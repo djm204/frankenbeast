@@ -186,6 +186,7 @@ const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
 const DEFAULT_QUERY_LIMIT = 20;
 const DEFAULT_ATTRIBUTION_LIMIT = 50;
 const MAX_QUERY_LIMIT = 1000;
+const MAX_EPISODIC_VISIBILITY_SCAN = 10_000;
 const MEMORY_ACCESS_AUDIT_SCAN_MULTIPLIER = 50;
 const MAX_MEMORY_ACCESS_AUDIT_SCAN_LIMIT = 10_000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
@@ -391,8 +392,24 @@ function formatWorkingEntryValue(entry: { value: string; expiresAt?: string }): 
 
 function parseAgentFromEpisodicDetails(
   details: Record<string, unknown> | undefined,
-): string | undefined {
+  eventId?: unknown,
+): string | null | undefined {
   if (!details) return undefined;
+  const detailKeys = Object.keys(details);
+  const quarantine = details["quarantine"];
+  if (
+    detailKeys.length === 1 &&
+    detailKeys[0] === "quarantine" &&
+    quarantine !== null &&
+    typeof quarantine === "object" &&
+    !Array.isArray(quarantine) &&
+    Object.keys(quarantine as Record<string, unknown>).sort().join(",") === "eventId,field,reason" &&
+    (quarantine as Record<string, unknown>)["field"] === "details" &&
+    (quarantine as Record<string, unknown>)["reason"] === "invalid JSON" &&
+    (quarantine as Record<string, unknown>)["eventId"] === eventId
+  ) {
+    return null;
+  }
   return details["__fbeastMemoryScope"] === AGENT_MEMORY_SCOPE_MARKER &&
     typeof details["agentId"] === "string"
     ? details["agentId"]
@@ -429,9 +446,12 @@ function resolveMemoryReadScope(input: MemoryScopeInput): {
 }
 
 function canReadMemoryEntry(
-  entryAgentId: string | undefined,
+  entryAgentId: string | null | undefined,
   scope: { readScope: MemoryReadScope; agentId?: string },
 ): boolean {
+  // Corrupt episodic details can no longer prove whether an event was shared or
+  // agent-scoped, so quarantine envelopes are hidden from every memory scope.
+  if (entryAgentId === null) return false;
   if (scope.readScope === "all") return true;
   if (scope.readScope === "shared") return entryAgentId === undefined;
   return entryAgentId === undefined || entryAgentId === scope.agentId;
@@ -443,6 +463,28 @@ function takeVisibleEntries<T>(
   canRead: (entry: T) => boolean,
 ): T[] {
   return entries.filter(canRead).slice(0, limit);
+}
+
+function collectVisibleEntries<T>(
+  fetchEntries: (limit: number) => T[],
+  limit: number,
+  canRead: (entry: T) => boolean,
+): T[] {
+  if (limit <= 0) return [];
+  let scanLimit = Math.min(MAX_EPISODIC_VISIBILITY_SCAN, Math.max(100, limit * 2));
+
+  for (;;) {
+    const entries = fetchEntries(scanLimit);
+    const visible = takeVisibleEntries(entries, limit, canRead);
+    if (
+      visible.length >= limit
+      || entries.length < scanLimit
+      || scanLimit >= MAX_EPISODIC_VISIBILITY_SCAN
+    ) {
+      return visible;
+    }
+    scanLimit = Math.min(MAX_EPISODIC_VISIBILITY_SCAN, scanLimit * 2);
+  }
 }
 
 function scopedReportEntry(entry: MemoryRetentionEntryReport): MemoryRetentionEntryReport {
@@ -1163,13 +1205,12 @@ export function createBrainAdapter(
 
       // Search episodic memory
       if (!memoryType || memoryType === "episodic") {
-        const episodicLimit = readScope.readScope === "all" ? limit : -1;
-        const events = takeVisibleEntries(
-          brain.episodic.recall(input.query, episodicLimit) as EpisodicEvent[],
+        const events = collectVisibleEntries(
+          (scanLimit) => brain.episodic.recall(input.query, scanLimit) as EpisodicEvent[],
           limit,
           (event) =>
             canReadMemoryEntry(
-              parseAgentFromEpisodicDetails(event.details),
+              parseAgentFromEpisodicDetails(event.details, event.id),
               readScope,
             ),
         );
@@ -1247,13 +1288,12 @@ export function createBrainAdapter(
       }
 
       // Recent episodic events
-      const episodicLimit = readScope.readScope === "all" ? 100 : -1;
-      const events = takeVisibleEntries(
-        brain.episodic.recent(episodicLimit) as EpisodicEvent[],
+      const events = collectVisibleEntries(
+        (scanLimit) => brain.episodic.recent(scanLimit) as EpisodicEvent[],
         100,
         (event) =>
           canReadMemoryEntry(
-            parseAgentFromEpisodicDetails(event.details),
+            parseAgentFromEpisodicDetails(event.details, event.id),
             readScope,
           ),
       );
@@ -1295,17 +1335,16 @@ export function createBrainAdapter(
           return exported;
         });
 
-      const episodicLimit = readScope.readScope === "all" ? limit : -1;
-      const episodic = takeVisibleEntries(
-        brain.episodic.recent(episodicLimit) as EpisodicEvent[],
+      const episodic = collectVisibleEntries(
+        (scanLimit) => brain.episodic.recent(scanLimit) as EpisodicEvent[],
         limit,
         (event) =>
           canReadMemoryEntry(
-            parseAgentFromEpisodicDetails(event.details),
+            parseAgentFromEpisodicDetails(event.details, event.id),
             readScope,
           ),
       ).map((event) => {
-        const entryAgentId = parseAgentFromEpisodicDetails(event.details);
+        const entryAgentId = parseAgentFromEpisodicDetails(event.details, event.id);
         const exported: MemoryExportEpisodicEntry = {
           ...(event.id === undefined ? {} : { id: event.id }),
           eventType: event.type,
@@ -1316,7 +1355,7 @@ export function createBrainAdapter(
           ...(event.details === undefined
             ? {}
             : { details: redactExportField(event.details, redaction, "details") }),
-          ...(entryAgentId === undefined
+          ...(entryAgentId == null
             ? {}
             : {
                 agentId: redactExportField(
@@ -1508,20 +1547,23 @@ export function createBrainAdapter(
 
     async memoryRetentionReport(input = {}) {
       const readScope = resolveMemoryReadScope(input);
+      if (
+        input.maxEntries !== undefined
+        && (!Number.isSafeInteger(input.maxEntries) || input.maxEntries < 1)
+      ) {
+        throw new Error("maxEntries must be a positive safe integer");
+      }
       const reportOptions: MemoryRetentionReportOptions = {
         ...(input.now === undefined ? {} : { now: input.now }),
         ...(input.expiryHorizonMs === undefined ? {} : { expiryHorizonMs: input.expiryHorizonMs }),
-        ...(readScope.readScope === "all" && input.maxEntries !== undefined
-          ? { maxEntries: input.maxEntries }
-          : {}),
-        ...(readScope.readScope !== "all" && input.maxEntries !== undefined
+        ...(input.maxEntries !== undefined
           ? { maxEntries: Number.MAX_SAFE_INTEGER }
           : {}),
       };
       return filterRetentionReportByScope(
         brain.memoryRetentionReport(reportOptions),
         readScope,
-        readScope.readScope === "all" ? undefined : input.maxEntries,
+        input.maxEntries,
       );    },
 
     async forget(key, input = {}) {

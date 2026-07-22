@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.4.2](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.1...live-bench-v0.4.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **live-bench:** bound corpus traversal ([#3448](https://github.com/djm204/frankenbeast/issues/3448)) ([64dada9](https://github.com/djm204/frankenbeast/commit/64dada90609944a1637c60ca7e015b5b73c0150a)), closes [#3068](https://github.com/djm204/frankenbeast/issues/3068)
+* **live-bench:** quarantine malformed candidate tasks ([#3440](https://github.com/djm204/frankenbeast/issues/3440)) ([be05795](https://github.com/djm204/frankenbeast/commit/be05795e1734798f40b8cf9f14b2e90d0020a680))
+
+
+### Miscellaneous
+
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.11.1 to 0.11.2
+    * @franken/types bumped from 0.14.1 to 0.15.0
+
 ## [0.4.1](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.0...live-bench-v0.4.1) (2026-07-19)
 
 

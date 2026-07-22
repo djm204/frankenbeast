@@ -27,7 +27,7 @@ import { Session } from './session.js';
 import { createEgressGuardedFetch } from '../network/egress-policy.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
-import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
+import { renderBanner, BeastLogger, isPlainOutput, setPlainOutput } from '../logging/beast-logger.js';
 import { ChatRepl, createReadlineIO, type ChatIO } from './chat-repl.js';
 import { createChatRuntime } from '../chat/chat-runtime-factory.js';
 import { FileSessionStore } from '../chat/session-store.js';
@@ -460,6 +460,12 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  /** Resolved provider's declared context window, for the status line's usage bar. */
+  contextMaxTokens: number;
+  /** Resolve a fallback provider's declared context window. */
+  contextMaxTokensForProvider: (provider: string) => number | undefined;
+  /** Chat model label for the status line (e.g. `claude-sonnet-4-6`). */
+  modelLabel: string;
 }
 
 function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): string {
@@ -1174,6 +1180,7 @@ export async function createChatSurfaceDeps(
     trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: true,
     verbose: args.verbose,
+    plain: args.plain,
     reset: false,
     adapterWorkingDir: tmpdir(),
     adapterModel: config.chat?.model ?? resolvedProvider.chatModel,
@@ -1200,6 +1207,11 @@ export async function createChatSurfaceDeps(
     sessionStoreDir,
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
+    contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
+    contextMaxTokensForProvider: (providerName) => registry.has(providerName)
+      ? registry.get(providerName).defaultContextWindowTokens()
+      : undefined,
+    modelLabel: chatDepOpts.adapterModel ?? provider,
   };
 }
 
@@ -1358,7 +1370,18 @@ async function runChatCommandIfRequested(
     chatIo?.close();
     throw error;
   }
-  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = chatDeps;
+  const {
+    chatLlm,
+    execLlm,
+    finalize,
+    projectId,
+    sessionStoreDir,
+    skillManager,
+    providerRegistry,
+    contextMaxTokens,
+    contextMaxTokensForProvider,
+    modelLabel,
+  } = chatDeps;
 
   if (args.subcommand === 'chat-server') {
     let mutableConfig = config;
@@ -1491,6 +1514,9 @@ async function runChatCommandIfRequested(
     sessionStore,
     verbose: args.verbose,
     ...(chatIo ? { io: chatIo } : {}),
+    contextMaxTokens,
+    contextMaxTokensForProvider,
+    modelLabel,
   });
   try {
     await repl.start();
@@ -1503,6 +1529,7 @@ async function runChatCommandIfRequested(
 
 export async function main(): Promise<void> {
   const args = parseArgs();
+  setPlainOutput(args.plain);
 
   if (args.help) {
     printUsage();
@@ -1610,7 +1637,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const logger = new BeastLogger({ verbose: args.verbose });
+  const logger = new BeastLogger({ verbose: args.verbose, plain: args.plain });
   if (args.config) {
     logger.info(`Loaded config from ${args.config}`, 'config');
   } else {
@@ -1645,6 +1672,8 @@ export async function main(): Promise<void> {
   // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
+  try {
+
   // Resolve base branch. Resume usually starts from the interrupted run's
   // feature branch, so infer the original base from git reflog unless the
   // user supplied an explicit --base-branch override.
@@ -1678,6 +1707,7 @@ export async function main(): Promise<void> {
     trustProviderCommandOverrides: args.trustProviderCommandOverrides,
     noPr: args.noPr,
     verbose: args.verbose,
+    plain: args.plain,
     reset: args.reset,
     resume: args.resume,
     io,
@@ -1732,6 +1762,9 @@ export async function main(): Promise<void> {
   // invoking frankenbeast for no-change tasks would see a spurious nonzero exit.
   if (result && result.status !== 'completed' && result.status !== 'no-op') {
     process.exit(1);
+  }
+  } finally {
+    io.close();
   }
 }
 
@@ -2225,6 +2258,7 @@ export async function runNetworkCommand(
       ...(configFile ? { configFile } : {}),
       ...(args.networkSet ? { configOverrides: args.networkSet } : {}),
       allowTrustedProviderCommandOverrides: args.trustProviderCommandOverrides,
+      ...(args.plain || isPlainOutput() ? { plain: true } : {}),
     }),
     action === 'up' ? undefined : args.networkTarget,
   );
@@ -2291,7 +2325,7 @@ export function runDirectCli(
       }
     })
     .catch((error) => {
-      console.error('Fatal:', error instanceof Error ? error.message : error);
+      console.error('Fatal:', error);
       exit(1);
     });
 }

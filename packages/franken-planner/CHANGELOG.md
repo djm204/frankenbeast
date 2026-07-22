@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.4.23](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.22...@franken/planner-v0.4.23) (2026-07-22)
+
+
+### Bug Fixes
+
+* **planner:** inspect error pattern code points ([#3451](https://github.com/djm204/frankenbeast/issues/3451)) ([aab7360](https://github.com/djm204/frankenbeast/commit/aab736016076f734f5e7fb04fe103800ba8447cc))
+* **planner:** recover concurrent wave failures together ([#3457](https://github.com/djm204/frankenbeast/issues/3457)) ([a08a27f](https://github.com/djm204/frankenbeast/commit/a08a27f580ac52190592b356bff81c36ec62508f))
+
+
+### Miscellaneous
+
+* **eslint:** enable type-aware promise linting ([#3435](https://github.com/djm204/frankenbeast/issues/3435)) ([c089f8b](https://github.com/djm204/frankenbeast/commit/c089f8b1cc0ff78a4fc5790567328b9c4928e8bf))
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+
+
+### Tests
+
+* **planner:** prove same-wave concurrency ([#3416](https://github.com/djm204/frankenbeast/issues/3416)) ([c17da84](https://github.com/djm204/frankenbeast/commit/c17da84574ec9332ebc9f3e8dfe2d8aad477d358))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.1 to 0.15.0
+
 ## [0.4.22](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.21...@franken/planner-v0.4.22) (2026-07-19)
 
 

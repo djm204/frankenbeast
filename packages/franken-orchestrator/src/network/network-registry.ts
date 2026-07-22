@@ -13,6 +13,7 @@ export interface NetworkRegistryContext {
   configFile?: string | undefined;
   configOverrides?: string[] | undefined;
   allowTrustedProviderCommandOverrides?: boolean | undefined;
+  plain?: boolean | undefined;
 }
 
 export interface NetworkServiceRuntimeConfig {

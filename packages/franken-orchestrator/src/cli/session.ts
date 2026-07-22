@@ -12,7 +12,7 @@ import { ChunkFileWriter } from '../planning/chunk-file-writer.js';
 import { InterviewLoop } from '../planning/interview-loop.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { ProgressLlmClient } from '../adapters/progress-llm-client.js';
-import { ANSI, budgetBar, statusBadge, logHeader, type BeastLogger } from '../logging/beast-logger.js';
+import { ANSI, budgetBar, statusBadge, logHeader, setPlainOutput, type BeastLogger } from '../logging/beast-logger.js';
 import { createStreamProgressWithSpinner, type StreamProgressEvent } from '../adapters/stream-progress.js';
 import type { CliLlmLifecycleEvent } from '../adapters/cli-llm-adapter.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
@@ -86,6 +86,7 @@ export interface SessionConfig {
   trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
+  plain?: boolean | undefined;
   reset: boolean;
   resume?: boolean | undefined;
   io: InterviewIO;
@@ -127,7 +128,9 @@ export interface SessionConfig {
 }
 
 export class Session {
-  constructor(private readonly config: SessionConfig) {}
+  constructor(private readonly config: SessionConfig) {
+    setPlainOutput(config.plain ?? false);
+  }
 
   async start(): Promise<BeastResult | undefined> {
     const { entryPhase, exitAfter } = this.config;
@@ -831,6 +834,7 @@ export class Session {
       trustProviderCommandOverrides: this.config.trustProviderCommandOverrides,
       noPr: this.config.noPr,
       verbose: this.config.verbose,
+      plain: this.config.plain,
       reset: this.config.reset,
       resume: this.config.resume ?? false,
       planDirOverride: this.config.planDirOverride,

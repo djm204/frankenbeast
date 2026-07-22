@@ -36,6 +36,7 @@ export const beastsDaemonService: NetworkServiceDefinition = {
       inheritedEnvKeys: inheritedNetworkServiceEnvKeys('beasts-daemon', config),
       env: {
         FRANKENBEAST_NETWORK_MANAGED: '1',
+        ...(context.plain ? { NO_COLOR: '1', FORCE_COLOR: '0' } : {}),
         FRANKENBEAST_BEAST_DAEMON_URL: localPlaintextOrSecureEndpoint(
           config.beastsDaemon.host,
           config.beastsDaemon.port,

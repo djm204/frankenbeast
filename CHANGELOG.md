@@ -1,5 +1,72 @@
 # Changelog
 
+## [0.62.0](https://github.com/djm204/frankenbeast/compare/v0.61.0...v0.62.0) (2026-07-22)
+
+
+### Features
+
+* **orchestrator:** add accessible plain CLI output ([#3425](https://github.com/djm204/frankenbeast/issues/3425)) ([2e4f947](https://github.com/djm204/frankenbeast/commit/2e4f947d372afe6146143de29d7819bd518f3201))
+* **orchestrator:** show stage-aware planning progress ([#3371](https://github.com/djm204/frankenbeast/issues/3371)) ([e99dcd0](https://github.com/djm204/frankenbeast/commit/e99dcd0de708b2e335f9496f8fa4df77eec9fbd5))
+
+
+### Bug Fixes
+
+* **beasts:** bound run log responses ([#3415](https://github.com/djm204/frankenbeast/issues/3415)) ([01cdb22](https://github.com/djm204/frankenbeast/commit/01cdb22dfa21d791df05f4b46f1f076892c4e819))
+* **beasts:** paginate run event API ([#3419](https://github.com/djm204/frankenbeast/issues/3419)) ([396a863](https://github.com/djm204/frankenbeast/commit/396a863b55ecf308968dd82fee3dae105bf1787a))
+* **brain:** preserve concurrent SQLite writes ([#3423](https://github.com/djm204/frankenbeast/issues/3423)) ([be06e50](https://github.com/djm204/frankenbeast/commit/be06e50dfa3b689023dd3a238945435a259811ae))
+* **comms:** bound outbound adapter fetches ([#3468](https://github.com/djm204/frankenbeast/issues/3468)) ([1ab6e81](https://github.com/djm204/frankenbeast/commit/1ab6e8199b856ac0241a21f2ff57643b9ec802f1))
+* **critique:** parse nested unicode set classes ([#3399](https://github.com/djm204/frankenbeast/issues/3399)) ([613162e](https://github.com/djm204/frankenbeast/commit/613162e40b7a6345ca8fd2775b0e07279558baa0))
+* **deps:** update body-parser past audit advisory ([#3511](https://github.com/djm204/frankenbeast/issues/3511)) ([c2a5b3a](https://github.com/djm204/frankenbeast/commit/c2a5b3a358969e1900f332a1e1b998f7db7ca4c5))
+* **docs:** remove stale package references ([#3473](https://github.com/djm204/frankenbeast/issues/3473)) ([8e6e431](https://github.com/djm204/frankenbeast/commit/8e6e431cbc05b337f7a56b5000b65e1f5dfd1ef1))
+* **governor:** honor skill HITL profiles ([#3380](https://github.com/djm204/frankenbeast/issues/3380)) ([ebe1d2f](https://github.com/djm204/frankenbeast/commit/ebe1d2fb7746bd8b57a2a8316c8dc166804514a3))
+* **mcp-suite:** sanitize proxy audit arguments ([#3446](https://github.com/djm204/frankenbeast/issues/3446)) ([6b99e84](https://github.com/djm204/frankenbeast/commit/6b99e841b449df7888c3794a7a938d6f32f0ef90))
+* **observer:** batch SQLite adapter drains ([#3417](https://github.com/djm204/frankenbeast/issues/3417)) ([eeba02e](https://github.com/djm204/frankenbeast/commit/eeba02eff4cad61607956caf5b0655b782c1fed6))
+* **observer:** offload SQLite operations to worker ([#3444](https://github.com/djm204/frankenbeast/issues/3444)) ([c527b11](https://github.com/djm204/frankenbeast/commit/c527b117a9d4744029172b87e8e77e47760a59cc))
+* **orchestrator:** paginate tracked agent listings ([#3418](https://github.com/djm204/frankenbeast/issues/3418)) ([98cf74b](https://github.com/djm204/frankenbeast/commit/98cf74b1dcea83424df14a4a6e21e74ec21e64db))
+* **orchestrator:** prevent duplicate terminal input ([#3436](https://github.com/djm204/frankenbeast/issues/3436)) ([fd4517b](https://github.com/djm204/frankenbeast/commit/fd4517b0bd1e365942b6e1dd55cf31397fb004e7)), closes [#3364](https://github.com/djm204/frankenbeast/issues/3364)
+* **orchestrator:** validate comms inbound payloads ([#3509](https://github.com/djm204/frankenbeast/issues/3509)) ([bbc2d24](https://github.com/djm204/frankenbeast/commit/bbc2d242c5a1d6c4ec4707628bb0dc24b509b0cb))
+* **orchestrator:** verify recovered process identity ([#3441](https://github.com/djm204/frankenbeast/issues/3441)) ([d70b92e](https://github.com/djm204/frankenbeast/commit/d70b92eaff32a670546bee8463038685260ea505))
+* **reliability:** bound PR reviewer diff ingestion ([#3270](https://github.com/djm204/frankenbeast/issues/3270)) ([a27935a](https://github.com/djm204/frankenbeast/commit/a27935aeea9b7505a4b7180450efbe3a3f9d8897))
+* **security:** bound profile update request bodies ([#3508](https://github.com/djm204/frankenbeast/issues/3508)) ([8705537](https://github.com/djm204/frankenbeast/commit/870553719732e60e04e24a5ae1e7c37565534731))
+* **security:** enforce role tool manifests ([#2573](https://github.com/djm204/frankenbeast/issues/2573)) ([1d7e7c3](https://github.com/djm204/frankenbeast/commit/1d7e7c3b7c9255dd95d21863bb43790bc5a38e3d))
+* **security:** guard cron installers from persisting PATs ([#3182](https://github.com/djm204/frankenbeast/issues/3182)) ([46ebc52](https://github.com/djm204/frankenbeast/commit/46ebc526ccd12965c3c20dcb4bccc7e07fd6d04e))
+* **security:** patch dependency audit vulnerabilities ([#3517](https://github.com/djm204/frankenbeast/issues/3517)) ([bde2a2c](https://github.com/djm204/frankenbeast/commit/bde2a2c12f633f0047a66029d13e30a8e9d61692))
+
+
+### Refactoring
+
+* **web:** scope wizard Zustand selectors ([#3477](https://github.com/djm204/frankenbeast/issues/3477)) ([a762240](https://github.com/djm204/frankenbeast/commit/a7622408f9a345b9c3e20702b264b42834205945))
+
+
+### Miscellaneous
+
+* **eslint:** enable type-aware promise linting ([#3435](https://github.com/djm204/frankenbeast/issues/3435)) ([c089f8b](https://github.com/djm204/frankenbeast/commit/c089f8b1cc0ff78a4fc5790567328b9c4928e8bf))
+* release main ([#3400](https://github.com/djm204/frankenbeast/issues/3400)) ([02fd894](https://github.com/djm204/frankenbeast/commit/02fd894bf6e7453e56d3446a73be277431ae6e12))
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+* **web:** upgrade jest-dom to version 7 ([#3476](https://github.com/djm204/frankenbeast/issues/3476)) ([2158876](https://github.com/djm204/frankenbeast/commit/2158876397237fbb1480f55008303cbcc067f9be))
+
+
+### Documentation
+
+* **readme:** add architecture text alternatives ([#3452](https://github.com/djm204/frankenbeast/issues/3452)) ([5bcb776](https://github.com/djm204/frankenbeast/commit/5bcb7765e3f9b5f55b59984858a719b131b22372))
+* **readme:** clarify current testing baseline ([#3478](https://github.com/djm204/frankenbeast/issues/3478)) ([3662316](https://github.com/djm204/frankenbeast/commit/36623164ad99d80a52db6f26c291144633a9e6c0))
+* **readme:** explain issue label filters ([#3442](https://github.com/djm204/frankenbeast/issues/3442)) ([2a32548](https://github.com/djm204/frankenbeast/commit/2a32548fb530d9cbb27a57d177a5e198606675c8))
+* **readme:** link package map before architecture ([#3404](https://github.com/djm204/frankenbeast/issues/3404)) ([52f28dc](https://github.com/djm204/frankenbeast/commit/52f28dc297c7b8deb744a4ac85e9305ac080b48b))
+* update dashboard chat provider troubleshooting ([#3519](https://github.com/djm204/frankenbeast/issues/3519)) ([2f7d9d4](https://github.com/djm204/frankenbeast/commit/2f7d9d447971536e73e73a2481278ed6ec879d17))
+
+
+### CI/CD
+
+* **release:** fail closed during latest-tag repair ([#3449](https://github.com/djm204/frankenbeast/issues/3449)) ([a5d6efb](https://github.com/djm204/frankenbeast/commit/a5d6efbc43ad0c42e6703c83344085b6fa0d9c48))
+
+
+### Tests
+
+* **config:** derive path aliases from package metadata ([#3474](https://github.com/djm204/frankenbeast/issues/3474)) ([922ed08](https://github.com/djm204/frankenbeast/commit/922ed087d82cd3b9a9ee462d10e1ea281e466ffa))
+* **pr-reviewer:** cover failed review retry ([#3455](https://github.com/djm204/frankenbeast/issues/3455)) ([422592b](https://github.com/djm204/frankenbeast/commit/422592ba42984e49ab4badfbf058fb9a0276f766))
+* **root:** validate aggregate task wiring ([#3421](https://github.com/djm204/frankenbeast/issues/3421)) ([fad577e](https://github.com/djm204/frankenbeast/commit/fad577e2740de8fa228e6507abdca6824f521cf6))
+* **turbo:** assert exact task contracts ([#3443](https://github.com/djm204/frankenbeast/issues/3443)) ([839c053](https://github.com/djm204/frankenbeast/commit/839c053e7376fd3130d482cd6197e84ef2a8bcd0))
+
 ## [0.61.0](https://github.com/djm204/frankenbeast/compare/v0.60.0...v0.61.0) (2026-07-19)
 
 

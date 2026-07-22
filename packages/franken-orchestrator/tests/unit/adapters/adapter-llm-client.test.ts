@@ -93,4 +93,51 @@ describe('AdapterLlmClient', () => {
     expect(observer.endSpan).toHaveBeenCalledWith({ id: 'span-1' }, { status: 'completed' });
     expect(observer.recordTokenUsage).toHaveBeenCalledTimes(1);
   });
+
+  it('completeWithUsage returns the adapter-reported usage alongside the text', async () => {
+    const usage = { inputTokens: 10, outputTokens: 5, totalTokens: 15 };
+    const client = new AdapterLlmClient(
+      makeAdapter({ transformResponse: vi.fn(() => ({ content: 'hello', usage })) }),
+    );
+
+    await expect(client.completeWithUsage('prompt')).resolves.toEqual({ text: 'hello', usage });
+  });
+
+  it('completeWithUsage omits usage when the adapter did not report it', async () => {
+    const client = new AdapterLlmClient(makeAdapter());
+
+    await expect(client.completeWithUsage('prompt')).resolves.toEqual({ text: 'hello' });
+  });
+
+  it('prefers real adapter usage over the character-count estimate when recording observer usage', async () => {
+    const observer = makeObserver();
+    const usage = { inputTokens: 999, outputTokens: 999, totalTokens: 1998 };
+    const client = new AdapterLlmClient(
+      makeAdapter({ transformResponse: vi.fn(() => ({ content: 'hi', usage })) }),
+      observer,
+    );
+
+    await client.complete('prompt');
+    expect(observer.recordTokenUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ promptTokens: 999, completionTokens: 999 }),
+      expect.anything(),
+    );
+  });
+
+  it('completeWithUsage returns providerContext when the adapter reports a fallback', async () => {
+    const providerContext = { provider: 'claude', switchedFrom: 'codex', switchReason: 'rate_limited' };
+    const client = new AdapterLlmClient(
+      makeAdapter({ transformResponse: vi.fn(() => ({ content: 'hello', providerContext })) }),
+    );
+
+    await expect(client.completeWithUsage('prompt')).resolves.toEqual({ text: 'hello', providerContext });
+  });
+
+  it('completeWithUsage omits providerContext when the adapter did not report it', async () => {
+    const client = new AdapterLlmClient(makeAdapter());
+
+    const result = await client.completeWithUsage('prompt');
+    expect(result.providerContext).toBeUndefined();
+  });
 });

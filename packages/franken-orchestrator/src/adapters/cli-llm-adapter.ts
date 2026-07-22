@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { ProviderContext, TokenUsage } from '@franken/types';
 import type { IAdapter } from './adapter-llm-client.js';
 import {
   createDefaultRegistry,
@@ -12,6 +13,7 @@ import {
   parseResetTimeText,
   type CommandFailure,
 } from '../errors/command-failure.js';
+import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 
 type CliCacheSessionHint = {
   key: string;
@@ -111,6 +113,7 @@ export class CliLlmAdapter implements IAdapter {
   private readonly registry: ProviderRegistry;
   private readonly responseProviders = new Map<string, string>();
   private readonly responseSessions = new Map<string, { provider: string; model?: string | undefined; sessionId: string }>();
+  private readonly responseProviderContext = new Map<string, ProviderContext>();
   private readonly chatNativeSessions = new Map<string, string>();
   private chatCallCount = 0;
 
@@ -197,6 +200,11 @@ export class CliLlmAdapter implements IAdapter {
     let activeProvider = initialProvider;
     let rateLimitRetryCycles = 0;
     let attempt = 0;
+    // Ground truth for "what model/provider are you running?" — set only at
+    // the point a fallback actually occurs, so a clean single-provider run
+    // never reports a bogus switch.
+    let fallbackFrom: string | undefined;
+    let fallbackReason: string | undefined;
     const timeoutMs = requestedTimeoutMs ?? this.opts.timeoutMs;
     const deadlineAt = Date.now() + timeoutMs;
     const logicalController = new AbortController();
@@ -298,6 +306,8 @@ export class CliLlmAdapter implements IAdapter {
           const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
           if (nextProvider) {
             this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
+            fallbackFrom ??= initialProvider;
+            fallbackReason ??= failure.rateLimited ? 'rate_limited' : 'unavailable';
             activeProvider = nextProvider;
             continue;
           }
@@ -313,6 +323,8 @@ export class CliLlmAdapter implements IAdapter {
             rateLimitRetryCycles++;
             exhaustedProviders.clear();
             activeProvider = initialProvider;
+            fallbackFrom = undefined;
+            fallbackReason = undefined;
             continue;
           }
           throw new Error(buildNoCliProvidersAvailableSummary(exhaustedProviders), { cause: failure });
@@ -340,6 +352,13 @@ export class CliLlmAdapter implements IAdapter {
             content: normalizedOutput,
           });
           this.responseProviders.set(requestId, activeProvider);
+          this.responseProviderContext.set(requestId, {
+            provider: activeProvider,
+            ...(activeModel ? { model: activeModel } : {}),
+            ...(fallbackFrom && fallbackFrom !== activeProvider
+              ? { switchedFrom: fallbackFrom, ...(fallbackReason ? { switchReason: fallbackReason } : {}) }
+              : {}),
+          });
           if (cacheSession?.persist && resolveProviderCacheCapabilities(provider).persistentAcrossProcesses) {
             const nativeSessionId = this.extractNativeSessionId(result.stdout);
             if (nativeSessionId) {
@@ -358,14 +377,17 @@ export class CliLlmAdapter implements IAdapter {
         this.responseSessions.delete(requestId);
       }
 
+      const failureStdout = isPlainOutput() ? stripAnsi(result.stdout) : result.stdout;
+      const failureStderr = isPlainOutput() ? stripAnsi(result.stderr) : result.stderr;
+      const normalizedFailureOutput = provider.normalizeOutput(failureStdout);
       const failure = classifyCommandFailure({
         tool: 'llm',
         provider: activeProvider,
         command: activeCommand,
         exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        normalizedOutput: provider.normalizeOutput(result.stdout),
+        stdout: failureStdout,
+        stderr: failureStderr,
+        normalizedOutput: isPlainOutput() ? stripAnsi(normalizedFailureOutput) : normalizedFailureOutput,
         detectRateLimit: (text) => provider.isRateLimited(text),
         parseRetryAfterMs: (text) => {
           const providerMs = provider.parseRetryAfter(text);
@@ -388,6 +410,8 @@ export class CliLlmAdapter implements IAdapter {
       const nextProvider = providers.find((name) => !exhaustedProviders.has(name));
       if (nextProvider) {
         this.opts.onLifecycleEvent?.({ type: 'fallback', from: activeProvider, to: nextProvider });
+        fallbackFrom ??= initialProvider;
+        fallbackReason ??= 'rate_limited';
         activeProvider = nextProvider;
         continue;
       }
@@ -403,6 +427,8 @@ export class CliLlmAdapter implements IAdapter {
       rateLimitRetryCycles++;
       exhaustedProviders.clear();
       activeProvider = initialProvider;
+      fallbackFrom = undefined;
+      fallbackReason = undefined;
       }
     } finally {
       clearTimeout(logicalTimeout);
@@ -410,12 +436,27 @@ export class CliLlmAdapter implements IAdapter {
     }
   }
 
-  transformResponse(providerResponse: unknown, _requestId: string): { content: string | null } {
+  transformResponse(providerResponse: unknown, _requestId: string): { content: string | null; usage?: TokenUsage; providerContext?: ProviderContext } {
     const raw = providerResponse as string;
     const providerName = this.responseProviders.get(_requestId) ?? this.provider.name;
     this.responseProviders.delete(_requestId);
-    const normalized = this.resolveProvider(providerName).normalizeOutput(raw ?? '');
-    return { content: normalized };
+    const storedContext = this.responseProviderContext.get(_requestId);
+    this.responseProviderContext.delete(_requestId);
+    const resolved = this.resolveProvider(providerName);
+    const normalized = resolved.normalizeOutput(raw ?? '');
+    const usage = resolved.extractUsage?.(raw ?? '');
+    // The CLI's own reported model (when it exposes one) reflects what
+    // actually executed and wins over the statically configured value —
+    // e.g. account-level routing this codebase has no other visibility into.
+    const extractedModel = resolved.extractModel?.(raw ?? '');
+    const providerContext = storedContext
+      ? { ...storedContext, ...(extractedModel ? { model: extractedModel } : {}) }
+      : undefined;
+    return {
+      content: isPlainOutput() ? stripAnsi(normalized) : normalized,
+      ...(usage ? { usage } : {}),
+      ...(providerContext ? { providerContext } : {}),
+    };
   }
 
   validateCapabilities(feature: string): boolean {
@@ -508,6 +549,10 @@ export class CliLlmAdapter implements IAdapter {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
+    }
+    if (isPlainOutput()) {
+      rawEnv.NO_COLOR = rawEnv.NO_COLOR ?? '1';
+      rawEnv.FORCE_COLOR = '0';
     }
     return rawEnv;
   }

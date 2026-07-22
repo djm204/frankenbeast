@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.15.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.14.1...franken-types-v0.15.0) (2026-07-22)
+
+
+### Features
+
+* **cli:** agent-style terminal rendering for fbeast chat ([#3427](https://github.com/djm204/frankenbeast/issues/3427)) ([d8f0a55](https://github.com/djm204/frankenbeast/commit/d8f0a55f92b4af2a89a3945c2ef9b86f51ba6fe7))
+
+
+### Bug Fixes
+
+* **beasts:** describe design document file prompt ([#3469](https://github.com/djm204/frankenbeast/issues/3469)) ([697151c](https://github.com/djm204/frankenbeast/commit/697151cd5fc6e7601f9dbb9e6eaf207832278720))
+* **beasts:** paginate run event API ([#3419](https://github.com/djm204/frankenbeast/issues/3419)) ([396a863](https://github.com/djm204/frankenbeast/commit/396a863b55ecf308968dd82fee3dae105bf1787a))
+* **comms:** bound outbound adapter fetches ([#3468](https://github.com/djm204/frankenbeast/issues/3468)) ([1ab6e81](https://github.com/djm204/frankenbeast/commit/1ab6e8199b856ac0241a21f2ff57643b9ec802f1))
+* **config:** default chat to Codex provider ([#3424](https://github.com/djm204/frankenbeast/issues/3424)) ([462b7df](https://github.com/djm204/frankenbeast/commit/462b7dfa4bc47d701875d4d0fd8cfcc07f790063))
+* **orchestrator:** paginate tracked agent listings ([#3418](https://github.com/djm204/frankenbeast/issues/3418)) ([98cf74b](https://github.com/djm204/frankenbeast/commit/98cf74b1dcea83424df14a4a6e21e74ec21e64db))
+* **types:** share branded critique score contract ([#3433](https://github.com/djm204/frankenbeast/issues/3433)) ([6800c5d](https://github.com/djm204/frankenbeast/commit/6800c5d0da90d5b0aabd5043a24306456c9b4f8c))
+
+
+### Miscellaneous
+
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+
 ## [0.14.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.14.0...franken-types-v0.14.1) (2026-07-19)
 
 

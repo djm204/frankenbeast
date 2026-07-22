@@ -5,8 +5,9 @@
  * Uses stream-json output format like Claude.
  */
 
+import type { TokenUsage } from '@franken/types';
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode } from './stream-json-utils.js';
+import { tryExtractTextFromNode, extractNdjsonTokenUsage } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 // Gemini adds RESOURCE_EXHAUSTED to the shared base patterns
@@ -28,7 +29,11 @@ function parseBoundedRetryAfterMs(secondsText: string): number {
 export class GeminiProvider implements ICliProvider {
   readonly name = 'gemini';
   readonly command = 'gemini';
-  readonly chatModel = 'gemini-2.0-flash';
+  // Flagship (Pro) tier, not the cheaper/faster Flash line — see the
+  // ICliProvider.chatModel doc. Not empirically verified against a live
+  // `gemini` CLI in this environment (no authenticated session available);
+  // based on the current public Gemini model line.
+  readonly chatModel = 'gemini-2.5-pro';
 
   buildArgs(opts: ProviderOpts): string[] {
     const args: string[] = ['-p', '', '--yolo', '--output-format', 'stream-json'];
@@ -66,6 +71,10 @@ export class GeminiProvider implements ICliProvider {
 
   estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
+  }
+
+  extractUsage(raw: string): TokenUsage | undefined {
+    return extractNdjsonTokenUsage(raw);
   }
 
   isRateLimited(stderr: string): boolean {

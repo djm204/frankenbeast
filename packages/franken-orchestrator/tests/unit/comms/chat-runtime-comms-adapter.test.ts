@@ -123,6 +123,46 @@ describe('ChatRuntimeCommsAdapter', () => {
     );
   });
 
+  it('persists provider context and feeds it into the next comms turn', async () => {
+    const providerContext = {
+      provider: 'claude',
+      model: 'claude-opus-4-8',
+      switchedFrom: 'codex',
+      switchReason: 'rate_limited',
+    } as const;
+    runtime.run
+      .mockResolvedValueOnce({
+        displayMessages: [{ kind: 'reply', content: 'Fallback reply' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+        providerContext,
+      })
+      .mockResolvedValueOnce({
+        displayMessages: [{ kind: 'reply', content: 'Follow-up reply' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: 'cheap',
+        transcript: [],
+      });
+
+    const inbound = {
+      sessionId: 'provider-sess',
+      channelType: 'slack' as const,
+      externalUserId: 'U123',
+    };
+    await adapter.processInbound({ ...inbound, text: 'first' });
+    await adapter.processInbound({ ...inbound, text: 'which model?' });
+
+    expect(runtime.run).toHaveBeenNthCalledWith(2, 'which model?', expect.objectContaining({
+      lastProviderContext: providerContext,
+    }));
+    expect(store._sessions.get('provider-sess')).toEqual(expect.objectContaining({ providerContext }));
+  });
+
   it('maps display message to comms outbound format', async () => {
     const result = await adapter.processInbound({
       sessionId: 'sess-1',

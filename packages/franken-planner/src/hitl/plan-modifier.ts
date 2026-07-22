@@ -14,8 +14,10 @@ export function applyModifications(graph: PlanGraph, changes: TaskModification[]
   const changeMap = new Map(changes.map((c) => [c.taskId, c]));
 
   const updatedTasks: Task[] = [];
+  let modified = false;
   for (const task of graph.topoSort()) {
     const change = changeMap.get(task.id);
+    if (change !== undefined) modified = true;
     const updatedTask: Task = change
       ? {
           ...task,
@@ -27,5 +29,9 @@ export function applyModifications(graph: PlanGraph, changes: TaskModification[]
       : task;
     updatedTasks.push({ ...updatedTask, dependsOn: graph.getDependencies(task.id) });
   }
-  return PlanGraph.fromTasks(updatedTasks, { version: graph.version, reason: graph.reason });
+  if (!modified) return graph;
+  return PlanGraph.fromTasks(updatedTasks, {
+    version: graph.version + 1,
+    reason: 'human modifications applied',
+  });
 }

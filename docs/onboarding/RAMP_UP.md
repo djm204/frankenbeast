@@ -109,7 +109,7 @@ packages/franken-orchestrator/src/
 - `MartinLoop` accepts a `ProviderRegistry` and resolves providers from a fallback chain. When chunk-session services are wired, it loads canonical chunk state from `.fbeast/.build/chunk-sessions/`, renders provider requests from normalized transcript state, snapshots before compaction, compacts at `>= 85%` context usage, and can replay that canonical state on provider switch.
 - `GitBranchIsolator` creates feature branch per chunk, auto-commits, merges back
 - Full Pipeline (Approach C): 3 input modes (chunks / design-doc / interview) → PlanGraph → execute → optional PR
-- CLI output uses service labels (`[planner]`, `[observer]`, `[martin]`, etc.) for clarity
+- CLI output uses service labels (`[planner]`, `[observer]`, `[martin]`, etc.) for clarity; `--plain`, `NO_COLOR`, or `FORCE_COLOR=0` suppress ANSI styling without removing those labels
 - `--verbose` attempts to start a trace viewer HTTP server on `:4040` (SQLiteAdapter + TraceServer)
 - `--provider <name>` sets the primary CLI agent (default: `claude`). `--providers <list>` sets a comma-separated fallback chain for rate limits (e.g., `claude,gemini,aider`)
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults). The `providers` section supports `default`, `fallbackChain`, and per-provider `overrides`

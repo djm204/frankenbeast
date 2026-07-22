@@ -5,8 +5,9 @@
  * tryExtractTextFromNode.
  */
 
+import type { TokenUsage } from '@franken/types';
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 import { resolveCodexSandboxArgs } from '../../providers/codex-args.js';
 
@@ -15,6 +16,16 @@ const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 export class CodexProvider implements ICliProvider {
   readonly name = 'codex';
   readonly command = 'codex';
+  // Deliberately no chatModel default (see #3424, and ICliProvider.chatModel
+  // doc). Verified live: with no --model override, `codex exec` resolves its
+  // own default to whatever OpenAI's account-level default currently is —
+  // observed newer than any specific version string this codebase could
+  // hardcode, and a stale hardcode here has broken chat before (#3412).
+  // `codex --json` also never reports the resolved model in its NDJSON
+  // output (checked every event type), so there is no way to recover it
+  // after the fact either — providerContext.model is expected to stay
+  // unknown for Codex sessions, and the runtime-transparency prompt note
+  // (conversation-engine.ts) is written to handle that honestly.
 
   buildArgs(opts: ProviderOpts): string[] {
     const { sandboxArgs, extraArgs } = resolveCodexSandboxArgs(opts.extraArgs);
@@ -54,6 +65,10 @@ export class CodexProvider implements ICliProvider {
 
   estimateTokens(text: string): number {
     return Math.ceil(text.length / 16);
+  }
+
+  extractUsage(raw: string): TokenUsage | undefined {
+    return extractNdjsonTokenUsage(raw);
   }
 
   isRateLimited(stderr: string): boolean {

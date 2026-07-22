@@ -212,6 +212,12 @@ const restored = SqliteBrain.hydrate(snapshot);
 restored.close();
 ```
 
+## Persistence atomicity
+
+`SqliteBrain` persists each working-memory flush as one immediate SQLite transaction. All dirty upserts, deletions, provenance cleanup, and the success audit record commit together; if any statement fails, SQLite rolls the entire batch back and the in-memory changes remain pending for a later retry. Recovery checkpoints include their working-memory flush in the same transaction, so a checkpoint cannot commit against a partially persisted memory snapshot.
+
+Keep future multi-row modifications inside `db.transaction(...)` rather than issuing independent statements. This preserves the same all-or-nothing contract for failures and concurrent writers.
+
 ## Encryption at rest
 
 `SqliteBrain` can encrypt persisted working memory rows, episodic summaries/details, and recovery checkpoint states with AES-256-GCM. Supply a key directly or point to an environment variable:

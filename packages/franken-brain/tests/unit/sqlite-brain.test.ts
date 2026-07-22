@@ -296,6 +296,59 @@ describe('SqliteBrain', () => {
       expect(report.compactionCandidates.map((entry) => entry.class)).not.toContain('audit_record');
     });
 
+    it('protects quarantined right-to-forget audit envelopes from retention compaction', () => {
+      brain.episodic.record({
+        type: 'observation',
+        step: 'right-to-forget',
+        summary: 'Right-to-forget deletion completed',
+        details: {
+          selectorHash: 'a'.repeat(64),
+          deleted: { working: 1, episodic: 0, derived: 1 },
+        },
+        createdAt: '2020-01-01T00:00:00.000Z',
+      });
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (
+        brain as unknown as {
+          db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } };
+        }
+      ).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run('{', eventId);
+
+      const report = brain.memoryRetentionReport({ now: '2027-01-01T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === String(eventId))).toMatchObject({
+        class: 'audit_record',
+        action: 'protect',
+        protected: true,
+      });
+      expect(report.compactionCandidates).not.toContainEqual(
+        expect.objectContaining({ key: String(eventId) }),
+      );
+    });
+
+    it('marks quarantined episodic retention rows as unreadable by scoped reports', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'private scoped retention entry',
+        details: {
+          __fbeastMemoryScope: 'fbeast:agent-memory',
+          agentId: 'private-agent',
+        },
+        createdAt: '2026-07-20T00:00:00.000Z',
+      });
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run('{', eventId);
+
+      const report = brain.memoryRetentionReport({ now: '2026-07-21T00:00:00.000Z' });
+
+      expect(report.entries.find((entry) => entry.key === String(eventId))).toMatchObject({
+        store: 'episodic',
+        agentId: null,
+      });
+    });
+
     it('treats explicit audit class aliases as protected audit records', () => {
       brain.episodic.record({
         type: 'observation',
@@ -508,6 +561,39 @@ describe('SqliteBrain', () => {
       }));
       expect(JSON.stringify(item)).not.toContain('stack trace');
       expect(brain.createSkillEvolutionReviewGate({ threshold: 3 })).toEqual([]);
+    });
+
+    it('does not let quarantined failures consume the skill-evolution lookback', () => {
+      for (const evidenceId of ['task-1', 'task-2', 'task-3']) {
+        brain.episodic.recordSkillFailure({
+          skillName: 'resolve-issues',
+          failureSignature: 'same bounded failure',
+          evidenceId,
+          createdAt: '2026-07-16T10:00:00.000Z',
+        });
+      }
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'newer corrupt failure',
+        details: { marker: 'valid-before-corruption' },
+        createdAt: '2026-07-16T10:01:00.000Z',
+      });
+      const db = (
+        brain as unknown as {
+          db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } };
+        }
+      ).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run(
+        '{',
+        'newer corrupt failure',
+      );
+
+      const [item] = brain.createSkillEvolutionReviewGate({ threshold: 3, lookback: 3 });
+
+      expect(item?.value).toMatchObject({
+        kind: 'skill-evolution-review',
+        failureCount: 3,
+      });
     });
 
     it('does not create a review item for unrelated one-off failures', () => {
@@ -784,6 +870,101 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('alice@example.test', 5)).toEqual([]);
       expect(brain.episodic.recall('Safe project note', 5)).toHaveLength(1);
       expect(brain.episodic.recent(5).some(event => event.step === 'right-to-forget')).toBe(true);
+    });
+
+    it('preserves quarantined right-to-forget audit envelopes during later forgets', () => {
+      brain.working.set('task', 'delete project note');
+      const first = brain.rightToForget({ query: 'delete project' });
+      const auditEventId = first.auditEventId;
+      expect(auditEventId).toBeDefined();
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run('{', auditEventId);
+
+      brain.rightToForget({ query: 'right-to-forget' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(auditEventId);
+    });
+
+    it('does not match persisted quarantine diagnostics when deleting audit rows', () => {
+      brain.working.set('task', 'delete project note');
+      const first = brain.rightToForget({ query: 'delete project' });
+      const auditEventId = first.auditEventId;
+      expect(auditEventId).toBeDefined();
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        JSON.stringify({
+          quarantine: {
+            field: 'details',
+            eventId: auditEventId,
+            reason: 'invalid JSON',
+          },
+        }),
+        auditEventId,
+      );
+
+      brain.rightToForget({ query: 'invalid JSON' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(auditEventId);
+    });
+
+    it('does not match persisted quarantine diagnostics on ordinary events', () => {
+      brain.episodic.record({
+        type: 'success',
+        summary: 'ordinary quarantined row',
+        createdAt: '2026-07-20T00:00:00.000Z',
+      });
+      const ordinaryEventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        JSON.stringify({
+          quarantine: {
+            field: 'details',
+            eventId: ordinaryEventId,
+            reason: 'invalid JSON',
+          },
+        }),
+        ordinaryEventId,
+      );
+
+      brain.rightToForget({ query: 'invalid JSON' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(ordinaryEventId);
+    });
+
+    it('matches readable summary fields on ordinary corrupt events', () => {
+      brain.episodic.record({
+        type: 'success',
+        summary: 'delete corrupt summary',
+        details: { marker: 'will-corrupt' },
+        createdAt: '2026-07-20T00:00:00.000Z',
+      });
+      const ordinaryEventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        '{"marker":"broken"',
+        ordinaryEventId,
+      );
+
+      brain.rightToForget({ query: 'corrupt summary' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).not.toContain(ordinaryEventId);
+    });
+
+    it('deletes quarantined audit rows when their malformed details contain the selector', () => {
+      brain.working.set('task', 'delete project note');
+      const first = brain.rightToForget({ query: 'delete project' });
+      const auditEventId = first.auditEventId;
+      expect(auditEventId).toBeDefined();
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        '{"residual":"alice@example.test"',
+        auditEventId,
+      );
+
+      const report = brain.rightToForget({ query: 'alice@example.test' });
+
+      expect(report.deleted.episodic).toBe(1);
+      expect(brain.episodic.recent(-1).map((event) => event.id)).not.toContain(auditEventId);
     });
 
     it('supports dry-run counts without deleting or auditing', () => {
@@ -5467,6 +5648,45 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('does not score synthetic quarantine metadata during encrypted recall', () => {
+      const dir = mkdtempSync(
+        join(tmpdir(), 'sqlite-brain-encryption-quarantine-recall-'),
+      );
+      const dbPath = join(dir, 'brain.db');
+
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.episodic.record({
+          type: 'observation',
+          summary: 'corrupt payload event',
+          details: { note: 'valid before corruption' },
+          createdAt: '2026-07-13T00:00:00.000Z',
+        });
+        const encodedMalformedJson = (
+          encrypted.episodic as unknown as { encode: (value: string) => string }
+        ).encode('{');
+        const db = (
+          encrypted as unknown as {
+            db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } };
+          }
+        ).db;
+        db.prepare(`UPDATE episodic_events SET details = ?`).run(encodedMalformedJson);
+
+        expect(encrypted.episodic.recall('invalid', 10)).toEqual([]);
+        expect(encrypted.episodic.recall('corrupt', 10)[0]).toMatchObject({
+          details: {
+            quarantine: {
+              field: 'details',
+              reason: 'invalid JSON',
+            },
+          },
+        });
+        encrypted.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('rejects future schemas before encryption migration mutates them', () => {
       const dir = mkdtempSync(
         join(tmpdir(), 'sqlite-brain-encryption-future-schema-'),
@@ -5597,6 +5817,31 @@ describe('SqliteBrain', () => {
       const snapshot = brain.serialize();
       // Working memory data is in the snapshot
       expect(snapshot.working).toEqual({ task: 'test-flush' });
+    });
+
+    it('rolls back every row when a working-memory batch fails mid-flush', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.exec(`
+        CREATE TEMP TRIGGER fail_second_working_memory_insert
+        BEFORE INSERT ON working_memory
+        WHEN NEW.key = 'beta'
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated mid-batch failure');
+        END;
+      `);
+
+      brain.working.set('alpha', 'one');
+      brain.working.set('beta', 'two');
+
+      expect(() => brain.flush()).toThrow('simulated mid-batch failure');
+      expect(db.prepare('SELECT key FROM working_memory ORDER BY key').all()).toEqual([]);
+
+      db.exec('DROP TRIGGER fail_second_working_memory_insert');
+      brain.flush();
+      expect(db.prepare('SELECT key FROM working_memory ORDER BY key').all()).toEqual([
+        { key: 'alpha' },
+        { key: 'beta' },
+      ]);
     });
 
     it('persists only changed working-memory rows on subsequent flushes', () => {
@@ -5945,7 +6190,65 @@ describe('SqliteBrain', () => {
       ).toEqual(['late match kw1199', 'early match kw0000']);
     });
 
-    it('skips corrupt persisted details while keeping healthy recent and failure rows available', () => {
+    it('preserves global ranking across recall keyword chunks', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'older combined kw0000 kw1199 match',
+        createdAt: '2026-07-10T00:00:00.000Z',
+      }));
+      brain.episodic.record(makeEvent({
+        summary: 'newer first-chunk kw0000 match',
+        createdAt: '2026-07-10T00:02:00.000Z',
+      }));
+      brain.episodic.record(makeEvent({
+        summary: 'newer last-chunk kw1199 match',
+        createdAt: '2026-07-10T00:01:00.000Z',
+      }));
+      const query = Array.from(
+        { length: 1200 },
+        (_, i) => `kw${String(i).padStart(4, '0')}`,
+      ).join(' ');
+
+      expect(brain.episodic.recall(query, 1).map((event) => event.summary)).toEqual([
+        'older combined kw0000 kw1199 match',
+      ]);
+    });
+
+    it('preserves unbounded recall across keyword chunks', () => {
+      const episodic = brain.episodic as unknown as {
+        recall: (query: string, limit: number) => EpisodicEvent[];
+        recallKeywordChunk: (
+          keywords: string[],
+          limit?: number,
+          offset?: number,
+        ) => Array<Record<string, unknown>>;
+      };
+      const recallKeywordChunk = vi
+        .spyOn(episodic, 'recallKeywordChunk')
+        .mockImplementation((keywords, batchLimit = 100, offset = 0) => {
+          if (offset >= 10_001) return [];
+          return Array.from(
+            { length: Math.min(batchLimit, 10_001 - offset) },
+            (_, index) => ({
+              id: offset + index + 1,
+              type: 'observation',
+              step: null,
+              summary: `${keywords[0]} cross-chunk match`,
+              details: null,
+              created_at: '2026-07-10T00:00:00.000Z',
+              relevance_score: 1,
+            }),
+          );
+        });
+      const query = Array.from(
+        { length: 1200 },
+        (_, i) => `kw${String(i).padStart(4, '0')}`,
+      ).join(' ');
+
+      expect(episodic.recall(query, -1)).toHaveLength(10_001);
+      expect(recallKeywordChunk.mock.calls.some(([, , offset]) => offset === 10_000)).toBe(true);
+    }, 20_000);
+
+    it('quarantines corrupt persisted details while keeping recent and failure rows available', () => {
       brain.episodic.record(
         makeEvent({
           type: 'failure',
@@ -5983,18 +6286,35 @@ describe('SqliteBrain', () => {
       ).run('{', 'newer corrupt failure');
 
       expect(() => brain.episodic.recent(2)).not.toThrow();
-      expect(brain.episodic.recent(2).map((event) => event.summary)).toEqual([
+      const recent = brain.episodic.recent(2);
+      expect(recent.map((event) => event.summary)).toEqual([
         'newest healthy success',
-        'older healthy failure',
+        'newer corrupt failure',
       ]);
+      expect(recent[0]!.details).toEqual({ marker: 'healthy' });
+      expect(recent[1]!.details).toEqual({
+        quarantine: {
+          field: 'details',
+          eventId: recent[1]!.id,
+          reason: 'invalid JSON',
+        },
+      });
 
       expect(() => brain.episodic.recentFailures(1)).not.toThrow();
-      expect(
-        brain.episodic.recentFailures(1).map((event) => event.summary),
-      ).toEqual(['older healthy failure']);
+      const failures = brain.episodic.recentFailures(1);
+      expect(failures.map((event) => event.summary)).toEqual([
+        'newer corrupt failure',
+      ]);
+      expect(failures[0]!.details).toEqual({
+        quarantine: {
+          field: 'details',
+          eventId: failures[0]!.id,
+          reason: 'invalid JSON',
+        },
+      });
     });
 
-    it('skips corrupt persisted details during recall', () => {
+    it('quarantines corrupt persisted details during recall', () => {
       brain.episodic.record(
         makeEvent({
           summary: 'healthy searchable event',
@@ -6009,6 +6329,13 @@ describe('SqliteBrain', () => {
           details: { marker: 'searchable' },
         }),
       );
+      brain.episodic.record(
+        makeEvent({
+          summary: 'corrupt details-only event',
+          createdAt: '2026-07-10T00:02:00.000Z',
+          details: { marker: 'details-only-token' },
+        }),
+      );
 
       const db = (
         brain as unknown as {
@@ -6020,14 +6347,219 @@ describe('SqliteBrain', () => {
       db.prepare(
         `UPDATE episodic_events SET details = ? WHERE summary = ?`,
       ).run('{', 'corrupt searchable event');
+      db.prepare(
+        `UPDATE episodic_events SET details = ? WHERE summary = ?`,
+      ).run('{"details-only-token"', 'corrupt details-only event');
 
       expect(() => brain.episodic.recall('searchable', 10)).not.toThrow();
-      expect(
-        brain.episodic.recall('searchable', 10).map((event) => event.summary),
-      ).toEqual(['healthy searchable event']);
+      const recalled = brain.episodic.recall('searchable', 10);
+      expect(recalled.map((event) => event.summary)).toEqual([
+        'healthy searchable event',
+        'corrupt searchable event',
+      ]);
+      expect(recalled[0]!.details).toEqual({ marker: 'searchable' });
+      expect(recalled[1]!.details).toEqual({
+        quarantine: {
+          field: 'details',
+          eventId: recalled[1]!.id,
+          reason: 'invalid JSON',
+        },
+      });
+      expect(brain.episodic.recall('details-only-token', 10)).toEqual([]);
       expect(brain.episodic.recall('searchable', 0)).toEqual([]);
       expect(brain.episodic.recent(0)).toEqual([]);
       expect(brain.episodic.recentFailures(0)).toEqual([]);
+    });
+
+    it('re-scores quarantined plaintext recall rows from readable fields before limiting', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'alpha quarantined candidate',
+          createdAt: '2026-07-20T00:00:00.000Z',
+          details: { marker: 'beta' },
+        }),
+      );
+      brain.episodic.record(
+        makeEvent({
+          summary: 'alpha healthy candidate',
+          createdAt: '2026-07-21T00:00:00.000Z',
+          details: { marker: 'healthy' },
+        }),
+      );
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run(
+        '{"marker":"beta"',
+        'alpha quarantined candidate',
+      );
+
+      expect(brain.episodic.recall('alpha beta', 1).map((event) => event.summary)).toEqual([
+        'alpha healthy candidate',
+      ]);
+    });
+
+    it('does not score synthetic quarantine metadata during plaintext recall', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'alpha quarantined candidate',
+          createdAt: '2026-07-20T00:00:00.000Z',
+          details: { marker: 'before-corruption' },
+        }),
+      );
+      brain.episodic.record(
+        makeEvent({
+          summary: 'alpha invalid healthy candidate',
+          createdAt: '2026-07-21T00:00:00.000Z',
+          details: { marker: 'healthy' },
+        }),
+      );
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary = ?`).run(
+        '{"marker":"before-corruption"',
+        'alpha quarantined candidate',
+      );
+
+      expect(brain.episodic.recall('alpha invalid json', 1).map((event) => event.summary)).toEqual([
+        'alpha invalid healthy candidate',
+      ]);
+    });
+
+    it('keeps nonmatching quarantine metadata with null fields searchable', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'ordinary metadata candidate',
+        details: { marker: 'before-update' },
+      }));
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        JSON.stringify({
+          quarantine: {
+            field: null,
+            eventId,
+            reason: 'invalid JSON',
+          },
+        }),
+        eventId,
+      );
+
+      expect(brain.episodic.recall('invalid JSON', 1).map((event) => event.id)).toEqual([eventId]);
+    });
+
+    it('uses finite batches for bounded plaintext recall', () => {
+      const episodic = brain.episodic as unknown as {
+        recall: (query: string, limit: number) => EpisodicEvent[];
+        recallKeywordChunk: (keywords: string[], limit?: number, offset?: number) => unknown[];
+      };
+      const recallKeywordChunk = vi.spyOn(episodic, 'recallKeywordChunk');
+      brain.episodic.record(makeEvent({ summary: 'bounded recall candidate' }));
+
+      expect(episodic.recall('bounded', 1)).toHaveLength(1);
+      expect(recallKeywordChunk).toHaveBeenCalledWith(['bounded'], expect.any(Number), 0);
+      expect(recallKeywordChunk.mock.calls.every(([, batchLimit]) => batchLimit !== undefined)).toBe(true);
+    });
+
+    it('scans past corrupt SQL-ranked pages before applying final recall ranking', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'alpha beta healthy best match',
+        createdAt: '2026-07-19T00:00:00.000Z',
+      }));
+      for (let index = 0; index < 101; index += 1) {
+        brain.episodic.record(makeEvent({
+          summary: `alpha corrupt candidate ${index}`,
+          details: { marker: 'beta' },
+          createdAt: '2026-07-20T00:00:00.000Z',
+        }));
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary LIKE 'alpha corrupt candidate %'`)
+        .run('{"marker":"beta"');
+
+      expect(brain.episodic.recall('alpha beta', 1).map((event) => event.summary)).toEqual([
+        'alpha beta healthy best match',
+      ]);
+    });
+
+    it('audits quarantined details rows with their event ids', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'diagnostic searchable event',
+          details: { marker: 'valid-before-corruption' },
+        }),
+      );
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (
+        brain as unknown as {
+          db: {
+            prepare: (sql: string) => { run: (...args: unknown[]) => void };
+          };
+        }
+      ).db;
+      db.prepare(
+        `UPDATE episodic_events SET details = ? WHERE id = ?`,
+      ).run('{', eventId);
+
+      const recent = brain.episodic.recent(1);
+      expect(recent).toHaveLength(1);
+      expect(recent[0]).toMatchObject({
+        id: eventId,
+        summary: 'diagnostic searchable event',
+        details: {
+          quarantine: {
+            field: 'details',
+            eventId,
+            reason: 'invalid JSON',
+          },
+        },
+      });
+      expect(brain.accessAudit.list({ operation: 'episodic.recent' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
+
+      const recalled = brain.episodic.recall('diagnostic', 1);
+      expect(recalled).toHaveLength(1);
+      expect(recalled[0]).toMatchObject({ id: eventId });
+      expect(brain.accessAudit.list({ operation: 'episodic.recall' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
+    });
+
+    it('audits imported quarantine envelopes with their event ids', () => {
+      brain.episodic.record(
+        makeEvent({
+          summary: 'imported diagnostic event',
+          details: { marker: 'valid-before-import' },
+        }),
+      );
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (
+        brain as unknown as {
+          db: {
+            prepare: (sql: string) => { run: (...args: unknown[]) => void };
+          };
+        }
+      ).db;
+      db.prepare(
+        `UPDATE episodic_events SET details = ? WHERE id = ?`,
+      ).run(JSON.stringify({
+        quarantine: {
+          field: 'details',
+          eventId,
+          reason: 'invalid JSON',
+        },
+      }), eventId);
+
+      expect(brain.episodic.recent(1)).toHaveLength(1);
+      expect(brain.accessAudit.list({ operation: 'episodic.recent' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
+
+      expect(brain.episodic.recall('imported diagnostic', 1)).toHaveLength(1);
+      expect(brain.accessAudit.list({ operation: 'episodic.recall' })[0]).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedEventIds: [eventId] },
+      });
     });
   });
 
@@ -6382,6 +6914,55 @@ describe('SqliteBrain', () => {
 
       expect(hydrated.episodic.recent(1)[0]?.step).toBe('right-to-forget');
       hydrated.close();
+      source.close();
+    });
+
+    it('hydrate() preserves quarantined right-to-forget audit envelopes', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('task', 'delete project note');
+      source.rightToForget({ query: 'delete project' });
+      const snapshot = source.serialize();
+      const auditEvent = snapshot.episodic.find(
+        (event) => event.step === 'right-to-forget',
+      );
+      expect(auditEvent).toBeDefined();
+      auditEvent!.details = {
+        quarantine: {
+          field: 'details',
+          eventId: auditEvent!.id,
+          reason: 'invalid JSON',
+        },
+      };
+
+      const hydrated = SqliteBrain.hydrate(snapshot);
+
+      expect(hydrated.episodic.recent(1)[0]).toMatchObject({
+        step: 'right-to-forget',
+        details: { quarantine: { field: 'details', reason: 'invalid JSON' } },
+      });
+      hydrated.close();
+      source.close();
+    });
+
+    it('hydrate() rejects quarantined audit envelopes with extra guarded details', () => {
+      const source = new SqliteBrain(':memory:');
+      source.working.set('task', 'alice@example.test');
+      source.rightToForget({ query: 'alice@example.test' });
+      const snapshot = source.serialize();
+      const auditEvent = snapshot.episodic.find(
+        (event) => event.step === 'right-to-forget',
+      );
+      expect(auditEvent).toBeDefined();
+      auditEvent!.details = {
+        quarantine: {
+          field: 'details',
+          eventId: auditEvent!.id,
+          reason: 'invalid JSON',
+        },
+        note: 'alice@example.test',
+      };
+
+      expect(() => SqliteBrain.hydrate(snapshot)).toThrow(/right-to-forget/);
       source.close();
     });
 

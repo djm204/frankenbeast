@@ -7,12 +7,14 @@ export interface DashboardSkill {
   mcpServerCount: number;
 }
 
+export type DashboardApprovalRequirement = 'all' | 'destructive' | 'none';
+
 export interface DashboardSecurity {
   profile: string;
   injectionDetection: boolean;
   piiMasking: boolean;
   outputValidation: boolean;
-  requireApproval?: string;
+  requireApproval?: DashboardApprovalRequirement;
 }
 
 export interface DashboardProvider {

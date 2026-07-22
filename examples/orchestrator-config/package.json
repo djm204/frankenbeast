@@ -1,0 +1,12 @@
+{
+  "name": "frankenbeast-orchestrator-config-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "help": "frankenbeast --help",
+    "setup": "git init -b main && git add . && git commit -m \"chore: initialize example\"",
+    "plan": "frankenbeast plan --design-doc docs/sample-design.md",
+    "start": "frankenbeast run --config .fbeast/config.json"
+  }
+}

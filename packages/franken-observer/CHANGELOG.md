@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.11.2](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.1...franken-observer-v0.11.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **observer:** batch SQLite adapter drains ([#3417](https://github.com/djm204/frankenbeast/issues/3417)) ([eeba02e](https://github.com/djm204/frankenbeast/commit/eeba02eff4cad61607956caf5b0655b782c1fed6))
+* **observer:** cap model attribution cardinality ([#3450](https://github.com/djm204/frankenbeast/issues/3450)) ([205d538](https://github.com/djm204/frankenbeast/commit/205d5383bbaac32ddb2d45c22778d00c6d5f1890))
+* **observer:** index ordered SQLite trace queries ([#3430](https://github.com/djm204/frankenbeast/issues/3430)) ([e79d239](https://github.com/djm204/frankenbeast/commit/e79d239a1fc0dae51ea6320f875ff21ffcab4180))
+* **observer:** multiply token counts before rate scaling ([#3405](https://github.com/djm204/frankenbeast/issues/3405)) ([3e9178b](https://github.com/djm204/frankenbeast/commit/3e9178b048893c3cc370365fc90c376210cae17c))
+* **observer:** offload SQLite operations to worker ([#3444](https://github.com/djm204/frankenbeast/issues/3444)) ([c527b11](https://github.com/djm204/frankenbeast/commit/c527b117a9d4744029172b87e8e77e47760a59cc))
+* **observer:** stabilize cost accumulation ([#3432](https://github.com/djm204/frankenbeast/issues/3432)) ([ebf0b8b](https://github.com/djm204/frankenbeast/commit/ebf0b8b9b2e89b41c5a436d1a9930bccfb9ecf7c))
+
+
+### Performance
+
+* **observer:** avoid repeated SQLite schema DDL ([#3411](https://github.com/djm204/frankenbeast/issues/3411)) ([5b7479c](https://github.com/djm204/frankenbeast/commit/5b7479ccbee4879f97493ad7df441e63e061793d))
+* **observer:** cache loop detector comparisons ([#3408](https://github.com/djm204/frankenbeast/issues/3408)) ([5e9b678](https://github.com/djm204/frankenbeast/commit/5e9b678d2f3e038ab2904c6821ec77230cfaf8ca))
+* **observer:** pre-index allowed tool parameters ([#3410](https://github.com/djm204/frankenbeast/issues/3410)) ([be3c7f2](https://github.com/djm204/frankenbeast/commit/be3c7f28ef7d0ce0d5bec96f47d230cc37247cdd))
+
+
+### Miscellaneous
+
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+
+
+### Tests
+
+* **observer:** focus TraceServer client script coverage ([acc4341](https://github.com/djm204/frankenbeast/commit/acc434169c0cc156e6bec90fe6e6ccf0a5c3114a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.1 to 0.15.0
+
 ## [0.11.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.0...franken-observer-v0.11.1) (2026-07-19)
 
 

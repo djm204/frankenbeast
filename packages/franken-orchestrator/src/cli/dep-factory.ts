@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
 import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
-import { BeastLogger } from '../logging/beast-logger.js';
+import { BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor, type ObserverDeps } from '../skills/cli-skill-executor.js';
@@ -51,6 +51,7 @@ export interface CliDepOptions {
   trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
+  plain?: boolean | undefined;
   reset: boolean;
   resume?: boolean | undefined;
   planDirOverride?: string | undefined;
@@ -148,7 +149,10 @@ const stubSkills: ISkillsModule = {
   getAvailableSkills: () => [],
   execute: async (skillId: string) => { throw new Error(`Skills module is disabled; cannot execute ${skillId}`); },
 };
-const stubHeartbeat: IHeartbeatModule = {
+// Module toggles are independent from the runtime enableHeartbeat flag. Keep an
+// explicit disabled implementation for --no-heartbeat; enabled CLI sessions
+// use the functional ReflectionHeartbeatAdapter created by createBeastDeps.
+const disabledHeartbeat: IHeartbeatModule = {
   pulse: async () => ({ summary: 'Heartbeat module disabled.', improvements: [], techDebt: [] }),
 };
 
@@ -513,6 +517,7 @@ async function createObserverDeps(
   mkdirSync(options.paths.buildDir, { recursive: true });
   const logger = new BeastLogger({
     verbose: options.verbose,
+    plain: options.plain,
     captureForFile: true,
     logFile: artifacts.logFile,
   });
@@ -1121,6 +1126,9 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
+  if (options.plain !== undefined) {
+    setPlainOutput(options.plain);
+  }
   const config = resolveEffectiveConfig(options);
   const commandOverridePolicy = {
     allowTrustedCommandOverrides: options.trustProviderCommandOverrides,
@@ -1166,7 +1174,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       firewall: config.modules.firewall ? consolidated.firewall : stubFirewall,
       skills: config.modules.skills ? createSkillDeps(consolidated, config.skills) : stubSkills,
       memory: config.modules.memory ? consolidated.memory : stubMemory,
-      heartbeat: config.modules.heartbeat ? consolidated.heartbeat : stubHeartbeat,
+      heartbeat: config.modules.heartbeat ? consolidated.heartbeat : disabledHeartbeat,
     };
     const issueDeps = createIssueDeps(options, options.paths, stack, executor, llm);
     finalize = appendAuditFinalize(finalize, observer, consolidated);

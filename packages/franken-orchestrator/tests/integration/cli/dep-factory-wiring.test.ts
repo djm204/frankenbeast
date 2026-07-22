@@ -12,6 +12,7 @@ import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
+import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
 
 function createTempPaths(): ProjectPaths {
   const root = join(tmpdir(), `dep-factory-wiring-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -63,10 +64,30 @@ describe('dep-factory wiring integration', () => {
   const cleanups: string[] = [];
 
   afterEach(() => {
+    setPlainOutput(false);
     for (const dir of cleanups) {
       try { rmSync(dir, { recursive: true, force: true }); } catch {}
     }
     cleanups.length = 0;
+  });
+
+  it('applies explicit plain mode to the process-wide dependency graph', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      plain: true,
+      reset: false,
+    });
+
+    expect(isPlainOutput()).toBe(true);
+    await finalize();
   });
 
   it('creates real SqliteBrainMemoryAdapter when modules are enabled', async () => {
@@ -105,7 +126,7 @@ describe('dep-factory wiring integration', () => {
     if (prev !== undefined) process.env.FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL = prev;
   });
 
-  it('uses real adapters via createBeastDeps even when enabledModules disables flags', async () => {
+  it('uses disabled adapters only for modules explicitly disabled by the CLI', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
@@ -117,16 +138,19 @@ describe('dep-factory wiring integration', () => {
       noPr: true,
       verbose: false,
       reset: false,
-      enabledModules: { firewall: false, memory: false },
+      enabledModules: { firewall: false, memory: false, heartbeat: false },
     });
 
-    // createBeastDeps now always provides real adapters — module toggles
-    // only affect critique/governor dynamic imports, not firewall/memory/skills/heartbeat
-    expect(deps.memory).toBeInstanceOf(SqliteBrainMemoryAdapter);
-    expect(deps.firewall).toBeInstanceOf(MiddlewareChainFirewallAdapter);
-    // Real memory adapter still returns valid context (empty from fresh db)
+    expect(deps.memory).not.toBeInstanceOf(SqliteBrainMemoryAdapter);
+    expect(deps.firewall).not.toBeInstanceOf(MiddlewareChainFirewallAdapter);
+    expect(deps.heartbeat).not.toBeInstanceOf(ReflectionHeartbeatAdapter);
     const ctx = await deps.memory.getContext('test');
     expect(ctx).toEqual({ adrs: [], knownErrors: [], rules: [] });
+    await expect(deps.heartbeat.pulse()).resolves.toEqual({
+      summary: 'Heartbeat module disabled.',
+      improvements: [],
+      techDebt: [],
+    });
     await finalize();
   });
 

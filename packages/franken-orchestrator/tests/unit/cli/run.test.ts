@@ -28,6 +28,7 @@ const {
   mockCreateBeastServices,
   mockFinalize,
   mockParseArgs,
+  mockSetPlainOutput,
   mockSessionStart,
   mockStartChatServer,
   mockStartBeastDaemon,
@@ -39,6 +40,7 @@ const {
 } = vi.hoisted(() => {
   const mockAdapterComplete = vi.fn(async () => 'mock-complete');
   const mockFinalize = vi.fn(async () => undefined);
+  const mockSetPlainOutput = vi.fn();
   const mockCreateCliDeps = vi.fn(async () => ({
     deps: {},
     cliLlmAdapter: { name: 'chat-adapter' },
@@ -78,6 +80,7 @@ const {
     allowOrigin: undefined,
     noPr: false,
     verbose: false,
+    plain: false,
     reset: false,
     resume: false,
     cleanup: false,
@@ -116,6 +119,7 @@ const {
     mockCreateBeastServices,
     mockFinalize,
     mockParseArgs,
+    mockSetPlainOutput,
     mockSessionStart,
     mockStartChatServer,
     mockStartBeastDaemon,
@@ -196,7 +200,11 @@ vi.mock('../../../src/http/beast-daemon-server.js', () => ({
 
 vi.mock('../../../src/skills/providers/cli-provider.js', () => ({
   createDefaultRegistry: vi.fn(() => ({
-    get: vi.fn(() => ({ chatModel: 'chat-model', command: 'claude' })),
+    get: vi.fn(() => ({
+      chatModel: 'chat-model',
+      command: 'claude',
+      defaultContextWindowTokens: () => 200_000,
+    })),
   })),
 }));
 
@@ -212,6 +220,8 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
   ANSI: { cyan: '', reset: '', bold: '', dim: '', green: '', yellow: '', blue: '', red: '' },
   BANNER: '[BANNER]',
   renderBanner: vi.fn(async () => '[BANNER]'),
+  setPlainOutput: mockSetPlainOutput,
+  isPlainOutput: vi.fn(() => false),
   BeastLogger: vi.fn(function (this: Record<string, unknown>) {
     this.info = vi.fn();
     this.warn = vi.fn();
@@ -383,12 +393,14 @@ describe('chat terminal ownership', () => {
       providers: [],
       trustProviderCommandOverrides: false,
       verbose: false,
+      plain: true,
     } as any, defaultConfig(), paths, governorQuestion, governorCancel);
 
     expect(mockCreateCliDeps).toHaveBeenCalledWith(expect.objectContaining({
       governorQuestion,
       governorCancel,
       chatMode: true,
+      plain: true,
     }));
   });
 });
@@ -1151,10 +1163,11 @@ describe('runDirectCli', () => {
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(false);
   });
 
-  it('exits nonzero when the direct CLI entrypoint rejects', async () => {
+  it('preserves the error stack and exits nonzero when the direct CLI entrypoint rejects', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fatalError = new Error('boom');
     const entrypoint = vi.fn(async () => {
-      throw new Error('boom');
+      throw fatalError;
     });
     const exit = vi.fn() as unknown as (code?: number) => never;
 
@@ -1163,7 +1176,7 @@ describe('runDirectCli', () => {
     await Promise.resolve();
 
     expect(exit).toHaveBeenCalledWith(1);
-    expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
+    expect(errorSpy).toHaveBeenCalledWith('Fatal:', fatalError);
     errorSpy.mockRestore();
   });
 });
@@ -1340,10 +1353,37 @@ describe('main() execution', () => {
     expect(resolveBaseBranch).toHaveBeenCalled();
   });
 
+  it('enables plain output from the parsed CLI flag before startup', async () => {
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as ReturnType<typeof mockParseArgs>),
+      plain: true,
+    });
+
+    await main();
+
+    expect(mockSetPlainOutput).toHaveBeenCalledWith(true);
+  });
+
   it('creates a Session and calls start()', async () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('closes the session readline interface after successful execution', async () => {
+    await main();
+
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline?.close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the session readline interface when execution throws', async () => {
+    mockSessionStart.mockRejectedValueOnce(new Error('execution failed'));
+
+    await expect(main()).rejects.toThrow('execution failed');
+
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline?.close).toHaveBeenCalledOnce();
   });
 
   it('prints network credentials as parseable JSON without a banner', async () => {

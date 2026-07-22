@@ -331,7 +331,7 @@ Chunk files are operator-reviewed project inputs, but `ChunkFileGraphBuilder` tr
 | `LlmGraphBuilder` | `packages/franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
 | `InterviewLoop` | `packages/franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
 | `PrCreator` | `packages/franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create`. Generates title + body from `BeastResult`. The dep factory wires `targetBranch` from `config.baseBranch` (resolved from CLI args/config). |
-| `BeastLogger` | `packages/franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting. Streams log entries to disk incrementally (crash-safe) as `.build/<plan-name>-<datetime>-build.log`. |
+| `BeastLogger` | `packages/franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting, plus accessible plain output via `--plain`, `NO_COLOR`, or `FORCE_COLOR=0`. Streams log entries to disk incrementally (crash-safe) as `.build/<plan-name>-<datetime>-build.log`. |
 | `CLI args/config/run` | `packages/franken-orchestrator/src/cli/args.ts`, `config-loader.ts`, `run.ts` | Thin CLI shell (~150 lines): arg parsing, dep construction, `BeastLoop.run()`, summary display. |
 | Execution checkpoint wiring | `packages/franken-orchestrator/src/phases/execution.ts` | Checks `checkpoint.has(taskId)` before each task, writes checkpoint after completion. Handles dirty-file resume. |
 | Planning GraphBuilder wiring | `packages/franken-orchestrator/src/phases/planning.ts` | Uses `GraphBuilder.build()` when available, falls back to `IPlannerModule.createPlan()`. |
@@ -828,7 +828,7 @@ fbeast mcp init / client config
 
 ## Examples
 
-There is no current top-level `examples/` directory in this repo. For runnable usage examples, prefer the package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, and tests next to the implementation. Older examples that mention Claude/OpenAI/Ollama adapters or a Docker firewall proxy describe pre-consolidation surfaces.
+The top-level [`examples/`](../examples/README.md) directory contains standalone, scaffoldable sample projects for CLI planning, MCP registration, and orchestrator configuration. Package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, and tests next to the implementation provide deeper usage details. Older examples that mention Claude/OpenAI/Ollama adapters or a Docker firewall proxy describe pre-consolidation surfaces.
 
 ## Chat System Architecture
 

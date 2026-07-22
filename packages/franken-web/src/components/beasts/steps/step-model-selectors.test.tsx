@@ -51,13 +51,16 @@ describe('Beast wizard model selectors', () => {
   it('renders LLM target selectors from the configured dashboard providers', () => {
     render(<StepLlmTargets />);
 
-    expect(screen.getAllByText('openai').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('codex').length).toBeGreaterThan(0);
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    expect(screen.getByRole('option', { name: 'openai' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'codex' })).toBeTruthy();
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
 
-    fireEvent.change(screen.getAllByLabelText('Provider')[0]!, { target: { value: 'openai' } });
+    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
 
-    expect(screen.getByText('gpt-4.1')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'gpt-4.1' })).toBeTruthy();
     expect(screen.queryByText('claude-sonnet-4-6')).toBeNull();
   });
 
@@ -67,13 +70,15 @@ describe('Beast wizard model selectors', () => {
     render(<StepModules />);
     fireEvent.click(screen.getByRole('button', { name: /Heartbeat\s+Configuration/i }));
 
-    expect(screen.getAllByText('openai').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('codex').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByLabelText('Provider'));
+    expect(screen.getByRole('option', { name: 'openai' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'codex' })).toBeTruthy();
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
 
-    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'codex' } });
+    fireEvent.click(screen.getByRole('option', { name: 'codex' }));
+    fireEvent.click(screen.getByLabelText('Model'));
 
-    expect(screen.getByText('gpt-5.3-codex-spark')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'gpt-5.3-codex-spark' })).toBeTruthy();
     expect(screen.queryByText('claude-opus-4-6')).toBeNull();
   });
 });

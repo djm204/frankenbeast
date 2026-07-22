@@ -1,4 +1,5 @@
 import { wallClockNow } from '@franken/types';
+import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const INTERVAL_MS = 100;
 const LABEL_ROTATE_MS = 5_000;
@@ -35,6 +36,7 @@ export interface SpinnerOptions {
 export class Spinner {
   private readonly write: (text: string) => void;
   private readonly silent: boolean;
+  private readonly plain: boolean;
   private interval: ReturnType<typeof setInterval> | null = null;
   private frameIdx = 0;
   private label = '';
@@ -44,6 +46,7 @@ export class Spinner {
   constructor(options: SpinnerOptions = {}) {
     this.write = options.write ?? ((text: string) => process.stderr.write(text));
     this.silent = options.silent ?? false;
+    this.plain = isPlainOutput();
   }
 
   start(label: string | string[]): void {
@@ -57,6 +60,10 @@ export class Spinner {
     }
     this.startMs = wallClockNow();
     this.frameIdx = 0;
+    if (this.plain) {
+      this.write(`${stripAnsi(this.label)}\n`);
+      return;
+    }
     this.render();
     this.interval = setInterval(() => this.render(), INTERVAL_MS);
   }
@@ -67,9 +74,9 @@ export class Spinner {
       clearInterval(this.interval);
       this.interval = null;
     }
-    this.write('\r\x1b[K');
+    if (!this.plain) this.write('\r\x1b[K');
     if (finalMessage) {
-      this.write(`${finalMessage}\n`);
+      this.write(`${this.plain ? stripAnsi(finalMessage) : finalMessage}\n`);
     }
   }
 
@@ -78,6 +85,7 @@ export class Spinner {
   }
 
   private render(): void {
+    if (this.plain) return;
     // Rotate through labels every 5 seconds
     if (this.labels.length > 0) {
       const idx = Math.floor((wallClockNow() - this.startMs) / LABEL_ROTATE_MS) % this.labels.length;

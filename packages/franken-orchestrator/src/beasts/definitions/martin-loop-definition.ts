@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
-import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
+import { resolveCliEntrypoint, spawnedCliEnv } from './resolve-cli-entrypoint.js';
 
 const promptConfigSchema = z.object({
   text: z.string().optional(),
@@ -51,7 +51,7 @@ export const martinLoopDefinition: BeastDefinition = {
       '--provider', String(config.provider),
       '--plan-dir', String(config.chunkDirectory),
     ],
-    env: { FRANKENBEAST_SPAWNED: '1' },
+    env: spawnedCliEnv(),
     cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
   }),
   telemetryLabels: {

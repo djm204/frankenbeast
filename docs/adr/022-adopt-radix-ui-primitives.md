@@ -21,6 +21,14 @@ Adopt Radix UI primitives (`@radix-ui/react-*`) as the component foundation for 
 - **Slide-in detail panel** — Radix Dialog with `modal={false}` provides dialog semantics, open/close focus management, focus return, and Escape handling without trapping focus or making the rest of the dashboard inert.
 - **Wizard step indicator** — custom component (Tabs allows free navigation, incompatible with validation-gated step progression)
 
+### Implementation status
+
+The dashboard imports Radix primitives directly in its thin interactive components:
+- Beast creation and detail surfaces use Dialog, Alert Dialog, Accordion, Tooltip, Scroll Area, and Toggle Group primitives.
+- The non-modal detail drawer uses `Dialog.Root modal={false}` through `SlideInPanel`.
+- The shared provider/model cascade uses Radix Select triggers/listboxes, while its “Use default” control uses Radix Toggle.
+- Native form controls remain appropriate for ordinary text entry and standalone browser-native fields; new composite controls should prefer the adopted primitives above.
+
 ## Consequences
 
 ### Positive

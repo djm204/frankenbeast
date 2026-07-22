@@ -21,7 +21,7 @@ export function whatsappSignatureMiddleware(options: WhatsAppSignatureOptions) {
     }
 
     try {
-      const body = await c.req.text();
+      const body = Buffer.from(await c.req.arrayBuffer());
       const hmac = createHmac('sha256', appSecret);
       hmac.update(body);
       const expectedSignature = `sha256=${hmac.digest('hex')}`;
