@@ -460,6 +460,12 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  /** Resolved provider's declared context window, for the status line's usage bar. */
+  contextMaxTokens: number;
+  /** Resolve a fallback provider's declared context window. */
+  contextMaxTokensForProvider: (provider: string) => number | undefined;
+  /** Chat model label for the status line (e.g. `claude-sonnet-4-6`). */
+  modelLabel: string;
 }
 
 function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): string {
@@ -1201,6 +1207,11 @@ export async function createChatSurfaceDeps(
     sessionStoreDir,
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
+    contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
+    contextMaxTokensForProvider: (providerName) => registry.has(providerName)
+      ? registry.get(providerName).defaultContextWindowTokens()
+      : undefined,
+    modelLabel: chatDepOpts.adapterModel ?? provider,
   };
 }
 
@@ -1359,7 +1370,18 @@ async function runChatCommandIfRequested(
     chatIo?.close();
     throw error;
   }
-  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = chatDeps;
+  const {
+    chatLlm,
+    execLlm,
+    finalize,
+    projectId,
+    sessionStoreDir,
+    skillManager,
+    providerRegistry,
+    contextMaxTokens,
+    contextMaxTokensForProvider,
+    modelLabel,
+  } = chatDeps;
 
   if (args.subcommand === 'chat-server') {
     let mutableConfig = config;
@@ -1492,6 +1514,9 @@ async function runChatCommandIfRequested(
     sessionStore,
     verbose: args.verbose,
     ...(chatIo ? { io: chatIo } : {}),
+    contextMaxTokens,
+    contextMaxTokensForProvider,
+    modelLabel,
   });
   try {
     await repl.start();

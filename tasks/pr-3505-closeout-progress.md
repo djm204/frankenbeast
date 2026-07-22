@@ -1,0 +1,26 @@
+# PR #3505 closeout progress
+
+- [x] Verify no duplicate nonterminal owner for PR #3505.
+- [x] Refresh live PR state and inspect the exact-head CI failure.
+- [x] Merge latest `origin/main` (including PR #3511 dependency-audit repair) into the PR branch.
+- [x] Verify dependency audit passes locally after the merge.
+- [x] Run local verification on the merged head: dependency audit, build, typecheck, and lint pass; the focused hardcoded-secret test passes, while full `test:ci` repeatedly hits that baseline test's 15s timeout under parallel load.
+- [x] Re-read all five unique current-head Codex findings and verify the existing repair diff addresses each one.
+- [x] Preserve the first fallback reason together with the configured provider across mixed-cause multi-hop fallback.
+- [x] Add a mixed unavailable -> rate-limited -> success three-provider regression.
+- [x] Re-run focused verification: 261 unit tests, the focused REST integration regression, orchestrator typecheck, and `git diff --check` all pass.
+- [x] Route repair commit `d657cf99` through approval-cop and verify the remote PR head matches.
+- [x] Merge current `origin/main` into the repair head and resolve the sole conflict by preserving both provider usage/context extraction and plain-output ANSI stripping.
+- [x] Verify the reconciled tree: 316 focused unit tests pass, focused REST provider-context regression passes, orchestrator typecheck/lint pass, root build passes, and `git diff --check` passes; the full REST integration file retains its two documented unrelated concurrency timeouts.
+- [x] Reconcile remote epoch drift at `18ac390e` with the prior local repair and current `origin/main`, preserving both live model extraction and plain-output sanitization.
+- [x] Re-verify the reconciled tree: 315 focused unit tests and the focused REST provider-context regression pass; orchestrator typecheck/lint, root build, and `git diff --check` pass.
+- [x] Route the exact reconciled branch head push through approval-cop.
+- [x] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
+- [x] Address the five fresh Codex invocation-4 findings and add focused regressions; 367 targeted tests, orchestrator typecheck/lint, root build, and `git diff --check` pass.
+- [x] Repair the two stale provider-transparency assertions exposed by exact-head CI and re-run both focused suites (49 tests pass).
+- [x] Publish the CI assertion repair through approval-cop and verify exact-head CI.
+- [x] Resolve invocation-4 threads and obtain the fifth/final Codex review response.
+- [x] Address the four invocation-5 findings: hook-safe usage/model extraction, per-turn context usage, persisted web token totals, and comms provider context; 103 focused tests, typecheck, lint, build, and diff checks pass.
+- [ ] Publish the invocation-5 repair through approval-cop and verify exact-head CI.
+- [ ] Verify zero unresolved Codex threads and record the invocation-cap closeout state.
+- [ ] Route a head-pinned squash merge through approval-cop and verify PR terminal state.

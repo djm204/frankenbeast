@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
+import { ConversationEngine, formatProviderTransparencyNote } from '../../../src/chat/conversation-engine.js';
 import { ModelTier } from '../../../src/chat/types.js';
-import type { ILlmClient } from '@franken/types';
+import type { ILlmClient, ProviderContext } from '@franken/types';
 
 function mockLlm(response = 'Mock response'): ILlmClient {
   return { complete: vi.fn().mockResolvedValue(response) };
@@ -83,5 +83,134 @@ describe('ConversationEngine', () => {
     if (result.outcome.kind === 'reply') {
       expect(result.outcome.content.toLowerCase()).toContain('error');
     }
+  });
+
+  it('surfaces real provider context from completeWithUsage on the turn result', async () => {
+    const providerContext: ProviderContext = { provider: 'claude', model: 'claude-sonnet-4-6' };
+    const llm = {
+      complete: vi.fn().mockResolvedValue('should not be used'),
+      completeWithUsage: vi.fn().mockResolvedValue({ text: 'Hello!', providerContext }),
+    };
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    const result = await engine.processTurn('hello', []);
+
+    expect(result.providerContext).toEqual(providerContext);
+  });
+
+  it('does not inject a transparency note on the very first turn (nothing known yet)', async () => {
+    const llm = mockLlm('Hello!');
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('hello', []);
+
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.not.stringContaining('Runtime status'),
+      expect.anything(),
+    );
+  });
+
+  it('injects a plain runtime-status note when the prior turn used the configured provider', async () => {
+    const llm = mockLlm('Hello!');
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('hello', [], {
+      priorProviderContext: { provider: 'codex', model: 'codex-mini' },
+    });
+
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('Runtime status from the most recently completed turn: it was served by the "codex" CLI provider.'),
+      expect.anything(),
+    );
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('The specific underlying model is "codex-mini".'),
+      expect.anything(),
+    );
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.not.stringContaining('fallback'),
+      expect.anything(),
+    );
+  });
+
+  it('tells the model not to guess a version when none is known', async () => {
+    const llm = mockLlm('Hello!');
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('hello', [], {
+      priorProviderContext: { provider: 'codex' },
+    });
+
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('not exposed to this session — do not name one'),
+      expect.anything(),
+    );
+    expect(llm.complete).toHaveBeenCalledWith(
+      expect.stringContaining('never state a specific model name or version'),
+      expect.anything(),
+    );
+  });
+
+  it('injects a fallback-aware note when the prior turn actually switched providers', async () => {
+    const llm = mockLlm('Hello!');
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('hello', [], {
+      priorProviderContext: {
+        provider: 'claude',
+        model: 'claude-sonnet-4-6',
+        switchedFrom: 'codex',
+        switchReason: 'rate_limited',
+      },
+    });
+
+    const [prompt] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(prompt).toContain('That completed turn used an automatic fallback');
+    expect(prompt).toContain('the configured provider "codex" was rate-limited');
+    expect(prompt).toContain('retried against "claude"');
+    expect(prompt).toContain('answer truthfully using these facts');
+    expect(prompt).toContain('do not present this historical status as the provider for the current request');
+  });
+});
+
+describe('formatProviderTransparencyNote', () => {
+  it('describes the current provider plainly when there was no fallback', () => {
+    const note = formatProviderTransparencyNote({ provider: 'claude', model: 'claude-sonnet-4-6' });
+    expect(note).toContain('"claude"');
+    expect(note).toContain('claude-sonnet-4-6');
+    expect(note).not.toContain('fallback');
+  });
+
+  it('explicitly forbids naming a model version when none is known, rather than staying silent', () => {
+    const note = formatProviderTransparencyNote({ provider: 'claude' });
+    expect(note).toContain('"claude"');
+    expect(note).toContain('not exposed to this session — do not name one');
+    expect(note).toContain('never state a specific model name or version');
+  });
+
+  it('explains a rate-limit fallback', () => {
+    const note = formatProviderTransparencyNote({
+      provider: 'claude',
+      switchedFrom: 'codex',
+      switchReason: 'rate_limited',
+    });
+    expect(note).toContain('"codex" was rate-limited');
+  });
+
+  it('explains an unavailable-provider fallback', () => {
+    const note = formatProviderTransparencyNote({
+      provider: 'claude',
+      switchedFrom: 'codex',
+      switchReason: 'unavailable',
+    });
+    expect(note).toContain('"codex" was unavailable');
+  });
+
+  it('falls back to a generic reason for an unrecognized switchReason', () => {
+    const note = formatProviderTransparencyNote({
+      provider: 'claude',
+      switchedFrom: 'codex',
+      switchReason: 'some_future_reason',
+    });
+    expect(note).toContain('"codex" was unavailable');
   });
 });

@@ -266,6 +266,73 @@ describe('Chat HTTP Routes', () => {
     expect(sessionBody.data.state).toBe('active');
   });
 
+  it('persists REST provider context and injects it into the next message turn', async () => {
+    const providerContext = {
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      switchedFrom: 'codex',
+      switchReason: 'rate_limited',
+    } as const;
+    const completeWithUsage = vi.fn()
+      .mockResolvedValueOnce({ text: 'Running on claude.', providerContext })
+      .mockResolvedValueOnce({ text: 'Still on claude.' });
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: { complete: llmComplete, completeWithUsage },
+      projectName: 'test-project',
+    });
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    for (const content of ['first', 'which provider is serving me?']) {
+      const response = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      expect(response.status).toBe(200);
+    }
+
+    expect(completeWithUsage.mock.calls[1]?.[0]).toContain('"codex" was rate-limited');
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.providerContext).toEqual(providerContext);
+  });
+
+  it('recomputes persisted REST token totals from transcript usage', async () => {
+    app = createChatApp({
+      sessionStoreDir: TMP,
+      llm: {
+        complete: llmComplete,
+        completeWithUsage: vi.fn().mockResolvedValue({
+          text: 'Measured reply.',
+          usage: { inputTokens: 40, outputTokens: 10, totalTokens: 50 },
+        }),
+      },
+      projectName: 'test-project',
+    });
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'measure this turn' }),
+    });
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.tokenTotals).toEqual({ cheap: 50, premiumReasoning: 0, premiumExecution: 0 });
+  });
+
   it('accepts chat message content at the 16,000-character limit', async () => {
     const createRes = await app.request('/v1/chat/sessions', {
       method: 'POST',

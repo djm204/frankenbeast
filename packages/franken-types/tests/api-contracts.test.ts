@@ -4,6 +4,7 @@ import {
   ChatSessionResponseSchema,
   MessageResultSchema,
   MODULE_CONFIG_KEYS,
+  ProviderContextSchema,
   type ApiDataEnvelope,
   type NetworkStatusResponse,
 } from '../src/api-contracts.js';
@@ -50,5 +51,38 @@ describe('web/API contracts', () => {
 
     expect(envelope.data.services[0]?.id).toBe('chat-server');
     expect(MODULE_CONFIG_KEYS).toContain('planner');
+  });
+
+  it('validates provider context DTOs, including an in-progress fallback', () => {
+    const noFallback = ProviderContextSchema.parse({ provider: 'claude' });
+    expect(noFallback.switchedFrom).toBeUndefined();
+
+    const withFallback = ProviderContextSchema.parse({
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      switchedFrom: 'codex',
+      switchReason: 'rate_limited',
+    });
+    expect(withFallback.switchedFrom).toBe('codex');
+  });
+
+  it('rejects a provider context missing the required provider field', () => {
+    expect(() => ProviderContextSchema.parse({ model: 'claude-sonnet-4-6' })).toThrow();
+  });
+
+  it('accepts chat sessions carrying a persisted providerContext', () => {
+    const session = ChatSessionResponseSchema.parse({
+      id: 'sess-1',
+      projectId: 'proj-1',
+      transcript: [],
+      state: 'active',
+      providerContext: { provider: 'claude', switchedFrom: 'codex', switchReason: 'rate_limited' },
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00.000Z',
+      updatedAt: '2026-03-09T00:00:01.000Z',
+    });
+
+    expect(session.providerContext?.switchedFrom).toBe('codex');
   });
 });

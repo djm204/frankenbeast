@@ -5,8 +5,9 @@
  * parseResetTime, and env filtering logic.
  */
 
+import type { TokenUsage } from '@franken/types';
 import type { ICliProvider, ProviderOpts } from './cli-provider.js';
-import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS } from './stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage, extractNdjsonModel } from './stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 // Re-export for backward compatibility (used by providers/index.ts)
@@ -17,7 +18,10 @@ const RATE_LIMIT_PATTERNS = BASE_RATE_LIMIT_PATTERNS;
 export class ClaudeProvider implements ICliProvider {
   readonly name = 'claude';
   readonly command = 'claude';
-  readonly chatModel = 'claude-sonnet-4-6';
+  // Flagship tier, not a cheap/fast one — see the ICliProvider.chatModel doc.
+  // Verified against a live `claude` CLI: `--model opus` resolves to exactly
+  // this string.
+  readonly chatModel = 'claude-opus-4-8';
 
   buildArgs(opts: ProviderOpts): string[] {
     // chatMode and chunk-session continuation can both use native CLI resume.
@@ -93,6 +97,14 @@ export class ClaudeProvider implements ICliProvider {
     return Math.ceil(text.length / 4);
   }
 
+  extractUsage(raw: string): TokenUsage | undefined {
+    return extractNdjsonTokenUsage(stripHookJson(raw));
+  }
+
+  extractModel(raw: string): string | undefined {
+    return extractNdjsonModel(stripHookJson(raw));
+  }
+
   isRateLimited(stderr: string): boolean {
     return RATE_LIMIT_PATTERNS.test(stderr);
   }
@@ -153,7 +165,7 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   defaultContextWindowTokens(): number {
-    return 200_000;
+    return 1_000_000;
   }
 
   getCacheCapabilities() {

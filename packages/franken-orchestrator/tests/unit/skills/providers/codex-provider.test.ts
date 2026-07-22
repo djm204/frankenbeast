@@ -226,4 +226,13 @@ describe('CodexProvider', () => {
     expect(result).toContain('Implemented chunk 08');
     expect(result).toContain('<promise>HARDEN_08_http-chat-routes_DONE</promise>');
   });
+
+  it('extractUsage reports real token counts from a usage event', () => {
+    const raw = JSON.stringify({ type: 'usage', usage: { input_tokens: 200, output_tokens: 40 } });
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 200, outputTokens: 40, totalTokens: 240 });
+  });
+
+  it('extractUsage returns undefined when the CLI output has no usage', () => {
+    expect(provider.extractUsage?.('plain output')).toBeUndefined();
+  });
 });

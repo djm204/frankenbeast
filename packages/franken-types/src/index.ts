@@ -48,7 +48,7 @@ export type { Verdict } from './verdict.js';
 export type { RationaleBlock, VerificationResult } from './rationale.js';
 
 // LLM client interfaces
-export type { ILlmClient, IResultLlmClient, LlmCompletionOptions } from './llm.js';
+export type { ILlmClient, IResultLlmClient, LlmCompletionOptions, LlmCompletionResult } from './llm.js';
 
 // Token
 export type { TokenSpend } from './token.js';
