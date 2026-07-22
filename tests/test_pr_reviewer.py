@@ -632,6 +632,20 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertIn("gh diff timed out", payload["message"])
         self.assertNotIn("super-secret-value", payload["message"])
 
+    def test_error_diagnostic_redacts_oauth_style_fields(self):
+        field_names = [
+            "access_" + "token",
+            "refresh_" + "token",
+            "client_" + "secret",
+        ]
+        message = " ".join(f"{name}=sensitive-{index}" for index, name in enumerate(field_names))
+
+        payload = json.loads(self.reviewer.error_diagnostic("agent", message))
+
+        for index, name in enumerate(field_names):
+            self.assertIn(name, payload["message"])
+            self.assertNotIn(f"sensitive-{index}", payload["message"])
+
     def test_error_diagnostic_remains_valid_json_at_length_limit(self):
         diagnostic = self.reviewer.error_diagnostic(
             "agent", 'password="' + ("\\\"secret" * 500)
@@ -665,6 +679,28 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
                 "FROM pr_reviews"
             ).fetchone()
         self.assertEqual(row, (42, 0, None, None))
+
+    def test_begin_retry_preserves_previous_diagnostic_until_outcome(self):
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        database = Path(temporary_directory.name) / "scans.db"
+        with mock.patch.object(self.reviewer, "DB_FILE", database):
+            self.reviewer.init_db()
+        with sqlite3.connect(database) as connection:
+            cursor = connection.cursor()
+            self.reviewer.begin_review_attempt(cursor, 42, "contributor", "a" * 40)
+            self.reviewer.update_review_state(
+                cursor, 42, "failed", "fetch", "first failure"
+            )
+            self.reviewer.begin_review_attempt(cursor, 42, "contributor", "a" * 40)
+            connection.commit()
+            row = connection.execute(
+                "SELECT status, attempt_count, last_error FROM pr_reviews "
+                "WHERE pr_number = 42"
+            ).fetchone()
+
+        self.assertEqual(row[0:2], ("working", 2))
+        self.assertEqual(json.loads(row[2])["message"], "first failure")
 
     def test_repository_is_derived_from_origin(self):
         result = mock.Mock(stdout="git@github.com:owner/repository.git\n")

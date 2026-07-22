@@ -39,7 +39,8 @@ SECRET_PATTERN = re.compile(
 )
 SENSITIVE_ERROR_VALUE_PATTERN = re.compile(
     r"(?i)\b(authorization\s*:\s*(?:bearer|token)\s+|"
-    r"(?:token|password|secret|api[_-]?key)\s*[=:]\s*)[^\s,;]+"
+    r"(?:(?:access|refresh|id)[_-]?token|client[_-]?secret|"
+    r"token|password|secret|api[_-]?key)\s*[=:]\s*)[^\s,;]+"
 )
 LAST_AGY_ERROR = None
 LAST_POST_ERROR = None
@@ -128,8 +129,7 @@ def begin_review_attempt(cursor, pr_number, author, head_sha):
             reviewed_at = NULL,
             head_sha = excluded.head_sha,
             attempt_count = COALESCE(pr_reviews.attempt_count, 0) + 1,
-            last_attempt_at = excluded.last_attempt_at,
-            last_error = NULL
+            last_attempt_at = excluded.last_attempt_at
         """,
         (pr_number, author, attempted_at, head_sha, attempted_at),
     )
