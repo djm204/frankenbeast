@@ -62,7 +62,7 @@ export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps 
  * log. This is a proportionate, best-effort scrub — exhaustive secret detection
  * is intentionally out of scope.
  */
-const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:authorization|password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))$/i;
+const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:authorization|password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:authorization|password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))$/i;
 const RAW_SECRET_HINTS = [
   'authorization',
   'bearer',
@@ -105,6 +105,10 @@ function containsOversizedSecretIndicator(text: string): boolean {
 
   const assignmentPattern = /\\*["']?\b([A-Za-z][A-Za-z0-9_-]{0,127})\b\\*["']?\s*[=:]/g;
   for (const match of text.matchAll(assignmentPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  const tupleKeyPattern = /\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,/g;
+  for (const match of text.matchAll(tupleKeyPattern)) {
     if (isSensitiveAssignmentKey(match[1]!)) return true;
   }
   return false;
@@ -158,9 +162,20 @@ function redactJsonSecrets(value: unknown, state: { changed: boolean }, key?: st
     return value.map((item) => redactJsonSecrets(item, state, undefined, preserveShellCommands));
   }
   if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const pairName = [record.name, record.key]
+      .find((candidate): candidate is string => typeof candidate === 'string' && isSensitiveAssignmentKey(candidate));
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .map(([entryKey, entryValue]) => [entryKey, redactJsonSecrets(entryValue, state, entryKey, preserveShellCommands)]),
+      Object.entries(record)
+        .map(([entryKey, entryValue]) => [
+          entryKey,
+          redactJsonSecrets(
+            entryValue,
+            state,
+            entryKey === 'value' && pairName ? pairName : entryKey,
+            preserveShellCommands,
+          ),
+        ]),
     );
   }
   return value;

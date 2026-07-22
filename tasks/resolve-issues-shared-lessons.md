@@ -3,8 +3,8 @@
 ## 2026-07-22 — Post-tool authorization and nested-string redaction
 - Use separate redaction modes for executable pre-tool shell context and inert post-tool output: shell assignments must stop at the first token so governance still sees the command, while post-tool output can consume known structured multi-token authorization values.
 - Authorization redaction must treat quoted header values and structured multi-token schemes (including AWS `Credential`/`SignedHeaders`/`Signature` parameters) as one secret-bearing value while stopping before shell control/substitution boundaries.
-- JSON sanitizers must recurse when the top-level parsed value is itself a string, recognize sensitive header-entry tuples such as `["Authorization", value]`, and preserve duplicate-key fallback boundaries; object-key-only recursion and line-greedy raw replacements can either miss credentials or erase later JSON fields.
-- Oversized-payload indicator scans must recognize escaped JSON keys (for example `\"apiKey\":`), authorization header tuples, and singular as well as plural credential keys before deciding that a payload is safe to persist unchanged.
+- JSON sanitizers must recurse when the top-level parsed value is itself a string, recognize sensitive header-entry tuples such as `["Authorization", value]`, proxy-authorization variants, and sibling-labelled `{name|key, value}` pairs, and preserve duplicate-key fallback boundaries; object-key-only recursion can miss credentials while line-greedy raw replacements can erase later JSON fields.
+- Oversized-payload indicator scans must recognize escaped JSON keys (for example `\"apiKey\":`) plus all sensitive header tuples (Authorization, Cookie, Set-Cookie, proxy variants), and singular as well as plural credential keys before deciding that a payload is safe to persist unchanged.
 - In inert post-tool output, Authorization and Cookie header redaction should consume complete line values (including semicolon-delimited SigV4 parameters or multiple cookies) but stop at unescaped JSON field boundaries when processing duplicate-key raw fallbacks.
 
 ## 2026-07-22 — Deterministic root release repair

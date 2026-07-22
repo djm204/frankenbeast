@@ -264,13 +264,14 @@ describe('fbeast-hook runtime', () => {
       credential: secret,
       credentials: secret,
       passphrase: secret,
+      proxyAuthorization: secret,
     });
 
     const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
     const loggedPayload = JSON.parse(metadata.payload) as Record<string, string>;
 
-    expect(Object.values(loggedPayload)).toEqual(Array(8).fill('[REDACTED]'));
+    expect(Object.values(loggedPayload)).toEqual(Array(9).fill('[REDACTED]'));
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
   });
 
@@ -369,8 +370,13 @@ describe('fbeast-hook runtime', () => {
 
   it('redacts credential values from serialized header entry arrays', async () => {
     const secret = ['header', 'tuple', 'fixture'].join('-');
+    const proxySecret = ['proxy', 'tuple', 'fixture'].join('-');
     const payload = JSON.stringify({
-      headers: [['Authorization', `Basic ${secret}`], ['Content-Type', 'application/json']],
+      headers: [
+        ['Authorization', `Basic ${secret}`],
+        ['Proxy-Authorization', `Basic ${proxySecret}`],
+        ['Content-Type', 'application/json'],
+      ],
     });
 
     const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
@@ -379,9 +385,26 @@ describe('fbeast-hook runtime', () => {
 
     expect(loggedPayload.headers).toEqual([
       ['Authorization', '[REDACTED]'],
+      ['Proxy-Authorization', '[REDACTED]'],
       ['Content-Type', 'application/json'],
     ]);
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata).not.toContain(proxySecret);
+  });
+
+  it('redacts secrets from name/value and key/value pair objects', async () => {
+    const secrets = ['env', 'database', 'header'].map((part) => `${part}-pair-fixture`);
+    const payload = JSON.stringify({
+      env: [{ name: 'OPENAI_API_KEY', value: secrets[0] }],
+      settings: [{ key: 'databasePassword', value: secrets[1] }],
+      headers: [{ name: 'Authorization', value: `Basic ${secrets[2]}` }],
+    });
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    for (const secret of secrets) expect(metadata.payload).not.toContain(secret);
+    expect(metadata.payload.match(/\[REDACTED\]/g)).toHaveLength(3);
   });
 
   it('recurses into top-level JSON string payloads before observer logging', async () => {
@@ -504,6 +527,20 @@ describe('fbeast-hook runtime', () => {
     const payload = JSON.stringify({
       output: 'x'.repeat(70_000),
       headers: [['Authorization', `Basic ${secret}`]],
+    });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('redacts oversized payloads containing cookie header tuples', async () => {
+    const secret = ['oversized', 'cookie', 'tuple'].join('-');
+    const payload = JSON.stringify({
+      output: 'x'.repeat(70_000),
+      headers: [['Set-Cookie', `sid=${secret}; Path=/; HttpOnly`]],
     });
 
     const result = await runHookForTest(['post-tool', 'read_file', payload]);
