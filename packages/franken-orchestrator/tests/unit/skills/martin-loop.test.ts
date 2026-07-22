@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { MartinLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
-import { ProviderRegistry } from '../../../src/skills/providers/index.js';
+import { ProviderRegistry, createDefaultRegistry } from '../../../src/skills/providers/index.js';
 import type { ICliProvider } from '../../../src/skills/providers/index.js';
 import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
 import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-session-snapshot-store.js';
@@ -22,7 +22,7 @@ import { spawn } from 'node:child_process';
 const mockSpawn = spawn as unknown as ReturnType<typeof vi.fn>;
 
 interface MockChildOpts {
-  stdout?: string;
+  stdout?: string | readonly string[];
   stderr?: string;
   exitCode?: number;
   hang?: boolean;
@@ -45,7 +45,10 @@ function mockChild(opts: MockChildOpts): ChildProcess {
     });
   } else if (!opts.hang) {
     process.nextTick(() => {
-      if (opts.stdout) (child.stdout as EventEmitter).emit('data', Buffer.from(opts.stdout));
+      const stdoutChunks = Array.isArray(opts.stdout) ? opts.stdout : [opts.stdout];
+      for (const chunk of stdoutChunks) {
+        if (chunk) (child.stdout as EventEmitter).emit('data', Buffer.from(chunk));
+      }
       if (opts.stderr) (child.stderr as EventEmitter).emit('data', Buffer.from(opts.stderr));
       child.emit('close', opts.exitCode ?? 0);
     });
@@ -87,6 +90,7 @@ describe('MartinLoop', () => {
   afterEach(() => {
     stdoutWriteSpy.mockRestore();
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     for (const dir of tmpDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -242,6 +246,118 @@ describe('MartinLoop', () => {
     );
   });
 
+  it('forces no-color provider output and strips terminal controls in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({ stdout: '\x1b[31mworking\x1b[0m\x1b[K\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      '/usr/bin/aider',
+      expect.any(Array),
+      expect.objectContaining({
+        env: expect.objectContaining({ NO_COLOR: '1', FORCE_COLOR: '0' }),
+      }),
+    );
+    expect(stdoutWriteSpy).toHaveBeenCalledWith('working\n<promise>IMPL_X_DONE</promise>');
+  });
+
+  it('does not mutate process.env when a custom provider returns the input env object', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    const originalForceColor = process.env['FORCE_COLOR'];
+    delete process.env['FORCE_COLOR'];
+    const registry = createDefaultRegistry();
+    vi.spyOn(registry.get('aider'), 'filterEnv').mockImplementation((env) => env);
+    queueMock({ stdout: '<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    try {
+      const loop = new MartinLoop(registry);
+      await loop.run(baseConfig({ provider: 'aider' }));
+
+      const spawnEnv = (mockSpawn.mock.calls[0] as unknown[])[2] as { env: Record<string, string> };
+      expect(spawnEnv.env).toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
+      expect(process.env['FORCE_COLOR']).toBeUndefined();
+    } finally {
+      if (originalForceColor === undefined) delete process.env['FORCE_COLOR'];
+      else process.env['FORCE_COLOR'] = originalForceColor;
+    }
+  });
+
+  it('strips ANSI sequences split across stdout chunks in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: ['\x1b[', '31mred', '\x1b[0', 'm done\x1b[K\n<promise>IMPL_X_DONE</promise>'],
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+
+    const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(displayed).toBe('red done\n<promise>IMPL_X_DONE</promise>');
+    expect(displayed).not.toContain('\x1b');
+    expect(displayed).not.toContain('31m');
+    expect(displayed).not.toContain('0m');
+    expect(result.output).toBe('red done\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).not.toContain('\x1b');
+  });
+
+  it('strips OSC/ST sequences split across stdout chunks without losing visible text', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: [
+        '\x1b]0;first title\x1b',
+        '\\visible',
+        '\x1b]0;second title',
+        '\x1b',
+        '\\ text\n<promise>IMPL_X_DONE</promise>',
+      ],
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'aider', command: '/usr/bin/aider' }));
+
+    const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(displayed).toBe('visible text\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).toBe('visible text\n<promise>IMPL_X_DONE</promise>');
+  });
+
+  it('sanitizes an unterminated stream-json tail in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: 'tail output\n\x1b[31m<promise>IMPL_X_DONE</promise>\x1b[0m',
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'claude' }));
+
+    expect(result.output).toBe('tail output\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).not.toContain('\x1b');
+  });
+
+  it('strips ANSI sequences split across stream-json text deltas in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({
+      stdout: [
+        `${JSON.stringify({ type: 'content_block_delta', delta: { text: '\x1b[' } })}\n`,
+        `${JSON.stringify({ type: 'content_block_delta', delta: { text: '31mred' } })}\n`,
+        `${JSON.stringify({ type: 'content_block_delta', delta: { text: '\x1b[0m<promise>IMPL_X_DONE</promise>' } })}\n`,
+      ],
+      exitCode: 0,
+    });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({ provider: 'claude' }));
+
+    const displayed = stdoutWriteSpy.mock.calls.map(([chunk]) => String(chunk)).join('');
+    expect(displayed).toBe('red\n<promise>IMPL_X_DONE</promise>\n');
+    expect(result.output).toBe('red\n<promise>IMPL_X_DONE</promise>');
+    expect(result.output).not.toContain('31m');
+  });
+
   it('normalizes codex JSON output to readable text and detects promise tag', async () => {
     queueMock({
       stdout: [
@@ -329,6 +445,21 @@ describe('MartinLoop', () => {
     expect(result.completed).toBe(true);
     expect(result.iterations).toBe(2);
     expect(mockSpawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('sanitizes failure stderr in plain mode', async () => {
+    vi.stubEnv('NO_COLOR', '1');
+    queueMock({ stdout: 'failed', stderr: '\x1b[31mprovider failed\x1b[0m\x1b[K', exitCode: 1 });
+    queueMock({ stdout: 'Success!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+    const onIteration = vi.fn();
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ maxIterations: 2, onIteration }));
+
+    const firstIteration = (onIteration.mock.calls[0] as [number, IterationResult])[1];
+    expect(firstIteration.stderr).toBe('provider failed');
+    expect(firstIteration.failure?.stderr).toBe('provider failed');
+    expect(firstIteration.failure?.summary).not.toContain('\x1b');
   });
 
   // ── 7. Promise-without-changes rejection ──

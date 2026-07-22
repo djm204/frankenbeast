@@ -30,6 +30,7 @@ describe('issue #2139 run-cli-beast CLI flags docs', () => {
       '--allow-origin',
       '--no-pr',
       '--verbose',
+      '--plain',
       '--reset',
       '--resume',
       '--cleanup',

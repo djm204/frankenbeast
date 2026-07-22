@@ -150,6 +150,24 @@ describe('startNetworkService', () => {
     expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Process spawn failed'));
   });
 
+  it.each([
+    ['chat-server', 'npm', CHAT_SERVER_ARGS],
+    ['beasts-daemon', 'npm', BEASTS_DAEMON_ARGS],
+    ['dashboard-web', 'node', DASHBOARD_ARGS],
+  ] as const)('allows plain-output environment for managed %s', async (id, command, args) => {
+    await expect(startNetworkService(makeService(command, {
+      args: [...args],
+      env: { NO_COLOR: '1', FORCE_COLOR: '0' },
+    }, {
+      id,
+    }), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+    expect(spawnOptions?.env).toEqual(expect.objectContaining({ NO_COLOR: '1', FORCE_COLOR: '0' }));
+  });
+
   it('does not inherit unrelated orchestrator secrets when starting a managed service', async () => {
     vi.stubEnv('FRANKENBEAST_NETWORK_TEST_SECRET', 'must-not-reach-child');
     vi.stubEnv('HOME', '/safe-network-home');

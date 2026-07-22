@@ -107,6 +107,20 @@ describe('toDockerSpec', () => {
     expect(spec.env).toEqual({});
   });
 
+  it('forwards plain-output environment into the Beast container', () => {
+    const spec = toDockerSpec({
+      ...base,
+      env: { ...base.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+    }, { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: '/proj' });
+
+    expect(spec.args).toEqual(expect.arrayContaining([
+      '-e',
+      'NO_COLOR=1',
+      '-e',
+      'FORCE_COLOR=0',
+    ]));
+  });
+
   it('appends the original command and args after the image', () => {
     const spec = toDockerSpec(base, { ...DEFAULT_SANDBOX_POLICY, image: 'fbeast/sandbox:1', workspaceHostPath: '/proj' });
 

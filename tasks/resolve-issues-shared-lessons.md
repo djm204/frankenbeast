@@ -1,8 +1,7 @@
 # Resolve Issues Shared Lessons
 
-## 2026-07-21 — Regex scanner alias normalization
-- When a security scanner recognizes imported child-process calls, capture the imported symbol separately from its local alias instead of inferring semantics from delimiter text; `spawn as run` and `spawn: run` must both preserve spawn-specific sink tracking.
-- TypeScript/CommonJS syntax variants need focused fixtures at the parser boundary: optional type annotations on method aliases, angle-bracket assertions around direct `require`, and harmless parentheses around namespace aliases can otherwise bypass line-oriented matching.
+## 2026-07-21 — Dashboard chat model precedence
+- For conversational dashboard replies, the selected provider's `providers.overrides.<provider>.model` wins over `chat.model`; `chat.model` only replaces the provider's built-in chat model when no selected-provider model override exists. Dashboard `/run` uses a separate execution adapter that ignores both model settings and provider `extraArgs`, although it does apply trusted command overrides. Trace both adapter construction paths and runtime provider override resolution before documenting dashboard behavior.
 
 ## 2026-07-20 — Outbound request deadlines must include response consumption
 - JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.

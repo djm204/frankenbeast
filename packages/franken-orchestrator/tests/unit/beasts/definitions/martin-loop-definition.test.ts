@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { martinLoopDefinition } from '../../../../src/beasts/definitions/martin-loop-definition.js';
 import { parseArgs } from '../../../../src/cli/args.js';
+import { setPlainOutput } from '../../../../src/logging/beast-logger.js';
 
 describe('martinLoopDefinition', () => {
   const validConfig = {
@@ -8,6 +9,10 @@ describe('martinLoopDefinition', () => {
     objective: 'implement feature X',
     chunkDirectory: '/tmp/chunks',
   };
+
+  afterEach(() => {
+    setPlainOutput(false);
+  });
 
   describe('buildProcessSpec', () => {
     it('uses process.execPath as the command', () => {
@@ -42,6 +47,18 @@ describe('martinLoopDefinition', () => {
     it('sets FRANKENBEAST_SPAWNED=1 in env', () => {
       const spec = martinLoopDefinition.buildProcessSpec(validConfig);
       expect(spec.env).toEqual({ FRANKENBEAST_SPAWNED: '1' });
+    });
+
+    it('propagates plain output to spawned Beast child processes', () => {
+      setPlainOutput(true);
+
+      const spec = martinLoopDefinition.buildProcessSpec(validConfig);
+
+      expect(spec.env).toMatchObject({
+        FRANKENBEAST_SPAWNED: '1',
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
+      });
     });
 
     it('uses config.projectRoot as cwd when provided', () => {
