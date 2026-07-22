@@ -118,7 +118,7 @@ function redactStructuredSecretsRaw(text: string): string {
   return tupleRedacted.replace(/\{[^{}\r\n]{0,8192}\}/g, (objectText) => {
     if (!containsStructuredSecretIndicator(objectText)) return objectText;
     return objectText.replace(
-      /((?:\\*["'])value(?:\\*["'])\s*:\s*)(\\*["'])(.*?)\2/i,
+      /((?:\\*["'])value(?:\\*["'])\s*:\s*)(\\*["'])((?:\\.|(?!\2)[\s\S])*?)\2/i,
       '$1$2[REDACTED]$2',
     );
   });
@@ -160,12 +160,16 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
       .replace(/(\bauthorization\b\s*=\s*)AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+/gi, '$1[REDACTED]')
       .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*(?:\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*)+|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]');
 
+  const sensitiveOptionPattern = preserveShellCommands
+    ? /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+[^\s\r\n;&|<>`$]+|[^\s\\;&|<>()$`]+)/gi
+    : /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi;
+
   return redacted
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
     .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(
-      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
+      sensitiveOptionPattern,
       (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
         ? `${prefix}[REDACTED]`
         : match,

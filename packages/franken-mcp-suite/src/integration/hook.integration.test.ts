@@ -112,6 +112,17 @@ describe('fbeast-hook runtime', () => {
     }
   });
 
+  it('redacts escaped quotes in shadowed structured secrets without hiding governed commands', async () => {
+    const escapedSecret = 'abc\\"def';
+    const structuredContext = `{"output":{"value":"${escapedSecret}","name":"OPENAI_API_KEY"},"output":"rm -rf /tmp/nope"}`;
+    const structuredResult = await runHookForTest(['pre-tool', '--', 'Bash'], { context: structuredContext });
+    const governedContext = structuredResult.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain('abc');
+    expect(governedContext).not.toContain('def');
+  });
+
   it('stops SigV4 option redaction at shell command separators for governance', async () => {
     const context = '--aws-authorization AWS4-HMAC-SHA256 Credential=scope;rm -rf /tmp/nope';
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
@@ -481,6 +492,16 @@ describe('fbeast-hook runtime', () => {
     expect(metadata).toContain('--openai-api-key [REDACTED]');
     expect(metadata).toContain('--aws-authorization [REDACTED]');
     expect(metadata).toContain('--format json');
+  });
+
+  it('redacts complete semicolon-delimited SigV4 option values from post-tool logs', async () => {
+    const sigV4Signature = ['sigv4', 'semicolon', 'fixture'].join('-');
+    const sigV4Payload = `--aws-authorization AWS4-HMAC-SHA256 Credential=scope SignedHeaders=host;x-amz-date Signature=${sigV4Signature}`;
+    const sigV4Result = await runHookForTest(['post-tool', 'custom_tool', sigV4Payload]);
+    const sigV4Metadata = JSON.parse(sigV4Result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(sigV4Metadata.payload).toBe('--aws-authorization [REDACTED]');
+    expect(sigV4Result.observerLogs[0]!.metadata).not.toContain(sigV4Signature);
   });
 
   it('redacts secrets from JSON embedded in text fields', async () => {
