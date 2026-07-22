@@ -5819,6 +5819,31 @@ describe('SqliteBrain', () => {
       expect(snapshot.working).toEqual({ task: 'test-flush' });
     });
 
+    it('rolls back every row when a working-memory batch fails mid-flush', () => {
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.exec(`
+        CREATE TEMP TRIGGER fail_second_working_memory_insert
+        BEFORE INSERT ON working_memory
+        WHEN NEW.key = 'beta'
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated mid-batch failure');
+        END;
+      `);
+
+      brain.working.set('alpha', 'one');
+      brain.working.set('beta', 'two');
+
+      expect(() => brain.flush()).toThrow('simulated mid-batch failure');
+      expect(db.prepare('SELECT key FROM working_memory ORDER BY key').all()).toEqual([]);
+
+      db.exec('DROP TRIGGER fail_second_working_memory_insert');
+      brain.flush();
+      expect(db.prepare('SELECT key FROM working_memory ORDER BY key').all()).toEqual([
+        { key: 'alpha' },
+        { key: 'beta' },
+      ]);
+    });
+
     it('persists only changed working-memory rows on subsequent flushes', () => {
       const db = (
         brain as unknown as {
