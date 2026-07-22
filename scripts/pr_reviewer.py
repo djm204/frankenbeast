@@ -39,9 +39,10 @@ SECRET_PATTERN = re.compile(
 )
 SENSITIVE_ERROR_VALUE_PATTERN = re.compile(
     r"(?i)(authorization\s*:\s*(?:bearer|token)\s+|"
-    r"(?<![a-zA-Z0-9_])[\"']?(?:(?:access|refresh|id)[_-]?token|"
-    r"client[_-]?secret|token|password|secret|api[_-]?key)[\"']?\s*[=:]\s*)"
-    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"
+    r"(?<![a-zA-Z0-9_])[\"']?(?:[a-zA-Z0-9]+[_-])*"
+    r"(?:(?:access|refresh|id)[_-]?token|client[_-]?secret|"
+    r"token|password|secret|api[_-]?key)[\"']?\s*[=:]\s*)"
+    r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)'''
 )
 LAST_AGY_ERROR = None
 LAST_POST_ERROR = None

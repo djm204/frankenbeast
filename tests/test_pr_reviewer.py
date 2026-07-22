@@ -654,11 +654,14 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             "access_" + "token",
             "refresh_" + "token",
             "client_" + "secret",
+            "OPENAI_" + "API_KEY",
+            "MY_" + "TOKEN",
         ]
         message = " ".join(
             f"{name}=sensitive-{index}" for index, name in enumerate(field_names)
         )
-        message += " " + json.dumps({field_names[0]: "json-sensitive"})
+        escaped_value = 'json-sensitive-"-suffix'
+        message += " " + json.dumps({field_names[0]: escaped_value})
 
         payload = json.loads(self.reviewer.error_diagnostic("agent", message))
 
@@ -666,6 +669,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             self.assertIn(name, payload["message"])
             self.assertNotIn(f"sensitive-{index}", payload["message"])
         self.assertNotIn("json-sensitive", payload["message"])
+        self.assertNotIn("suffix", payload["message"])
 
     def test_error_diagnostic_remains_valid_json_at_length_limit(self):
         diagnostic = self.reviewer.error_diagnostic(
