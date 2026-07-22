@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "help": "frankenbeast --help",
+    "setup": "git init",
     "plan": "frankenbeast plan --design-doc docs/sample-design.md",
     "start": "frankenbeast run --config .fbeast/config.json"
   }

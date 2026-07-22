@@ -84,9 +84,15 @@ describe("issue #3480 runnable example projects", () => {
     expect(OrchestratorConfigSchema.safeParse(config).success).toBe(true);
 
     const readme = readText("examples/orchestrator-config/README.md");
+    expect(readme.indexOf("npm run setup")).toBeLessThan(
+      readme.indexOf("npm run plan"),
+    );
     expect(readme.indexOf("npm run plan")).toBeLessThan(
       readme.indexOf("npm start"),
     );
+    expect(
+      readJson("examples/orchestrator-config/package.json").scripts,
+    ).toMatchObject({ setup: "git init" });
     expect(
       existsSync(
         resolve(ROOT, "examples/orchestrator-config/docs/sample-design.md"),

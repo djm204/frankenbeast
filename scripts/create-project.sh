@@ -95,15 +95,6 @@ fi
   npm ci
 )
 
-if node -e '
-  const manifest = require(process.argv[1]);
-  process.exit(Object.hasOwn(manifest.scripts ?? {}, "start") ? 0 : 1);
-' "$target_dir/package.json"; then
-  next_command="npm start"
-else
-  next_command="See README.md for this example's commands"
-fi
-
 cat <<EOF
 Created Frankenbeast example project
   Example: $example_name
@@ -112,5 +103,5 @@ Created Frankenbeast example project
 
 Next steps:
   cd "$target_dir"
-  $next_command
+  See README.md for this example's commands
 EOF
