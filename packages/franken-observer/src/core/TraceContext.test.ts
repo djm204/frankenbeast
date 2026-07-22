@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { TraceContext } from './TraceContext.js'
 
 describe('TraceContext', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   describe('createTrace()', () => {
     it('returns a root trace with a unique id', () => {
       const a = TraceContext.createTrace('goal A')
@@ -86,6 +90,23 @@ describe('TraceContext', () => {
       const span = TraceContext.startSpan(trace, { name: 'step' })
       TraceContext.endSpan(span)
       expect(span.durationMs).toBeGreaterThanOrEqual(0)
+    })
+
+    it('uses a monotonic clock for duration when the wall clock moves backward', () => {
+      vi.spyOn(Date, 'now')
+        .mockReturnValueOnce(1_000)
+        .mockReturnValueOnce(2_000)
+        .mockReturnValueOnce(1_500)
+      vi.spyOn(performance, 'now').mockReturnValueOnce(10).mockReturnValueOnce(35.6)
+
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'step' })
+      TraceContext.endSpan(span)
+
+      expect(span.startedAt).toBe(2_000)
+      expect(span.endedAt).toBe(1_500)
+      expect(span.durationMs).toBe(26)
+      expect(Number.isInteger(span.durationMs)).toBe(true)
     })
 
     it('can mark a span as errored', () => {

@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { wallClockNow } from '@franken/types';
 import type { LoopDetector } from '../incident/LoopDetector.js'
 
+const spanMonotonicStartTimes = new WeakMap<Span, number>()
+
 export const TraceContext = {
   createTrace(goal: string): Trace {
     return {
@@ -35,6 +37,7 @@ export const TraceContext = {
       metadata: {},
       thoughtBlocks: [],
     }
+    spanMonotonicStartTimes.set(span, performance.now())
     trace.spans.push(span)
     return span
   },
@@ -44,8 +47,14 @@ export const TraceContext = {
       throw new Error(`Cannot end span that is already ${span.status} (id: ${span.id})`)
     }
     const endedAt = wallClockNow()
+    const monotonicStartedAt = spanMonotonicStartTimes.get(span)
+    const durationMs =
+      monotonicStartedAt === undefined
+        ? endedAt - span.startedAt
+        : performance.now() - monotonicStartedAt
     span.endedAt = endedAt
-    span.durationMs = endedAt - span.startedAt
+    span.durationMs = Math.max(0, Math.round(durationMs))
+    spanMonotonicStartTimes.delete(span)
     span.status = options.status ?? 'completed'
     if (options.errorMessage !== undefined) {
       span.errorMessage = options.errorMessage
