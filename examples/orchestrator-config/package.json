@@ -1,0 +1,10 @@
+{
+  "name": "frankenbeast-orchestrator-config-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "help": "frankenbeast --help",
+    "start": "frankenbeast run --config .fbeast/config.json"
+  }
+}
