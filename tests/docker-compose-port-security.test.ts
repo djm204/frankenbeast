@@ -33,6 +33,7 @@ describe("docker compose published-port security", () => {
         new RegExp(`^\\s+- ["']0\\.0\\.0\\.0:${port}:${port}["']`, "mu"),
       );
     }
+    expect(override).toMatch(/GF_AUTH_ANONYMOUS_ENABLED:\s*["']false["']/u);
   });
 
   it("documents the remote-exposure security tradeoff and opt-in command", () => {
@@ -40,6 +41,8 @@ describe("docker compose published-port security", () => {
 
     expect(quickstart).toContain("docker-compose.remote.yml");
     expect(quickstart).toContain("reachable from other machines");
+    expect(quickstart).toMatch(/Docker Engine 28\.0\.0 or\s+newer/u);
+    expect(quickstart).toContain("same layer-2 network");
     expect(quickstart).toContain(
       "docker compose -f docker-compose.yml -f docker-compose.remote.yml up -d",
     );
