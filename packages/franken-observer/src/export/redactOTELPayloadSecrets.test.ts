@@ -42,6 +42,8 @@ describe('redactOTELPayloadSecrets', () => {
     const headerObjectSecret = ['header', 'object', 'credential'].join('-')
     const passphraseSecret = ['vault', 'passphrase', 'credential'].join('-')
     const multiwordSecret = ['correct', 'horse', 'battery', 'staple'].join(' ')
+    const multiValueHeaderSecret = ['multi', 'value', 'header', 'credential'].join('-')
+    const unmatchedTupleSecret = ['unmatched', 'tuple', 'credential'].join('-')
     const aliasSecrets = ['sshKey', 'signing_key', 'gpg_key', 'PAT', 'webhookUrl']
       .map(key => [key, `${key}-credential`] as const)
     const geminiSecret = `AIza${'e'.repeat(35)}`
@@ -74,6 +76,9 @@ describe('redactOTELPayloadSecrets', () => {
       JSON.stringify([{ key: 'x-api-key', value: headerObjectSecret }]),
       `FRANKENBEAST_PASSPHRASE=${passphraseSecret}`,
       `password: ${multiwordSecret}`,
+      `passphrase=${multiwordSecret}`,
+      JSON.stringify({ name: 'x-api-key', values: [multiValueHeaderSecret] }),
+      `prefix { ... ${JSON.stringify([['x-api-key', unmatchedTupleSecret]])}`,
       ...aliasSecrets.map(([key, secret]) => JSON.stringify({ [key]: secret })),
       geminiSecret,
       `https://hooks.slack.com/services/T000/B000/${slackSecret}`,
@@ -115,6 +120,8 @@ describe('redactOTELPayloadSecrets', () => {
       headerObjectSecret,
       passphraseSecret,
       multiwordSecret,
+      multiValueHeaderSecret,
+      unmatchedTupleSecret,
       ...aliasSecrets.map(([, secret]) => secret),
       geminiSecret,
       slackSecret,
@@ -127,15 +134,14 @@ describe('redactOTELPayloadSecrets', () => {
     expect(output).toContain('[REDACTED]')
     expect(output).toContain('safe diagnostic value')
 
-    input.resourceSpans[0]!.resource.attributes.push({
-      key: 'promptTokens',
-      value: { intValue: 42 },
-    })
+    for (const key of ['promptTokens', 'inputTokens', 'outputTokens', 'cached_tokens']) {
+      input.resourceSpans[0]!.resource.attributes.push({ key, value: { intValue: 42 } })
+    }
     const withMetrics = redactOTELPayloadSecrets(input)
-    expect(withMetrics.resourceSpans[0]!.resource.attributes.at(-1)).toEqual({
-      key: 'promptTokens',
-      value: { intValue: 42 },
-    })
+    expect(withMetrics.resourceSpans[0]!.resource.attributes.slice(-4)).toEqual(
+      ['promptTokens', 'inputTokens', 'outputTokens', 'cached_tokens']
+        .map(key => ({ key, value: { intValue: 42 } })),
+    )
   })
 
   it('handles unmatched JSON openers without repeatedly rescanning the suffix', () => {
