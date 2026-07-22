@@ -304,6 +304,35 @@ function stripComments(line, state, options = {}) {
   return output;
 }
 
+function linesWithoutCommentsOrTemplates(lines) {
+  const commentState = { inBlockComment: false };
+  let inTemplate = false;
+  let escaped = false;
+  return lines.map((line) => {
+    const uncommented = stripComments(line, commentState);
+    let output = '';
+    for (const character of uncommented) {
+      if (!inTemplate) {
+        output += character;
+        if (character === '`') {
+          inTemplate = true;
+          escaped = false;
+        }
+        continue;
+      }
+      output += ' ';
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '`') {
+        inTemplate = false;
+      }
+    }
+    return output;
+  });
+}
+
 function lineLanguage(path) {
   const extension = extensionOf(path);
   if (extension === '.py') {
@@ -1015,11 +1044,20 @@ function lexicalScopeEnds(lines) {
       if (character === '{') {
         scopeStack.push([]);
       } else if (character === '}' && scopeStack.length > 1) {
-        for (const scopedIndex of scopeStack.pop()) ends[scopedIndex] = index - 1;
+        for (const scopedIndex of scopeStack.pop()) ends[scopedIndex] = index;
       }
     }
   }
   return ends;
+}
+
+function assignedAliasScopeEnd(lines, scopeEnds, assignmentIndex, alias) {
+  const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declarationPattern = new RegExp(`\\b(?:const|let|var)\\s+${escapedAlias}\\b`, 'u');
+  for (let index = assignmentIndex; index >= 0; index -= 1) {
+    if (declarationPattern.test(codeOutsideStringLiterals(lines[index]))) return scopeEnds[index];
+  }
+  return scopeEnds[assignmentIndex];
 }
 
 function collectProgrammaticCrontabAliases(lines) {
@@ -1029,21 +1067,23 @@ function collectProgrammaticCrontabAliases(lines) {
   const processNames = new Set();
   const childProcessModuleAliases = new Set();
   const scopedChildProcessModuleAliases = [];
-  const preboundCrontabSpawnCallNames = new Set();
-  const scopeEnds = lexicalScopeEnds(lines);
-  for (const [index, line] of lines.entries()) {
+  const scopedSpawnCallNames = [];
+  const scopedPreboundCrontabSpawnCallNames = [];
+  const aliasSourceLines = linesWithoutCommentsOrTemplates(lines);
+  const scopeEnds = lexicalScopeEnds(aliasSourceLines);
+  for (const [index, line] of aliasSourceLines.entries()) {
     let aliasDeclaration = line;
     if (/^\s*import\b/.test(line) && !/\bfrom\s*['"]/.test(line)) {
       for (let cursor = index + 1; cursor < Math.min(lines.length, index + 10); cursor += 1) {
-        aliasDeclaration += ` ${lines[cursor].trim()}`;
-        if (/['"](?:node:)?child_process['"]/.test(aliasDeclaration) || /;\s*(?:(?:\/\/|\/\*).*)?$/.test(lines[cursor])) break;
+        aliasDeclaration += ` ${aliasSourceLines[cursor].trim()}`;
+        if (/['"](?:node:)?child_process['"]/.test(aliasDeclaration) || /;\s*(?:(?:\/\/|\/\*).*)?$/.test(aliasSourceLines[cursor])) break;
       }
     }
     if (/\bimport\s*\(/.test(line) && groupingDepthDelta(line) > 0) {
       let depth = groupingDepthDelta(line);
       for (let cursor = index + 1; depth > 0 && cursor < Math.min(lines.length, index + 10); cursor += 1) {
-        aliasDeclaration += ` ${lines[cursor].trim()}`;
-        depth += groupingDepthDelta(lines[cursor]);
+        aliasDeclaration += ` ${aliasSourceLines[cursor].trim()}`;
+        depth += groupingDepthDelta(aliasSourceLines[cursor]);
       }
     }
     const esmImport = aliasDeclaration.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
@@ -1057,13 +1097,17 @@ function collectProgrammaticCrontabAliases(lines) {
     }
     const commonJsAliasPattern = /(?:^\s*(?:(?:const|let|var)\s+)?|,\s*)([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*(?:as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\))(?:\s+as\s+[^,;]+)?(?=\s*(?:,|;|\/\/|\/\*|$))/gu;
     for (const commonJsAlias of line.matchAll(commonJsAliasPattern)) {
-      scopedChildProcessModuleAliases.push({ name: commonJsAlias[1], start: index, end: scopeEnds[index] });
+      const alias = commonJsAlias[1];
+      const declaredHere = /\b(?:const|let|var)\b/u.test(commonJsAlias[0]);
+      scopedChildProcessModuleAliases.push({ name: alias, start: index, end: declaredHere ? scopeEnds[index] : assignedAliasScopeEnd(aliasSourceLines, scopeEnds, index, alias) });
     }
     const importEqualsAlias = line.match(/^\s*import\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (importEqualsAlias) childProcessModuleAliases.add(importEqualsAlias[1]);
     const dynamicImportAlias = aliasDeclaration.match(/(?:^|[,;]\s*)(?:const|let|var)?\s*([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:await\s+)?import\s*\(\s*['"](?:node:)?child_process['"]\s*,?\s*\)/);
     if (dynamicImportAlias) {
-      scopedChildProcessModuleAliases.push({ name: dynamicImportAlias[1], start: index, end: scopeEnds[index] });
+      const alias = dynamicImportAlias[1];
+      const declaredHere = /\b(?:const|let|var)\b/u.test(dynamicImportAlias[0]);
+      scopedChildProcessModuleAliases.push({ name: alias, start: index, end: declaredHere ? scopeEnds[index] : assignedAliasScopeEnd(aliasSourceLines, scopeEnds, index, alias) });
     }
   }
   for (const [index, line] of lines.entries()) {
@@ -1076,12 +1120,16 @@ function collectProgrammaticCrontabAliases(lines) {
     }
     const childProcessAliases = line.match(/^\s*(?:import|const|let|var)\s*\{([^}]+)\}\s*(?:from\s*['"](?:node:)?child_process['"]|=\s*(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?|(?:await\s+)?import\s*\(\s*['"](?:node:)?child_process['"]\s*,?\s*\)))\s*;?$/);
     if (childProcessAliases) {
+      const staticImport = /^\s*import\b/u.test(line);
       for (const part of childProcessAliases[1].split(',')) {
         const imported = part.trim().match(/^(execFileSync|execFile|spawnSync|spawn|execSync|exec)(?:\s*(?:as|:)\s*([A-Za-z_$][\w$]*))?$/);
         if (imported) {
           const alias = imported[2] ?? imported[1];
           callNames.add(alias);
-          if (imported[1] === 'spawn') spawnCallNames.add(alias);
+          if (imported[1] === 'spawn') {
+            if (staticImport) spawnCallNames.add(alias);
+            else scopedSpawnCallNames.push({ name: alias, start: index, end: scopeEnds[index] });
+          }
         }
       }
     }
@@ -1100,6 +1148,15 @@ function collectProgrammaticCrontabAliases(lines) {
     const activeChildProcessModuleAliases = scopedChildProcessModuleAliases
       .filter((alias) => alias.start <= index && index <= alias.end)
       .map((alias) => alias.name);
+    const activeSpawnCallNames = new Set([
+      ...spawnCallNames,
+      ...scopedSpawnCallNames.filter((alias) => alias.start <= index && index <= alias.end).map((alias) => alias.name),
+    ]);
+    const activePreboundCrontabSpawnCallNames = new Set(
+      scopedPreboundCrontabSpawnCallNames
+        .filter((alias) => alias.start <= index && index <= alias.end)
+        .map((alias) => alias.name),
+    );
     const childProcessQualifierPattern = ['subprocess', ...childProcessModuleAliases, ...activeChildProcessModuleAliases]
       .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('|');
@@ -1108,14 +1165,21 @@ function collectProgrammaticCrontabAliases(lines) {
     const childProcessMethodPattern = String.raw`(?:(?:\.|\?\.)\s*spawn(?:\s*\?\.)?|(?:\?\.\s*)?\[\s*['"]spawn['"]\s*\](?:\s*\?\.)?|\.\s*Popen)`;
     const directRequireExpressionPattern = String.raw`(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\)|\(\s*<\s*typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*>\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*\))`;
     const qualifiedChildProcessCallPattern = String.raw`(?:(?:${childProcessQualifierPattern})\s*${childProcessMethodPattern}|${directRequireExpressionPattern}\s*${childProcessMethodPattern})`;
-    const namespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}(?:\\s+as\\s+(?:typeof\\s+)?[^;]+)?\\s*;?\\s*$`, 'u'));
-    const boundNamespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*\\.\\s*bind\\s*\\(\\s*(?:${childProcessQualifierPattern}|null|undefined)\\s*(?:,\\s*(.*?))?\\)\\s*;?\\s*$`, 'u'));
+    const namespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}(?:\\s+as\\s+(?:typeof\\s+)?[^;]+)?\\s*;?\\s*(?:\\/\\/.*|\\/\\*.*\\*\\/\\s*)?$`, 'u'));
+    const boundNamespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*\\.\\s*bind\\s*\\(\\s*[^,]*?\\s*(?:,\\s*(.*?))?\\)\\s*;?\\s*(?:\\/\\/.*|\\/\\*.*\\*\\/\\s*)?$`, 'u'));
     const spawnMethodAlias = namespaceMethodAlias ?? boundNamespaceMethodAlias;
     if (spawnMethodAlias) {
-      spawnCallNames.add(spawnMethodAlias[1]);
+      scopedSpawnCallNames.push({ name: spawnMethodAlias[1], start: index, end: scopeEnds[index] });
+      activeSpawnCallNames.add(spawnMethodAlias[1]);
       callNames.add(spawnMethodAlias[1]);
-      if (boundNamespaceMethodAlias && stringLiterals(boundNamespaceMethodAlias[2] ?? '').some((literal) => /(?:^|\/)crontab$/.test(literal.value.trim()))) {
-        preboundCrontabSpawnCallNames.add(boundNamespaceMethodAlias[1]);
+      if (boundNamespaceMethodAlias) {
+        const boundArguments = boundNamespaceMethodAlias[2] ?? '';
+        const bindsCrontab = stringLiterals(boundArguments).some((literal) => /(?:^|\/)crontab$/.test(literal.value.trim()))
+          || [...commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(codeOutsideStringLiterals(boundArguments)));
+        if (bindsCrontab) {
+          scopedPreboundCrontabSpawnCallNames.push({ name: boundNamespaceMethodAlias[1], start: index, end: scopeEnds[index] });
+          activePreboundCrontabSpawnCallNames.add(boundNamespaceMethodAlias[1]);
+        }
       }
     }
     const namespaceDestructuredMethods = line.match(new RegExp(`^\\s*(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*(?:${childProcessQualifierPattern})\\s*;?\\s*$`, 'u'));
@@ -1124,11 +1188,12 @@ function collectProgrammaticCrontabAliases(lines) {
         const imported = part.trim().match(/^spawn(?:\s*:\s*([A-Za-z_$][\w$]*))?(?:\s*=.*)?$/u);
         if (!imported) continue;
         const alias = imported[1] ?? 'spawn';
-        spawnCallNames.add(alias);
+        scopedSpawnCallNames.push({ name: alias, start: index, end: scopeEnds[index] });
+        activeSpawnCallNames.add(alias);
         callNames.add(alias);
       }
     }
-    const spawnCallPattern = [...spawnCallNames]
+    const spawnCallPattern = [...activeSpawnCallNames]
       .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
       .join('|');
     let spawnedProcess = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${qualifiedChildProcessCallPattern}|${spawnCallPattern})\\s*\\((.*)$`, 'u'));
@@ -1153,7 +1218,7 @@ function collectProgrammaticCrontabAliases(lines) {
         depth += groupingDepthDelta(lines[cursor]);
       }
       const usesCommandAlias = [...commandNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(callExpression));
-      const usesPreboundCrontab = [...preboundCrontabSpawnCallNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`, 'u').test(spawnedProcess[0]));
+      const usesPreboundCrontab = [...activePreboundCrontabSpawnCallNames].some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\(`, 'u').test(spawnStartLine));
       if (/['"`](?:[^'"`]*\/)?crontab['"`]/.test(callExpression) || usesCommandAlias || usesPreboundCrontab) processNames.add(spawnedProcess[1]);
     }
   }
