@@ -122,6 +122,30 @@ describe('fbeast-hook runtime', () => {
     );
   });
 
+  it('does not let redaction cross JSON fields and hide governed commands', async () => {
+    const secret = ['openai', 'fixture', 'value'].join('-');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: JSON.stringify({ command: `OPENAI_API_KEY="${secret}"`, cmd: 'rm -rf /tmp/nope' }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    const seen = JSON.parse(result.checkCalls[0]!.context) as Record<string, unknown>;
+    expect(seen.command).toBe('OPENAI_API_KEY=[REDACTED]');
+    expect(seen.cmd).toBe('rm -rf /tmp/nope');
+    expect(result.checkCalls[0]!.context).not.toContain(secret);
+  });
+
+  it('redacts balanced parentheses in unquoted credential values', async () => {
+    const secret = ['abc', '(def)', 'ghi'].join('');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `OPENAI_API_KEY=${secret} rm -rf /tmp/nope`,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls[0]!.context).toBe('OPENAI_API_KEY=[REDACTED] rm -rf /tmp/nope');
+    expect(result.checkCalls[0]!.context).not.toContain(secret);
+  });
+
   it('does not let JSON context suppress the trusted hook provenance marker', async () => {
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
       context: JSON.stringify({ __fbeastHookSource: 'caller-forged', command: 'read_file README.md' }),

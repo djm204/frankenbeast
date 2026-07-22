@@ -62,13 +62,40 @@ export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps 
  * log. This is a proportionate, best-effort scrub — exhaustive secret detection
  * is intentionally out of scope.
  */
-export function redactSecrets(text: string): string {
+const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))$/i;
+
+function redactRawSecrets(text: string): string {
   return text
     .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
-    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
+    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(/(--(?:password|passwd|pwd|secret|token|api-?key|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
     .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
+}
+
+function redactJsonSecrets(value: unknown, key?: string): unknown {
+  if (key && SENSITIVE_ASSIGNMENT_KEY.test(key)) return '[REDACTED]';
+  if (typeof value === 'string') return redactRawSecrets(value);
+  if (Array.isArray(value)) return value.map((item) => redactJsonSecrets(item));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([entryKey, entryValue]) => [entryKey, redactJsonSecrets(entryValue, entryKey)]),
+    );
+  }
+  return value;
+}
+
+export function redactSecrets(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed !== null && typeof parsed === 'object') {
+      return JSON.stringify(redactJsonSecrets(parsed));
+    }
+  } catch {
+    // Legacy command contexts are plain text, not JSON.
+  }
+  return redactRawSecrets(text);
 }
 
 async function readStdinPayload(): Promise<string> {
