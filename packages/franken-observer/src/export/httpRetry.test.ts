@@ -43,6 +43,49 @@ describe('fetchWithRetry (issue #68)', () => {
     expect(attempt).toHaveBeenCalledTimes(3)
   })
 
+  it('aborts and rejects an attempt that never settles within its deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      let receivedSignal: AbortSignal | undefined
+      const attempt = vi.fn((signal: AbortSignal) => {
+        receivedSignal = signal
+        return new Promise<typeof ok>(() => undefined)
+      })
+
+      const result = fetchWithRetry(attempt, { attemptTimeoutMs: 25 })
+      const rejection = expect(result).rejects.toThrow('HTTP attempt timed out after 25ms')
+      await vi.advanceTimersByTimeAsync(25)
+
+      await rejection
+      expect(receivedSignal?.aborted).toBe(true)
+      expect(attempt).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('retries a timed-out attempt and succeeds within the next deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const attempt = vi.fn()
+        .mockImplementationOnce(() => new Promise<typeof ok>(() => undefined))
+        .mockResolvedValueOnce(ok)
+      const result = fetchWithRetry(attempt, {
+        attemptTimeoutMs: 25,
+        maxRetries: 1,
+        jitter: false,
+        sleep: noSleep(),
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+
+      await expect(result).resolves.toEqual(ok)
+      expect(attempt).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retries a 429 rate-limit response then succeeds', async () => {
     const sleep = noSleep()
     const attempt = vi.fn().mockResolvedValueOnce(rateLimited).mockResolvedValueOnce(ok)
@@ -105,6 +148,17 @@ describe('fetchWithRetry (issue #68)', () => {
       )
       expect(attempt).not.toHaveBeenCalled()
       expect(sleep).not.toHaveBeenCalled()
+    }
+  })
+
+  it('rejects invalid attempt deadlines before making an attempt', async () => {
+    for (const attemptTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const attempt = vi.fn().mockResolvedValue(ok)
+
+      await expect(fetchWithRetry(attempt, { attemptTimeoutMs })).rejects.toThrow(
+        'attemptTimeoutMs must be a finite positive number',
+      )
+      expect(attempt).not.toHaveBeenCalled()
     }
   })
 

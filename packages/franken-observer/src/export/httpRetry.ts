@@ -17,9 +17,22 @@ export interface HttpRetryOptions {
   jitter?: boolean
   /** Injectable sleep for testing without real timers. Default: setTimeout wrapper. */
   sleep?: (ms: number) => Promise<void>
+  /** Per-attempt request deadline in ms. Default: 10000. */
+  attemptTimeoutMs?: number
 }
 
 const MAX_HTTP_RETRIES = 10
+const DEFAULT_ATTEMPT_TIMEOUT_MS = 10_000
+
+export class HttpAttemptTimeoutError extends Error {
+  readonly timeoutMs: number
+
+  constructor(timeoutMs: number) {
+    super(`HTTP attempt timed out after ${timeoutMs}ms`)
+    this.name = 'HttpAttemptTimeoutError'
+    this.timeoutMs = timeoutMs
+  }
+}
 
 /**
  * A response is transient and worth retrying when it is a 5xx server error or a
@@ -46,19 +59,51 @@ function requireFiniteNonNegative(name: 'baseDelayMs' | 'maxDelayMs', value: num
   return normalized
 }
 
+function normalizeAttemptTimeoutMs(value: number | undefined): number {
+  const timeoutMs = value ?? DEFAULT_ATTEMPT_TIMEOUT_MS
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('attemptTimeoutMs must be a finite positive number')
+  }
+  return timeoutMs
+}
+
+async function runWithDeadline(
+  attempt: (signal: AbortSignal) => Promise<FetchResponse>,
+  timeoutMs: number,
+): Promise<FetchResponse> {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeoutError = new HttpAttemptTimeoutError(timeoutMs)
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort(timeoutError)
+      reject(timeoutError)
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([attempt(controller.signal), deadline])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 /**
- * Invoke `attempt` with bounded exponential backoff. Retries only transient
- * failures: thrown errors (network), 5xx responses, and 429 rate-limit
- * responses. Other 4xx responses are returned immediately to the caller with no
- * retry. The caller is responsible for turning a non-ok response into an error.
+ * Invoke `attempt` with a bounded per-attempt deadline and exponential backoff.
+ * Each attempt receives an AbortSignal that is aborted when its deadline expires.
+ * Retries only transient failures: thrown errors (including timeouts), 5xx
+ * responses, and 429 rate-limit responses. Other 4xx responses are returned
+ * immediately to the caller with no retry. The caller is responsible for
+ * turning a non-ok response into an error.
  * On exhaustion, the last transient response is returned (so the caller throws
  * its own formatted error) and the last network error is rethrown.
  */
 export async function fetchWithRetry(
-  attempt: () => Promise<FetchResponse>,
+  attempt: (signal: AbortSignal) => Promise<FetchResponse>,
   options: HttpRetryOptions = {},
 ): Promise<FetchResponse> {
   const maxRetries = normalizeMaxRetries(options.maxRetries)
+  const attemptTimeoutMs = normalizeAttemptTimeoutMs(options.attemptTimeoutMs)
   const jitter = options.jitter ?? true
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
 
@@ -76,7 +121,7 @@ export async function fetchWithRetry(
       await sleep(delay)
     }
     try {
-      const response = await attempt()
+      const response = await runWithDeadline(attempt, attemptTimeoutMs)
       // Success or a non-transient (non-429 4xx) response → return; the caller decides.
       if (response.ok || !isTransientStatus(response.status)) return response
       lastError = new Error(`transient HTTP ${response.status}`)

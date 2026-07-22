@@ -5,7 +5,13 @@ import { fetchWithRetry, type HttpRetryOptions } from '../../export/httpRetry.js
 
 export type FetchFn = (
   url: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string; redirect?: 'error' | 'follow' | 'manual' },
+  init?: {
+    method?: string
+    headers?: Record<string, string>
+    body?: string
+    redirect?: 'error' | 'follow' | 'manual'
+    signal?: AbortSignal
+  },
 ) => Promise<{ ok: boolean; status: number; statusText?: string }>
 
 export interface LangfuseAdapterOptions {
@@ -42,7 +48,7 @@ export class LangfuseAdapter implements ExportAdapter {
     const payload = OTELSerializer.serializeTrace(trace)
     const url = `${this.baseUrl}/api/public/otel/v1/traces`
     const response = await fetchWithRetry(
-      () =>
+      signal =>
         this.fetchFn(url, {
           method: 'POST',
           headers: {
@@ -50,6 +56,7 @@ export class LangfuseAdapter implements ExportAdapter {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
+          signal,
         }),
       this.retry,
     )
