@@ -26,6 +26,7 @@ AGY_PATH = os.environ.get("PR_REVIEWER_AGY_PATH", "agy")
 MAX_DIFF_BYTES = 60_000
 MAX_REVIEW_BYTES = 120_000
 MAX_REVIEW_BODY_CHARS = 60_000
+MAX_ERROR_CHARS = 1_000
 REVIEW_BODY_TRUNCATION_NOTICE = "\n\n... [REVIEW BODY TRUNCATED BEFORE POSTING] ..."
 HTTP_TIMEOUT_SECONDS = 30
 GH_LIST_TIMEOUT_SECONDS = 30
@@ -36,6 +37,12 @@ SECRET_PATTERN = re.compile(
     r"sk-ant-[a-zA-Z0-9_-]{40,}|sk-(?:proj-)?[a-zA-Z0-9_-]{20,}|"
     r"AIza[a-zA-Z0-9_-]{35})"
 )
+SENSITIVE_ERROR_VALUE_PATTERN = re.compile(
+    r"(?i)\b(authorization\s*:\s*(?:bearer|token)\s+|"
+    r"(?:token|password|secret|api[_-]?key)\s*[=:]\s*)[^\s,;]+"
+)
+LAST_AGY_ERROR = None
+LAST_POST_ERROR = None
 DIFF_TRUNCATION_MARKER = (
     f"\n... [DIFF TRUNCATED AFTER {MAX_DIFF_BYTES} BYTES] ..."
 )
@@ -61,10 +68,71 @@ def init_db():
         """
     )
     columns = {row[1] for row in cursor.execute("PRAGMA table_info(pr_reviews)")}
-    if "head_sha" not in columns:
-        cursor.execute("ALTER TABLE pr_reviews ADD COLUMN head_sha TEXT")
+    migrations = {
+        "head_sha": "TEXT",
+        "attempt_count": "INTEGER NOT NULL DEFAULT 0",
+        "last_error": "TEXT",
+        "last_attempt_at": "TEXT",
+    }
+    for column, declaration in migrations.items():
+        if column not in columns:
+            cursor.execute(
+                f"ALTER TABLE pr_reviews ADD COLUMN {column} {declaration}"
+            )
     conn.commit()
     conn.close()
+
+
+def error_diagnostic(stage, error):
+    """Return bounded JSON diagnostics with common credential forms redacted."""
+    message = str(error) or "unknown failure"
+    message = SECRET_PATTERN.sub("[REDACTED]", message)
+    message = SENSITIVE_ERROR_VALUE_PATTERN.sub(r"\1[REDACTED]", message)
+    message = " ".join(message.split())
+    payload = json.dumps(
+        {"stage": stage, "message": message}, separators=(",", ":")
+    )
+    if len(payload) <= MAX_ERROR_CHARS:
+        return payload
+    overflow = len(payload) - MAX_ERROR_CHARS
+    message = message[: max(0, len(message) - overflow - 3)] + "..."
+    return json.dumps(
+        {"stage": stage, "message": message}, separators=(",", ":")
+    )
+
+
+def begin_review_attempt(cursor, pr_number, author, head_sha):
+    attempted_at = datetime.now(timezone.utc).isoformat()
+    cursor.execute(
+        """
+        INSERT INTO pr_reviews (
+            pr_number, author, status, created_at, head_sha,
+            attempt_count, last_attempt_at, last_error
+        ) VALUES (?, ?, 'working', ?, ?, 1, ?, NULL)
+        ON CONFLICT(pr_number) DO UPDATE SET
+            author = excluded.author,
+            status = 'working',
+            created_at = excluded.created_at,
+            reviewed_at = NULL,
+            head_sha = excluded.head_sha,
+            attempt_count = COALESCE(pr_reviews.attempt_count, 0) + 1,
+            last_attempt_at = excluded.last_attempt_at,
+            last_error = NULL
+        """,
+        (pr_number, author, attempted_at, head_sha, attempted_at),
+    )
+
+
+def update_review_state(
+    cursor, pr_number, status, stage=None, error=None, reviewed=False
+):
+    diagnostic = error_diagnostic(stage, error) if stage else None
+    reviewed_at = datetime.now(timezone.utc).isoformat() if reviewed else None
+    cursor.execute(
+        "UPDATE pr_reviews SET status = ?, reviewed_at = ?, last_error = ? "
+        "WHERE pr_number = ?",
+        (status, reviewed_at, diagnostic, pr_number),
+    )
 
 
 def github_token():
@@ -340,6 +408,7 @@ def diff_contains_secret(diff_content):
 
 
 def decode_agy_result(return_code, stdout, stderr):
+    global LAST_AGY_ERROR
     output_was_capped = len(stdout) > MAX_REVIEW_BYTES or (
         return_code != 0 and len(stdout) >= MAX_REVIEW_BYTES
     )
@@ -351,14 +420,18 @@ def decode_agy_result(return_code, stdout, stderr):
         ).decode("utf-8", errors="replace")
     if return_code == 0:
         return stdout.decode("utf-8", errors="replace")
+    decoded_stderr = stderr.decode("utf-8", errors="replace")
+    LAST_AGY_ERROR = decoded_stderr or f"reviewer exited with code {return_code}"
     print(
-        f"Agy review failed: {stderr.decode('utf-8', errors='replace')}",
+        f"Agy review failed: {decoded_stderr}",
         file=sys.stderr,
     )
     return ""
 
 
 def run_agy_review(diff_content):
+    global LAST_AGY_ERROR
+    LAST_AGY_ERROR = None
     prompt = (
         "CRITICAL: Do NOT run any tools, read any files, or search the directory. "
         "Perform your review based SOLELY on the diff text provided below.\n\n"
@@ -397,6 +470,7 @@ def run_agy_review(diff_content):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait()
+                LAST_AGY_ERROR = f"reviewer timed out after {AGY_TIMEOUT_SECONDS} seconds"
                 print("Agy review timed out.", file=sys.stderr)
                 return ""
             stdout_file.seek(0)
@@ -405,6 +479,7 @@ def run_agy_review(diff_content):
             stderr = stderr_file.read(MAX_REVIEW_BYTES + 1)
         return decode_agy_result(return_code, stdout, stderr)
     except Exception as error:
+        LAST_AGY_ERROR = str(error)
         print(f"Agy execution exception: {error}", file=sys.stderr)
         return ""
 
@@ -455,6 +530,8 @@ def post_pr_review(
     diff_truncated=False,
     repository=None,
 ):
+    global LAST_POST_ERROR
+    LAST_POST_ERROR = None
     repository = repository or get_repository()
     verdict = "comment"
     if security_warnings:
@@ -515,6 +592,7 @@ def post_pr_review(
         print(f"Successfully posted {verdict} review on PR #{pr_number}")
         return True
     except Exception as error:
+        LAST_POST_ERROR = str(error)
         print(f"Error posting review on PR #{pr_number}: {error}", file=sys.stderr)
         return False
     finally:
@@ -523,6 +601,7 @@ def post_pr_review(
 
 
 def process_prs():
+    global LAST_AGY_ERROR, LAST_POST_ERROR
     init_db()
     if not github_token():
         print(
@@ -559,17 +638,7 @@ def process_prs():
             continue
 
         print(f"Processing PR #{pr_number} by {author} at {head_sha[:12]}...")
-        cursor.execute(
-            "INSERT OR REPLACE INTO pr_reviews "
-            "(pr_number, author, status, created_at, head_sha) VALUES (?, ?, ?, ?, ?)",
-            (
-                pr_number,
-                author,
-                "working",
-                datetime.now(timezone.utc).isoformat(),
-                head_sha,
-            ),
-        )
+        begin_review_attempt(cursor, pr_number, author, head_sha)
         conn.commit()
 
         try:
@@ -579,19 +648,13 @@ def process_prs():
                 f"Could not fetch diff for PR #{pr_number}: {error}",
                 file=sys.stderr,
             )
-            cursor.execute(
-                "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
-                ("failed", pr_number),
-            )
+            update_review_state(cursor, pr_number, "failed", "fetch", error)
             conn.commit()
             fatal_failures.append(f"PR #{pr_number}: diff could not be fetched")
             continue
         if not diff_content.strip():
             print(f"Empty diff for PR #{pr_number}. Skipping.")
-            cursor.execute(
-                "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
-                ("skipped", pr_number),
-            )
+            update_review_state(cursor, pr_number, "skipped")
             conn.commit()
             continue
 
@@ -608,8 +671,11 @@ def process_prs():
                 "VERDICT: REQUEST_CHANGES"
             )
         else:
+            LAST_AGY_ERROR = None
             review_body = run_agy_review(diff_content)
             model_review_unavailable = not review_body.strip()
+            if model_review_unavailable and LAST_AGY_ERROR is None:
+                LAST_AGY_ERROR = "model reviewer produced no result"
         if not review_body.strip():
             if security_warnings or diff_truncated:
                 review_body = (
@@ -628,7 +694,13 @@ def process_prs():
                 )
 
         review_body = add_diff_truncation_notice(review_body, diff_content)
-        current_prs = get_open_prs(repository)
+        try:
+            current_prs = get_open_prs(repository)
+        except Exception as error:
+            update_review_state(cursor, pr_number, "failed", "fetch", error)
+            conn.commit()
+            fatal_failures.append(f"PR #{pr_number}: current head could not be fetched")
+            continue
         current_head_sha = next(
             (
                 item["headRefOid"]
@@ -641,12 +713,10 @@ def process_prs():
             print(
                 f"PR #{pr_number} head changed before posting; skipping stale review."
             )
-            cursor.execute(
-                "UPDATE pr_reviews SET status = ? WHERE pr_number = ?",
-                ("superseded", pr_number),
-            )
+            update_review_state(cursor, pr_number, "superseded")
             conn.commit()
             continue
+        LAST_POST_ERROR = None
         posted = post_pr_review(
             pr_number,
             review_body,
@@ -657,13 +727,27 @@ def process_prs():
         )
         if posted:
             status = "incomplete" if model_review_unavailable else "completed"
+            if model_review_unavailable:
+                update_review_state(
+                    cursor,
+                    pr_number,
+                    status,
+                    "agent",
+                    LAST_AGY_ERROR or "model reviewer produced no result",
+                    reviewed=True,
+                )
+            else:
+                update_review_state(cursor, pr_number, status, reviewed=True)
         else:
             status = "failed"
+            update_review_state(
+                cursor,
+                pr_number,
+                status,
+                "post",
+                LAST_POST_ERROR or "review could not be posted",
+            )
             fatal_failures.append(f"PR #{pr_number}: review could not be posted")
-        cursor.execute(
-            "UPDATE pr_reviews SET status = ?, reviewed_at = ? WHERE pr_number = ?",
-            (status, datetime.now(timezone.utc).isoformat(), pr_number),
-        )
         conn.commit()
     conn.close()
     if fatal_failures:
