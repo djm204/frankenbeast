@@ -29,13 +29,13 @@ describe('SQLiteAdapter', () => {
     adapter = new SQLiteAdapter(dbPath)
   })
 
-  afterEach(() => {
-    adapter.close()
+  afterEach(async () => {
+    await adapter.close()
     cleanup(dbPath)
   })
 
   describe('database open hardening', () => {
-    it('creates nested database directories and configures durability pragmas', () => {
+    it('creates nested database directories and configures durability pragmas', async () => {
       const root = join(tmpdir(), `franken-observer-nested-${randomUUID()}`)
       const nestedDbPath = join(root, 'missing', 'observer.db')
       const nestedAdapter = new SQLiteAdapter(nestedDbPath)
@@ -48,7 +48,7 @@ describe('SQLiteAdapter', () => {
         expect(String(handle.pragma('journal_mode', { simple: true })).toLowerCase()).toBe('wal')
         expect(handle.pragma('foreign_keys', { simple: true })).toBe(1)
       } finally {
-        nestedAdapter.close()
+        await nestedAdapter.close()
         rmSync(root, { recursive: true, force: true })
       }
     })
@@ -70,13 +70,13 @@ describe('SQLiteAdapter', () => {
         const trace = TraceContext.createTrace('stable relative path')
         TraceContext.endTrace(trace)
         await relativeAdapter.flush(trace)
-        relativeAdapter.close()
+        await relativeAdapter.close()
 
         expect(existsSync(join(firstCwd, 'relative.db'))).toBe(true)
         expect(existsSync(join(secondCwd, 'relative.db'))).toBe(false)
       } finally {
         process.chdir(originalCwd)
-        relativeAdapter?.close()
+        await relativeAdapter?.close()
         rmSync(root, { recursive: true, force: true })
       }
     })
@@ -97,7 +97,7 @@ describe('SQLiteAdapter', () => {
           })
           expect((transientAdapter as unknown as { workerClient?: unknown }).workerClient).toBeUndefined()
         } finally {
-          transientAdapter.close()
+          await transientAdapter.close()
         }
       },
     )
@@ -278,11 +278,52 @@ describe('SQLiteAdapter', () => {
       expect(worker).toBeDefined()
       await worker!.terminate()
 
-      expect(() => adapter.close()).not.toThrow()
+      await expect(adapter.close()).resolves.toBeUndefined()
     })
 
-    it('waits for the worker to release its database handle before close returns', () => {
-      adapter.close()
+    it('keeps the event loop responsive while worker shutdown is delayed', async () => {
+      await adapter.close()
+      adapter = new SQLiteAdapter(dbPath, { busyTimeoutMs: 100 })
+      await adapter.listTraceIds()
+
+      const blocker = new Database(dbPath)
+      blocker.exec('BEGIN EXCLUSIVE')
+      try {
+        const worker = (adapter as unknown as {
+          workerClient: { worker: { postMessage: (message: unknown) => void } }
+        }).workerClient.worker
+        worker.postMessage({
+          id: -1,
+          operation: 'flush',
+          payload: {
+            traces: [{
+              id: 'delayed-close',
+              goal: 'hold worker before close',
+              status: 'completed',
+              startedAt: Date.now(),
+              spans: [],
+            }],
+          },
+        })
+
+        const timer = new Promise<'timer'>(resolve => setTimeout(() => resolve('timer'), 0))
+        const close = adapter.close()
+        const firstSettled = await Promise.race([
+          Promise.resolve(close).then(() => 'close' as const),
+          timer,
+        ])
+
+        expect(firstSettled).toBe('timer')
+        await close
+      } finally {
+        blocker.exec('ROLLBACK')
+        blocker.close()
+        await adapter.close()
+      }
+    })
+
+    it('releases the worker database handle before awaited close resolves', async () => {
+      await adapter.close()
 
       const reopened = new Database(dbPath)
       try {
@@ -302,12 +343,12 @@ describe('SQLiteAdapter', () => {
       TraceContext.endTrace(trace)
 
       await adapter.flush(trace)
-      adapter.close()
+      await adapter.close()
 
       // Simulate restart: new adapter instance, same file
       const restarted = new SQLiteAdapter(dbPath)
       const result = await restarted.queryByTraceId(trace.id)
-      restarted.close()
+      await restarted.close()
 
       expect(result).not.toBeNull()
       expect(result!.spans).toHaveLength(10)
@@ -377,8 +418,8 @@ describe('SQLiteAdapter', () => {
       raw.close()
     })
 
-    it('adds the ordered trace index when opening an existing database', () => {
-      adapter.close()
+    it('adds the ordered trace index when opening an existing database', async () => {
+      await adapter.close()
       const raw = new Database(dbPath)
       raw.exec('DROP INDEX IF EXISTS idx_traces_startedAt')
       raw.close()
@@ -403,9 +444,9 @@ describe('SQLiteAdapter', () => {
 
   describe('concurrent sequential writes', () => {
     it('does not poison the worker when startup overlaps a transient write lock', async () => {
-      adapter.close()
+      await adapter.close()
       const bootstrap = new SQLiteAdapter(dbPath, { useWorkerThread: false })
-      bootstrap.close()
+      await bootstrap.close()
       const blocker = new Database(dbPath)
       blocker.exec('BEGIN IMMEDIATE')
 
@@ -436,7 +477,7 @@ describe('SQLiteAdapter', () => {
     })
 
     it('does not let a read overtake an earlier queued write', async () => {
-      adapter.close()
+      await adapter.close()
       adapter = new SQLiteAdapter(dbPath, {
         busyTimeoutMs: 500,
         maxLockRetries: 0,
@@ -470,7 +511,7 @@ describe('SQLiteAdapter', () => {
     })
 
     it('keeps the event loop responsive while SQLite waits for a write lock', async () => {
-      adapter.close()
+      await adapter.close()
       adapter = new SQLiteAdapter(dbPath, {
         busyTimeoutMs: 500,
         maxLockRetries: 0,
