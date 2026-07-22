@@ -65,7 +65,12 @@ export class TraceServer {
   stop(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.server) { resolve(); return }
-      this.server.close(err => (err ? reject(err) : resolve()))
+      this.server.close(err => {
+        if (err) { reject(err); return }
+        this.server = null
+        this._port = 0
+        resolve()
+      })
     })
   }
 
