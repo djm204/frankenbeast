@@ -305,12 +305,49 @@ describe('fbeast-hook runtime', () => {
       `--cookie ${secret}`,
       `authorization=Basic ${secret}`,
       `authorization=Token ${secret}`,
+      `authorization="Basic ${secret}=="`,
+      `authorization=Basic ${secret}==`,
     ].join('\n');
 
     const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
 
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
-    expect(result.observerLogs[0]!.metadata.match(/\[REDACTED\]/g)).toHaveLength(7);
+    expect(result.observerLogs[0]!.metadata.match(/\[REDACTED\]/g)).toHaveLength(9);
+  });
+
+  it('redacts acronym-prefixed credentials from raw post-tool payloads', async () => {
+    const secret = ['acronym', 'raw', 'fixture'].join('-');
+    const payload = `DBPassword=${secret} JWTToken=${secret}`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata).toContain('DBPassword=[REDACTED]');
+    expect(result.observerLogs[0]!.metadata).toContain('JWTToken=[REDACTED]');
+  });
+
+  it('redacts secrets from JSON embedded in text fields', async () => {
+    const secret = ['embedded', 'json', 'fixture'].join('-');
+    const payload = JSON.stringify({
+      content: [{ type: 'text', text: JSON.stringify({ apiKey: secret, clientSecret: secret }) }],
+    });
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata).toContain('[REDACTED]');
+  });
+
+  it('redacts shadowed secrets while preserving duplicate-key JSON bytes', async () => {
+    const secret = ['duplicate', 'key', 'fixture'].join('-');
+    const payload = `{"output":"Authorization: Bearer ${secret}","output":"ok"}`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toContain('"output":"ok"');
+    expect(metadata.payload).not.toContain(secret);
+    expect(metadata.payload).toContain('[REDACTED]');
   });
 
   it('redacts long URL userinfo credentials from raw post-tool payloads', async () => {

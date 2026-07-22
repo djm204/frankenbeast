@@ -112,12 +112,12 @@ function containsOversizedSecretIndicator(text: string): boolean {
 function redactRawSecrets(text: string): string {
   if (!containsRawSecretHint(text)) return text;
   return text
-    .replace(/(authorization\s*:\s*)(?:\$(?!\()|[^$\r\n;&|<>`])+/gi, '$1[REDACTED]')
+    .replace(/(authorization\s*:\s*)(?:\$(?!\()|[^$\r\n;&|<>`"'])+/gi, '$1[REDACTED]')
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
-    .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=)[^\s=\\;&|<>()$`]+|[^\s=\\;&|<>()$`]+)/gi, '$1[REDACTED]')
     .replace(/(\bauthorization\b\s*=\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*')/gi, '$1[REDACTED]')
-    .replace(/(\b[a-z][A-Za-z0-9]{0,127}(?:Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials|Passphrase)\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
-    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
+    .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]')
+    .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
+    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(/(--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
     .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
 }
@@ -135,7 +135,7 @@ function redactJsonSecrets(value: unknown, state: { changed: boolean }, key?: st
     return '[REDACTED]';
   }
   if (typeof value === 'string') {
-    const redacted = redactRawSecrets(value);
+    const redacted = redactSecrets(value);
     if (redacted !== value) state.changed = true;
     return redacted;
   }
@@ -155,7 +155,8 @@ export function redactSecrets(text: string): string {
     if (parsed !== null && typeof parsed === 'object') {
       const state = { changed: false };
       const redacted = redactJsonSecrets(parsed, state);
-      return state.changed ? JSON.stringify(redacted) : text;
+      if (state.changed) return JSON.stringify(redacted);
+      return redactRawSecrets(text);
     }
   } catch {
     // Legacy command contexts are plain text, not JSON.
