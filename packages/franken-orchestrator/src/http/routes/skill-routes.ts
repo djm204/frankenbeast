@@ -1,9 +1,12 @@
 import { Hono } from 'hono';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import { isUnsafeSkillPathError, type SkillManager } from '../../skills/skill-manager.js';
 import { SkillHealthChecker } from '../../skills/skill-health-checker.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
 import { HttpError, parseJsonBody } from '../middleware.js';
+
+const SKILL_CONTEXT_MAX_CONTENT_BYTES = 256 * 1024;
+const skillContextBodySchema = z.object({ content: z.string() });
 
 function isSkillInstallValidationError(err: unknown): boolean {
   return err instanceof ZodError
@@ -168,17 +171,29 @@ export function createSkillRoutes(deps: {
 
   app.put('/:name/context', async (c) => {
     const name = c.req.param('name');
-    let body: { content: string };
+    let rawBody: unknown;
     try {
-      body = (await parseJsonBody(c)) as { content: string };
+      rawBody = await parseJsonBody(c);
     } catch (err) {
       if (err instanceof HttpError && err.statusCode === 400) {
         return c.json({ error: 'Invalid JSON' }, 400);
       }
       throw err;
     }
+
+    const parsedBody = skillContextBodySchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return c.json({ error: 'Context content must be a string' }, 400);
+    }
+    if (Buffer.byteLength(parsedBody.data.content, 'utf8') > SKILL_CONTEXT_MAX_CONTENT_BYTES) {
+      return c.json(
+        { error: `Context content exceeds the ${SKILL_CONTEXT_MAX_CONTENT_BYTES}-byte limit` },
+        413,
+      );
+    }
+
     try {
-      deps.skillManager.writeContext(name, body.content);
+      deps.skillManager.writeContext(name, parsedBody.data.content);
       return c.json({ updated: true });
     } catch (err) {
       return c.json(

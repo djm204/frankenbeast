@@ -415,6 +415,44 @@ describe('Skill API routes', () => {
       expect(writeContextSpy).not.toHaveBeenCalled();
     });
 
+    it('returns 400 without writing when context content is not a string', async () => {
+      await manager.install({
+        name: 'github', description: 'GH', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+      const writeContextSpy = vi.spyOn(manager, 'writeContext');
+
+      const res = await app.request('/api/skills/github/context', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { markdown: '# Team rules' } }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'Context content must be a string' });
+      expect(writeContextSpy).not.toHaveBeenCalled();
+    });
+
+    it('returns 413 without writing when UTF-8 context content exceeds 256 KiB', async () => {
+      await manager.install({
+        name: 'github', description: 'GH', provider: 'cli',
+        installConfig: { command: 'npx' }, authFields: [],
+      });
+      const writeContextSpy = vi.spyOn(manager, 'writeContext');
+
+      const res = await app.request('/api/skills/github/context', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'é'.repeat((256 * 1024) / 2 + 1) }),
+      });
+
+      expect(res.status).toBe(413);
+      expect(await res.json()).toEqual({
+        error: 'Context content exceeds the 262144-byte limit',
+      });
+      expect(writeContextSpy).not.toHaveBeenCalled();
+    });
+
     it('returns generic unsafe path errors for unsafe context writes', async () => {
       mkdirSync(join(skillsDir, 'github'), { recursive: true });
       writeFileSync(join(skillsDir, 'github', 'mcp.json'), JSON.stringify({
