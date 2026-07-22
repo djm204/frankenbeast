@@ -48,8 +48,7 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
     },
 
     async info(skillId) {
-      const installed = listInstalledSkills(skillsDir, readEnabledSkills(configPath));
-      const summary = installed.find((entry) => entry.name === skillId);
+      const summary = readSkillSummary(skillsDir, skillId, readEnabledSkills(configPath));
 
       if (!summary) {
         return undefined;
@@ -111,15 +110,17 @@ function readSkillSummary(
     return undefined;
   }
 
+  const mcpConfig = readMcpManifest(mcpPath);
+
   return {
     name,
     enabled: enabledSkills.has(name),
-    description: inferDescription(skillDir, name),
+    description: inferDescription(skillDir, name, mcpConfig),
     updatedAt: stat.mtime.toISOString(),
   };
 }
 
-function inferDescription(skillDir: string, name: string): string {
+function inferDescription(skillDir: string, name: string, mcpConfig: McpConfig | undefined): string {
   const contextPath = join(skillDir, 'context.md');
   const context = readOptionalTextFile(contextPath);
   if (context !== undefined) {
@@ -133,7 +134,6 @@ function inferDescription(skillDir: string, name: string): string {
     }
   }
 
-  const mcpConfig = readMcpManifest(join(skillDir, 'mcp.json'));
   const serverNames = mcpConfig ? Object.keys(mcpConfig.mcpServers) : [];
 
   return serverNames.length > 0

@@ -98,6 +98,25 @@ describe('SkillsAdapter filesystem race handling', () => {
     );
   });
 
+  it('validates mcp.json during listing even when context supplies the description', async () => {
+    const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
+    await createSkill('broken', { context: '# Broken skill', mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).list({})).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: expected mcpServers to be a record`,
+    );
+  });
+
+  it('loads a requested healthy skill without validating unrelated sibling manifests', async () => {
+    await createSkill('stable', { context: '# Stable skill' });
+    await createSkill('broken', { mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('stable')).resolves.toMatchObject({
+      name: 'stable',
+      description: 'Stable skill',
+    });
+  });
+
   it('rejects mcp.json that does not match the MCP manifest schema', async () => {
     const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
     await createSkill('broken', { mcp: { mcpServers: 'not-an-object' } });

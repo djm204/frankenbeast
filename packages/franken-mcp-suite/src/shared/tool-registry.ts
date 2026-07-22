@@ -4,7 +4,7 @@ import { createFirewallAdapter, type FirewallAdapter } from '../adapters/firewal
 import { createGovernorAdapter, type GovernorAdapter } from '../adapters/governor-adapter.js';
 import { createObserverAdapter, type ObserverAdapter } from '../adapters/observer-adapter.js';
 import { createPlannerAdapter, type PlannerAdapter } from '../adapters/planner-adapter.js';
-import { createSkillsAdapter, type SkillsAdapter } from '../adapters/skills-adapter.js';
+import { createSkillsAdapter, SkillManifestValidationError, type SkillsAdapter } from '../adapters/skills-adapter.js';
 import { parseObserverCostArgs } from './observer-cost-validation.js';
 import type { ToolDef, ToolExecutionContext, ToolInputSchema, ToolResult } from './server-factory.js';
 
@@ -19,6 +19,16 @@ export interface AdapterSet {
 }
 
 export type ToolServer = 'memory' | 'planner' | 'critique' | 'firewall' | 'observer' | 'governor' | 'skills';
+
+function skillManifestErrorResult(error: unknown): ToolResult | undefined {
+  if (!(error instanceof SkillManifestValidationError)) {
+    return undefined;
+  }
+  return {
+    content: [{ type: 'text', text: `Error: ${error.message}` }],
+    isError: true,
+  };
+}
 
 interface ToolStub {
   name: string;
@@ -1265,16 +1275,22 @@ const TOOLS: ToolFull[] = [
       },
     },
     makeHandler: ({ skills }) => async (args) => {
-      const enabled = args['enabled'] !== undefined ? String(args['enabled']) === 'true' : undefined;
-      const rows = await skills.list(enabled === undefined ? {} : { enabled });
-      if (rows.length === 0) {
-        return { content: [{ type: 'text', text: 'No skills registered.' }] };
+      try {
+        const enabled = args['enabled'] !== undefined ? String(args['enabled']) === 'true' : undefined;
+        const rows = await skills.list(enabled === undefined ? {} : { enabled });
+        if (rows.length === 0) {
+          return { content: [{ type: 'text', text: 'No skills registered.' }] };
+        }
+        const lines = rows.map((r) => {
+          const status = r.enabled ? 'enabled' : 'disabled';
+          return `- **${r.name}** [${status}] (updated: ${r.updatedAt ?? 'unknown'})`;
+        });
+        return { content: [{ type: 'text', text: `## Skills (${rows.length})\n\n${lines.join('\n')}` }] };
+      } catch (error) {
+        const result = skillManifestErrorResult(error);
+        if (result) return result;
+        throw error;
       }
-      const lines = rows.map((r) => {
-        const status = r.enabled ? 'enabled' : 'disabled';
-        return `- **${r.name}** [${status}] (updated: ${r.updatedAt ?? 'unknown'})`;
-      });
-      return { content: [{ type: 'text', text: `## Skills (${rows.length})\n\n${lines.join('\n')}` }] };
     },
   },
   {
@@ -1288,15 +1304,21 @@ const TOOLS: ToolFull[] = [
       },
     },
     makeHandler: ({ skills }) => async (args) => {
-      const query = args['query'] ? String(args['query']) : '';
-      const rows = await skills.list({});
-      const normalizedQuery = query.trim().toLowerCase();
-      const matches = normalizedQuery.length === 0 ? rows : rows.filter((row) => row.name.toLowerCase().includes(normalizedQuery) || row.description.toLowerCase().includes(normalizedQuery));
-      if (matches.length === 0) {
-        return { content: [{ type: 'text', text: query ? `No skills matching "${query}".` : 'No skills registered.' }] };
+      try {
+        const query = args['query'] ? String(args['query']) : '';
+        const rows = await skills.list({});
+        const normalizedQuery = query.trim().toLowerCase();
+        const matches = normalizedQuery.length === 0 ? rows : rows.filter((row) => row.name.toLowerCase().includes(normalizedQuery) || row.description.toLowerCase().includes(normalizedQuery));
+        if (matches.length === 0) {
+          return { content: [{ type: 'text', text: query ? `No skills matching "${query}".` : 'No skills registered.' }] };
+        }
+        const lines = matches.map((row) => `- **${row.name}**: ${row.description}`);
+        return { content: [{ type: 'text', text: `## Discovered Skills (${matches.length})\n\n${lines.join('\n')}` }] };
+      } catch (error) {
+        const result = skillManifestErrorResult(error);
+        if (result) return result;
+        throw error;
       }
-      const lines = matches.map((row) => `- **${row.name}**: ${row.description}`);
-      return { content: [{ type: 'text', text: `## Discovered Skills (${matches.length})\n\n${lines.join('\n')}` }] };
     },
   },
   {
@@ -1311,13 +1333,19 @@ const TOOLS: ToolFull[] = [
       required: ['skillId'],
     },
     makeHandler: ({ skills }) => async (args) => {
-      const skillId = String(args['skillId']);
-      const info = await skills.info(skillId);
-      if (!info) {
-        return { content: [{ type: 'text', text: `Skill not found: ${skillId}` }], isError: true };
+      try {
+        const skillId = String(args['skillId']);
+        const info = await skills.info(skillId);
+        if (!info) {
+          return { content: [{ type: 'text', text: `Skill not found: ${skillId}` }], isError: true };
+        }
+        const lines = [`## Skill: ${skillId}`, '', `**Status:** ${info['enabled'] ? 'enabled' : 'disabled'}`, `**Updated:** ${typeof info['updatedAt'] === 'string' ? info['updatedAt'] : 'unknown'}`, '', '**Config:**', '```json', JSON.stringify(info, null, 2), '```'];
+        return { content: [{ type: 'text', text: lines.join('\n') }] };
+      } catch (error) {
+        const result = skillManifestErrorResult(error);
+        if (result) return result;
+        throw error;
       }
-      const lines = [`## Skill: ${skillId}`, '', `**Status:** ${info['enabled'] ? 'enabled' : 'disabled'}`, `**Updated:** ${typeof info['updatedAt'] === 'string' ? info['updatedAt'] : 'unknown'}`, '', '**Config:**', '```json', JSON.stringify(info, null, 2), '```'];
-      return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },
 ];
