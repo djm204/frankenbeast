@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z, ZodError } from 'zod';
+import type { McpServerConfig, SkillCatalogEntry, ToolDefinition } from '@franken/types';
 import { isUnsafeSkillPathError, type SkillManager } from '../../skills/skill-manager.js';
 import { SkillHealthChecker } from '../../skills/skill-health-checker.js';
 import type { ProviderRegistry } from '../../providers/provider-registry.js';
@@ -7,6 +8,137 @@ import { HttpError, parseJsonBody } from '../middleware.js';
 
 const SKILL_CONTEXT_MAX_CONTENT_BYTES = 256 * 1024;
 const skillContextBodySchema = z.object({ content: z.string() });
+
+const MAX_SKILL_NAME_LENGTH = 128;
+const MAX_FIELD_LENGTH = 4_096;
+const MAX_COLLECTION_ITEMS = 128;
+const MAX_INPUT_SCHEMA_BYTES = 8 * 1_024;
+const SAFE_SKILL_NAME = /^[a-zA-Z0-9_-]+$/;
+
+const BoundedString = z.string().max(MAX_FIELD_LENGTH);
+const SkillName = z.string()
+  .min(1)
+  .max(MAX_SKILL_NAME_LENGTH)
+  .regex(SAFE_SKILL_NAME);
+
+const BoundedStringRecord = z.record(
+  z.string().min(1).max(MAX_SKILL_NAME_LENGTH),
+  BoundedString,
+).refine(
+  (record) => Object.keys(record).length <= MAX_COLLECTION_ITEMS,
+  `Must contain at most ${MAX_COLLECTION_ITEMS} entries`,
+);
+
+function isJsonWithinByteLimit(value: unknown, maxBytes: number): boolean {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= maxBytes;
+  } catch {
+    return false;
+  }
+}
+
+const BoundedInputSchema = z.record(
+  z.string().max(MAX_SKILL_NAME_LENGTH),
+  z.unknown(),
+).refine(
+  (record) => Object.keys(record).length <= MAX_COLLECTION_ITEMS,
+  `Must contain at most ${MAX_COLLECTION_ITEMS} entries`,
+).refine(
+  (record) => isJsonWithinByteLimit(record, MAX_INPUT_SCHEMA_BYTES),
+  `Must serialize to at most ${MAX_INPUT_SCHEMA_BYTES} bytes`,
+);
+
+const SkillInstallConfigSchema = z.object({
+  command: z.string().min(1).max(MAX_FIELD_LENGTH),
+  args: z.array(BoundedString).max(MAX_COLLECTION_ITEMS).optional(),
+  env: BoundedStringRecord.optional(),
+  url: z.string().url().max(MAX_FIELD_LENGTH).optional(),
+}).strict();
+
+const SkillToolDefinitionSchema = z.object({
+  name: z.string().min(1).max(MAX_SKILL_NAME_LENGTH),
+  title: BoundedString.optional(),
+  description: BoundedString,
+  inputSchema: BoundedInputSchema,
+  outputSchema: BoundedInputSchema.optional(),
+  annotations: z.object({
+    title: BoundedString.optional(),
+    readOnlyHint: z.boolean().optional(),
+    destructiveHint: z.boolean().optional(),
+    idempotentHint: z.boolean().optional(),
+    openWorldHint: z.boolean().optional(),
+  }).strict().optional(),
+  _meta: BoundedInputSchema.optional(),
+  requiresHitl: z.boolean().optional(),
+}).strict();
+
+const CatalogInstallSchema = z.object({
+  name: SkillName,
+  description: BoundedString,
+  provider: z.string().min(1).max(MAX_SKILL_NAME_LENGTH),
+  installConfig: SkillInstallConfigSchema,
+  authFields: z.array(z.object({
+    key: z.string().min(1).max(MAX_SKILL_NAME_LENGTH),
+    label: BoundedString,
+    type: z.enum(['secret', 'text']),
+    required: z.boolean(),
+  }).strict()).max(MAX_COLLECTION_ITEMS),
+  toolDefinitions: z.array(SkillToolDefinitionSchema).max(MAX_COLLECTION_ITEMS).optional(),
+}).strict();
+
+const CustomInstallSchema = z.object({
+  name: SkillName,
+  config: SkillInstallConfigSchema,
+}).strict();
+
+const SkillInstallRequestSchema = z.object({
+  catalogEntry: CatalogInstallSchema.optional(),
+  custom: CustomInstallSchema.optional(),
+}).strict().superRefine((request, ctx) => {
+  if ((request.catalogEntry === undefined) === (request.custom === undefined)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'Must provide exactly one of catalogEntry or custom',
+    });
+  }
+});
+
+function toMcpServerConfig(
+  config: z.infer<typeof SkillInstallConfigSchema>,
+): McpServerConfig {
+  return {
+    command: config.command,
+    ...(config.args !== undefined ? { args: config.args } : {}),
+    ...(config.env !== undefined ? { env: config.env } : {}),
+    ...(config.url !== undefined ? { url: config.url } : {}),
+  };
+}
+
+function toToolDefinition(
+  tool: z.infer<typeof SkillToolDefinitionSchema>,
+): ToolDefinition {
+  return {
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    ...(tool.requiresHitl !== undefined ? { requiresHitl: tool.requiresHitl } : {}),
+  };
+}
+
+function toSkillCatalogEntry(
+  entry: z.infer<typeof CatalogInstallSchema>,
+): SkillCatalogEntry {
+  return {
+    name: entry.name,
+    description: entry.description,
+    provider: entry.provider,
+    installConfig: toMcpServerConfig(entry.installConfig),
+    authFields: entry.authFields,
+    ...(entry.toolDefinitions !== undefined
+      ? { toolDefinitions: entry.toolDefinitions.map(toToolDefinition) }
+      : {}),
+  };
+}
 
 function isSkillInstallValidationError(err: unknown): boolean {
   return err instanceof ZodError
@@ -80,38 +212,40 @@ export function createSkillRoutes(deps: {
   });
 
   app.post('/', async (c) => {
-    let body: Record<string, unknown>;
+    let request: z.infer<typeof SkillInstallRequestSchema>;
     try {
-      body = (await parseJsonBody(c)) as Record<string, unknown>;
+      request = SkillInstallRequestSchema.parse(await parseJsonBody(c));
     } catch (err) {
       if (err instanceof HttpError && err.statusCode === 400) {
         return c.json({ error: 'Invalid JSON' }, 400);
+      }
+      if (err instanceof ZodError) {
+        return c.json({ error: skillInstallErrorMessage(err) }, 400);
       }
       throw err;
     }
 
     try {
-      if (body['catalogEntry']) {
-        const entry = body['catalogEntry'] as Parameters<
-          SkillManager['install']
-        >[0];
-        await deps.skillManager.install(entry);
-        return c.json({ installed: entry.name }, 201);
+      if (request.catalogEntry !== undefined) {
+        await deps.skillManager.install(toSkillCatalogEntry(request.catalogEntry));
+        return c.json({ installed: request.catalogEntry.name }, 201);
       }
 
-      if (body['custom']) {
-        const custom = body['custom'] as { name: string; config: Parameters<SkillManager['installCustom']>[1] };
-        await deps.skillManager.installCustom(custom.name, custom.config);
-        return c.json({ installed: custom.name }, 201);
+      if (request.custom !== undefined) {
+        await deps.skillManager.installCustom(
+          request.custom.name,
+          toMcpServerConfig(request.custom.config),
+        );
+        return c.json({ installed: request.custom.name }, 201);
       }
+
+      throw new Error('Validated skill install request contained no install payload');
     } catch (err) {
       if (!isSkillInstallValidationError(err)) {
         throw err;
       }
       return c.json({ error: skillInstallErrorMessage(err) }, 400);
     }
-
-    return c.json({ error: 'Must provide catalogEntry or custom' }, 400);
   });
 
   app.patch('/:name', async (c) => {
