@@ -8,6 +8,7 @@ import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
 import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from './chat-style.js';
+import { CHAT_SLASH_COMMAND_NAMES, completeSlashCommand } from './slash-command-completion.js';
 import { isoNow, type ProviderContext, type TokenUsage } from '@franken/types';
 
 
@@ -16,15 +17,7 @@ function printLine(...args: unknown[]): void {
 }
 export { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 
-const SLASH_COMMANDS = new Set([
-  '/plan',
-  '/run',
-  '/status',
-  '/diff',
-  '/approve',
-  '/session',
-  '/quit',
-]);
+const SLASH_COMMANDS = new Set<string>(CHAT_SLASH_COMMAND_NAMES);
 
 export interface ChatIO {
   prompt(): Promise<string>;
@@ -59,7 +52,11 @@ export function createReadlineIO(): ChatIO {
   let rl: Interface | undefined;
   let activeQuestion: AbortController | undefined;
   const getReadline = (): Interface => {
-    rl ??= createInterface({ input: process.stdin, output: process.stdout });
+    rl ??= createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      completer: completeSlashCommand,
+    });
     return rl;
   };
   const cancelQuestion = (): void => {

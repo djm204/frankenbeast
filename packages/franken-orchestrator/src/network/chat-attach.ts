@@ -5,6 +5,7 @@ import type { OrchestratorConfig } from '../config/orchestrator-config.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from '../cli/chat-style.js';
+import { completeSlashCommand } from '../cli/slash-command-completion.js';
 import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
@@ -207,7 +208,11 @@ function createIo(): {
   print(message: string): void;
   close(): void;
 } {
-  const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
+  const rl: Interface = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: completeSlashCommand,
+  });
   return {
     prompt: () => new Promise((resolve) => rl.question(`${CHAT_COLOR.user}${CHAT_GLYPHS.user}${ANSI.reset} `, resolve)),
     print: (message: string) => printLine(message),
