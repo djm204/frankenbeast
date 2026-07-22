@@ -94,19 +94,7 @@ function containsRawSecretHint(text: string): boolean {
     || CREDENTIAL_URL_HINT.test(text);
 }
 
-function containsOversizedSecretIndicator(text: string): boolean {
-  if (/\bauthorization\b\s*[:=]/i.test(text)
-    || /\\*["']authorization\\*["']\s*,/i.test(text)
-    || /\bbearer\s+\S+/i.test(text)
-    || /--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+\S+/i.test(text)
-    || CREDENTIAL_URL_HINT.test(text)) {
-    return true;
-  }
-
-  const assignmentPattern = /\\*["']?\b([A-Za-z][A-Za-z0-9_-]{0,127})\b\\*["']?\s*[=:]/g;
-  for (const match of text.matchAll(assignmentPattern)) {
-    if (isSensitiveAssignmentKey(match[1]!)) return true;
-  }
+function containsStructuredSecretIndicator(text: string): boolean {
   const tupleKeyPattern = /\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,/g;
   for (const match of text.matchAll(tupleKeyPattern)) {
     if (isSensitiveAssignmentKey(match[1]!)) return true;
@@ -117,6 +105,25 @@ function containsOversizedSecretIndicator(text: string): boolean {
     if (isSensitiveAssignmentKey(match[1]!)) return true;
   }
   return false;
+}
+
+function containsOversizedSecretIndicator(text: string): boolean {
+  if (/\bauthorization\b\s*[:=]/i.test(text)
+    || /\\*["']authorization\\*["']\s*,/i.test(text)
+    || /\bbearer\s+\S+/i.test(text)
+    || CREDENTIAL_URL_HINT.test(text)) {
+    return true;
+  }
+
+  const assignmentPattern = /\\*["']?\b([A-Za-z][A-Za-z0-9_-]{0,127})\b\\*["']?\s*[=:]/g;
+  for (const match of text.matchAll(assignmentPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  const optionPattern = /--([A-Za-z][A-Za-z0-9-]{0,127})\s+/g;
+  for (const match of text.matchAll(optionPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  return containsStructuredSecretIndicator(text);
 }
 
 function redactRawSecrets(text: string, preserveShellCommands = false): string {
@@ -141,7 +148,7 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
     .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(
-      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
+      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
       (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
         ? `${prefix}[REDACTED]`
         : match,
@@ -203,7 +210,9 @@ export function redactSecrets(text: string, preserveShellCommands = false): stri
       const state = { changed: false };
       const redacted = redactJsonSecrets(parsed, state, undefined, preserveShellCommands);
       if (state.changed) return JSON.stringify(redacted);
-      return redactRawSecrets(text, preserveShellCommands);
+      const rawRedacted = redactRawSecrets(text, preserveShellCommands);
+      if (rawRedacted !== text) return rawRedacted;
+      return containsStructuredSecretIndicator(text) ? '[REDACTED]' : text;
     }
   } catch {
     // Legacy command contexts are plain text, not JSON.
