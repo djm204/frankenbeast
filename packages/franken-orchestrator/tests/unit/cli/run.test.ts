@@ -1163,10 +1163,11 @@ describe('runDirectCli', () => {
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(false);
   });
 
-  it('exits nonzero when the direct CLI entrypoint rejects', async () => {
+  it('preserves the error stack and exits nonzero when the direct CLI entrypoint rejects', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fatalError = new Error('boom');
     const entrypoint = vi.fn(async () => {
-      throw new Error('boom');
+      throw fatalError;
     });
     const exit = vi.fn() as unknown as (code?: number) => never;
 
@@ -1175,7 +1176,7 @@ describe('runDirectCli', () => {
     await Promise.resolve();
 
     expect(exit).toHaveBeenCalledWith(1);
-    expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
+    expect(errorSpy).toHaveBeenCalledWith('Fatal:', fatalError);
     errorSpy.mockRestore();
   });
 });
