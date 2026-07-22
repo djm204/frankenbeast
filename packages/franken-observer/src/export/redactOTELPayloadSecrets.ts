@@ -4,9 +4,14 @@ const REDACTED = '[REDACTED]'
 const SENSITIVE_KEY_RE = /(?:^|_)(?:secret|token|password|passwd|pwd|credential|cookie|bearer|auth|authorization|api_?key|private_?key|access_?key)(?:$|_)/iu
 const SENSITIVE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu
+const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
+const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
+const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)(?:Basic|Bearer)\s+[^\s,;]+/giu
 const AUTHORIZATION_RE = /\b((?:Proxy-)?Authorization\s*:\s*)(?:Basic|Bearer)\s+[^\s,;]+/giu
+const DISCORD_WEBHOOK_RE = /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/giu
+const CREDENTIAL_URL_RE = /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu
 const BEARER_RE = /\bBearer\s+[^\s,;]+/giu
-const TOKEN_RE = /\b(?:sk|gho|ghp|glpat|glc|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b/gu
+const TOKEN_RE = /\b(?:(?:sk|gh[oprsu]|glpat|glc|xox[baprs])[-_][A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9_-]{12,})\b/gu
 
 function normalizeSensitiveKey(key: string): string {
   return key
@@ -21,7 +26,12 @@ function isSensitiveKey(key: string): boolean {
 
 function redactText(value: string): string {
   return value
+    .replace(PRIVATE_KEY_RE, REDACTED)
+    .replace(COOKIE_HEADER_RE, REDACTED)
+    .replace(AUTHORIZATION_ASSIGNMENT_RE, `$1${REDACTED}`)
     .replace(AUTHORIZATION_RE, `$1${REDACTED}`)
+    .replace(DISCORD_WEBHOOK_RE, REDACTED)
+    .replace(CREDENTIAL_URL_RE, REDACTED)
     .replace(BEARER_RE, REDACTED)
     .replace(SENSITIVE_ASSIGNMENT_RE, (match, key: string, separator: string) =>
       isSensitiveKey(key) ? `${key}${separator}${REDACTED}` : match,
