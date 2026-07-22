@@ -394,11 +394,15 @@ function parseAgentFromEpisodicDetails(
   eventId?: unknown,
 ): string | null | undefined {
   if (!details) return undefined;
+  const detailKeys = Object.keys(details);
   const quarantine = details["quarantine"];
   if (
+    detailKeys.length === 1 &&
+    detailKeys[0] === "quarantine" &&
     quarantine !== null &&
     typeof quarantine === "object" &&
     !Array.isArray(quarantine) &&
+    Object.keys(quarantine as Record<string, unknown>).sort().join(",") === "eventId,field,reason" &&
     (quarantine as Record<string, unknown>)["field"] === "details" &&
     (quarantine as Record<string, unknown>)["reason"] === "invalid JSON" &&
     (quarantine as Record<string, unknown>)["eventId"] === eventId
@@ -1540,17 +1544,14 @@ export function createBrainAdapter(
       const reportOptions: MemoryRetentionReportOptions = {
         ...(input.now === undefined ? {} : { now: input.now }),
         ...(input.expiryHorizonMs === undefined ? {} : { expiryHorizonMs: input.expiryHorizonMs }),
-        ...(readScope.readScope === "all" && input.maxEntries !== undefined
-          ? { maxEntries: input.maxEntries }
-          : {}),
-        ...(readScope.readScope !== "all" && input.maxEntries !== undefined
+        ...(input.maxEntries !== undefined
           ? { maxEntries: Number.MAX_SAFE_INTEGER }
           : {}),
       };
       return filterRetentionReportByScope(
         brain.memoryRetentionReport(reportOptions),
         readScope,
-        readScope.readScope === "all" ? undefined : input.maxEntries,
+        input.maxEntries,
       );    },
 
     async forget(key, input = {}) {

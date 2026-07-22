@@ -885,6 +885,28 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(auditEventId);
     });
 
+    it('does not match persisted quarantine diagnostics when deleting audit rows', () => {
+      brain.working.set('task', 'delete project note');
+      const first = brain.rightToForget({ query: 'delete project' });
+      const auditEventId = first.auditEventId;
+      expect(auditEventId).toBeDefined();
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        JSON.stringify({
+          quarantine: {
+            field: 'details',
+            eventId: auditEventId,
+            reason: 'invalid JSON',
+          },
+        }),
+        auditEventId,
+      );
+
+      brain.rightToForget({ query: 'invalid JSON' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(auditEventId);
+    });
+
     it('deletes quarantined audit rows when their malformed details contain the selector', () => {
       brain.working.set('task', 'delete project note');
       const first = brain.rightToForget({ query: 'delete project' });
@@ -6286,6 +6308,27 @@ describe('SqliteBrain', () => {
       expect(episodic.recall('bounded', 1)).toHaveLength(1);
       expect(recallKeywordChunk).toHaveBeenCalledWith(['bounded'], expect.any(Number), 0);
       expect(recallKeywordChunk.mock.calls.every(([, batchLimit]) => batchLimit !== undefined)).toBe(true);
+    });
+
+    it('scans past corrupt SQL-ranked pages before applying final recall ranking', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'alpha beta healthy best match',
+        createdAt: '2026-07-19T00:00:00.000Z',
+      }));
+      for (let index = 0; index < 101; index += 1) {
+        brain.episodic.record(makeEvent({
+          summary: `alpha corrupt candidate ${index}`,
+          details: { marker: 'beta' },
+          createdAt: '2026-07-20T00:00:00.000Z',
+        }));
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE summary LIKE 'alpha corrupt candidate %'`)
+        .run('{"marker":"beta"');
+
+      expect(brain.episodic.recall('alpha beta', 1).map((event) => event.summary)).toEqual([
+        'alpha beta healthy best match',
+      ]);
     });
 
     it('audits quarantined details rows with their event ids', () => {

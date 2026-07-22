@@ -2836,13 +2836,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           result = this.recent(limit, reportCorruptDetails);
         } else {
           const eventsById = new Map<number, EpisodicEvent>();
-          const candidateLimit = limit < 0
-            ? -1
-            : Math.max(CORRUPT_JSON_SCAN_BATCH_SIZE, limit * 2);
           for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
             const events = collectRowsToEvents(
               (batchLimit, offset) => this.recallKeywordChunk(chunk, batchLimit, offset),
-              candidateLimit,
+              -1,
               this.encryption,
               reportCorruptDetails,
               (event) => recallEventScore(event, keywords) > 0,
@@ -6214,6 +6211,7 @@ export class SqliteBrain implements IBrain {
         const summary = this.encryption?.decrypt(row.summary) ?? row.summary;
         const details = row.details ? (this.encryption?.decrypt(row.details) ?? row.details) : null;
         let eventDetails: Record<string, unknown> | undefined;
+        let detailsWereMalformed = false;
         if (details !== null) {
           try {
             const parsedDetails = JSON.parse(details) as unknown;
@@ -6221,6 +6219,7 @@ export class SqliteBrain implements IBrain {
               eventDetails = parsedDetails as Record<string, unknown>;
             }
           } catch {
+            detailsWereMalformed = true;
             eventDetails = {
               quarantine: {
                 field: 'details',
@@ -6239,10 +6238,15 @@ export class SqliteBrain implements IBrain {
           ...(eventDetails === undefined ? {} : { details: eventDetails }),
         };
         if (isRightToForgetAuditEvent(candidateEvent)) return false;
-        if (
-          isQuarantinedRightToForgetAuditEvent(candidateEvent)
-          && !episodicRowMatchesSelector('', '', details, selector)
-        ) return false;
+        if (isQuarantinedRightToForgetAuditEvent(candidateEvent)) {
+          // Persisted quarantine envelopes contain synthetic diagnostics, not
+          // the original corrupt payload, and must never become deletion input.
+          // Fresh malformed rows may still be removed when their raw payload
+          // itself matches the selector.
+          if (!detailsWereMalformed || !episodicRowMatchesSelector('', '', details, selector)) {
+            return false;
+          }
+        }
         return episodicRowMatchesSelector(step, summary, details, selector);
       })
       .map(row => row.id);

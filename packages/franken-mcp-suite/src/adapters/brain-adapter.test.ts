@@ -1059,6 +1059,31 @@ describe("createBrainAdapter", () => {
     ]);
   });
 
+  it("does not hide ordinary episodic metadata that only contains a quarantine child", async () => {
+    const brain = createBrainAdapter("/tmp/ordinary-quarantine-child.db");
+    const mockBrain = brainInstances[0]!;
+    const event = {
+      id: 43,
+      type: "success",
+      summary: "ordinary event with diagnostic-looking metadata",
+      details: {
+        quarantine: { field: "details", reason: "invalid JSON", eventId: 43 },
+        note: "ordinary domain metadata",
+      },
+      createdAt: "2026-07-20T00:00:00.000Z",
+    };
+    mockBrain.episodic.recall.mockReturnValue([event]);
+
+    await expect(brain.query({
+      query: "ordinary",
+      type: "episodic",
+      readScope: "all",
+      limit: 1,
+    })).resolves.toEqual([
+      expect.objectContaining({ key: "43", value: "ordinary event with diagnostic-looking metadata" }),
+    ]);
+  });
+
   it("exports scoped project memory with safe redaction by default", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
 
@@ -1193,6 +1218,47 @@ describe("createBrainAdapter", () => {
 
     expect(report.entries).toEqual([]);
     expect(report.counts.total).toBe(0);
+  });
+
+  it("applies all-scope retention budgets after hiding quarantined rows", async () => {
+    const brain = createBrainAdapter("/tmp/quarantined-all-retention.db");
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-21T00:00:00.000Z",
+      policies: [],
+      counts: { total: 2, protected: 0, expired: 0, nearingExpiry: 0, compactionCandidates: 0 },
+      entries: [
+        {
+          store: "episodic",
+          key: "17",
+          agentId: null,
+          class: "transient_observation",
+          action: "retain",
+          policy: { class: "transient_observation", retentionDays: 30, compactPriority: 1, protected: false, description: "test" },
+          protected: false,
+          reason: "test",
+        },
+        {
+          store: "working",
+          key: "shared.visible",
+          class: "environment_fact",
+          action: "retain",
+          policy: { class: "environment_fact", retentionDays: 180, compactPriority: 30, protected: false, description: "env" },
+          protected: false,
+          reason: "retain",
+        },
+      ],
+      compactionCandidates: [],
+    });
+
+    const report = await brain.memoryRetentionReport({ readScope: "all", maxEntries: 1 });
+
+    expect(brainInstances[0].memoryRetentionReport).toHaveBeenCalledWith({
+      maxEntries: Number.MAX_SAFE_INTEGER,
+    });
+    expect(report.entries).toEqual([
+      expect.objectContaining({ key: "shared.visible", action: "retain" }),
+    ]);
+    expect(report.compactionCandidates).toEqual([]);
   });
 
   it("counts existing scoped compaction candidates before applying retention budgets", async () => {
