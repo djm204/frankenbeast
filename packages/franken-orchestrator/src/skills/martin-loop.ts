@@ -31,6 +31,11 @@ import {
   parseResetTimeText,
   type CommandFailure,
 } from '../errors/command-failure.js';
+import { redactSensitiveText } from '../logging/redaction.js';
+
+const MAX_RATE_LIMIT_WARNING_STDERR_CHARS = 256;
+const MAX_RATE_LIMIT_WARNING_DIAGNOSTICS_CHARS = 768;
+const TRUNCATION_MARKER = '[truncated]';
 
 type RunLoopRateLimitState = {
   readonly activeProvider: string;
@@ -65,6 +70,12 @@ function abortError(reason?: unknown): Error {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function sanitizeWarningText(text: string, maxChars: number): string {
+  const sanitized = redactSensitiveText(text).replace(/\s+/gu, ' ').trim();
+  if (sanitized.length <= maxChars) return sanitized;
+  return `${sanitized.slice(0, maxChars - TRUNCATION_MARKER.length)}${TRUNCATION_MARKER}`;
 }
 
 /** Exported for tests: regression coverage that no abort listeners leak (issue #39). */
@@ -901,10 +912,14 @@ export class MartinLoop {
       return { sleepMs: shortestSleep * 1000, sleepSource: shortestSource };
     }
 
-    const rawStderrs = [...exhaustedProviders.entries()]
-      .map(([p, d]) => `${p}: ${d.stderr}`)
+    const providerDiagnostics = [...exhaustedProviders.entries()]
+      .map(([provider, failure]) => {
+        const stderr = sanitizeWarningText(failure.stderr || '<empty>', MAX_RATE_LIMIT_WARNING_STDERR_CHARS);
+        return `provider=${provider} status=rate-limited stderr=${stderr}`;
+      })
       .join(' | ');
-    console.warn(`[MartinLoop] Rate limit reset time could not be determined. Raw stderr: ${rawStderrs}`);
+    const boundedDiagnostics = sanitizeWarningText(providerDiagnostics, MAX_RATE_LIMIT_WARNING_DIAGNOSTICS_CHARS);
+    console.warn(`[MartinLoop] Rate limit reset time could not be determined. ${boundedDiagnostics}`);
     return { sleepMs: 120_000, sleepSource: 'unknown' };
   }
 

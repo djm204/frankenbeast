@@ -322,6 +322,31 @@ describe('MartinLoop — Rate Limit Resilience', () => {
     console.warn = origWarn;
   });
 
+  it('redacts and bounds provider stderr in fallback sleep warnings', async () => {
+    const sleepFn = vi.fn().mockResolvedValue(undefined);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const secret = ['sk', 'providersecretvalue123456789'].join('-');
+    const longDiagnostic = `rate limit exceeded api_key=${secret} ${'x'.repeat(5_000)}`;
+
+    queueMock({ stderr: longDiagnostic, exitCode: 1 });
+    queueMock({ stderr: `429 error Authorization: Bearer ${secret}`, exitCode: 1 });
+    queueMock({ stdout: 'ok!\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({
+      maxIterations: 1,
+      providers: ['claude', 'codex'],
+      _sleepFn: sleepFn,
+    }));
+
+    const warning = warnSpy.mock.calls.flat().join(' ');
+    expect(warning).toContain('could not be determined');
+    expect(warning).toContain('<redacted>');
+    expect(warning).not.toContain(secret);
+    expect(warning.length).toBeLessThanOrEqual(1_024);
+    expect(warning).toContain('[truncated]');
+  });
+
   it('picks shortest sleep time when multiple providers have different reset times', async () => {
     const sleepFn = vi.fn().mockResolvedValue(undefined);
 
