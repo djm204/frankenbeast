@@ -193,6 +193,51 @@ describe('CostCalculator', () => {
       })
     })
 
+    it.each([
+      [
+        'prompt token aggregate',
+        [
+          { model: 'gpt-4o', promptTokens: Number.MAX_SAFE_INTEGER, completionTokens: 0 },
+          { model: 'gpt-4o', promptTokens: 1, completionTokens: 0 },
+        ],
+      ],
+      [
+        'completion token aggregate',
+        [
+          { model: 'gpt-4o', promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER },
+          { model: 'gpt-4o', promptTokens: 0, completionTokens: 1 },
+        ],
+      ],
+      [
+        'combined prompt and completion aggregate',
+        [
+          {
+            model: 'gpt-4o',
+            promptTokens: Number.MAX_SAFE_INTEGER,
+            completionTokens: 1,
+          },
+        ],
+      ],
+    ])('rejects an unsafe %s', (_name, entries) => {
+      const calc = new CostCalculator(DEFAULT_PRICING)
+
+      expect(() => calc.totalCost(entries)).toThrow(RangeError)
+    })
+
+    it('validates token aggregates before reporting unknown models', () => {
+      const onUnknownModel = vi.fn()
+      const calc = new CostCalculator(DEFAULT_PRICING, { onUnknownModel })
+
+      expect(() => calc.totalCost([
+        {
+          model: 'unknown-model',
+          promptTokens: Number.MAX_SAFE_INTEGER,
+          completionTokens: 1,
+        },
+      ])).toThrow(RangeError)
+      expect(onUnknownModel).not.toHaveBeenCalled()
+    })
+
     it('returns 0 for an empty list', () => {
       const calc = new CostCalculator(DEFAULT_PRICING)
       expect(calc.totalCost([])).toBe(0)

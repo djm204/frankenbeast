@@ -39,6 +39,29 @@ export class CostCalculator {
     }
   }
 
+  private static safeAddTokenCounts(a: number, b: number): number {
+    const sum = a + b
+    if (!Number.isSafeInteger(sum)) {
+      throw new RangeError(
+        `CostCalculator: token total ${sum} exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+      )
+    }
+    return sum
+  }
+
+  private static assertValidTokenAggregates(entries: TokenRecord[]): void {
+    let promptTokens = 0
+    let completionTokens = 0
+
+    for (const entry of entries) {
+      CostCalculator.assertValidTokenCount(entry.promptTokens, 'promptTokens')
+      CostCalculator.assertValidTokenCount(entry.completionTokens, 'completionTokens')
+      promptTokens = CostCalculator.safeAddTokenCounts(promptTokens, entry.promptTokens)
+      completionTokens = CostCalculator.safeAddTokenCounts(completionTokens, entry.completionTokens)
+      CostCalculator.safeAddTokenCounts(promptTokens, completionTokens)
+    }
+  }
+
   calculate(entry: TokenRecord): number {
     return this.calculateWithAttribution(entry).costUsd
   }
@@ -68,6 +91,10 @@ export class CostCalculator {
   }
 
   totalCostWithAttribution(entries: TokenRecord[]): TotalCostCalculation {
+    // Validate the full snapshot before calculating costs so no invalid aggregate
+    // can produce a partial result or unknown-model warning side effect.
+    CostCalculator.assertValidTokenAggregates(entries)
+
     let sum = 0
     let compensation = 0
     const unknownModels = new Set<string>()
