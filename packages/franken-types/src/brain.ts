@@ -209,4 +209,33 @@ export const BrainSnapshotSchema = z.object({
       truncated: z.boolean(),
     }).optional(),
   }),
+}).superRefine((snapshot, ctx) => {
+  const episodicExport = snapshot.metadata.episodicExport;
+  if (!episodicExport) return;
+
+  if (episodicExport.exportedEvents !== snapshot.episodic.length) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['metadata', 'episodicExport', 'exportedEvents'],
+      message: 'exportedEvents must match the episodic event count',
+    });
+  }
+  if (episodicExport.exportedEvents > episodicExport.totalEvents) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['metadata', 'episodicExport', 'totalEvents'],
+      message: 'totalEvents must be at least exportedEvents',
+    });
+  }
+  if (
+    episodicExport.truncated !==
+    (episodicExport.exportedEvents < episodicExport.totalEvents)
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['metadata', 'episodicExport', 'truncated'],
+      message:
+        'truncated must indicate whether exportedEvents is less than totalEvents',
+    });
+  }
 });
