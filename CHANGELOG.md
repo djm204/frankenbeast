@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.63.1](https://github.com/djm204/frankenbeast/compare/v0.63.0...v0.63.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **mcp:** cover prefixed credential forms ([36338f5](https://github.com/djm204/frankenbeast/commit/36338f5ad38cc3a297a43c2e779b31ed876ff514))
+* **mcp:** cover serialized header redaction ([483ac18](https://github.com/djm204/frankenbeast/commit/483ac185667dee22da89464831c2a55f0ebe30a6))
+* **mcp:** redact credential pair structures ([9ace190](https://github.com/djm204/frankenbeast/commit/9ace190962eab939e9a93bd3cb38568bd12edb1f))
+* **mcp:** redact post-tool observer payload secrets ([52d47e4](https://github.com/djm204/frankenbeast/commit/52d47e421f95c0f9e40cd225e324cbb40454b248))
+* **security:** close remaining spawn scanner gaps ([2f3cb0b](https://github.com/djm204/frankenbeast/commit/2f3cb0be2a4bf28d69ac5763315d6066d42fac06))
+* **security:** harden spawn alias scanner ([4dbf80f](https://github.com/djm204/frankenbeast/commit/4dbf80f851ede434060d3557af340221a2cea1d2))
+* **security:** track child process cron spawn aliases ([d6e4b5b](https://github.com/djm204/frankenbeast/commit/d6e4b5bf0dbab4103983e9f204e29c177daf50c7))
+* **web:** reconcile timed-out approval responses ([#3588](https://github.com/djm204/frankenbeast/issues/3588)) ([45f042a](https://github.com/djm204/frankenbeast/commit/45f042aa12b2780831ec386431701165b26d3c57))
+
 ## [0.63.0](https://github.com/djm204/frankenbeast/compare/v0.62.0...v0.63.0) (2026-07-22)
 
 

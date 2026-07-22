@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.57.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.57.0...@franken/orchestrator-v0.57.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **orchestrator:** handle CLI stdin errors ([#3563](https://github.com/djm204/frankenbeast/issues/3563)) ([5cfa883](https://github.com/djm204/frankenbeast/commit/5cfa8830b7496997f76dd699527612e122f3d952))
+* **web:** reconcile timed-out approval responses ([#3588](https://github.com/djm204/frankenbeast/issues/3588)) ([45f042a](https://github.com/djm204/frankenbeast/commit/45f042aa12b2780831ec386431701165b26d3c57))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.10.2 to 0.10.3
+    * @franken/observer bumped from 0.11.3 to 0.11.4
+
 ## [0.57.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.56.0...@franken/orchestrator-v0.57.0) (2026-07-22)
 
 

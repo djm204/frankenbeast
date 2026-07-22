@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.4](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.3...live-bench-v0.4.4) (2026-07-22)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.11.3 to 0.11.4
+
 ## [0.4.3](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.2...live-bench-v0.4.3) (2026-07-22)
 
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.2...franken-critique-v0.10.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **critique:** bound complexity evaluator input size ([#3605](https://github.com/djm204/frankenbeast/issues/3605)) ([56c1ced](https://github.com/djm204/frankenbeast/commit/56c1ced17c071e94dc24743280149171e7da1e6f))
+* **critique:** redact token budget breaker reasons ([#3604](https://github.com/djm204/frankenbeast/issues/3604)) ([9db5cfb](https://github.com/djm204/frankenbeast/commit/9db5cfb1afb0fac02b71aa7bef282776976c6686))
+
 ## [0.10.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.1...franken-critique-v0.10.2) (2026-07-22)
 
 
