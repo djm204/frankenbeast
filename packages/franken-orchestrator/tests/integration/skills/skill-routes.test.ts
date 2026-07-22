@@ -258,6 +258,33 @@ describe('Skill API routes', () => {
       expect(skillManager.installCustom).not.toHaveBeenCalled();
     });
 
+    it('rejects deeply nested tool schemas without throwing from size validation', async () => {
+      const skillManager = {
+        install: vi.fn().mockResolvedValue(undefined),
+        installCustom: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SkillManager;
+      const validationApp = new Hono();
+      validationApp.onError(errorHandler);
+      validationApp.route('/api/skills', createSkillRoutes({
+        skillManager,
+        providerRegistry: mockProviderRegistry(),
+      }));
+      const depth = 10_000;
+      const deeplyNestedSchema = `${'{"nested":'.repeat(depth)}null${'}'.repeat(depth)}`;
+      const body = `{"catalogEntry":{"name":"deep-schema","description":"Deep schema","provider":"test","installConfig":{"command":"node"},"authFields":[],"toolDefinitions":[{"name":"deep-tool","description":"Deep tool","inputSchema":${deeplyNestedSchema}}]}}`;
+
+      const res = await validationApp.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: expect.any(String) });
+      expect(skillManager.install).not.toHaveBeenCalled();
+      expect(skillManager.installCustom).not.toHaveBeenCalled();
+    });
+
     it('rejects invalid custom MCP configs without poisoning the skills list', async () => {
       const res = await app.request('/api/skills', {
         method: 'POST',

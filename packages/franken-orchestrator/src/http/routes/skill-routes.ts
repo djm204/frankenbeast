@@ -29,6 +29,14 @@ const BoundedStringRecord = z.record(
   `Must contain at most ${MAX_COLLECTION_ITEMS} entries`,
 );
 
+function isJsonWithinByteLimit(value: unknown, maxBytes: number): boolean {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= maxBytes;
+  } catch {
+    return false;
+  }
+}
+
 const BoundedInputSchema = z.record(
   z.string().max(MAX_SKILL_NAME_LENGTH),
   z.unknown(),
@@ -36,7 +44,7 @@ const BoundedInputSchema = z.record(
   (record) => Object.keys(record).length <= MAX_COLLECTION_ITEMS,
   `Must contain at most ${MAX_COLLECTION_ITEMS} entries`,
 ).refine(
-  (record) => Buffer.byteLength(JSON.stringify(record), 'utf8') <= MAX_INPUT_SCHEMA_BYTES,
+  (record) => isJsonWithinByteLimit(record, MAX_INPUT_SCHEMA_BYTES),
   `Must serialize to at most ${MAX_INPUT_SCHEMA_BYTES} bytes`,
 );
 
