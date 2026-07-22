@@ -144,6 +144,42 @@ describe('TempoAdapter', () => {
       const idAttr = resourceAttrs.find(a => a.key === 'frankenbeast.trace.id')
       expect(idAttr?.value.stringValue).toBe(trace.id)
     })
+
+    it('redacts credentials from trace payloads while preserving request authentication', async () => {
+      const rawSecret = ['glc', 'observer', 'raw', 'credential'].join('_')
+      const jsonSecret = ['plain', 'json', 'credential', 'value'].join('-')
+      const colonSecret = ['plain', 'colon', 'credential', 'value'].join('-')
+      const authSecret = ['plain', 'bearer', 'credential', 'value'].join('-')
+      const trace = makeTrace()
+      trace.goal = `inspect api_key=${rawSecret}`
+      trace.spans[0]!.metadata = {
+        apiKey: rawSecret,
+        authorization: `Bearer ${rawSecret}`,
+        diagnostic: `Authorization: Bearer ${authSecret}`,
+        jsonDiagnostic: JSON.stringify({ password: jsonSecret }),
+        colonDiagnostic: `password: ${colonSecret}`,
+        safe: 'retained',
+      }
+      const adapter = new TempoAdapter({
+        endpoint: 'https://otlp-gateway-prod-us-central-0.grafana.net',
+        basicAuth: { user: '123456', password: rawSecret },
+        fetch: mockFetch,
+      })
+
+      await adapter.flush(trace)
+
+      const [, init] = mockFetch.mock.calls[0]
+      const body = init.body as string
+      expect(body).not.toContain(rawSecret)
+      expect(body).not.toContain(jsonSecret)
+      expect(body).not.toContain(colonSecret)
+      expect(body).not.toContain(authSecret)
+      expect(body).toContain('[REDACTED]')
+      expect(body).toContain('retained')
+      expect(init.headers['Authorization']).toBe(
+        `Basic ${Buffer.from(`123456:${rawSecret}`).toString('base64')}`,
+      )
+    })
   })
 
   describe('flush() — error handling', () => {

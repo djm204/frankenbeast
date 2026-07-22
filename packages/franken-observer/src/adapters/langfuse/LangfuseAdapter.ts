@@ -1,6 +1,7 @@
 import type { ExportAdapter } from '../../export/ExportAdapter.js'
 import type { Trace } from '../../core/types.js'
 import { OTELSerializer } from '../../export/OTELSerializer.js'
+import { redactOTELPayloadSecrets } from '../../export/redactOTELPayloadSecrets.js'
 import { fetchWithRetry, type HttpRetryOptions } from '../../export/httpRetry.js'
 
 export type FetchFn = (
@@ -45,7 +46,7 @@ export class LangfuseAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
-    const payload = OTELSerializer.serializeTrace(trace)
+    const payload = redactOTELPayloadSecrets(OTELSerializer.serializeTrace(trace))
     const url = `${this.baseUrl}/api/public/otel/v1/traces`
     const response = await fetchWithRetry(
       signal =>

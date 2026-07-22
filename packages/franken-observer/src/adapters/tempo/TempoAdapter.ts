@@ -2,6 +2,7 @@ import type { ExportAdapter } from '../../export/ExportAdapter.js'
 import type { Trace } from '../../core/types.js'
 import type { FetchFn } from '../langfuse/LangfuseAdapter.js'
 import { OTELSerializer } from '../../export/OTELSerializer.js'
+import { redactOTELPayloadSecrets } from '../../export/redactOTELPayloadSecrets.js'
 import { fetchWithRetry, type HttpRetryOptions } from '../../export/httpRetry.js'
 
 export interface TempoBasicAuth {
@@ -79,7 +80,7 @@ export class TempoAdapter implements ExportAdapter {
   }
 
   async flush(trace: Trace): Promise<void> {
-    const payload = OTELSerializer.serializeTrace(trace)
+    const payload = redactOTELPayloadSecrets(OTELSerializer.serializeTrace(trace))
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this.authHeader) headers['Authorization'] = this.authHeader
 

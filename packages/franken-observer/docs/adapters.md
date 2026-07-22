@@ -68,6 +68,11 @@ const adapter = new LangfuseAdapter({
 await adapter.flush(trace) // throws on non-2xx response
 ```
 
+Before export, credential-bearing OTEL attributes and secret-shaped text are
+masked with `[REDACTED]`. This applies to trace content only; the Basic
+Authorization header still carries the configured Langfuse credentials and
+must not be logged by callers.
+
 **Options**
 
 | Option      | Type      | Default                      | Description                       |
@@ -219,6 +224,11 @@ const cloud = new TempoAdapter({
 })
 await cloud.flush(trace)
 ```
+
+Before export, credential-bearing OTEL attributes and secret-shaped text are
+masked with `[REDACTED]`. This applies to trace content only; the Basic
+Authorization header still carries the configured Grafana credentials and
+must not be logged by callers.
 
 **Options**
 

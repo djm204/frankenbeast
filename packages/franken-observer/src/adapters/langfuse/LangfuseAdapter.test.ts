@@ -86,6 +86,42 @@ describe('LangfuseAdapter', () => {
       expect(idAttr?.value.stringValue).toBe(trace.id)
     })
 
+    it('redacts credentials from trace payloads while preserving request authentication', async () => {
+      const rawSecret = ['sk', 'observer', 'raw', 'credential'].join('-')
+      const jsonSecret = ['plain', 'json', 'credential', 'value'].join('-')
+      const colonSecret = ['plain', 'colon', 'credential', 'value'].join('-')
+      const authSecret = ['plain', 'bearer', 'credential', 'value'].join('-')
+      const trace = makeTrace()
+      trace.goal = `inspect api_key=${rawSecret}`
+      trace.spans[0]!.metadata = {
+        api_key: rawSecret,
+        authorization: `Bearer ${rawSecret}`,
+        diagnostic: `Authorization: Bearer ${authSecret}`,
+        jsonDiagnostic: JSON.stringify({ password: jsonSecret }),
+        colonDiagnostic: `password: ${colonSecret}`,
+        safe: 'retained',
+      }
+      const adapter = new LangfuseAdapter({
+        publicKey: LANGFUSE_PUBLIC_KEY,
+        secretKey: LANGFUSE_SECRET_KEY,
+        fetch: mockFetch,
+      })
+
+      await adapter.flush(trace)
+
+      const [, init] = mockFetch.mock.calls[0]
+      const body = init.body as string
+      expect(body).not.toContain(rawSecret)
+      expect(body).not.toContain(jsonSecret)
+      expect(body).not.toContain(colonSecret)
+      expect(body).not.toContain(authSecret)
+      expect(body).toContain('[REDACTED]')
+      expect(body).toContain('retained')
+      expect(init.headers['Authorization']).toBe(
+        `Basic ${Buffer.from(`${LANGFUSE_PUBLIC_KEY}:${LANGFUSE_SECRET_KEY}`).toString('base64')}`,
+      )
+    })
+
     it('throws if the HTTP response is not ok', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 401, statusText: 'Unauthorized' })
       const adapter = new LangfuseAdapter({ publicKey: 'bad', secretKey: 'bad', fetch: mockFetch })
