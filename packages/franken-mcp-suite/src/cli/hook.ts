@@ -62,19 +62,54 @@ export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps 
  * log. This is a proportionate, best-effort scrub — exhaustive secret detection
  * is intentionally out of scope.
  */
-const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))$/i;
+const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:authorization|password|passwd|pwd|secret|token|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))$/i;
+const RAW_SECRET_HINTS = [
+  'authorization',
+  'bearer',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'token',
+  'api_key',
+  'api-key',
+  'apikey',
+  'access_key',
+  'access-key',
+  'accesskey',
+  '_key',
+  '-key',
+] as const;
+const CREDENTIAL_URL_HINT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:[^\s@/]+@/i;
+const CAMEL_CASE_SECRET_KEY_HINT = /[a-z0-9](?:Password|Passwd|Pwd|Secret|Token|Key)\b/;
+const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
+
+function containsRawSecretHint(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  return RAW_SECRET_HINTS.some((hint) => lowerText.includes(hint))
+    || CAMEL_CASE_SECRET_KEY_HINT.test(text)
+    || CREDENTIAL_URL_HINT.test(text);
+}
 
 function redactRawSecrets(text: string): string {
+  if (!containsRawSecretHint(text)) return text;
   return text
     .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
-    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
-    .replace(/(--(?:password|passwd|pwd|secret|token|api-?key|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
+    .replace(/(\bauthorization\b\s*=\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
+    .replace(/(\b[a-z][A-Za-z0-9]{0,127}(?:Password|Passwd|Pwd|Secret|Token|Key)\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
+    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
+    .replace(/(--(?:authorization|password|passwd|pwd|secret|token|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
+    .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
+}
+
+function isSensitiveAssignmentKey(key: string): boolean {
+  const separatorNormalized = key.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  return SENSITIVE_ASSIGNMENT_KEY.test(separatorNormalized);
 }
 
 function redactJsonSecrets(value: unknown, key?: string): unknown {
-  if (key && SENSITIVE_ASSIGNMENT_KEY.test(key)) return '[REDACTED]';
+  if (key && isSensitiveAssignmentKey(key)) return '[REDACTED]';
   if (typeof value === 'string') return redactRawSecrets(value);
   if (Array.isArray(value)) return value.map((item) => redactJsonSecrets(item));
   if (value !== null && typeof value === 'object') {
@@ -256,8 +291,13 @@ function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: 
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
-  if (!MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
-  return '[memory-review-result-redacted]';
+  if (MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) {
+    return '[memory-review-result-redacted]';
+  }
+  if (payload.length > MAX_POST_TOOL_SECRET_SCAN_CHARS) {
+    return containsRawSecretHint(payload) ? '[post-tool-payload-redacted]' : payload;
+  }
+  return redactSecrets(payload);
 }
 
 export async function runHook(
