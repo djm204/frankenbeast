@@ -15,6 +15,7 @@ import {
   SOCKET_SEND_ACK_TIMEOUT_MS,
   NonRetryableSendError,
   activityEventsFromApproveResult,
+  approvalReconciliationResult,
   appendOrUpdateAssistantMessage,
   applySessionSnapshot,
   errorMessage,
@@ -68,7 +69,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const [tokenTotals, setTokenTotals] = useState<TokenTotals>(EMPTY_TOKEN_TOTALS);
   const [errorBanners, setErrorBanners] = useState<ChatErrorBanner[]>([]);
   const [sessionRetrySeed, setSessionRetrySeed] = useState(0);
-
   const clientRef = useRef(new ChatApiClient(opts.baseUrl));
   // Refresh the client when the baseUrl changes; useRef alone would pin the
   // original client after a proxy/origin switch.
@@ -82,37 +82,32 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const lastMessageRef = useRef<{ clientMessageId: string; content: string } | null>(null);
   const errorActionRef = useRef(new Map<string, ChatErrorAction>());
   const approvalResolvingRef = useRef(false);
+  const approvalDecisionRef = useRef<boolean | null>(null);
   const approvalAttemptRef = useRef(0);
   const approvalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedSocketEventIdsRef = useRef<Set<string>>(new Set());
   const replayCursorsRef = useRef<Map<string, number>>(new Map());
-
   function addErrorBanner(banner: ChatErrorBanner) {
     errorActionRef.current.set(banner.id, banner.action);
     setErrorBanners((current) => [banner, ...current.filter((item) => item.action !== banner.action)].slice(0, 3));
   }
-
   function dismissError(id: string) {
     errorActionRef.current.delete(id);
     setErrorBanners((current) => current.filter((item) => item.id !== id));
   }
-
   function sessionStillCurrent(capturedSessionId: string): boolean {
     return activeSessionIdRef.current === capturedSessionId;
   }
-
   function notifyClearedFailedDrafts(contents: string[]) {
     for (const content of contents) {
       setClearedFailedDraft((current) => ({ content, nonce: (current?.nonce ?? 0) + 1 }));
     }
   }
-
   function reconcileRecoveryMessages(current: ChatMessage[], transcript: TranscriptMessage[]): ChatMessage[] {
     const recovery = preserveLocalRecoveryMessages(current, transcript);
     notifyClearedFailedDrafts(recovery.clearedFailedDrafts);
     return recovery.messages;
   }
-
   function failPendingSend(messageId: string, error: Error, canRetry = true) {
     const pending = pendingSendsRef.current.get(messageId);
     if (!pending) {
@@ -125,13 +120,11 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('error');
     pending.reject(error);
   }
-
   function failAllPendingSends(error: Error, canRetry = true) {
     for (const messageId of pendingSendsRef.current.keys()) {
       failPendingSend(messageId, error, canRetry);
     }
   }
-
   function updateApprovalResolving(value: boolean): void {
     if (!value && approvalTimeoutRef.current) {
       clearTimeout(approvalTimeoutRef.current);
@@ -141,18 +134,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     approvalResolvingRef.current = value;
     setApprovalResolving(value);
   }
-
-  function reconcileApprovalResponse(capturedSessionId: string, approvalAttempt: number): void {
-    void clientRef.current.getSession(capturedSessionId)
+  function reconcileApprovalResponse(
+    capturedSessionId: string,
+    approvalAttempt: number,
+    requestedAt?: string,
+  ): void {
+    const controller = new AbortController();
+    const refreshTimeout = setTimeout(() => controller.abort(), APPROVAL_RESPONSE_TIMEOUT_MS);
+    void clientRef.current.getSession(capturedSessionId, controller.signal)
       .then((refreshed) => {
         if (!sessionStillCurrent(capturedSessionId)
           || refreshed.id !== capturedSessionId
           || approvalAttemptRef.current !== approvalAttempt
-          || !approvalResolvingRef.current) {
-          return;
-        }
-        const approvalPending = Boolean(refreshed.pendingApproval) || refreshed.state === 'pending_approval';
-        const approvalFailed = refreshed.state === 'failed';
+          || !approvalResolvingRef.current) return;
+        const reconciliation = approvalReconciliationResult(refreshed, requestedAt);
         readyRef.current = true;
         setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
@@ -161,33 +156,23 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setCostUsd(refreshed.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
         setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
+        approvalDecisionRef.current = null;
         updateApprovalResolving(false);
-        setApprovalError(approvalPending
-          ? 'The server did not confirm the approval response. Try again.'
-          : approvalFailed ? 'The approved action failed. Review the transcript and try again.' : null);
-        if (approvalFailed) {
-          addErrorBanner(makeBanner(
-            'Approved action failed',
-            'The approved action failed. Review the transcript and try again.',
-            'dismiss',
-            'Dismiss',
-            'APPROVAL_EXECUTION_FAILED',
-          ));
-        }
-        setStatus(approvalPending || approvalFailed ? 'error' : 'idle');
+        setApprovalError(reconciliation.error);
+        if (reconciliation.banner) addErrorBanner(reconciliation.banner);
+        setStatus(reconciliation.status);
       })
       .catch((error) => {
         if (!sessionStillCurrent(capturedSessionId)
           || approvalAttemptRef.current !== approvalAttempt
-          || !approvalResolvingRef.current) {
-          return;
-        }
+          || !approvalResolvingRef.current) return;
+        approvalDecisionRef.current = null;
         updateApprovalResolving(false);
         setApprovalError(errorMessage(error, 'The approval response timed out and the session could not be refreshed. Try again.'));
         setStatus('error');
-      });
+      })
+      .finally(() => clearTimeout(refreshTimeout));
   }
-
   function refreshSession() {
     if (!sessionId) {
       setSessionRetrySeed((current) => current + 1);
@@ -486,10 +471,12 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setShowTypingIndicator(false);
           setStatus('idle');
           if (approvalResolvingRef.current) {
+            const approved = approvalDecisionRef.current !== false;
             readyRef.current = true;
             setPendingApproval(null);
-            setSessionState('approved');
+            setSessionState(approved ? 'approved' : 'rejected');
             setApprovalError(null);
+            approvalDecisionRef.current = null;
             updateApprovalResolving(false);
           }
           if (payload.modelTier) {
@@ -818,6 +805,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     setApprovalError(null);
+    approvalDecisionRef.current = approved;
     updateApprovalResolving(true);
     const approvalAttempt = approvalAttemptRef.current;
     setStatus('sending');
@@ -876,7 +864,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }));
     approvalTimeoutRef.current = setTimeout(() => {
       approvalTimeoutRef.current = null;
-      reconcileApprovalResponse(sessionId, approvalAttempt);
+      reconcileApprovalResponse(sessionId, approvalAttempt, pendingApproval?.requestedAt);
     }, APPROVAL_RESPONSE_TIMEOUT_MS);
   }
 

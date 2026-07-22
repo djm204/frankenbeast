@@ -1097,6 +1097,33 @@ describe('useChatSession', () => {
     expect(mockGetSession).not.toHaveBeenCalled();
   });
 
+  it('keeps a dropped rejection resolution rejected when its completion arrives', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+    await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    await act(async () => result.current.approve(false));
+    act(() => socket.message({
+      type: 'assistant.message.complete',
+      messageId: 'assistant-rejected',
+      content: 'Rejected.',
+      kind: 'approval',
+      timestamp: '2026-03-09T00:00:07Z',
+    }));
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('rejected');
+    expect(result.current.status).toBe('idle');
+  });
+
   it('reconciles approval state when the websocket response event is dropped', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -1142,7 +1169,7 @@ describe('useChatSession', () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
 
-    expect(mockGetSession).toHaveBeenCalledWith('chat-1');
+    expect(mockGetSession).toHaveBeenCalledWith('chat-1', expect.any(AbortSignal));
     expect(result.current.approvalResolving).toBe(false);
     expect(result.current.approvalError).toBeNull();
     expect(result.current.pendingApproval).toBeNull();
@@ -1172,6 +1199,71 @@ describe('useChatSession', () => {
     });
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
+  });
+
+  it('keeps an approved action streaming while its REST snapshot has no completed output', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+    await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:07Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
+    expect(result.current.status).toBe('streaming');
+  });
+
+  it('bounds a stalled approval reconciliation fetch', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+    await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockImplementationOnce((_sessionId: string, signal?: AbortSignal) => new Promise((_resolve, reject) => {
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    }));
+
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toBeTruthy();
+    expect(result.current.pendingApproval?.description).toBe('Deploy the generated fix');
+    expect(result.current.status).toBe('error');
   });
 
   it('surfaces a failed approved action from REST reconciliation', async () => {

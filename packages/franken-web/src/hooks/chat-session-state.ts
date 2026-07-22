@@ -10,7 +10,7 @@ import {
   seededRandom,
   type ServerSocketEvent,
 } from '@franken/types';
-import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt } from './chat-session-types';
+import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt, SessionStatus } from './chat-session-types';
 
 export const EMPTY_TOKEN_TOTALS: TokenTotals = {
   cheap: 0,
@@ -84,6 +84,26 @@ export function makeBanner(
     actionLabel,
     ...(code ? { code } : {}),
   };
+}
+
+export function approvalReconciliationResult(
+  session: ChatSession,
+  requestedAt?: string,
+): { error: string | null; banner: ChatErrorBanner | null; status: SessionStatus } {
+  if (session.pendingApproval || session.state === 'pending_approval') {
+    return { error: 'The server did not confirm the approval response. Try again.', banner: null, status: 'error' };
+  }
+  if (session.state === 'failed') {
+    const message = 'The approved action failed. Review the transcript and try again.';
+    return {
+      error: message,
+      banner: makeBanner('Approved action failed', message, 'dismiss', 'Dismiss', 'APPROVAL_EXECUTION_FAILED'),
+      status: 'error',
+    };
+  }
+  const completedAfterApproval = requestedAt !== undefined
+    && session.transcript.some((message) => message.timestamp > requestedAt);
+  return { error: null, banner: null, status: session.state === 'approved' && !completedAfterApproval ? 'streaming' : 'idle' };
 }
 
 function hasDeterministicSeed(): boolean {

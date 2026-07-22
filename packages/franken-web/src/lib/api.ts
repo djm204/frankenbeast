@@ -103,9 +103,10 @@ export class ChatApiClient {
     });
   }
 
-  async getSession(id: string): Promise<ChatSession> {
+  async getSession(id: string, signal?: AbortSignal): Promise<ChatSession> {
     return this.request<ChatSession>(`/v1/chat/sessions/${encodeURIComponent(id)}`, {
       method: 'GET',
+      ...(signal ? { signal } : {}),
     });
   }
 
