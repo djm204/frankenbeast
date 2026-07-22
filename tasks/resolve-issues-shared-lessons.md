@@ -3,8 +3,9 @@
 ## 2026-07-22 — Post-tool authorization and nested-string redaction
 - Use separate redaction modes for executable pre-tool shell context and inert post-tool output: shell assignments must stop at the first token so governance still sees the command, while post-tool output can consume known structured multi-token authorization values.
 - Authorization redaction must treat quoted header values and structured multi-token schemes (including AWS `Credential`/`SignedHeaders`/`Signature` parameters) as one secret-bearing value while stopping before shell control/substitution boundaries.
-- JSON sanitizers must recurse when the top-level parsed value is itself a string containing serialized JSON, and must recognize sensitive header-entry tuples such as `["Authorization", value]`; object-key-only recursion misses both shapes.
-- Oversized-payload indicator scans must recognize escaped JSON keys (for example `\"apiKey\":`) and singular as well as plural credential keys before deciding that a payload is safe to persist unchanged.
+- JSON sanitizers must recurse when the top-level parsed value is itself a string, recognize sensitive header-entry tuples such as `["Authorization", value]`, and preserve duplicate-key fallback boundaries; object-key-only recursion and line-greedy raw replacements can either miss credentials or erase later JSON fields.
+- Oversized-payload indicator scans must recognize escaped JSON keys (for example `\"apiKey\":`), authorization header tuples, and singular as well as plural credential keys before deciding that a payload is safe to persist unchanged.
+- In inert post-tool output, Authorization and Cookie header redaction should consume complete line values (including semicolon-delimited SigV4 parameters or multiple cookies) but stop at unescaped JSON field boundaries when processing duplicate-key raw fallbacks.
 
 ## 2026-07-22 — Deterministic root release repair
 - When repairing GitHub's latest-release marker in a multi-package repository, fetch a bounded but churn-tolerant release window with explicit draft/prerelease exclusion, filter only bare root semver tags, and sort parsed numeric version tuples instead of trusting API creation order. Resolve the replacement candidate before demoting the current latest release so an empty bounded result fails without leaving the repository markerless.

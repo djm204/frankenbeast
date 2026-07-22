@@ -326,6 +326,20 @@ describe('fbeast-hook runtime', () => {
     expect(result.observerLogs[0]!.metadata.match(/\[REDACTED\]/g)).toHaveLength(9);
   });
 
+  it('redacts complete SigV4 Authorization and multi-cookie header lines', async () => {
+    const secret = ['header', 'line', 'fixture'].join('-');
+    const payload = [
+      `Authorization: AWS4-HMAC-SHA256 Credential=${secret}/scope SignedHeaders=host;x-amz-date Signature=${secret}`,
+      `Cookie: sid=${secret}; refresh=${secret}`,
+    ].join('\n');
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('Authorization: [REDACTED]\nCookie: [REDACTED]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
   it('redacts complete multi-token authorization assignments from raw post-tool payloads', async () => {
     const credential = ['fixture', 'signed', 'credential'].join('-');
     const signature = ['fixture', 'signature'].join('-');
@@ -417,6 +431,17 @@ describe('fbeast-hook runtime', () => {
     expect(metadata.payload).toContain('[REDACTED]');
   });
 
+  it('redacts escaped authorization values in shadowed duplicate-key JSON', async () => {
+    const secret = ['shadowed', 'escaped', 'fixture'].join('-');
+    const payload = `{"output":"Authorization: \\\"Basic ${secret}\\\"","output":"ok"}`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toContain('Authorization: [REDACTED]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
   it('redacts long URL userinfo credentials from raw post-tool payloads', async () => {
     const username = 'u'.repeat(300);
     const password = 'p'.repeat(300);
@@ -465,6 +490,20 @@ describe('fbeast-hook runtime', () => {
     const secret = ['escaped', 'oversized', 'fixture'].join('-');
     const payload = JSON.stringify({
       output: `${'x'.repeat(70_000)} ${JSON.stringify({ apiKey: secret })}`,
+    });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('redacts oversized payloads containing authorization header tuples', async () => {
+    const secret = ['oversized', 'header', 'tuple'].join('-');
+    const payload = JSON.stringify({
+      output: 'x'.repeat(70_000),
+      headers: [['Authorization', `Basic ${secret}`]],
     });
 
     const result = await runHookForTest(['post-tool', 'read_file', payload]);
