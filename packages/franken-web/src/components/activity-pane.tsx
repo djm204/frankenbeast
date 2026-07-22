@@ -171,9 +171,9 @@ function viewModelForActivity(event: ActivityEvent): ActivityViewModel {
   };
 }
 
-function announcementForActivity(event: ActivityEvent): string {
+function announcementForActivity(event: ActivityEvent, activityNumber: number): string {
   const viewModel = viewModelForActivity(event);
-  return `${viewModel.title} at ${formatActivityTime(event.timestamp)} — ${viewModel.status}: ${viewModel.summary}`;
+  return `${viewModel.title} at ${formatActivityTime(event.timestamp)} — ${viewModel.status}: ${viewModel.summary} (activity ${activityNumber})`;
 }
 
 const UNABLE_TO_STRINGIFY_EVENT_DATA = '[unserializable event data]';
@@ -214,7 +214,7 @@ function safeEventDataSummary(data: Record<string, unknown>): string {
 
 export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
   const latestEvent = events[events.length - 1];
-  const latestAnnouncement = latestEvent ? announcementForActivity(latestEvent) : '';
+  const latestAnnouncement = latestEvent ? announcementForActivity(latestEvent, events.length) : '';
   const [announcement, setAnnouncement] = useState('');
   const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll<HTMLOListElement, HTMLLIElement>(
     events.length,
