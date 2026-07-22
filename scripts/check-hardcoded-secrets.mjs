@@ -1169,12 +1169,19 @@ function functionParameterScope(lines, startIndex) {
   const functionParameters = /^\s*(?:async\s+)?function(?:\s+[A-Za-z_$][\w$]*)?\s*\(([\s\S]*?)\)[^{]*\{/u.exec(header)?.[1];
   const arrowParameters = /^\s*(?:(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*)?(?:async\s*)?\(([\s\S]*?)\)\s*(?:[^=]*)=>\s*\{/u.exec(header)?.[1];
   const singleArrowParameter = /^\s*(?:(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=\s*)?(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>\s*\{/u.exec(header)?.[1];
+  const inlineArrowParameters = /(?:^|[,(=]\s*)(?:async\s*)?\(([^()]*)\)\s*=>\s*\{/u.exec(header)?.[1];
+  const inlineSingleArrowParameter = /(?:^|[,(=]\s*)(?:async\s+)?([A-Za-z_$][\w$]*)\s*=>\s*\{/u.exec(header)?.[1];
   const methodHeader = /^\s*(?:(?:async|get|set)\s+)*(?:[A-Za-z_$][\w$]*|\[[^\]]+\])\s*\(([\s\S]*?)\)\s*\{/u.exec(header);
   const methodName = /^\s*(?:(?:async|get|set)\s+)*([A-Za-z_$][\w$]*)\s*\(/u.exec(header)?.[1];
   const methodParameters = methodHeader && !new Set(['if', 'for', 'while', 'switch', 'catch', 'with']).has(methodName)
     ? methodHeader[1]
     : undefined;
-  const parameters = functionParameters ?? arrowParameters ?? singleArrowParameter ?? methodParameters;
+  const parameters = functionParameters
+    ?? arrowParameters
+    ?? singleArrowParameter
+    ?? methodParameters
+    ?? inlineArrowParameters
+    ?? inlineSingleArrowParameter;
   if (parameters === undefined) return null;
   const names = new Set([...parameters.matchAll(/(?:^|,)\s*(?:\.\.\.\s*)?([A-Za-z_$][\w$]*)/gu)].map((match) => match[1]));
   for (const binding of parameters.matchAll(/(?:^|[,\[{])\s*(?:\.\.\.\s*)?(?:(?:[A-Za-z_$][\w$]*)\s*:\s*)?([A-Za-z_$][\w$]*)\b(?=\s*(?:[,}\]=]|$))/gu)) {
@@ -1338,7 +1345,7 @@ function collectProgrammaticCrontabAliases(lines) {
       const [, kind, bindings, source] = destructuredDeclaration;
       const end = kind === 'var' ? functionScopeEnd(aliasSourceLines, index) : scopeEnds[index];
       const destructuresKnownModule = [...knownModuleAliases].some((alias) => new RegExp(`^\\s*${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'u').test(source))
-        || /^(?:\s*(?:await\s+)?import|\s*require)\s*\(/u.test(source);
+        || /^\s*(?:(?:await\s+)?import|require)\s*\(\s*['"](?:node:)?child_process['"]/u.test(source);
       if (destructuresKnownModule) continue;
       for (const binding of bindings.split(',')) {
         const bindingName = /:\s*([A-Za-z_$][\w$]*)/u.exec(binding)?.[1]
@@ -1464,6 +1471,11 @@ function collectProgrammaticCrontabAliases(lines) {
           .slice(1, envCrontabPosition)
           .every((literal) => /^(?:[A-Za-z_][A-Za-z0-9_]*=|-)/u.test(literal.value.trim()));
         const envCrontabLiteral = envCrontabPosition > 0 ? boundLiterals[envCrontabPosition] : undefined;
+        const bindsCommandAliasAfterEnv = firstLiteral !== undefined
+          && /(?:^|\/)env$/.test(firstLiteral.value.trim())
+          && [...commandNames].some((name) => new RegExp(`^\\s*,\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:,|$)`, 'u').test(
+            codeOutsideStringLiterals(boundArguments.slice(firstLiteral.end)),
+          ));
         const bindsCrontab = (firstLiteral !== undefined
           && codeOutsideStringLiterals(boundArguments.slice(0, firstLiteral.start)).trim() === ''
           && /(?:^|\/)crontab$/.test(firstLiteral.value.trim()))
@@ -1472,6 +1484,7 @@ function collectProgrammaticCrontabAliases(lines) {
             && codeOutsideStringLiterals(boundArguments.slice(0, firstLiteral.start)).trim() === ''
             && /(?:^|\/)env$/.test(firstLiteral.value.trim())
             && envPrefixIsStatic)
+          || bindsCommandAliasAfterEnv
           || [...commandNames].some((name) => new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:,|$)`, 'u').test(codeOutsideStringLiterals(boundArguments)));
         if (bindsCrontab) {
           scopedPreboundCrontabSpawnCallNames.push({ name: alias, start: index, end: aliasEnd });
@@ -1522,7 +1535,7 @@ function collectProgrammaticCrontabAliases(lines) {
       spawnStartLine = aliasSourceLines[spawnStartIndex];
     }
     if (spawnedProcess) {
-      let callExpression = spawnedProcess[2];
+      let callExpression = `${spawnedProcess[2]} ${normalizedModuleSpecifierLines[spawnStartIndex]}`;
       let depth = groupingDepthDelta(spawnStartLine);
       for (let cursor = spawnStartIndex + 1; depth > 0 && cursor < Math.min(lines.length, spawnStartIndex + 40); cursor += 1) {
         callExpression += ` ${normalizedModuleSpecifierLines[cursor]}`;

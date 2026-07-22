@@ -3212,6 +3212,62 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/loop-shadow.mjs:5');
   });
 
+  it('rejects static-template and env-wrapped prebound crontab spawn variants', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const cases: Record<string, string[]> = {
+      'template-command.mjs': [
+        "import { spawn } from 'node:child_process';",
+        "const child = spawn(`crontab`, ['-']);",
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'env-command-alias.mjs': [
+        "import * as cp from 'node:child_process';",
+        "const args = ['crontab', '-'];",
+        "const launch = cp.spawn.bind(cp, 'env', args);",
+        'const child = launch();',
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+    };
+    for (const [name, source] of Object.entries(cases)) {
+      writeFileSync(join(scriptDir, name), source.join('\n'), 'utf8');
+    }
+
+    const result = runScanner(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/template-command.mjs:4');
+    expect(result.stderr).toContain('scripts/env-command-alias.mjs:6');
+  });
+
+  it('does not treat local destructures or inline callback parameters as child_process aliases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'local-destructure.mjs'), [
+      "import { spawn as launch } from 'node:child_process';",
+      'function useMock() {',
+      "  const { launch } = require('./mock-spawn');",
+      "  const child = launch('crontab', ['-']);",
+      '  const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+      '  child.stdin.end(entry);',
+      '}',
+    ].join('\n'), 'utf8');
+    writeFileSync(join(scriptDir, 'inline-callback.mjs'), [
+      "import * as cp from 'node:child_process';",
+      'withMock((cp) => {',
+      "  const child = cp.spawn('crontab', ['-']);",
+      '  const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+      '  child.stdin.end(entry);',
+      '});',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it('rejects Codex round 28 cron scanner bypasses', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');

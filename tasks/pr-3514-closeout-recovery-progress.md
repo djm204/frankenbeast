@@ -12,7 +12,10 @@
 - [x] Route round-15 Codex replies/resolutions and the fresh review trigger through approval-cop.
 - [x] Recover the crashed round-16 worktree and inspect all 11 current-head Codex findings.
 - [x] Correct the recovered split-call regression and verify the 102-test scanner suite plus full repository gates.
-- [ ] Commit and publish the round-16 remediation through approval-cop.
-- [ ] Route round-16 Codex replies/resolutions and a fresh review trigger through approval-cop.
+- [x] Commit and publish the round-16 remediation through approval-cop.
+- [x] Fix the four fresh round-17 Codex findings and the deterministic zombie-test newline bug from exact-head CI.
+- [x] Verify and commit round-17 remediation.
+- [ ] Publish the round-17 commit through approval-cop.
+- [ ] Route all addressed Codex replies/resolutions and a fresh review trigger through approval-cop.
 - [ ] Confirm exact-head CI green, current-head Codex clean, zero unresolved Codex threads, and clean mergeability.
 - [ ] Route the head-bound merge through approval-cop and verify the PR is live `MERGED`.
