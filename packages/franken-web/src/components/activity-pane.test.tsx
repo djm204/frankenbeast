@@ -34,6 +34,32 @@ describe('ActivityPane', () => {
     expect(screen.getByText(/"traceId": "trace-1"/)).toBeTruthy();
   });
 
+  it('announces newly appended runtime activity with a concise polite status', () => {
+    const { rerender } = render(<ActivityPane events={[]} />);
+
+    const liveStatus = screen.getByRole('status');
+    expect(liveStatus.getAttribute('aria-live')).toBe('polite');
+    expect(liveStatus.getAttribute('aria-atomic')).toBe('true');
+    expect(liveStatus.textContent).toBe('');
+
+    rerender(
+      <ActivityPane
+        events={[
+          {
+            type: 'turn.execution.progress',
+            data: { message: 'Installing dependencies', traceId: 'trace-should-not-be-announced' },
+            timestamp: '2026-07-05T01:02:03.000Z',
+          },
+        ]}
+      />,
+    );
+
+    expect(liveStatus.textContent).toBe(
+      'Execution update at Jul 5, 2026, 1:02 AM — In progress: Installing dependencies',
+    );
+    expect(liveStatus.textContent).not.toContain('trace-should-not-be-announced');
+  });
+
   it('renders runtime activity as a readable timeline with status chips and artifact links', () => {
     render(
       <ActivityPane
