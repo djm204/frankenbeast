@@ -708,6 +708,24 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(401);
     });
 
+    it.each([
+      ['non-numeric', 'not-a-number'],
+      ['non-integer', `${Math.floor(Date.now() / 1000)}.5`],
+    ])('rejects a %s Slack timestamp', async (_description, invalidTimestamp) => {
+      const app = createGovernorApp({ slackSigningSecret: SLACK_SECRET, allowUnsignedApprovalsForTests: true });
+      await seedApproval(app, 'req-1');
+
+      const rawBody = JSON.stringify({ actions: [{ action_id: 'approve', value: 'req-1' }] });
+      const res = await app.request('/v1/webhook/slack', {
+        method: 'POST',
+        headers: { ...slackHeaders(rawBody, SLACK_SECRET, invalidTimestamp) },
+        body: rawBody,
+      });
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: { message: 'Stale or invalid Slack timestamp' } });
+    });
+
     it('fails closed when no Slack signing secret is configured', async () => {
       const app = createGovernorApp();
       const res = await app.request('/v1/webhook/slack', {

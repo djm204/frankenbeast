@@ -269,8 +269,16 @@ Once installed, your MCP-compatible client has access to the tools registered in
 | `fbeast_memory_store` | memory | Store a key/value entry in working, episodic, or recovery memory |
 | `fbeast_memory_query` | memory | Search memory entries by keyword substring |
 | `fbeast_memory_frontload` | memory | Load all memory entries from this database as context |
+| `fbeast_memory_export` | memory | Export project memory as structured JSON with safe redaction by default |
+| `fbeast_memory_retention_report` | memory | Inspect retention and compaction policy status by memory class |
 | `fbeast_memory_forget` | memory | Delete a working memory entry by key |
 | `fbeast_memory_right_to_forget` | memory | Delete memory by key, category, source scope, or sensitive query and return hashed deletion evidence |
+| `fbeast_memory_review_propose` | memory | Queue a proposed working-memory promotion for operator review |
+| `fbeast_memory_review_list` | memory | List queued memory promotion candidates by review status |
+| `fbeast_memory_source_attribution` | memory | View source attribution and approval provenance for working-memory entries |
+| `fbeast_memory_review_conflicts` | memory | Inspect conflicts and guidance for a pending memory promotion candidate |
+| `fbeast_memory_review_decide` | memory | Decide or resolve a queued memory promotion |
+| `fbeast_memory_access_audit_report` | memory | Report redacted memory access by agent, profile, repo, tool, operation, and decision |
 | `fbeast_plan_decompose` | planner | Create a scaffold DAG for a task objective |
 | `fbeast_plan_status` | planner | Get status and visualization for a plan |
 | `fbeast_plan_validate` | planner | Validate a plan DAG for cycles and missing dependencies |

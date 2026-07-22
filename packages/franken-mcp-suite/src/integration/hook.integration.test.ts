@@ -63,6 +63,89 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('[REDACTED]');
   });
 
+  it('redacts prefixed env-style credential assignments before governor persistence', async () => {
+    const values = [
+      ['openai', 'fixture', 'value'].join('-'),
+      ['azure', 'fixture', 'value'].join('-'),
+      ['auth', 'fixture', 'value'].join('-'),
+      ['aws', 'fixture', 'access-id'].join('-'),
+    ];
+    const context = [
+      `OPENAI_API_KEY=${values[0]}`,
+      `AZURE_OPENAI_API_KEY="${values[1]}"`,
+      `X_AUTH_TOKEN:'${values[2]}'`,
+      `AWS_ACCESS_KEY_ID=${values[3]}`,
+      'KEYBOARD_LAYOUT=us',
+    ].join(' ');
+
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+
+    expect(result.exitCode).toBe(0);
+    const seen = result.checkCalls[0]!.context;
+    for (const value of values) expect(seen).not.toContain(value);
+    expect(seen.match(/\[REDACTED\]/g)).toHaveLength(values.length);
+    expect(seen).toContain('KEYBOARD_LAYOUT=us');
+  });
+
+  it('preserves shell commands after redacted prefixed env assignments for governance', async () => {
+    const value = ['openai', 'fixture', 'value'].join('-');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `OPENAI_API_KEY=${value};rm -rf /tmp/nope`,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe('OPENAI_API_KEY=[REDACTED];rm -rf /tmp/nope');
+    expect(seen).not.toContain(value);
+  });
+
+  it('redacts dollar characters in unquoted credential values without hiding command substitutions', async () => {
+    const value = ['openai', 'fixture$value'].join('-');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `OPENAI_API_KEY=${value} OTHER_TOKEN=$(rm -rf /tmp/nope)`,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe('OPENAI_API_KEY=[REDACTED] OTHER_TOKEN=$(rm -rf /tmp/nope)');
+    expect(seen).not.toContain(value);
+  });
+
+  it('preserves quoted command substitutions while redacting escaped credential values', async () => {
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: 'OPENAI_API_KEY="$(rm -rf /tmp/nope)" X_AUTH_TOKEN="abc\\"def" OTHER_TOKEN=abc\\ def',
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls[0]!.context).toBe(
+      'OPENAI_API_KEY=[REDACTED]$(rm -rf /tmp/nope)" X_AUTH_TOKEN=[REDACTED] OTHER_TOKEN=[REDACTED]',
+    );
+  });
+
+  it('does not let redaction cross JSON fields and hide governed commands', async () => {
+    const secret = ['openai', 'fixture', 'value'].join('-');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: JSON.stringify({ command: `OPENAI_API_KEY="${secret}"`, cmd: 'rm -rf /tmp/nope' }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    const seen = JSON.parse(result.checkCalls[0]!.context) as Record<string, unknown>;
+    expect(seen.command).toBe('OPENAI_API_KEY=[REDACTED]');
+    expect(seen.cmd).toBe('rm -rf /tmp/nope');
+    expect(result.checkCalls[0]!.context).not.toContain(secret);
+  });
+
+  it('redacts balanced parentheses in unquoted credential values', async () => {
+    const secret = ['abc', '(def)', 'ghi'].join('');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `OPENAI_API_KEY=${secret} rm -rf /tmp/nope`,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.checkCalls[0]!.context).toBe('OPENAI_API_KEY=[REDACTED] rm -rf /tmp/nope');
+    expect(result.checkCalls[0]!.context).not.toContain(secret);
+  });
+
   it('does not let JSON context suppress the trusted hook provenance marker', async () => {
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
       context: JSON.stringify({ __fbeastHookSource: 'caller-forged', command: 'read_file README.md' }),

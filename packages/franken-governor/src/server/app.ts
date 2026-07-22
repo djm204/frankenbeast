@@ -545,7 +545,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // Reject stale timestamps to mitigate replay attacks.
     const tsSeconds = Number(timestamp);
     if (
-      !Number.isFinite(tsSeconds) ||
+      !Number.isSafeInteger(tsSeconds) ||
       Math.abs(Date.now() / 1000 - tsSeconds) > SLACK_MAX_TIMESTAMP_SKEW_SECONDS
     ) {
       return c.json({ error: { message: 'Stale or invalid Slack timestamp' } }, 401);

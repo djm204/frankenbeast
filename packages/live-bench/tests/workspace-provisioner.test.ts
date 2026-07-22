@@ -258,11 +258,36 @@ describe('workspace provisioning', () => {
 
     const offsetResult = provisioner.provision({ ...row, runId: 'run-offset', runTimestamp: '2026-05-23T23:30:00+02:00' }, task);
     expect(offsetResult.runDir).toContain(join('2026-05-23', 'run-offset'));
-    const yearZeroLeapDay = provisioner.provision({ ...row, runId: 'run-year-zero', runTimestamp: '0000-02-29T00:00:00.000Z' }, task);
-    expect(yearZeroLeapDay.runDir).toContain(join('0000-02-29', 'run-year-zero'));
-    expect(() => provisioner.provision({ ...row, runTimestamp: '0001-02-29T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
-    expect(() => provisioner.provision({ ...row, runTimestamp: '0000-01-01T00:00:00+01:00' }, task)).toThrow(/Invalid runTimestamp/);
-    expect(() => provisioner.provision({ ...row, runTimestamp: '9999-12-31T23:30:00-01:00' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '2001-02-29T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
+  });
+
+  it('accepts benchmark timestamp years from 2000 through 2100 and rejects dates outside that policy', () => {
+    const fixturesRoot = tempRoot('live-bench-fixtures-');
+    const runsRoot = tempRoot('live-bench-runs-');
+    createFixture(fixturesRoot);
+
+    const provisioner = new WorkspaceProvisioner({
+      fixtures: new FixtureStore(fixturesRoot),
+      runsRoot,
+    });
+
+    const lowerBoundary = provisioner.provision({
+      ...row,
+      runId: 'run-year-lower-boundary',
+      runTimestamp: '2000-01-01T00:00:00.000Z',
+    }, task);
+    const upperBoundary = provisioner.provision({
+      ...row,
+      runId: 'run-year-upper-boundary',
+      runTimestamp: '2100-12-31T23:59:59.999Z',
+    }, task);
+
+    expect(lowerBoundary.runDir).toContain(join('2000-01-01', 'run-year-lower-boundary'));
+    expect(upperBoundary.runDir).toContain(join('2100-12-31', 'run-year-upper-boundary'));
+    expect(() => provisioner.provision({ ...row, runTimestamp: '1999-12-31T23:59:59.999Z' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '2101-01-01T00:00:00.000Z' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '2000-01-01T00:30:00+01:00' }, task)).toThrow(/Invalid runTimestamp/);
+    expect(() => provisioner.provision({ ...row, runTimestamp: '2100-12-31T23:30:00-01:00' }, task)).toThrow(/Invalid runTimestamp/);
   });
 
   it('rejects mismatched benchmark rows and tasks before persisting metadata', () => {

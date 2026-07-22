@@ -1,20 +1,20 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  chmodSync,
-  lstatSync,
-  mkdtempSync,
-  readlinkSync,
-  realpathSync,
-  rmSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-} from 'node:fs';
+  chmod,
+  lstat,
+  mkdtemp,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { deterministicUuid } from '@franken/types';
 import type {
   ILlmProvider,
@@ -70,16 +70,29 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     const workspaceDir = resolve(this.workingDir);
-    const contextWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-context-')));
-    const settingsWorkingDir = resolve(mkdtempSync(join(tmpdir(), 'franken-gemini-settings-')));
+    let contextWorkingDir: string | undefined;
+    let settingsWorkingDir: string | undefined;
     let managedContextFileName: string | undefined;
 
     try {
-      this.removeManagedGeminiMd();
-      const contextSettings = this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
-      const settingsPath = contextSettings.settingsPath;
-      managedContextFileName = contextSettings.managedContextFileName;
-      this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, managedContextFileName);
+      let settingsPath: string;
+      try {
+        contextWorkingDir = resolve(await mkdtemp(join(tmpdir(), 'franken-gemini-context-')));
+        settingsWorkingDir = resolve(await mkdtemp(join(tmpdir(), 'franken-gemini-settings-')));
+        await this.removeManagedGeminiMd();
+        const contextSettings = await this.writeContextSettings(settingsWorkingDir, contextWorkingDir);
+        settingsPath = contextSettings.settingsPath;
+        managedContextFileName = contextSettings.managedContextFileName;
+        await this.writeGeminiMd(request.systemPrompt, undefined, contextWorkingDir, managedContextFileName);
+      } catch (error) {
+        yield {
+          type: 'error',
+          error: `gemini prompt file setup failed: ${this.errorMessage(error)}`,
+          retryable: false,
+        };
+        return;
+      }
+
       const args = this.buildArgs(request);
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
@@ -106,9 +119,11 @@ export class GeminiCliAdapter implements ILlmProvider {
 
       yield* this.parseStream(proc, spawnState);
     } finally {
-      if (managedContextFileName) this.removeManagedGeminiMd(contextWorkingDir, managedContextFileName);
-      rmSync(contextWorkingDir, { recursive: true, force: true });
-      rmSync(settingsWorkingDir, { recursive: true, force: true });
+      if (managedContextFileName && contextWorkingDir) {
+        await this.removeManagedGeminiMd(contextWorkingDir, managedContextFileName).catch(() => undefined);
+      }
+      if (contextWorkingDir) await rm(contextWorkingDir, { recursive: true, force: true }).catch(() => undefined);
+      if (settingsWorkingDir) await rm(settingsWorkingDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
@@ -208,12 +223,12 @@ export class GeminiCliAdapter implements ILlmProvider {
     return result;
   }
 
-  writeGeminiMd(
+  async writeGeminiMd(
     systemPrompt: string,
     handoffContext?: string,
     targetDir = this.workingDir,
     fileName = 'GEMINI.md',
-  ): void {
+  ): Promise<void> {
     const geminiMdPath = join(targetDir, fileName);
     const managedContent = [
       MANAGED_START,
@@ -222,8 +237,8 @@ export class GeminiCliAdapter implements ILlmProvider {
       MANAGED_END,
     ].join('\n');
 
-    if (existsSync(geminiMdPath)) {
-      let existing = readFileSync(geminiMdPath, 'utf-8');
+    if (await this.pathExists(geminiMdPath)) {
+      let existing = await readFile(geminiMdPath, 'utf-8');
       const startIdx = existing.indexOf(MANAGED_START);
       const endIdx = existing.indexOf(MANAGED_END);
       if (startIdx !== -1 && endIdx !== -1) {
@@ -234,23 +249,23 @@ export class GeminiCliAdapter implements ILlmProvider {
       } else {
         existing = managedContent + '\n\n' + existing;
       }
-      this.writeFileAtomically(geminiMdPath, existing);
+      await this.writeFileAtomically(geminiMdPath, existing);
     } else {
-      this.writeFileAtomically(geminiMdPath, managedContent);
+      await this.writeFileAtomically(geminiMdPath, managedContent);
     }
   }
 
-  private writeContextSettings(
+  private async writeContextSettings(
     targetDir: string,
     managedContextDir: string,
-  ): { settingsPath: string; managedContextFileName: string } {
+  ): Promise<{ settingsPath: string; managedContextFileName: string }> {
     const existingPath = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH ?? this.defaultSystemSettingsPath();
     const existing = this.readSettingsFile(existingPath, 'Gemini system settings');
 
     const existingContext = this.asObject(existing['context']) ?? {};
     const managedContextFileName = this.managedContextFileName();
     const settingsPath = join(targetDir, 'settings.json');
-    writeFileSync(
+    await writeFile(
       settingsPath,
       JSON.stringify(
         {
@@ -448,11 +463,11 @@ export class GeminiCliAdapter implements ILlmProvider {
     return output;
   }
 
-  private removeManagedGeminiMd(targetDir = this.workingDir, fileName = 'GEMINI.md'): void {
+  private async removeManagedGeminiMd(targetDir = this.workingDir, fileName = 'GEMINI.md'): Promise<void> {
     const geminiMdPath = join(targetDir, fileName);
-    if (!existsSync(geminiMdPath)) return;
+    if (!(await this.pathExists(geminiMdPath))) return;
 
-    const existing = readFileSync(geminiMdPath, 'utf-8');
+    const existing = await readFile(geminiMdPath, 'utf-8');
     const startIdx = existing.indexOf(MANAGED_START);
     const endIdx = existing.indexOf(MANAGED_END);
     if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) return;
@@ -464,40 +479,60 @@ export class GeminiCliAdapter implements ILlmProvider {
     }
     const next = before + after;
     if (next) {
-      this.writeFileAtomically(geminiMdPath, next);
-    } else if (this.isSymlink(geminiMdPath)) {
-      this.writeFileAtomically(geminiMdPath, '');
+      await this.writeFileAtomically(geminiMdPath, next);
+    } else if (await this.isSymlink(geminiMdPath)) {
+      await this.writeFileAtomically(geminiMdPath, '');
     } else {
-      unlinkSync(geminiMdPath);
+      await unlink(geminiMdPath);
     }
   }
 
-  private writeFileAtomically(path: string, content: string): void {
-    const writePath = this.isSymlink(path) ? this.resolveSymlinkTarget(path) : path;
+  private async writeFileAtomically(path: string, content: string): Promise<void> {
+    const writePath = (await this.isSymlink(path)) ? await this.resolveSymlinkTarget(path) : path;
     const tmpPath = `${writePath}.${process.pid}.${randomUUID()}.tmp`;
-    const existingMode = existsSync(writePath) ? statSync(writePath).mode : undefined;
-    writeFileSync(tmpPath, content);
-    if (existingMode !== undefined) {
-      chmodSync(tmpPath, existingMode);
+    const existingMode = (await this.pathExists(writePath)) ? (await stat(writePath)).mode : undefined;
+
+    try {
+      await writeFile(tmpPath, content);
+      if (existingMode !== undefined) {
+        await chmod(tmpPath, existingMode);
+      }
+      await rename(tmpPath, writePath);
+    } catch (error) {
+      await unlink(tmpPath).catch(() => undefined);
+      throw error;
     }
-    renameSync(tmpPath, writePath);
   }
 
-  private resolveSymlinkTarget(path: string): string {
+  private async resolveSymlinkTarget(path: string): Promise<string> {
     try {
-      return realpathSync(path);
+      return await realpath(path);
     } catch {
-      const target = readlinkSync(path);
+      const target = await readlink(path);
       return isAbsolute(target) ? target : resolve(dirname(path), target);
     }
   }
 
-  private isSymlink(path: string): boolean {
+  private async isSymlink(path: string): Promise<boolean> {
     try {
-      return lstatSync(path).isSymbolicLink();
+      return (await lstat(path)).isSymbolicLink();
     } catch {
       return false;
     }
+  }
+
+  private async pathExists(path: string): Promise<boolean> {
+    try {
+      await stat(path);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private async *parseStream(
