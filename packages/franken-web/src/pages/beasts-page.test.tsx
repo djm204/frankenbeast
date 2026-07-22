@@ -77,10 +77,13 @@ describe('BeastsPage', () => {
     await waitFor(() => expect(dashboardClient.fetchSnapshot).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Toggle form mode' }));
 
-    expect(await screen.findByText('openai')).toBeTruthy();
     expect(screen.getByRole('button', { name: /live-runtime-skill/i })).toBeTruthy();
-    fireEvent.change(screen.getAllByLabelText('Provider')[0]!, { target: { value: 'openai' } });
-    expect(screen.getByText('gpt-4.1')).toBeTruthy();
+    const providerSelect = (await screen.findAllByLabelText('Provider'))[0]!;
+    fireEvent.click(providerSelect);
+    expect(screen.getByRole('option', { name: 'openai' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.getByRole('option', { name: 'gpt-4.1' })).toBeTruthy();
   });
 
   it('displays actionable backend launch errors from Beast API failures', async () => {

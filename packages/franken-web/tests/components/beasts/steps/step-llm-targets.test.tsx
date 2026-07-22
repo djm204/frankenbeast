@@ -47,13 +47,16 @@ describe('StepLlmTargets', () => {
 
     render(<StepLlmTargets />);
 
-    expect(screen.getAllByText('openai').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('gemini').length).toBeGreaterThan(0);
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    expect(screen.getByRole('option', { name: 'openai' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'gemini' })).toBeTruthy();
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
 
-    fireEvent.change(screen.getAllByLabelText('Provider')[0]!, { target: { value: 'openai' } });
+    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
 
-    expect(screen.getByText('gpt-5.3')).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'gpt-5.3' })).toBeTruthy();
     expect(screen.queryByText('claude-sonnet-4-6')).toBeNull();
   });
 
