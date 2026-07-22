@@ -50,7 +50,7 @@ describe('TokenBudgetBreaker', () => {
     expect(result.tripped).toBe(true);
     if (result.tripped) {
       expect(result.action).toBe('halt');
-      expect(result.reason).toContain('Token budget');
+      expect(result.reason).toBe('Token budget exceeded');
     }
   });
 
@@ -93,7 +93,7 @@ describe('TokenBudgetBreaker', () => {
       expect(result.tripped).toBe(true);
       if (result.tripped) {
         expect(result.action).toBe('halt');
-        expect(result.reason).toContain('Cost budget');
+        expect(result.reason).toBe('Cost budget exceeded');
       }
     });
 

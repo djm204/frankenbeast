@@ -25,7 +25,7 @@ export class TokenBudgetBreaker implements CircuitBreaker {
     if (config.costBudgetUsd !== undefined && spend.estimatedCostUsd > config.costBudgetUsd) {
       return {
         tripped: true,
-        reason: `Cost budget exceeded: $${spend.estimatedCostUsd.toFixed(4)} > $${config.costBudgetUsd.toFixed(4)} (${spend.totalTokens} tokens)`,
+        reason: 'Cost budget exceeded',
         action: 'halt',
       };
     }
@@ -33,7 +33,7 @@ export class TokenBudgetBreaker implements CircuitBreaker {
     if (spend.totalTokens >= config.tokenBudget) {
       return {
         tripped: true,
-        reason: `Token budget exceeded: ${spend.totalTokens} >= ${config.tokenBudget} (estimated cost: $${spend.estimatedCostUsd.toFixed(4)})`,
+        reason: 'Token budget exceeded',
         action: 'halt',
       };
     }
