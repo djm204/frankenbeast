@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -330,8 +331,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=capture_review
-        ) as check_call:
+            self.reviewer.subprocess, "run", side_effect=capture_review
+        ):
             posted = self.reviewer.post_pr_review(
                 123,
                 "VERDICT: APPROVE",
@@ -361,8 +362,8 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=capture_review
-        ) as check_call:
+            self.reviewer.subprocess, "run", side_effect=capture_review
+        ):
             posted = self.reviewer.post_pr_review(
                 124, model_body, [], "b" * 40, repository="owner/repository"
             )
@@ -381,7 +382,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=OSError("offline")
+            self.reviewer.subprocess, "run", side_effect=OSError("offline")
         ):
             self.assertFalse(
                 self.reviewer.post_pr_review(
@@ -389,13 +390,30 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
                 )
             )
 
+    def test_failed_review_post_captures_command_stderr(self):
+        field_name = "access_" + "token"
+        stderr = f'{{"message":"denied","{field_name}":"sensitive"}}'
+        failure = subprocess.CalledProcessError(
+            1, ["gh", "api"], stderr=stderr
+        )
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(self.reviewer.subprocess, "run", side_effect=failure):
+            self.assertFalse(
+                self.reviewer.post_pr_review(
+                    123, "body", [], "c" * 40, repository="owner/repository"
+                )
+            )
+
+        self.assertEqual(self.reviewer.LAST_POST_ERROR, stderr)
+
     def test_review_file_is_written_as_utf8(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
             Path, "write_text", autospec=True
         ) as write_text, mock.patch.object(
-            self.reviewer.subprocess, "check_call"
+            self.reviewer.subprocess, "run"
         ):
             self.assertTrue(
                 self.reviewer.post_pr_review(
@@ -490,6 +508,224 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
         self.assertEqual(get_diff.call_count, 2)
         self.assertEqual(post_review.call_count, 2)
+
+    def test_diff_fetch_failure_persists_bounded_sanitized_diagnostics(self):
+        pull_request = {
+            "number": 42,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        token = "ghp_" + "a" * 40
+        authorization_scheme = "".join(("Bea", "rer"))
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        directory = temporary_directory.name
+        with mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            },
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer,
+            "get_pr_diff",
+            side_effect=RuntimeError(
+                f"fetch rejected Authorization: {authorization_scheme} {token}"
+            ),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.reviewer.process_prs()
+
+        with sqlite3.connect(Path(directory) / "scans.db") as connection:
+            row = connection.execute(
+                "SELECT status, attempt_count, last_error, last_attempt_at "
+                "FROM pr_reviews WHERE pr_number = 42"
+            ).fetchone()
+        self.assertEqual(row[0:2], ("failed", 1))
+        diagnostic = json.loads(row[2])
+        self.assertEqual(diagnostic["stage"], "fetch")
+        self.assertNotIn(token, row[2])
+        self.assertLessEqual(len(row[2]), self.reviewer.MAX_ERROR_CHARS)
+        self.assertTrue(row[3])
+
+    def test_agent_failure_persists_diagnostics_and_retry_count(self):
+        pull_request = {
+            "number": 42,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        directory = temporary_directory.name
+        with mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            },
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value="+safe change"
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", side_effect=["", "VERDICT: APPROVE"]
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=True
+        ):
+            self.reviewer.process_prs()
+            with sqlite3.connect(Path(directory) / "scans.db") as connection:
+                failed_row = connection.execute(
+                    "SELECT status, attempt_count, last_error FROM pr_reviews "
+                    "WHERE pr_number = 42"
+                ).fetchone()
+            self.assertEqual(failed_row[0:2], ("incomplete", 1))
+            self.assertEqual(json.loads(failed_row[2])["stage"], "agent")
+            self.reviewer.process_prs()
+
+        with sqlite3.connect(Path(directory) / "scans.db") as connection:
+            row = connection.execute(
+                "SELECT status, attempt_count, last_error FROM pr_reviews "
+                "WHERE pr_number = 42"
+            ).fetchone()
+        self.assertEqual(row, ("completed", 2, None))
+
+    def test_review_post_failure_persists_post_stage(self):
+        pull_request = {
+            "number": 42,
+            "author": {"login": "contributor"},
+            "headRefOid": "a" * 40,
+        }
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        directory = temporary_directory.name
+        with mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(
+            self.reviewer, "DB_FILE", Path(directory) / "scans.db"
+        ), mock.patch.dict(
+            os.environ,
+            {
+                "GITHUB_PERSONAL_ACCESS_TOKEN": "token",
+                "PR_REVIEWER_REPOSITORY": "owner/repository",
+            },
+        ), mock.patch.object(
+            self.reviewer, "get_open_prs", return_value=[pull_request]
+        ), mock.patch.object(
+            self.reviewer, "get_pr_diff", return_value="+safe change"
+        ), mock.patch.object(
+            self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
+        ), mock.patch.object(
+            self.reviewer, "post_pr_review", return_value=False
+        ):
+            with self.assertRaises(RuntimeError):
+                self.reviewer.process_prs()
+
+        with sqlite3.connect(Path(directory) / "scans.db") as connection:
+            row = connection.execute(
+                "SELECT status, attempt_count, last_error FROM pr_reviews "
+                "WHERE pr_number = 42"
+            ).fetchone()
+        self.assertEqual(row[0:2], ("failed", 1))
+        self.assertEqual(json.loads(row[2])["stage"], "post")
+
+    def test_error_diagnostic_includes_sanitized_exception_chain(self):
+        cause = TimeoutError("gh diff timed out with token=super-secret-value")
+        error = RuntimeError("Unable to fetch diff through API or gh")
+        error.__cause__ = cause
+
+        payload = json.loads(self.reviewer.error_diagnostic("fetch", error))
+
+        self.assertIn("Unable to fetch diff", payload["message"])
+        self.assertIn("gh diff timed out", payload["message"])
+        self.assertNotIn("super-secret-value", payload["message"])
+
+    def test_error_diagnostic_redacts_oauth_style_fields(self):
+        field_names = [
+            "access_" + "token",
+            "refresh_" + "token",
+            "client_" + "secret",
+            "OPENAI_" + "API_KEY",
+            "MY_" + "TOKEN",
+        ]
+        message = " ".join(
+            f"{name}=sensitive-{index}" for index, name in enumerate(field_names)
+        )
+        escaped_value = 'json-sensitive-"-suffix'
+        message += " " + json.dumps({field_names[0]: escaped_value})
+
+        payload = json.loads(self.reviewer.error_diagnostic("agent", message))
+
+        for index, name in enumerate(field_names):
+            self.assertIn(name, payload["message"])
+            self.assertNotIn(f"sensitive-{index}", payload["message"])
+        self.assertNotIn("json-sensitive", payload["message"])
+        self.assertNotIn("suffix", payload["message"])
+
+    def test_error_diagnostic_remains_valid_json_at_length_limit(self):
+        diagnostic = self.reviewer.error_diagnostic(
+            "agent", 'password="' + ("\\\"secret" * 500)
+        )
+
+        self.assertLessEqual(len(diagnostic), self.reviewer.MAX_ERROR_CHARS)
+        payload = json.loads(diagnostic)
+        self.assertEqual(payload["stage"], "agent")
+        self.assertNotIn("secret", payload["message"])
+
+    def test_init_db_migrates_existing_review_rows(self):
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        database = Path(temporary_directory.name) / "scans.db"
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "CREATE TABLE pr_reviews (pr_number INTEGER PRIMARY KEY, author TEXT, "
+                "status TEXT, created_at TEXT, reviewed_at TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO pr_reviews VALUES (42, 'contributor', 'failed', "
+                "'created', NULL)"
+            )
+
+        with mock.patch.object(self.reviewer, "DB_FILE", database):
+            self.reviewer.init_db()
+
+        with sqlite3.connect(database) as connection:
+            row = connection.execute(
+                "SELECT pr_number, attempt_count, last_error, last_attempt_at "
+                "FROM pr_reviews"
+            ).fetchone()
+        self.assertEqual(row, (42, 0, None, None))
+
+    def test_begin_retry_preserves_previous_diagnostic_until_outcome(self):
+        temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        database = Path(temporary_directory.name) / "scans.db"
+        with mock.patch.object(self.reviewer, "DB_FILE", database):
+            self.reviewer.init_db()
+        with sqlite3.connect(database) as connection:
+            cursor = connection.cursor()
+            self.reviewer.begin_review_attempt(cursor, 42, "contributor", "a" * 40)
+            self.reviewer.update_review_state(
+                cursor, 42, "failed", "fetch", "first failure"
+            )
+            self.reviewer.begin_review_attempt(cursor, 42, "contributor", "a" * 40)
+            connection.commit()
+            row = connection.execute(
+                "SELECT status, attempt_count, last_error FROM pr_reviews "
+                "WHERE pr_number = 42"
+            ).fetchone()
+
+        self.assertEqual(row[0:2], ("working", 2))
+        self.assertEqual(json.loads(row[2])["message"], "first failure")
 
     def test_repository_is_derived_from_origin(self):
         result = mock.Mock(stdout="git@github.com:owner/repository.git\n")
@@ -640,6 +876,10 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertIn("fails closed", post_review.call_args.args[1])
         self.assertIn("VERDICT: REQUEST_CHANGES", post_review.call_args.args[1])
 
+    def test_failed_agy_result_uses_stdout_as_diagnostic_fallback(self):
+        self.assertEqual(self.reviewer.decode_agy_result(1, b"provider offline", b""), "")
+        self.assertEqual(self.reviewer.LAST_AGY_ERROR, "provider offline")
+
     def test_file_limit_exit_salvages_truncated_agy_stdout(self):
         payload = b"x" * self.reviewer.MAX_REVIEW_BYTES
         result = self.reviewer.decode_agy_result(-25, payload, b"file too large")
@@ -674,7 +914,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory).resolve()
-        ), mock.patch.object(self.reviewer.subprocess, "check_call", side_effect=capture):
+        ), mock.patch.object(self.reviewer.subprocess, "run", side_effect=capture):
             self.assertTrue(
                 self.reviewer.post_pr_review(
                     55,
@@ -703,7 +943,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ) as check_output, mock.patch.object(
             self.reviewer.subprocess, "Popen", return_value=process
         ) as popen, mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=capture_review
+            self.reviewer.subprocess, "run", side_effect=capture_review
         ):
             self.reviewer.get_open_prs(repository)
             self.reviewer.read_gh_diff(7, repository)
@@ -833,7 +1073,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
         ), mock.patch.object(
             self.reviewer.subprocess,
-            "check_call",
+            "run",
             side_effect=[post_failure, None],
         ) as check_call:
             with self.assertRaisesRegex(RuntimeError, "review could not be posted"):
