@@ -559,6 +559,9 @@ jobs:
       (step) => step.name === 'Ensure only root release is marked latest',
     );
     expect(releaseLatestStep).toBeTruthy();
+    expect(expectRecord(releaseLatestStep?.env, 'latest-release repair environment').GH_REPO).toBe(
+      '${{ github.repository }}',
+    );
     const releaseLatestRun = String(releaseLatestStep?.run ?? '');
     const firstCommand = releaseLatestRun
       .split('\n')
