@@ -45,7 +45,9 @@ For a persistent selection, update the config used by the server:
 }
 ```
 
-`providers.overrides.<provider>.extraArgs` changes that provider's CLI arguments. For dashboard chat, `providers.overrides.<selected-provider>.model` has the highest model precedence. When that field is absent, `chat.model` overrides the provider's built-in chat model. Remove a stale selected-provider model override (or set it to the same value) when changing `chat.model`. Keep provider credentials in the provider's normal environment or credential store, not in this JSON file.
+`providers.overrides.<provider>.extraArgs` changes that provider's CLI arguments for conversational replies. For those replies, `providers.overrides.<selected-provider>.model` has the highest model precedence. When that field is absent, optional `chat.model` overrides the provider's built-in chat model. Remove a stale selected-provider model override (or set it to the same value) when changing `chat.model`.
+
+Dashboard `/run` uses the selected provider's execution adapter, not the conversational adapter. Its spawned agent uses the provider's built-in/default model; `chat.model`, provider `model`, and provider `extraArgs` do not change `/run` execution. A trusted provider `command` override does apply to both paths. Keep provider credentials in the provider's normal environment or credential store, not in this JSON file.
 
 Command overrides are intentionally fail-closed. Do not add `command` when the provider's normal binary is sufficient. To use a wrapper or nonstandard binary, put the override in an explicit operator-owned config outside the repository, set `trustCommandOverride: true`, restrict an absolute wrapper path with `trustedCommandPaths`, and start the server with both `--config <operator-config.json>` and `--trust-provider-command-overrides`:
 
@@ -210,8 +212,8 @@ and marker-looking text nested there must not be treated as a real prompt bounda
 - verify the selected CLI provider works directly and is authenticated, then verify it with `frankenbeast chat`
 - pass `--provider <name>` explicitly to distinguish a bad `providers.default` from a provider runtime failure
 - if fallback selection is unexpected, pass `--providers <comma-separated-list>` explicitly and check `providers.fallbackChain`
-- if you use a config file, pass `--config <path>` and confirm that file contains `providers` and `chat.model` at the top level
-- if `chat.model` appears to be ignored, check `providers.overrides.<selected-provider>.model`, which takes precedence
+- if you use a config file, pass `--config <path>` and confirm provider settings are under top-level `providers`; when used, the optional conversation-model override belongs at `chat.model`
+- if `chat.model` appears to be ignored for a conversational reply, check `providers.overrides.<selected-provider>.model`, which takes precedence; neither model setting changes `/run` execution
 - if a command override is refused, do not weaken repository config; use the operator-owned config and explicit trust flow above
 
 `The UI loads but does not connect`

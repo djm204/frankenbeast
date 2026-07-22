@@ -12,7 +12,9 @@ describe('issue #3507 dashboard chat provider override guidance', () => {
     expect(guide).toContain('`--provider <name>` wins over `providers.default`');
     expect(guide).toContain('`--providers <comma-separated-list>` wins over `providers.fallbackChain`');
     expect(guide).toContain('`providers.overrides.<selected-provider>.model` has the highest model precedence');
-    expect(guide).toContain('`chat.model` overrides the provider\'s built-in chat model');
+    expect(guide).toContain('optional `chat.model` overrides the provider\'s built-in chat model');
+    expect(guide).toContain('`chat.model`, provider `model`, and provider `extraArgs` do not change `/run` execution');
+    expect(guide).toContain('the optional conversation-model override belongs at `chat.model`');
     expect(guide).toContain('`--trust-provider-command-overrides`');
     expect(guide).toContain('explicit operator-owned config outside the repository');
     expect(guide).toContain('trust fields in `.fbeast/config.json` are stripped');

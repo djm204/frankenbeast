@@ -1,7 +1,7 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-21 — Dashboard chat model precedence
-- For dashboard chat, the selected provider's `providers.overrides.<provider>.model` wins over `chat.model`; `chat.model` only replaces the provider's built-in chat model when no selected-provider model override exists. Trace both initial adapter construction and runtime provider override resolution before documenting model precedence.
+- For conversational dashboard replies, the selected provider's `providers.overrides.<provider>.model` wins over `chat.model`; `chat.model` only replaces the provider's built-in chat model when no selected-provider model override exists. Dashboard `/run` uses a separate execution adapter that ignores both model settings and provider `extraArgs`, although it does apply trusted command overrides. Trace both adapter construction paths and runtime provider override resolution before documenting dashboard behavior.
 
 ## 2026-07-20 — Outbound request deadlines must include response consumption
 - JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
