@@ -221,6 +221,9 @@ function validateNonNegativeInteger(value: number, fieldName: string): number {
   if (!Number.isInteger(value) || value < 0) {
     throw new RangeError(`${fieldName} must be a non-negative integer`)
   }
+  if (!Number.isSafeInteger(value)) {
+    throw new RangeError(`${fieldName} must be a non-negative safe integer`)
+  }
   return value
 }
 

@@ -1246,6 +1246,16 @@ describe('WebhookNotifier', () => {
       expect(mockFetch).not.toHaveBeenCalled()
     })
 
+    it('rejects unsafe integer maxRetries during retry configuration validation', () => {
+      expect(
+        () =>
+          createNotifier({
+            retry: { maxRetries: Number.MAX_SAFE_INTEGER + 1 },
+          }),
+      ).toThrow('retry.maxRetries must be a non-negative safe integer')
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
     it('rejects invalid retry delay bounds during retry configuration validation', () => {
       const invalidOptions = [
         { retry: { maxRetries: 1, baseDelayMs: -1 } },
