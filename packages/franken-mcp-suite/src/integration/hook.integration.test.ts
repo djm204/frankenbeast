@@ -68,11 +68,13 @@ describe('fbeast-hook runtime', () => {
       ['openai', 'fixture', 'value'].join('-'),
       ['azure', 'fixture', 'value'].join('-'),
       ['auth', 'fixture', 'value'].join('-'),
+      ['aws', 'fixture', 'access-id'].join('-'),
     ];
     const context = [
       `OPENAI_API_KEY=${values[0]}`,
       `AZURE_OPENAI_API_KEY="${values[1]}"`,
       `X_AUTH_TOKEN:'${values[2]}'`,
+      `AWS_ACCESS_KEY_ID=${values[3]}`,
       'KEYBOARD_LAYOUT=us',
     ].join(' ');
 
