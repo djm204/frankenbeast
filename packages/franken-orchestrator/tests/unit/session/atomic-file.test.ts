@@ -128,6 +128,34 @@ describe('atomic-file', () => {
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
       expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
     });
+
+    it('recovers when a restarted process reuses the crashed writer PID', () => {
+      const dir = makeTmpDir('atomic-write-reused-pid-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000012`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+          writerPid: process.pid,
+          writerInstanceId: 'crashed-process-instance',
+        }),
+        'utf8',
+      );
+
+      atomicWriteFileSync(filePath, '{"new":true}');
+
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+      expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
+    });
   });
 
   describe('recoverStateWriteTransaction()', () => {

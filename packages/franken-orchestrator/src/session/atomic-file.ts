@@ -13,12 +13,14 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import { basename, dirname, join, resolve } from 'node:path';
 
 const STALE_JOURNAL_AGE_MS = 5 * 60_000;
 const JOURNAL_REFRESH_INTERVAL_MS = 5_000;
 const WRITE_CHUNK_BYTES = 1024 * 1024;
+const PROCESS_INSTANCE_ID = randomUUID();
 let writeCounter = 0;
 
 export type StateWriteJournalPhase = 'preparing' | 'writing-temp' | 'renaming';
@@ -31,6 +33,7 @@ export interface StateWriteTransactionJournal {
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly writerPid?: number;
+  readonly writerInstanceId?: string;
 }
 
 export interface StateWriteJournalRecovery {
@@ -141,6 +144,9 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
   if (value.writerPid !== undefined && (!Number.isSafeInteger(value.writerPid) || value.writerPid <= 0)) {
     throw new Error(`state write journal ${journalPath} writerPid must be a positive safe integer`);
   }
+  if (value.writerInstanceId !== undefined && (typeof value.writerInstanceId !== 'string' || value.writerInstanceId.length === 0)) {
+    throw new Error(`state write journal ${journalPath} writerInstanceId must be a non-empty string`);
+  }
   return {
     schemaVersion: 1,
     targetPath: value.targetPath,
@@ -149,6 +155,7 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
     ...(value.writerPid === undefined ? {} : { writerPid: value.writerPid }),
+    ...(value.writerInstanceId === undefined ? {} : { writerInstanceId: value.writerInstanceId }),
   };
 }
 
@@ -274,6 +281,9 @@ function journalWriterIsAlive(journal: StateWriteTransactionJournal): boolean {
     // the stale timeout so an active writer cannot be mistaken for a crash.
     return true;
   }
+  if (journal.writerPid === process.pid && journal.writerInstanceId !== undefined) {
+    return journal.writerInstanceId === PROCESS_INSTANCE_ID;
+  }
   try {
     process.kill(journal.writerPid, 0);
     return true;
@@ -291,7 +301,8 @@ function sameStateWriteTransaction(
     pathsReferenceSameFile(left.targetPath, right.targetPath) &&
     pathsReferenceSameFile(left.tempPath, right.tempPath) &&
     left.startedAt === right.startedAt &&
-    left.writerPid === right.writerPid
+    left.writerPid === right.writerPid &&
+    left.writerInstanceId === right.writerInstanceId
   );
 }
 
@@ -443,6 +454,7 @@ export function atomicWriteFileSync(
     tempPath: resolve(tmpPath),
     startedAt,
     writerPid: process.pid,
+    writerInstanceId: PROCESS_INSTANCE_ID,
   };
   try {
     let fd: number;
