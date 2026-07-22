@@ -2718,6 +2718,131 @@ describe('hard-coded example secret scanner', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it('does not treat unparenthesized arrow parameters as imported namespace aliases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'single-parameter-arrow-shadow.mjs'), [
+      "import * as cp from 'node:child_process';",
+      'const useMock = cp => {',
+      "  const child = cp.spawn('crontab', ['-']);",
+      '  const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      '  child.stdin.end(entry);',
+      '};',
+      'void useMock;',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('does not create spawn method aliases from template documentation', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'documented-spawn-method-alias.mjs'), [
+      "import * as cp from 'node:child_process';",
+      'const docs = `',
+      'const launch = cp.spawn;',
+      '`;',
+      "const child = launch('crontab', ['-']);",
+      'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      'child.stdin.end(entry);',
+      'void docs;',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('rejects direct dynamic-import crontab spawn calls', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'direct-dynamic-import-spawn.mjs'), [
+      "const child = (await import('node:child_process')).spawn('crontab', ['-']);",
+      'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      'child.stdin.end(entry);',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/direct-dynamic-import-spawn.mjs:3');
+  });
+
+  it('rejects direct require spawn method aliases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'direct-require-spawn-alias.cjs'), [
+      "const launch = require('node:child_process').spawn;",
+      "const child = launch('crontab', ['-']);",
+      'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      'child.stdin.end(entry);',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/direct-require-spawn-alias.cjs:4');
+  });
+
+  it('rejects exported CommonJS namespace aliases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'exported-commonjs-namespace.ts'), [
+      "export const cp = require('node:child_process');",
+      "const child = cp.spawn('crontab', ['-']);",
+      'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      'child.stdin.end(entry);',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/exported-commonjs-namespace.ts:4');
+  });
+
+  it('does not treat scoped crontab process aliases as file-wide', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'scoped-crontab-process.mjs'), [
+      "import * as cp from 'node:child_process';",
+      'function createInstaller() {',
+      "  const child = cp.spawn('crontab', ['-']);",
+      '  return child;',
+      '}',
+      'function useMock(child) {',
+      '  const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      '  child.stdin.end(entry);',
+      '}',
+      'void createInstaller;',
+      'void useMock;',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('does not treat destructured local shadows as imported namespace aliases', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'destructured-namespace-shadow.mjs'), [
+      "import * as cp from 'node:child_process';",
+      'function useMock(mocks) {',
+      '  const { cp } = mocks;',
+      "  const child = cp.spawn('crontab', ['-']);",
+      '  const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+      '  child.stdin.end(entry);',
+      '}',
+      'void useMock;',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it('rejects Codex round 28 cron scanner bypasses', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
