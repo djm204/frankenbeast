@@ -325,7 +325,11 @@ describe('ChatApiClient', () => {
           }),
       });
 
-      await expect(client.getSession('nonexistent')).rejects.toThrow('Session not found');
+      await expect(client.getSession('nonexistent')).rejects.toMatchObject({
+        message: 'Session not found',
+        name: 'ChatApiError',
+        status: 404,
+      });
     });
   });
 });

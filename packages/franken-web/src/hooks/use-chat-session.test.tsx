@@ -11,7 +11,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: CloseEvent) => void) | null = null;
   readyState = MockWebSocket.OPEN;
   send = vi.fn();
   close = vi.fn();
@@ -71,6 +71,7 @@ function deferred<T>() {
 describe('useChatSession error banners', () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     MockWebSocket.instances = [];
@@ -112,10 +113,11 @@ describe('useChatSession error banners', () => {
     ]);
   });
 
-  it('fetches a fresh socket token before reconnecting a closed websocket', async () => {
+  it('fetches a fresh socket token after the reconnect delay', async () => {
     const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2'] });
     vi.stubGlobal('fetch', fetch);
     vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
 
     renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
 
@@ -127,14 +129,17 @@ describe('useChatSession error banners', () => {
       'franken.chat.token.socket-token-1',
     ]);
 
+    vi.useFakeTimers();
     act(() => {
       MockWebSocket.instances[0]!.onclose?.();
     });
 
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledTimes(4);
-      expect(MockWebSocket.instances).toHaveLength(2);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
     });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(MockWebSocket.instances).toHaveLength(2);
     expect(fetch).toHaveBeenNthCalledWith(3,
       'http://localhost:3000/v1/chat/sessions/session-1',
       { credentials: 'same-origin', method: 'GET' },
@@ -143,6 +148,152 @@ describe('useChatSession error banners', () => {
       'franken.chat.v1',
       'franken.chat.token.socket-token-2',
     ]);
+  });
+
+  it('backs off before refreshing a closed websocket session', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    vi.useFakeTimers();
+    act(() => {
+      MockWebSocket.instances[0]!.onclose?.();
+    });
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(499);
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('continues backing off after repeated transient pre-open failures', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2', 'socket-token-3'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    vi.useFakeTimers();
+    act(() => {
+      MockWebSocket.instances[0]!.onerror?.();
+      MockWebSocket.instances[0]!.onclose?.(new CloseEvent('close', { code: 1006 }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    act(() => {
+      MockWebSocket.instances[1]!.onerror?.();
+      MockWebSocket.instances[1]!.onclose?.(new CloseEvent('close', { code: 1006 }));
+    });
+
+    expect(result.current.connectionStatus).toBe('reconnecting');
+    expect(result.current.errorBanners).not.toContainEqual(
+      expect.objectContaining({ code: 'socket_setup_failed' }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(MockWebSocket.instances).toHaveLength(3);
+  });
+
+  it('does not reset authentication failures merely because the socket opened', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2', 'socket-token-3'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    vi.useFakeTimers();
+    act(() => {
+      MockWebSocket.instances[0]!.onopen?.();
+      MockWebSocket.instances[0]!.onclose?.(new CloseEvent('close', { code: 4401, reason: 'Unauthorized' }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    act(() => {
+      MockWebSocket.instances[1]!.onopen?.();
+      MockWebSocket.instances[1]!.onclose?.(new CloseEvent('close', { code: 4401, reason: 'Unauthorized' }));
+    });
+
+    expect(result.current.connectionStatus).toBe('error');
+    expect(result.current.errorBanners[0]).toMatchObject({ code: 'socket_setup_failed' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('cancels a pending automatic retry when reconnect is requested manually', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    const { result } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    vi.useFakeTimers();
+    act(() => {
+      MockWebSocket.instances[0]!.onclose?.();
+      result.current.reconnect();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('cancels a pending reconnect timer when the hook unmounts', async () => {
+    const fetch = chatFetch({ tickets: ['socket-token-1', 'socket-token-2'] });
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    const { unmount } = renderHook(() => useChatSession({ baseUrl: 'http://chat.test', projectId: 'project-1' }));
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+
+    vi.useFakeTimers();
+    act(() => MockWebSocket.instances[0]!.onclose?.());
+    unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 
   it('fetches a fresh socket token before reconnecting after a websocket error', async () => {

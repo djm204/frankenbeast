@@ -11,6 +11,11 @@ const mockSocketUrl = vi.fn();
 const mockSocketProtocols = vi.fn();
 
 vi.mock('../../src/lib/api', () => ({
+  ChatApiError: class ChatApiError extends Error {
+    constructor(message: string, readonly status: number) {
+      super(message);
+    }
+  },
   ChatApiClient: vi.fn(function (this: {
     createSession: typeof mockCreateSession;
     createSocketTicket: typeof mockCreateSocketTicket;

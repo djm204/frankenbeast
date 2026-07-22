@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ChatApiClient,
+  ChatApiError,
   type PendingApproval,
   type TokenTotals,
   type TranscriptMessage,
@@ -31,6 +32,7 @@ import {
   updateReceipt,
   type PendingSend,
 } from './chat-session-state';
+import { useChatReconnect } from './use-chat-reconnect';
 import type {
   ActivityEvent,
   ChatErrorAction,
@@ -44,9 +46,7 @@ import type {
   UseChatSessionResult,
 } from './chat-session-types';
 export type * from './chat-session-types';
-
 const APPROVAL_RESPONSE_TIMEOUT_MS = 15_000;
-
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
   const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -87,6 +87,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const approvalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedSocketEventIdsRef = useRef<Set<string>>(new Set());
   const replayCursorsRef = useRef<Map<string, number>>(new Map());
+  const reconnectControl = useChatReconnect(refreshSession);
   function addErrorBanner(banner: ChatErrorBanner) {
     errorActionRef.current.set(banner.id, banner.action);
     setErrorBanners((current) => [banner, ...current.filter((item) => item.action !== banner.action)].slice(0, 3));
@@ -173,21 +174,20 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       })
       .finally(() => clearTimeout(refreshTimeout));
   }
-  function refreshSession() {
+  function refreshSession(): Promise<'complete' | 'retry'> {
     if (!sessionId) {
       setSessionRetrySeed((current) => current + 1);
-      return;
+      return Promise.resolve('complete');
     }
-
     const capturedSessionId = sessionId;
-    void clientRef.current.getSession(capturedSessionId)
+    return clientRef.current.getSession(capturedSessionId)
       .then(async (refreshed) => {
         if (!sessionStillCurrent(capturedSessionId) || refreshed.id !== capturedSessionId) {
-          return;
+          return 'complete' as const;
         }
         const ticket = await clientRef.current.createSocketTicket(refreshed.id);
         if (!sessionStillCurrent(refreshed.id)) {
-          return;
+          return 'complete' as const;
         }
         setSocketToken(ticket);
         setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
@@ -200,13 +200,16 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setStatus(refreshed.state === 'executing' ? 'streaming' : 'idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
+        setErrorBanners((current) => current.filter((item) => item.action !== 'retry-session'));
+        return 'complete' as const;
       })
       .catch((error) => {
         if (!sessionStillCurrent(capturedSessionId)) {
-          return;
+          return 'complete' as const;
         }
+        const retryable = !(error instanceof ChatApiError && [401, 403, 404].includes(error.status));
         setStatus('error');
-        setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
+        setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : retryable ? 'reconnecting' : 'error');
         addErrorBanner(makeBanner(
           'Unable to refresh chat session',
           errorMessage(error, 'The chat API did not return a refreshed session.'),
@@ -214,14 +217,18 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           'Retry session',
           'session_refresh_failed',
         ));
+        return retryable ? 'retry' as const : 'complete' as const;
       });
   }
-
   async function retryError(id: string): Promise<string | undefined> {
     const action = errorActionRef.current.get(id);
     dismissError(id);
-    if (action === 'retry-session' || action === 'reconnect') {
-      refreshSession();
+    if (action === 'reconnect') {
+      reconnectControl.manualReconnect();
+      return undefined;
+    }
+    if (action === 'retry-session') {
+      reconnectControl.manualReconnect();
       return undefined;
     }
     if (action === 'retry-message' && lastMessageRef.current) {
@@ -232,7 +239,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
     return undefined;
   }
-
   useEffect(() => {
     let cancelled = false;
     const client = clientRef.current;
@@ -257,6 +263,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     errorActionRef.current.clear();
     processedSocketEventIdsRef.current.clear();
     replayCursorsRef.current.clear();
+    reconnectControl.reset();
     setStatus('connecting');
     setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'connecting');
 
@@ -309,11 +316,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     if (!sessionId || !socketToken || typeof window === 'undefined') {
       return;
     }
-
     function handleOnline() {
       failAllPendingSends(new Error('Connection is reconnecting before the server acknowledged the message.'));
       setConnectionStatus('reconnecting');
-      refreshSession();
+      reconnectControl.manualReconnect();
     }
 
     window.addEventListener('online', handleOnline);
@@ -331,18 +337,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
 
     let shouldReconnect = true;
-    let reconnectRefreshInFlight = false;
     let protocolErrored = false;
+    const reconnectCycle = reconnectControl.beginCycle();
     setConnectionStatus('connecting');
     readyRef.current = false;
-
-    function refreshBeforeReconnect() {
-      if (reconnectRefreshInFlight) {
-        return;
-      }
-      reconnectRefreshInFlight = true;
-      refreshSession();
-    }
 
     function handleProtocolError(message: string) {
       protocolErrored = true;
@@ -415,6 +413,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
       switch (payload.type) {
         case 'session.ready':
+          reconnectCycle.onReady();
           if (!readyRef.current) {
             readyRef.current = true;
             setMessages((current) => reconcileRecoveryMessages(current, payload.transcript));
@@ -594,10 +593,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         return;
       }
       setConnectionStatus('reconnecting');
-      refreshBeforeReconnect();
+      reconnectCycle.schedule();
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (socketRef.current !== socket) {
         return;
       }
@@ -609,12 +608,19 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setApprovalError('Connection interrupted while resolving approval. Try again if approval is still pending.');
       }
       if (shouldReconnect) {
+        if (reconnectCycle.onClose(event)) {
+          shouldReconnect = false;
+          setConnectionStatus('error');
+          setStatus('error');
+          addErrorBanner(makeBanner('Chat connection needs attention', 'Automatic reconnects stopped after repeated connection setup failures. Check the backend and operator credentials, then reconnect.', 'reconnect', 'Reconnect after checking setup', 'socket_setup_failed'));
+          return;
+        }
         if (typeof navigator !== 'undefined' && navigator.onLine === false) {
           setConnectionStatus('offline');
           return;
         }
         setConnectionStatus('reconnecting');
-        refreshBeforeReconnect();
+        reconnectCycle.schedule();
       } else {
         setConnectionStatus('disconnected');
       }
@@ -622,6 +628,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
 
     return () => {
       shouldReconnect = false;
+      reconnectCycle.dispose();
       failAllPendingSends(new Error('Chat session changed before the server acknowledged the message. Your draft was kept.'));
       updateApprovalResolving(false);
       socket.close();
@@ -876,7 +883,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     messages,
     pendingApproval,
     projectId,
-    reconnect: refreshSession,
+    reconnect: reconnectControl.manualReconnect,
     retryError,
     retryMessage,
     send,
