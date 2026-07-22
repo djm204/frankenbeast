@@ -68,6 +68,36 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
+function mockStdinError(errorMessage = 'write EPIPE') {
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  let hadErrorListener = false;
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => {
+      setImmediate(() => {
+        stdout.end();
+        setImmediate(() => proc.emit('close', 1));
+      });
+      return true;
+    }),
+  });
+  vi.spyOn(stdin, 'write').mockImplementation(() => {
+    hadErrorListener = stdin.listenerCount('error') > 0;
+    setImmediate(() => {
+      if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
+    });
+    return true;
+  });
+  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
+  return { hadErrorListener: () => hadErrorListener, proc };
+}
+
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
   const events: LlmStreamEvent[] = [];
   for await (const e of iterable) events.push(e);
@@ -353,6 +383,22 @@ describe('GeminiCliAdapter', () => {
         retryable: false,
       }]);
       expect(spawn).not.toHaveBeenCalled();
+    });
+
+    it('handles child stdin errors through the provider error path', async () => {
+      const { hadErrorListener, proc } = mockStdinError();
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(hadErrorListener()).toBe(true);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('write EPIPE'),
+        retryable: false,
+      }]);
     });
 
     it('parses stream-json text events', async () => {

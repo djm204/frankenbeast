@@ -65,6 +65,37 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
+function mockStdinError(errorMessage = 'write EPIPE', stdoutFrame?: string) {
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  let hadErrorListener = false;
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1234,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => {
+      setImmediate(() => {
+        if (stdoutFrame) stdout.write(`${stdoutFrame}\n`);
+        stdout.end();
+        setImmediate(() => proc.emit('close', 1));
+      });
+      return true;
+    }),
+  });
+  vi.spyOn(stdin, 'write').mockImplementation(() => {
+    hadErrorListener = stdin.listenerCount('error') > 0;
+    setImmediate(() => {
+      if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
+    });
+    return true;
+  });
+  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
+  return { hadErrorListener: () => hadErrorListener, proc };
+}
+
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
   const events: LlmStreamEvent[] = [];
   for await (const e of iterable) events.push(e);
@@ -197,6 +228,41 @@ describe('ClaudeCliAdapter', () => {
       expect(proc.kill).not.toHaveBeenCalled();
     });
 
+    it('handles child stdin errors through the provider error path', async () => {
+      const { hadErrorListener, proc } = mockStdinError();
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(hadErrorListener()).toBe(true);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('write EPIPE'),
+        retryable: false,
+      }]);
+    });
+
+    it('preserves a provider error frame emitted after stdin fails', async () => {
+      const providerError = JSON.stringify({
+        type: 'error',
+        error: { message: 'rate limit exceeded while rejecting prompt' },
+      });
+      mockStdinError('write EPIPE', providerError);
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: 'rate limit exceeded while rejecting prompt',
+        retryable: true,
+      }]);
+    });
+
     it('parses text stream events', async () => {
       mockSpawn([
         JSON.stringify({ type: 'message_start', message: { usage: { input_tokens: 50 } } }),
@@ -207,6 +273,26 @@ describe('ClaudeCliAdapter', () => {
       const events = await collectEvents(adapter.execute({ systemPrompt: '', messages: [{ role: 'user', content: 'Hi' }] }));
       expect(events[0]).toEqual({ type: 'text', content: 'Hello world' });
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 } });
+    });
+
+    it('keeps draining partial-message output after message_stop', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'prefix' } }),
+        JSON.stringify({ type: 'message_stop' }),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'suffix' }] } }),
+      ]);
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'Hi' }],
+        extraArgs: ['--include-partial-messages'],
+      }));
+
+      expect(events).toEqual([
+        { type: 'text', content: 'prefix' },
+        { type: 'text', content: 'suffix' },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
     });
 
     it('parses Claude CLI result wrapper frames', async () => {

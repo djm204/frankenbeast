@@ -493,6 +493,49 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow('something went wrong');
       });
 
+      it('rejects child stdin errors instead of emitting an unhandled stream error', async () => {
+        let hadErrorListener = false;
+        const spawnFn = (): ChildProcess => {
+          const proc = new EventEmitter() as ChildProcess;
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          const stderr = new PassThrough();
+          Object.defineProperty(proc, 'stdin', { value: stdin });
+          Object.defineProperty(proc, 'stdout', { value: stdout });
+          Object.defineProperty(proc, 'stderr', { value: stderr });
+          Object.defineProperty(proc, 'pid', { value: 12345 });
+          Object.defineProperty(proc, 'kill', { value: vi.fn(() => true) });
+          vi.spyOn(stdin, 'write').mockImplementation(() => {
+            hadErrorListener = stdin.listenerCount('error') > 0;
+            setImmediate(() => {
+              stderr.write('rate limit exceeded before prompt was accepted');
+              if (hadErrorListener) {
+                stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+              }
+              proc.emit('close', 1);
+            });
+            return true;
+          });
+          return proc;
+        };
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+        try {
+          await adapter.execute({ prompt: 'x'.repeat(128 * 1024), maxTurns: 1 });
+          throw new Error('expected execute to throw');
+        } catch (error) {
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toContain('rate limit exceeded before prompt was accepted');
+          expect((error as Error & { cause?: { kind?: string; stderr?: string } }).cause).toEqual(
+            expect.objectContaining({
+              kind: 'rate_limit',
+              stderr: 'rate limit exceeded before prompt was accepted',
+            }),
+          );
+        }
+        expect(hadErrorListener).toBe(true);
+      });
+
       it('strips ANSI from non-zero failure summaries in plain mode', async () => {
         setPlainOutput(true);
         try {

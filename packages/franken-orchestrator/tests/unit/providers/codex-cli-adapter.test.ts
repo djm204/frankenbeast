@@ -62,6 +62,47 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
+function mockStdinError(errorMessage = 'write EPIPE', late = false, stdoutFrame?: string) {
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  let hadErrorListener = false;
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => {
+      if (!late) {
+        setImmediate(() => {
+          stdout.end();
+          setImmediate(() => proc.emit('close', 1));
+        });
+      }
+      return true;
+    }),
+  });
+  vi.spyOn(stdin, 'write').mockImplementation(() => {
+    hadErrorListener = stdin.listenerCount('error') > 0;
+    setImmediate(() => {
+      if (late) {
+        if (stdoutFrame) stdout.write(`${stdoutFrame}\n`);
+        stdout.end();
+        setImmediate(() => {
+          if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
+          setImmediate(() => proc.emit('close', 0));
+        });
+      } else if (hadErrorListener) {
+        stdin.emit('error', new Error(errorMessage));
+      }
+    });
+    return true;
+  });
+  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
+  return { hadErrorListener: () => hadErrorListener, proc };
+}
+
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
   const events: LlmStreamEvent[] = [];
   for await (const e of iterable) events.push(e);
@@ -249,6 +290,56 @@ describe('CodexCliAdapter', () => {
         retryable: false,
       });
       expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('handles child stdin errors through the provider error path', async () => {
+      const { hadErrorListener, proc } = mockStdinError();
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(hadErrorListener()).toBe(true);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('write EPIPE'),
+        retryable: false,
+      }]);
+    });
+
+    it('reports stdin errors that arrive after stdout ends but before process close', async () => {
+      const { proc } = mockStdinError('late write EPIPE', true);
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('late write EPIPE'),
+        retryable: false,
+      }]);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    });
+
+    it('lets a late stdin error preempt a successful terminal frame', async () => {
+      const { proc } = mockStdinError(
+        'partial prompt EPIPE',
+        true,
+        JSON.stringify({ type: 'done', usage: { input_tokens: 1, output_tokens: 1 } }),
+      );
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('partial prompt EPIPE'),
+        retryable: false,
+      }]);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
     });
 
     it('parses tool call events', async () => {

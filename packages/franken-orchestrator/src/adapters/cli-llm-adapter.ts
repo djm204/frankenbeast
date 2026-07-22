@@ -588,15 +588,21 @@ export class CliLlmAdapter implements IAdapter {
         env: input.env,
       });
 
-      child.stdin!.write(input.prompt);
-      child.stdin!.end();
-
       let stdout = '';
       let stderr = '';
       let settled = false;
       let terminated = false;
       let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
       let lineBuffer = '';
+      let stdinError: unknown;
+
+      const buildStdinFailure = (): Error => {
+        const message = stdinError instanceof Error ? stdinError.message : String(stdinError);
+        const failure = new Error(`Failed to write prompt to ${input.cmd} stdin: ${message}`, {
+          cause: stdinError,
+        });
+        return Object.assign(failure, { stdout, stderr, exitCode: 1 });
+      };
 
       const settle = (fn: () => void): void => {
         if (settled) return;
@@ -620,7 +626,7 @@ export class CliLlmAdapter implements IAdapter {
         hardKillTimer.unref();
       };
 
-      const terminate = (label: 'timed-out' | 'aborted'): void => {
+      const terminate = (label: 'timed-out' | 'aborted' | 'stdin-failed'): void => {
         terminated = true;
         try {
           child.kill('SIGTERM');
@@ -693,12 +699,21 @@ export class CliLlmAdapter implements IAdapter {
         if (this.opts.onStreamLine && lineBuffer.trim().length > 0) {
           this.opts.onStreamLine(lineBuffer);
         }
+        if (stdinError !== undefined) {
+          settle(() => reject(buildStdinFailure()));
+          return;
+        }
         if (terminated) return;
         settle(() => resolve({ stdout, stderr, exitCode: code ?? 1 }));
       });
 
       child.on('error', (err) => {
         if (terminated) {
+          if (stdinError !== undefined) {
+            clearTimers();
+            settle(() => reject(buildStdinFailure()));
+            return;
+          }
           // Preserve the scheduled SIGKILL fallback if termination failed.
           clearTimeout(timer);
           return;
@@ -706,6 +721,24 @@ export class CliLlmAdapter implements IAdapter {
         clearTimers();
         settle(() => reject(err));
       });
+
+      child.stdin!.on('error', (error) => {
+        if (settled || stdinError !== undefined) return;
+        clearTimeout(timer);
+        input.signal?.removeEventListener('abort', abortRequest);
+        stdinError = error;
+        terminate('stdin-failed');
+      });
+
+      if (!settled) {
+        try {
+          child.stdin!.write(input.prompt);
+          child.stdin!.end();
+        } catch (error) {
+          stdinError = error;
+          terminate('stdin-failed');
+        }
+      }
     });
   }
 }

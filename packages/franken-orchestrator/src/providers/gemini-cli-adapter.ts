@@ -104,9 +104,23 @@ export class GeminiCliAdapter implements ILlmProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      const spawnState: { message: string | undefined } = { message: undefined };
+      const spawnState: {
+        message: string | undefined;
+        source: 'spawn' | 'stdin' | undefined;
+      } = {
+        message: undefined,
+        source: undefined,
+      };
       proc.once('error', (error) => {
         spawnState.message = error.message;
+        spawnState.source = 'spawn';
+      });
+      proc.stdin!.on('error', (error) => {
+        if (spawnState.source !== 'spawn') {
+          spawnState.message = error.message;
+          spawnState.source = 'stdin';
+        }
+        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
       });
 
       const userContent = request.messages
@@ -537,7 +551,10 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
-    spawnState: { message: string | undefined },
+    spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
     proc.once('error', () => {
@@ -608,18 +625,6 @@ export class GeminiCliAdapter implements ILlmProvider {
             return;
           }
           sawTerminalFrame = true;
-
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-
-            },
-          };
-          return;
         } else if (type === 'content_block_delta') {
           const delta = parsed['delta'] as Record<string, unknown>;
           if (delta?.['type'] === 'text_delta') {
@@ -695,16 +700,8 @@ export class GeminiCliAdapter implements ILlmProvider {
             };
             return;
           }
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
-          };
-          return;
+          // Delay success until close so a late stdin EPIPE can preempt a
+          // terminal frame produced from a partial prompt.
         } else if (type === 'error') {
           const message = this.stringifyGeminiContent(parsed['message'] ?? parsed['error'] ?? 'Unknown error');
           yield {
@@ -726,15 +723,29 @@ export class GeminiCliAdapter implements ILlmProvider {
         }
       }
 
-      // Stream ended without message_stop/result/error — check exit code
-      const exitCode = await new Promise<number | null>((resolve) => {
-        proc.on('close', resolve);
-      });
       if (spawnState.message) {
         streamCompleted = true;
         yield {
           type: 'error',
-          error: `gemini process failed to start: ${spawnState.message}`,
+          error: spawnState.source === 'stdin'
+            ? `gemini process stdin failed: ${spawnState.message}`
+            : `gemini process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
+      // Stream ended without message_stop/result/error — check its exit code.
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
+      // stdin errors can arrive after stdout reaches EOF but before process close.
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: spawnState.source === 'stdin'
+            ? `gemini process stdin failed: ${spawnState.message}`
+            : `gemini process failed to start: ${spawnState.message}`,
           retryable: false,
         };
         return;

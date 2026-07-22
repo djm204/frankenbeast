@@ -57,9 +57,23 @@ export class ClaudeCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const spawnState: { message: string | undefined } = { message: undefined };
+    const spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+    } = {
+      message: undefined,
+      source: undefined,
+    };
     proc.once('error', (error) => {
       spawnState.message = error.message;
+      spawnState.source = 'spawn';
+    });
+    proc.stdin!.on('error', (error) => {
+      if (spawnState.source !== 'spawn') {
+        spawnState.message = error.message;
+        spawnState.source = 'stdin';
+      }
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
     });
 
     const userContent = request.messages
@@ -148,7 +162,10 @@ export class ClaudeCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
-    spawnState: { message: string | undefined },
+    spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
     proc.once('error', () => {
@@ -160,6 +177,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
     let totalOutputTokens = 0;
     let emittedText = false;
     let emittedToolUse = false;
+    let sawTerminalFrame = false;
     let streamCompleted = false;
 
     try {
@@ -215,16 +233,9 @@ export class ClaudeCliAdapter implements ILlmProvider {
             };
             return;
           }
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
-          };
-          return;
+          // Delay success until close so a late stdin EPIPE can preempt a
+          // terminal frame produced from a partial prompt.
+          sawTerminalFrame = true;
         } else if (type === 'content_block_start') {
           const block = parsed['content_block'] as Record<string, unknown>;
           if (block?.['type'] === 'tool_use') {
@@ -320,16 +331,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
             };
             return;
           }
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
-          };
-          return;
+          sawTerminalFrame = true;
         } else if (type === 'error') {
           const error = parsed['error'] as Record<string, unknown> | undefined;
           const message =
@@ -341,15 +343,29 @@ export class ClaudeCliAdapter implements ILlmProvider {
         }
       }
 
-      // If process exited without message_stop, check spawn/exit status
-      const exitCode = await new Promise<number | null>((resolve) => {
-        proc.on('close', resolve);
-      });
       if (spawnState.message) {
         streamCompleted = true;
         yield {
           type: 'error',
-          error: `claude process failed to start: ${spawnState.message}`,
+          error: spawnState.source === 'stdin'
+            ? `claude process stdin failed: ${spawnState.message}`
+            : `claude process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
+      // If process exited without message_stop, check its exit status.
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
+      // stdin errors can arrive after stdout reaches EOF but before process close.
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: spawnState.source === 'stdin'
+            ? `claude process stdin failed: ${spawnState.message}`
+            : `claude process failed to start: ${spawnState.message}`,
           retryable: false,
         };
         return;
@@ -359,6 +375,16 @@ export class ClaudeCliAdapter implements ILlmProvider {
           type: 'error',
           error: `claude process exited with code ${exitCode}`,
           retryable: false,
+        };
+      } else if (sawTerminalFrame) {
+        streamCompleted = true;
+        yield {
+          type: 'done',
+          usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          },
         };
       } else if (!emittedText) {
         yield {

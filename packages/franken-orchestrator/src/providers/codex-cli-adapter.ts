@@ -56,9 +56,23 @@ export class CodexCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const spawnState: { message: string | undefined } = { message: undefined };
+    const spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+    } = {
+      message: undefined,
+      source: undefined,
+    };
     proc.once('error', (error) => {
       spawnState.message = error.message;
+      spawnState.source = 'spawn';
+    });
+    proc.stdin!.on('error', (error) => {
+      if (spawnState.source !== 'spawn') {
+        spawnState.message = error.message;
+        spawnState.source = 'stdin';
+      }
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
     });
 
     const userContent = request.messages
@@ -150,7 +164,10 @@ export class CodexCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
-    spawnState: { message: string | undefined },
+    spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
     proc.once('error', () => {
@@ -191,16 +208,8 @@ export class CodexCliAdapter implements ILlmProvider {
           totalOutputTokens =
             (usage['output_tokens'] as number) ?? totalOutputTokens;
           if (type === 'done') {
-            streamCompleted = true;
-            yield {
-              type: 'done',
-              usage: {
-                inputTokens: totalInputTokens,
-                outputTokens: totalOutputTokens,
-                totalTokens: totalInputTokens + totalOutputTokens,
-              },
-            };
-            return;
+            // Do not report success until the child closes: a late stdin EPIPE
+            // means the terminal frame may describe only a partial prompt.
           }
         } else if (type === 'error') {
           const message =
@@ -212,15 +221,29 @@ export class CodexCliAdapter implements ILlmProvider {
         }
       }
 
-      // Stream ended without a done/error frame — check spawn/exit status
-      const exitCode = await new Promise<number | null>((resolve) => {
-        proc.on('close', resolve);
-      });
       if (spawnState.message) {
         streamCompleted = true;
         yield {
           type: 'error',
-          error: `codex process failed to start: ${spawnState.message}`,
+          error: spawnState.source === 'stdin'
+            ? `codex process stdin failed: ${spawnState.message}`
+            : `codex process failed to start: ${spawnState.message}`,
+          retryable: false,
+        };
+        return;
+      }
+      // Stream ended without a done/error frame — check its exit status.
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
+      // stdin errors can arrive after stdout reaches EOF but before process close.
+      if (spawnState.message) {
+        streamCompleted = true;
+        yield {
+          type: 'error',
+          error: spawnState.source === 'stdin'
+            ? `codex process stdin failed: ${spawnState.message}`
+            : `codex process failed to start: ${spawnState.message}`,
           retryable: false,
         };
         return;
