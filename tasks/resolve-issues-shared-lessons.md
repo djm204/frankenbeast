@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-22 — Shared chat command completion catalogs
+- When adding interactive completion for chat commands, derive or cross-check the catalog against every command accepted by the shared runtime, not only the commands handled locally by one CLI wrapper. Approval commands such as `/approve` and `/reject` can be runtime-owned even when the readline layer has no dedicated branch; keep both attached and local chat interfaces on one completer and test paired command prefixes explicitly.
+
 ## 2026-07-21 — Dashboard chat model precedence
 - For conversational dashboard replies, the selected provider's `providers.overrides.<provider>.model` wins over `chat.model`; `chat.model` only replaces the provider's built-in chat model when no selected-provider model override exists. Dashboard `/run` uses a separate execution adapter that ignores both model settings and provider `extraArgs`, although it does apply trusted command overrides. Trace both adapter construction paths and runtime provider override resolution before documenting dashboard behavior.
 
