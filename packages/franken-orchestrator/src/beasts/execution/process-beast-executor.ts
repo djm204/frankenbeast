@@ -23,11 +23,46 @@ import {
 } from '../../cli/run-config-integrity.js';
 
 const STDERR_BUFFER_SIZE = 50;
+const EARLY_OUTPUT_MAX_LINES = 50;
+const EARLY_OUTPUT_MAX_BYTES = 60 * 1_024;
 const REDACTED_SECRET = '[REDACTED]';
 const MIN_CONFIGURED_SECRET_LENGTH = 6;
 const RUN_CONFIG_DIR_MODE = 0o700;
 const RUN_CONFIG_FILE_MODE = 0o600;
 const SPAWN_FAILED_CODE = 'SPAWN_FAILED';
+
+interface EarlyOutputBuffer {
+  readonly lines: string[];
+  bytes: number;
+  droppedLines: number;
+  droppedBytes: number;
+}
+
+function createEarlyOutputBuffer(): EarlyOutputBuffer {
+  return { lines: [], bytes: 0, droppedLines: 0, droppedBytes: 0 };
+}
+
+function bufferEarlyOutput(buffer: EarlyOutputBuffer, line: string): void {
+  const lineBytes = Buffer.byteLength(line, 'utf8');
+  if (
+    buffer.lines.length >= EARLY_OUTPUT_MAX_LINES
+    || buffer.bytes + lineBytes > EARLY_OUTPUT_MAX_BYTES
+  ) {
+    buffer.droppedLines += 1;
+    buffer.droppedBytes += lineBytes;
+    return;
+  }
+  buffer.lines.push(line);
+  buffer.bytes += lineBytes;
+}
+
+function earlyOutputLines(buffer: EarlyOutputBuffer): readonly string[] {
+  if (buffer.droppedLines === 0) return buffer.lines;
+  return [
+    ...buffer.lines,
+    `[early output truncated: dropped ${buffer.droppedLines} line(s) / ${buffer.droppedBytes} byte(s); retained at most ${EARLY_OUTPUT_MAX_LINES} lines / ${EARLY_OUTPUT_MAX_BYTES} bytes]`,
+  ];
+}
 const SAFE_SPAWN_ERROR_CODES = new Set([
   'EACCES',
   'EAGAIN',
@@ -455,8 +490,8 @@ export class ProcessBeastExecutor implements BeastExecutor {
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
-    const earlyStdoutLines: string[] = [];
-    const earlyStderrLines: string[] = [];
+    const earlyStdout = createEarlyOutputBuffer();
+    const earlyStderr = createEarlyOutputBuffer();
     const stderrTail: string[] = [];
     let earlyExit: { code: number | null; signal: string | null } | undefined;
 
@@ -473,7 +508,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
               data: { runId: run.id, attemptId, stream: 'stdout', line: redactedLine, createdAt },
             });
           } else {
-            earlyStdoutLines.push(redactedLine);
+            bufferEarlyOutput(earlyStdout, redactedLine);
           }
         },
         onStderr: (line) => {
@@ -488,7 +523,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
               data: { runId: run.id, attemptId, stream: 'stderr', line: redactedLine, createdAt },
             });
           } else {
-            earlyStderrLines.push(redactedLine);
+            bufferEarlyOutput(earlyStderr, redactedLine);
           }
         },
         onExit: (code, signal) => {
@@ -524,7 +559,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const crashClassification = classifyWorkerCrash({
         stopReason: 'spawn_failed',
         spawnErrorCode: errorCode,
-        stderrTail: earlyStderrLines,
+        stderrTail: earlyStderr.lines,
       });
       const spawnFailedEvent = {
         type: 'run.spawn_failed' as const,
@@ -662,7 +697,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     attemptId = attempt.id;
 
     // Flush early buffered lines to logs and SSE
-    for (const line of earlyStdoutLines) {
+    for (const line of earlyOutputLines(earlyStdout)) {
       const createdAt = new Date(wallClockNow()).toISOString();
       void this.logs.append(run.id, attemptId, 'stdout', line, createdAt);
       this.options.eventBus?.publish({
@@ -670,7 +705,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
         data: { runId: run.id, attemptId, stream: 'stdout', line, createdAt },
       });
     }
-    for (const line of earlyStderrLines) {
+    for (const line of earlyOutputLines(earlyStderr)) {
       const createdAt = new Date(wallClockNow()).toISOString();
       void this.logs.append(run.id, attemptId, 'stderr', line, createdAt);
       this.options.eventBus?.publish({

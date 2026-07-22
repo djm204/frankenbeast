@@ -80,6 +80,48 @@ function createRepository() {
 }
 
 describe('ProcessBeastExecutor log redaction', () => {
+  it('bounds early stdout and stderr by line count and bytes and reports truncation', async () => {
+    const logs: LogEntry[] = [];
+    const repository = createRepository();
+    const logStore = {
+      async append(
+        runId: string,
+        attemptId: string,
+        stream: 'stdout' | 'stderr',
+        message: string,
+      ): Promise<void> {
+        logs.push({ runId, attemptId, stream, message });
+      },
+    } as BeastLogStore;
+    const supervisor: ProcessSupervisorLike = {
+      async spawn(_spec, callbacks: ProcessCallbacks) {
+        for (let index = 0; index < 200; index += 1) {
+          callbacks.onStdout(`stdout-${index}`);
+          callbacks.onStderr(`stderr-${index}-${'y'.repeat(2_048)}`);
+        }
+        return { pid: 4242 };
+      },
+      async stop() {},
+      async kill() {},
+    };
+    const executor = new ProcessBeastExecutor(
+      repository as unknown as SQLiteBeastRepository,
+      logStore,
+      supervisor,
+    );
+
+    await executor.start(createRun(), createDefinition());
+
+    for (const stream of ['stdout', 'stderr'] as const) {
+      const streamLogs = logs.filter((entry) => entry.stream === stream);
+      const startupLogs = streamLogs.filter((entry) => !entry.message.startsWith('started pid='));
+      expect(startupLogs.length).toBeLessThanOrEqual(51);
+      expect(Buffer.byteLength(startupLogs.map((entry) => entry.message).join('\n'), 'utf8'))
+        .toBeLessThanOrEqual(65_536);
+      expect(startupLogs.some((entry) => entry.message.includes('early output truncated'))).toBe(true);
+    }
+  });
+
   it('redacts early stdout and stderr before flushing them to durable logs and events', async () => {
     const rawStdoutSecret = `${'sk'}-${'12345678901234567890'}`;
     const rawStderrSecret = `${'ghp'}_${'abcdefghijklmnopqrstuvwxyz1234567890'}`;
