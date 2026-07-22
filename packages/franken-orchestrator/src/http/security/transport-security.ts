@@ -68,7 +68,11 @@ export class TransportSecurityService {
     }
 
     const payload = decode(encodedPayload);
-    const [subject, scope, expiresAtRaw] = payload.split('.');
+    const payloadParts = payload.split('.');
+    if (payloadParts.length !== 4) {
+      return false;
+    }
+    const [subject, scope, expiresAtRaw] = payloadParts;
     if (scope !== options.scope) {
       return false;
     }
@@ -77,7 +81,7 @@ export class TransportSecurityService {
     }
 
     const expiresAt = Number(expiresAtRaw);
-    if (!Number.isFinite(expiresAt) || expiresAt < wallClockNow()) {
+    if (!Number.isSafeInteger(expiresAt) || expiresAt < 0 || expiresAt < wallClockNow()) {
       return false;
     }
 
