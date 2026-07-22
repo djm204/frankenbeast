@@ -112,22 +112,76 @@ async function readBoundedErrorBody(response: Response): Promise<string> {
   return truncated ? `${decoded}…` : decoded;
 }
 
+function normalizeNumericProviderCode(value: unknown): string | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : undefined;
+}
+
+function normalizeSlackErrorCode(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value)
+    ? value
+    : undefined;
+}
+
+export interface HttpErrorContextOptions {
+  provider?: 'slack' | 'discord' | 'telegram' | 'whatsapp';
+  redact?: (value: string) => string;
+}
+
+function extractProviderErrorCode(
+  responseBody: string,
+  provider: HttpErrorContextOptions['provider'],
+): string | undefined {
+  try {
+    const payload = JSON.parse(responseBody) as unknown;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return undefined;
+    }
+
+    const record = payload as Record<string, unknown>;
+    switch (provider) {
+      case 'slack':
+        return normalizeSlackErrorCode(record['error']);
+      case 'discord':
+        return normalizeNumericProviderCode(record['code']);
+      case 'telegram':
+        return normalizeNumericProviderCode(record['error_code']);
+      case 'whatsapp': {
+        const nestedError = record['error'];
+        return nestedError && typeof nestedError === 'object' && !Array.isArray(nestedError)
+          ? normalizeNumericProviderCode((nestedError as Record<string, unknown>)['code'])
+          : undefined;
+      }
+      default:
+        return undefined;
+    }
+  } catch {
+    // Malformed or truncated provider bodies are intentionally omitted.
+  }
+  return undefined;
+}
+
 export async function formatHttpErrorMessage(
   prefix: string,
   response: Response,
   endpoint: string,
-  redact: (value: string) => string = redactHttpErrorSecrets,
+  options: HttpErrorContextOptions = {},
 ): Promise<string> {
+  const redact = options.redact ?? redactHttpErrorSecrets;
   const statusText = response.statusText ? ` ${response.statusText}` : '';
   const redactedEndpoint = redact(endpoint);
-  let responseBody = '';
+  let providerCode: string | undefined;
 
   try {
-    responseBody = await readBoundedErrorBody(response);
+    providerCode = extractProviderErrorCode(
+      await readBoundedErrorBody(response),
+      options.provider,
+    );
   } catch {
-    responseBody = '';
+    providerCode = undefined;
   }
 
-  const bodySuffix = responseBody ? `: ${redact(responseBody)}` : '';
-  return `${prefix}: ${response.status}${statusText} for ${redactedEndpoint}${bodySuffix}`;
+  const codeSuffix = providerCode ? ` (provider code: ${providerCode})` : '';
+  return `${prefix}: ${response.status}${statusText} for ${redactedEndpoint}${codeSuffix}`;
 }

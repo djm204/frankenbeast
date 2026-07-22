@@ -62,7 +62,12 @@ export class SlackAdapter implements ChannelAdapter {
       }),
     }, async response => {
       if (!response.ok) {
-        throw new Error(await formatHttpErrorMessage('Slack API error', response, targetUrl));
+        throw new Error(await formatHttpErrorMessage(
+          'Slack API error',
+          response,
+          targetUrl,
+          { provider: 'slack' },
+        ));
       }
 
       const result = await response.json() as { ok: boolean; error?: string };

@@ -57,7 +57,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
       body: JSON.stringify(body),
     }, async response => {
       if (!response.ok) {
-        throw new Error(await formatHttpErrorMessage('WhatsApp API error', response, targetUrl));
+        throw new Error(await formatHttpErrorMessage(
+          'WhatsApp API error',
+          response,
+          targetUrl,
+          { provider: 'whatsapp' },
+        ));
       }
     });
   }

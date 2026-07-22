@@ -79,24 +79,33 @@ describe('WhatsAppAdapter', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('includes endpoint and response body when WhatsApp returns HTTP errors', async () => {
+  it('omits raw WhatsApp error bodies while preserving status and provider code', async () => {
     const adapter = new WhatsAppAdapter({
       accessToken: 'token',
       phoneNumberId: '123',
     });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue(new Response('{"error":"invalid token"}', {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 190,
+        message: 'private request data',
+      },
+    }), {
       status: 401,
       statusText: 'Unauthorized',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'hello whatsapp',
       status: 'reply',
       metadata: { phoneNumber: '123456789' },
-    })).rejects.toThrow(
-      'WhatsApp API error: 401 Unauthorized for https://graph.facebook.com/v21.0/123/messages: {"error":"invalid token"}',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'WhatsApp API error: 401 Unauthorized for https://graph.facebook.com/v21.0/123/messages (provider code: 190)',
     );
+    expect((error as Error).message).not.toContain('private request data');
   });
 
   it('times out a never-resolving outbound request with a redacted error', async () => {
