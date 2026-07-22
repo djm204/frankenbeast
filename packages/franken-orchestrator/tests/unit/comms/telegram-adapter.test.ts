@@ -83,22 +83,30 @@ describe('TelegramAdapter', () => {
     })).rejects.not.toThrow(token);
   });
 
-  it('includes redacted endpoint and response body when Telegram returns HTTP errors', async () => {
+  it('omits raw Telegram error bodies while preserving status and provider code', async () => {
     const token = '123456789:abcdefghijklmnopqrstuvwxyz';
     const adapter = new TelegramAdapter({ token });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue(new Response('{"description":"chat not found"}', {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({
+      error_code: 400,
+      description: 'private request data',
+    }), {
       status: 400,
       statusText: 'Bad Request',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'hello telegram',
       status: 'reply',
       metadata: { chatId: '12345' },
-    })).rejects.toThrow(
-      'Telegram API error: 400 Bad Request for https://api.telegram.org/bot[REDACTED]/sendMessage: {"description":"chat not found"}',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Telegram API error: 400 Bad Request for https://api.telegram.org/bot[REDACTED]/sendMessage (provider code: 400)',
     );
+    expect((error as Error).message).not.toContain('private request data');
+    expect((error as Error).message).not.toContain(token);
   });
 
   it('times out a never-resolving outbound request without exposing the bot token', async () => {

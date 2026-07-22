@@ -96,21 +96,28 @@ describe('DiscordAdapter', () => {
     expect(body.components[0].components[0].style).toBe(1); // Primary
   });
 
-  it('includes endpoint and response body when Discord rejects a message', async () => {
+  it('omits raw Discord error bodies while preserving status and provider code', async () => {
     const adapter = new DiscordAdapter({ token: 'bot-token' });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue(new Response('{"message":"rate limited"}', {
-      status: 429,
-      statusText: 'Too Many Requests',
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({
+      code: 50035,
+      message: 'private request data',
+    }), {
+      status: 400,
+      statusText: 'Bad Request',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'hello from discord',
       status: 'reply',
       metadata: { channelId: 'C1' },
-    })).rejects.toThrow(
-      'Discord API error: 429 Too Many Requests for https://discord.com/api/v10/channels/C1/messages: {"message":"rate limited"}',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Discord API error: 400 Bad Request for https://discord.com/api/v10/channels/C1/messages (provider code: 50035)',
     );
+    expect((error as Error).message).not.toContain('private request data');
   });
 
   it('redacts echoed auth headers from Discord error bodies by default', async () => {
@@ -121,13 +128,18 @@ describe('DiscordAdapter', () => {
       statusText: 'Bad Gateway',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'hello from discord',
       status: 'reply',
       metadata: { channelId: 'C1' },
-    })).rejects.toThrow(
-      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: {"Authorization":"[REDACTED]","x-api-key":"[REDACTED]"}',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages',
     );
+    expect((error as Error).message).not.toContain('bot-token');
+    expect((error as Error).message).not.toContain('proxy-key');
   });
 
   it('redacts unterminated echoed auth fields from Discord error bodies', async () => {
@@ -138,13 +150,17 @@ describe('DiscordAdapter', () => {
       statusText: 'Bad Gateway',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'hello from discord',
       status: 'reply',
       metadata: { channelId: 'C1' },
-    })).rejects.toThrow(
-      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: {"Authorization":"[REDACTED]"',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages',
     );
+    expect((error as Error).message).not.toContain('bot-token');
   });
 
   it('bounds streamed Discord error bodies before formatting diagnostics', async () => {
@@ -160,13 +176,17 @@ describe('DiscordAdapter', () => {
       statusText: 'Bad Gateway',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'hello from discord',
       status: 'reply',
       metadata: { channelId: 'C1' },
-    })).rejects.toThrow(
-      `Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages: ${'x'.repeat(2048)}…`,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Discord API error: 502 Bad Gateway for https://discord.com/api/v10/channels/C1/messages',
     );
+    expect((error as Error).message).not.toContain('x'.repeat(32));
   });
 
   it('times out a never-resolving outbound request with a redacted error', async () => {

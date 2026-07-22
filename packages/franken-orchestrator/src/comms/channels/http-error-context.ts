@@ -112,6 +112,43 @@ async function readBoundedErrorBody(response: Response): Promise<string> {
   return truncated ? `${decoded}…` : decoded;
 }
 
+function normalizeNumericProviderCode(value: unknown): string | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : undefined;
+}
+
+function normalizeSlackErrorCode(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value)
+    ? value
+    : undefined;
+}
+
+function extractProviderErrorCode(responseBody: string): string | undefined {
+  try {
+    const payload = JSON.parse(responseBody) as unknown;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return undefined;
+    }
+
+    const record = payload as Record<string, unknown>;
+    const directCode = normalizeNumericProviderCode(record['error_code'])
+      ?? normalizeNumericProviderCode(record['code'])
+      ?? normalizeSlackErrorCode(record['error']);
+    if (directCode) {
+      return directCode;
+    }
+
+    const nestedError = record['error'];
+    if (nestedError && typeof nestedError === 'object' && !Array.isArray(nestedError)) {
+      return normalizeNumericProviderCode((nestedError as Record<string, unknown>)['code']);
+    }
+  } catch {
+    // Malformed or truncated provider bodies are intentionally omitted.
+  }
+  return undefined;
+}
+
 export async function formatHttpErrorMessage(
   prefix: string,
   response: Response,
@@ -120,14 +157,14 @@ export async function formatHttpErrorMessage(
 ): Promise<string> {
   const statusText = response.statusText ? ` ${response.statusText}` : '';
   const redactedEndpoint = redact(endpoint);
-  let responseBody = '';
+  let providerCode: string | undefined;
 
   try {
-    responseBody = await readBoundedErrorBody(response);
+    providerCode = extractProviderErrorCode(await readBoundedErrorBody(response));
   } catch {
-    responseBody = '';
+    providerCode = undefined;
   }
 
-  const bodySuffix = responseBody ? `: ${redact(responseBody)}` : '';
-  return `${prefix}: ${response.status}${statusText} for ${redactedEndpoint}${bodySuffix}`;
+  const codeSuffix = providerCode ? ` (provider code: ${providerCode})` : '';
+  return `${prefix}: ${response.status}${statusText} for ${redactedEndpoint}${codeSuffix}`;
 }

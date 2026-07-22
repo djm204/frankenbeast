@@ -9,14 +9,14 @@ const responseBody = (value: string) => new ReadableStream<Uint8Array>({
 });
 
 describe('http error context', () => {
-  it('bounds streamed response bodies before formatting provider errors', async () => {
+  it('omits unstructured provider response bodies from formatted errors', async () => {
     const message = await formatHttpErrorMessage('Provider failed', {
       status: 502,
       statusText: 'Bad Gateway',
       body: responseBody('x'.repeat(3000)),
     } as Response, 'https://discord.example.test/webhook');
 
-    expect(message).toBe(`Provider failed: 502 Bad Gateway for https://discord.example.test/webhook: ${'x'.repeat(2048)}…`);
+    expect(message).toBe('Provider failed: 502 Bad Gateway for https://discord.example.test/webhook');
   });
 
   it('does not fall back to unbounded text() reads when a body stream is unavailable', async () => {
@@ -47,14 +47,14 @@ describe('http error context', () => {
       .toBe('proxy echoed https://api.telegram.org/[REDACTED]/sendMessage');
   });
 
-  it('does not mark exact-limit provider bodies as truncated', async () => {
+  it('omits exact-limit provider bodies', async () => {
     const message = await formatHttpErrorMessage('Provider failed', {
       status: 502,
       statusText: 'Bad Gateway',
       body: responseBody('x'.repeat(2048)),
     } as Response, 'https://discord.example.test/webhook');
 
-    expect(message).toBe(`Provider failed: 502 Bad Gateway for https://discord.example.test/webhook: ${'x'.repeat(2048)}`);
+    expect(message).toBe('Provider failed: 502 Bad Gateway for https://discord.example.test/webhook');
   });
 
   it('stops waiting on stalled provider error bodies', async () => {
@@ -72,6 +72,6 @@ describe('http error context', () => {
     } as Response, 'https://discord.example.test/webhook');
 
     expect(Date.now() - startedAt).toBeLessThan(750);
-    expect(message).toBe('Provider failed: 502 Bad Gateway for https://discord.example.test/webhook: partial…');
+    expect(message).toBe('Provider failed: 502 Bad Gateway for https://discord.example.test/webhook');
   });
 });

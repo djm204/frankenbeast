@@ -164,20 +164,27 @@ describe('SlackAdapter', () => {
     expect(body.blocks.find((b) => b.type === 'context')).toBeUndefined();
   });
 
-  it('includes endpoint and response body when Slack returns HTTP errors', async () => {
+  it('omits raw Slack error bodies while preserving status and provider code', async () => {
     const adapter = new SlackAdapter({ token: TEST_SLACK_BOT_TOKEN });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue(new Response('temporarily unavailable', {
-      status: 503,
-      statusText: 'Service Unavailable',
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({
+      error: 'invalid_auth',
+      request_echo: 'private request data',
+    }), {
+      status: 401,
+      statusText: 'Unauthorized',
     }));
 
-    await expect(adapter.send('session-123', {
+    const error = await adapter.send('session-123', {
       text: 'result',
       metadata: { channelId: 'C1' },
-    })).rejects.toThrow(
-      'Slack API error: 503 Service Unavailable for https://slack.com/api/chat.postMessage: temporarily unavailable',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      'Slack API error: 401 Unauthorized for https://slack.com/api/chat.postMessage (provider code: invalid_auth)',
     );
+    expect((error as Error).message).not.toContain('private request data');
   });
 
   it('times out a never-resolving outbound request with a redacted error', async () => {
