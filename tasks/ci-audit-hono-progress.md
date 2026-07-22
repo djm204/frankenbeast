@@ -7,6 +7,10 @@
 - [x] Implement a consumer-safe remediation: migrate `@franken/mcp-suite` from SDK v1 to split `@modelcontextprotocol/server@2.0.0-beta.5`.
 - [x] Run focused install/audit/pack/offline-consumer verification and prove the vulnerable packages are absent.
 - [x] Run repository test, integration, lint, typecheck, and build gates; isolate the one unrelated full-suite timeout as a passing targeted rerun.
+- [x] Add a focused publish-smoke assertion that rejects missing or pre-2.0.10 `@hono/node-server` versions in the clean packed consumer.
+- [x] Declare a publish-visible patched Hono server dependency and regenerate the workspace lockfile.
+- [x] Re-run the focused unit test, package packing/external install, dependency-tree assertion, and consumer audit.
+- [x] Inspect the packed manifest and commit the focused correction with timestamped audit evidence.
 - [ ] Commit with a conventional commit message.
 - [ ] Route push and PR-body correction through approval-cop.
 - [ ] Reply to and resolve both Codex findings through approval-cop.
@@ -41,8 +45,9 @@
 - Full workspace typecheck: 17/17 tasks passed.
 - `@franken/mcp-suite`: 39 test files and 601 tests passed.
 - Publish smoke packed all 10 packages, installed them outside the monorepo, audited the clean consumer tree, and executed every CLI help check; zero vulnerabilities.
-- Independent packed-tree inspection found `@modelcontextprotocol/server@2.0.0-beta.5` and no `@modelcontextprotocol/sdk` or `@hono/node-server`.
-- Publish smoke now audits the clean packed consumer at high severity so root-only overrides cannot mask this class of exposure again.
+- Independent packed-tree inspection found `@modelcontextprotocol/server@2.0.0-beta.5`, no `@modelcontextprotocol/sdk`, and the publish-visible `@hono/node-server@^2.0.10` security floor.
+- Publish smoke now rejects missing or pre-2.0.10 Hono node-server versions and audits the clean packed consumer at high severity so root-only overrides cannot mask this class of exposure again.
 - MCP integration suite: 5 files and 34 tests passed, including all seven standalone stdio servers, the combined server, and proxy-server tool discovery through `@modelcontextprotocol/client@2.0.0-beta.5`.
 - Fresh `npm ci` succeeded; `npm audit --omit=dev` reported zero vulnerabilities.
 - Full `npm test` passed all MCP-suite tests and all but one unrelated orchestrator test, which timed out only under the concurrent workspace run and then passed alone (50/50 tests, 1.32 seconds).
+- Final full `npm test` passed 9/10 package tasks but hit one unrelated `@franken/web` alert-query failure; the exact failing file immediately passed 20/20 alone. Full lint, typecheck, and build passed.

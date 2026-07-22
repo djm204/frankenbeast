@@ -4,9 +4,38 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { isDirectRun, runWithTempCleanup } from '../../scripts/publish-smoke.mjs';
+import {
+  assertPatchedHonoTree,
+  isDirectRun,
+  runWithTempCleanup,
+} from '../../scripts/publish-smoke.mjs';
 
 describe('publish smoke temp cleanup', () => {
+  it('requires a patched Hono node server in the packed consumer tree', () => {
+    expect(() => assertPatchedHonoTree({})).toThrow('is missing');
+    expect(() => assertPatchedHonoTree({
+      dependencies: {
+        '@franken/mcp-suite': {
+          version: '0.8.1',
+          dependencies: {
+            '@hono/node-server': { version: '2.0.9' },
+          },
+        },
+      },
+    })).toThrow('2.0.9 is below required 2.0.10');
+
+    expect(assertPatchedHonoTree({
+      dependencies: {
+        '@franken/mcp-suite': {
+          version: '0.8.1',
+          dependencies: {
+            '@hono/node-server': { version: '2.0.10' },
+          },
+        },
+      },
+    })).toBe('2.0.10');
+  });
+
   it('recognizes symlinked script invocations as direct runs', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'fbeast-entrypoint-test-'));
     const realScript = join(tempDir, 'publish-smoke.mjs');
