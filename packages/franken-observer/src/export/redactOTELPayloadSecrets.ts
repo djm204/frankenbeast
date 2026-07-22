@@ -14,7 +14,9 @@ const SENSITIVE_FLAG_RE = new RegExp(
 )
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/gu
 const ESCAPED_SENSITIVE_JSON_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*\\+")[^"\r\n]*?(\\+")/gu
-const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)[^\r\n]+/gu
+const SENSITIVE_JSON_COLLECTION_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)(\[[^\]\r\n]*\]|\{[^}\r\n]*\})/gu
+const ESCAPED_SENSITIVE_JSON_COLLECTION_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*)(\[[^\]\r\n]*\]|\{[^}\r\n]*\})/gu
+const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)[^\r\n]*?(?=\s+[A-Za-z_][A-Za-z0-9_-]*\s*[=:]|$)/gu
 const SENSITIVE_HEADER_TUPLE_RE = /(\[\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*")[^"\r\n]*("\s*\])/gu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
@@ -39,60 +41,67 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function redactEmbeddedJson(value: string): string {
-  let output = ''
-  let cursor = 0
+  const firstStart = value.search(/[\[{]/u)
+  if (firstStart < 0) return value
 
-  while (cursor < value.length) {
-    const start = value.slice(cursor).search(/[\[{]/u)
-    if (start < 0) return output + value.slice(cursor)
+  const stack: Array<{ opening: string, start: number }> = []
+  const candidates: Array<{ start: number, end: number, redacted: string }> = []
+  let quoted = false
+  let escaped = false
 
-    const absoluteStart = cursor + start
-    output += value.slice(cursor, absoluteStart)
-    const stack: string[] = []
-    let quoted = false
-    let escaped = false
-    let end = absoluteStart
-
-    for (; end < value.length; end += 1) {
-      const character = value[end]!
-      if (quoted) {
-        if (escaped) escaped = false
-        else if (character === '\\') escaped = true
-        else if (character === '"') quoted = false
+  for (let index = firstStart; index < value.length; index += 1) {
+    const character = value[index]!
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') quoted = false
+      continue
+    }
+    if (character === '"' && value[index - 1] !== '\\') {
+      quoted = true
+    } else if (character === '{' || character === '[') {
+      stack.push({ opening: character, start: index })
+    } else if (character === '}' || character === ']') {
+      const frame = stack.at(-1)
+      if (frame === undefined
+        || (frame.opening === '{' && character !== '}')
+        || (frame.opening === '[' && character !== ']')) {
+        stack.length = 0
         continue
       }
-      if (character === '"') {
-        quoted = true
-      } else if (character === '{' || character === '[') {
-        stack.push(character)
-      } else if (character === '}' || character === ']') {
-        const opening = stack.at(-1)
-        if ((opening === '{' && character !== '}') || (opening === '[' && character !== ']')) break
-        stack.pop()
-        if (stack.length === 0) {
-          end += 1
-          break
+      stack.pop()
+      const candidate = value.slice(frame.start, index + 1)
+      let redacted: string | undefined
+      try {
+        redacted = JSON.stringify(redactJsonValue(JSON.parse(candidate)))
+      } catch {
+        const unescaped = candidate.replace(/\\+"/gu, '"')
+        if (unescaped !== candidate) {
+          try {
+            redacted = JSON.stringify(redactJsonValue(JSON.parse(unescaped))).replace(/"/gu, '\\"')
+          } catch {
+            // Keep scanning for a later valid embedded candidate.
+          }
         }
       }
-    }
-
-    if (stack.length > 0 || quoted) {
-      // No balanced JSON candidate starts here. Preserve the remaining text for
-      // the linear regex passes below instead of rescanning every later opener.
-      return output + value.slice(absoluteStart)
-    }
-
-    const candidate = value.slice(absoluteStart, end)
-    try {
-      output += JSON.stringify(redactJsonValue(JSON.parse(candidate)))
-      cursor = end
-    } catch {
-      output += value[absoluteStart]
-      cursor = absoluteStart + 1
+      if (redacted !== undefined) {
+        for (let candidateIndex = candidates.length - 1; candidateIndex >= 0; candidateIndex -= 1) {
+          if (candidates[candidateIndex]!.start >= frame.start) candidates.splice(candidateIndex, 1)
+        }
+        candidates.push({ start: frame.start, end: index + 1, redacted })
+      }
     }
   }
 
-  return output
+  if (candidates.length === 0) return value
+  candidates.sort((left, right) => left.start - right.start)
+  let output = ''
+  let cursor = 0
+  for (const candidate of candidates) {
+    output += value.slice(cursor, candidate.start) + candidate.redacted
+    cursor = candidate.end
+  }
+  return output + value.slice(cursor)
 }
 
 function redactPlainText(value: string): string {
@@ -104,6 +113,12 @@ function redactPlainText(value: string): string {
     )
     .replace(SENSITIVE_HEADER_TUPLE_RE, (match, prefix: string, key: string, suffix: string) =>
       isSensitiveKey(key) ? `${prefix}${REDACTED}${suffix}` : match,
+    )
+    .replace(SENSITIVE_JSON_COLLECTION_FIELD_RE, (match, prefix: string, key: string) =>
+      isSensitiveKey(key) ? `${prefix}"${REDACTED}"` : match,
+    )
+    .replace(ESCAPED_SENSITIVE_JSON_COLLECTION_FIELD_RE, (match, prefix: string, key: string) =>
+      isSensitiveKey(key) ? `${prefix}"${REDACTED}"` : match,
     )
     .replace(AUTHORIZATION_ASSIGNMENT_RE, `$1${REDACTED}`)
     .replace(AUTHORIZATION_RE, `$1${REDACTED}`)

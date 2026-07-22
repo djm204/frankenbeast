@@ -44,6 +44,8 @@ describe('redactOTELPayloadSecrets', () => {
     const multiwordSecret = ['correct', 'horse', 'battery', 'staple'].join(' ')
     const multiValueHeaderSecret = ['multi', 'value', 'header', 'credential'].join('-')
     const unmatchedTupleSecret = ['unmatched', 'tuple', 'credential'].join('-')
+    const unmatchedArraySecrets = ['alpha one', 'beta two']
+    const escapedArraySecrets = ['escaped alpha', 'escaped beta']
     const aliasSecrets = ['sshKey', 'signing_key', 'gpg_key', 'PAT', 'webhookUrl']
       .map(key => [key, `${key}-credential`] as const)
     const geminiSecret = `AIza${'e'.repeat(35)}`
@@ -79,6 +81,9 @@ describe('redactOTELPayloadSecrets', () => {
       `passphrase=${multiwordSecret}`,
       JSON.stringify({ name: 'x-api-key', values: [multiValueHeaderSecret] }),
       `prefix { ... ${JSON.stringify([['x-api-key', unmatchedTupleSecret]])}`,
+      `prefix { ... ${JSON.stringify({ safe: 'x', password: unmatchedArraySecrets })}`,
+      `body={\\"password\\":[\\"${escapedArraySecrets[0]}\\",\\"${escapedArraySecrets[1]}\\"]}`,
+      `user: alice password: ${multiwordSecret}`,
       ...aliasSecrets.map(([key, secret]) => JSON.stringify({ [key]: secret })),
       geminiSecret,
       `https://hooks.slack.com/services/T000/B000/${slackSecret}`,
@@ -122,6 +127,8 @@ describe('redactOTELPayloadSecrets', () => {
       multiwordSecret,
       multiValueHeaderSecret,
       unmatchedTupleSecret,
+      ...unmatchedArraySecrets,
+      ...escapedArraySecrets,
       ...aliasSecrets.map(([, secret]) => secret),
       geminiSecret,
       slackSecret,
