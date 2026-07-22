@@ -529,6 +529,11 @@ function DetailDrawer({
     tone: 'success' | 'error';
   } | null>(null);
   const detailStateLabel = hasFullDetail ? 'Full event detail' : 'Partial row data';
+  const detailStateDescription = hasFullDetail
+    ? 'This drawer is showing the full analytics event detail.'
+    : isLoading
+      ? 'Loading full event detail; the fields below are from the selected table row.'
+      : 'Full event detail is not loaded; the fields below are only from the selected table row.';
   const copyDisabled = !hasFullDetail;
 
   useEffect(() => {
@@ -572,7 +577,6 @@ function DetailDrawer({
       <Dialog.Portal>
         <Dialog.Overlay className="analytics-drawer-overlay" />
         <Dialog.Content
-          aria-describedby={undefined}
           aria-modal="true"
           asChild
           onOpenAutoFocus={(event) => {
@@ -587,6 +591,9 @@ function DetailDrawer({
                 <Dialog.Title asChild>
                   <h3><SafeMarkdownText text={detail.summary} /></h3>
                 </Dialog.Title>
+                <Dialog.Description className="sr-only">
+                  Analytics event details. {detailStateDescription}
+                </Dialog.Description>
               </div>
               <Dialog.Close asChild>
                 <button ref={closeButtonRef} className="button button--secondary button--small" type="button">Close</button>
@@ -597,13 +604,7 @@ function DetailDrawer({
 
             <div className="analytics-detail-status" aria-live="polite">
               <strong>{detailStateLabel}</strong>
-              <span>
-                {hasFullDetail
-                  ? 'This drawer is showing the full analytics event detail.'
-                  : isLoading
-                    ? 'Loading full event detail; the fields below are from the selected table row.'
-                    : 'Full event detail is not loaded; the fields below are only from the selected table row.'}
-              </span>
+              <span>{detailStateDescription}</span>
             </div>
 
             <dl className="analytics-detail-list">

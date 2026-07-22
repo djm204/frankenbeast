@@ -585,6 +585,12 @@ describe('AnalyticsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'View details for Denied destructive command' }));
 
     expect(await screen.findByText('Partial row data')).toBeTruthy();
+    const dialog = screen.getByRole('dialog', { name: 'Denied destructive command' });
+    const partialDescriptionId = dialog.getAttribute('aria-describedby');
+    expect(partialDescriptionId).toBeTruthy();
+    expect(document.getElementById(partialDescriptionId!)?.textContent).toBe(
+      'Analytics event details. Loading full event detail; the fields below are from the selected table row.',
+    );
     expect(screen.getByText('Loading full event detail; the fields below are from the selected table row.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Copy JSON' })).toHaveProperty('disabled', true);
     expect(screen.getByText('Copy JSON is available after full event detail loads.')).toBeTruthy();
@@ -604,6 +610,11 @@ describe('AnalyticsPage', () => {
     });
 
     expect(await screen.findByText('Full event detail')).toBeTruthy();
+    const fullDescriptionId = dialog.getAttribute('aria-describedby');
+    expect(fullDescriptionId).toBeTruthy();
+    expect(document.getElementById(fullDescriptionId!)?.textContent).toBe(
+      'Analytics event details. This drawer is showing the full analytics event detail.',
+    );
     expect(screen.getByText('This drawer is showing the full analytics event detail.')).toBeTruthy();
     expect(screen.getByText('"full": true')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Copy JSON' })).toHaveProperty('disabled', false);
