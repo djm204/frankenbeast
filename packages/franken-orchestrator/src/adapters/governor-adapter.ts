@@ -1,5 +1,6 @@
 import type { IGovernorModule, ApprovalPayload, ApprovalOutcome } from '../deps.js';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
+import type { SessionToken } from '@franken/governor';
 
 export type GovernorDecision = ApprovalOutcome['decision'];
 
@@ -25,7 +26,7 @@ export interface ApprovalRequestPort {
 }
 
 export type ApprovalOutcomePort =
-  | { decision: 'APPROVE'; token?: unknown }
+  | { decision: 'APPROVE'; token?: SessionToken }
   | { decision: 'REGEN'; feedback: string }
   | { decision: 'ABORT'; reason?: string }
   | { decision: 'DEBUG' };
@@ -103,7 +104,9 @@ export class GovernorPortAdapter implements IGovernorModule {
 function mapOutcome(outcome: ApprovalOutcomePort): ApprovalOutcome {
   switch (outcome.decision) {
     case 'APPROVE':
-      return { decision: 'approved' };
+      return outcome.token === undefined
+        ? { decision: 'approved' }
+        : { decision: 'approved', token: outcome.token };
     case 'ABORT':
       return { decision: 'abort', reason: outcome.reason };
     case 'REGEN':
