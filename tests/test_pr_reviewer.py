@@ -331,7 +331,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=capture_review
+            self.reviewer.subprocess, "run", side_effect=capture_review
         ):
             posted = self.reviewer.post_pr_review(
                 123,
@@ -362,7 +362,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=capture_review
+            self.reviewer.subprocess, "run", side_effect=capture_review
         ):
             posted = self.reviewer.post_pr_review(
                 124, model_body, [], "b" * 40, repository="owner/repository"
@@ -382,7 +382,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=OSError("offline")
+            self.reviewer.subprocess, "run", side_effect=OSError("offline")
         ):
             self.assertFalse(
                 self.reviewer.post_pr_review(
@@ -390,13 +390,30 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
                 )
             )
 
+    def test_failed_review_post_captures_command_stderr(self):
+        field_name = "access_" + "token"
+        stderr = f'{{"message":"denied","{field_name}":"sensitive"}}'
+        failure = subprocess.CalledProcessError(
+            1, ["gh", "api"], stderr=stderr
+        )
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            self.reviewer, "WORKSPACE", Path(directory)
+        ), mock.patch.object(self.reviewer.subprocess, "run", side_effect=failure):
+            self.assertFalse(
+                self.reviewer.post_pr_review(
+                    123, "body", [], "c" * 40, repository="owner/repository"
+                )
+            )
+
+        self.assertEqual(self.reviewer.LAST_POST_ERROR, stderr)
+
     def test_review_file_is_written_as_utf8(self):
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory)
         ), mock.patch.object(
             Path, "write_text", autospec=True
         ) as write_text, mock.patch.object(
-            self.reviewer.subprocess, "check_call"
+            self.reviewer.subprocess, "run"
         ):
             self.assertTrue(
                 self.reviewer.post_pr_review(
@@ -638,13 +655,17 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             "refresh_" + "token",
             "client_" + "secret",
         ]
-        message = " ".join(f"{name}=sensitive-{index}" for index, name in enumerate(field_names))
+        message = " ".join(
+            f"{name}=sensitive-{index}" for index, name in enumerate(field_names)
+        )
+        message += " " + json.dumps({field_names[0]: "json-sensitive"})
 
         payload = json.loads(self.reviewer.error_diagnostic("agent", message))
 
         for index, name in enumerate(field_names):
             self.assertIn(name, payload["message"])
             self.assertNotIn(f"sensitive-{index}", payload["message"])
+        self.assertNotIn("json-sensitive", payload["message"])
 
     def test_error_diagnostic_remains_valid_json_at_length_limit(self):
         diagnostic = self.reviewer.error_diagnostic(
@@ -851,6 +872,10 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         self.assertIn("fails closed", post_review.call_args.args[1])
         self.assertIn("VERDICT: REQUEST_CHANGES", post_review.call_args.args[1])
 
+    def test_failed_agy_result_uses_stdout_as_diagnostic_fallback(self):
+        self.assertEqual(self.reviewer.decode_agy_result(1, b"provider offline", b""), "")
+        self.assertEqual(self.reviewer.LAST_AGY_ERROR, "provider offline")
+
     def test_file_limit_exit_salvages_truncated_agy_stdout(self):
         payload = b"x" * self.reviewer.MAX_REVIEW_BYTES
         result = self.reviewer.decode_agy_result(-25, payload, b"file too large")
@@ -885,7 +910,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             self.reviewer, "WORKSPACE", Path(directory).resolve()
-        ), mock.patch.object(self.reviewer.subprocess, "check_call", side_effect=capture):
+        ), mock.patch.object(self.reviewer.subprocess, "run", side_effect=capture):
             self.assertTrue(
                 self.reviewer.post_pr_review(
                     55,
@@ -914,7 +939,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
         ) as check_output, mock.patch.object(
             self.reviewer.subprocess, "Popen", return_value=process
         ) as popen, mock.patch.object(
-            self.reviewer.subprocess, "check_call", side_effect=capture_review
+            self.reviewer.subprocess, "run", side_effect=capture_review
         ):
             self.reviewer.get_open_prs(repository)
             self.reviewer.read_gh_diff(7, repository)
@@ -1044,7 +1069,7 @@ class PrReviewerDiffBoundsTests(unittest.TestCase):
             self.reviewer, "run_agy_review", return_value="VERDICT: APPROVE"
         ), mock.patch.object(
             self.reviewer.subprocess,
-            "check_call",
+            "run",
             side_effect=[post_failure, None],
         ) as check_call:
             with self.assertRaisesRegex(RuntimeError, "review could not be posted"):

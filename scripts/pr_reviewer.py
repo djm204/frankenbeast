@@ -38,9 +38,10 @@ SECRET_PATTERN = re.compile(
     r"AIza[a-zA-Z0-9_-]{35})"
 )
 SENSITIVE_ERROR_VALUE_PATTERN = re.compile(
-    r"(?i)\b(authorization\s*:\s*(?:bearer|token)\s+|"
-    r"(?:(?:access|refresh|id)[_-]?token|client[_-]?secret|"
-    r"token|password|secret|api[_-]?key)\s*[=:]\s*)[^\s,;]+"
+    r"(?i)(authorization\s*:\s*(?:bearer|token)\s+|"
+    r"(?<![a-zA-Z0-9_])[\"']?(?:(?:access|refresh|id)[_-]?token|"
+    r"client[_-]?secret|token|password|secret|api[_-]?key)[\"']?\s*[=:]\s*)"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)"
 )
 LAST_AGY_ERROR = None
 LAST_POST_ERROR = None
@@ -430,10 +431,15 @@ def decode_agy_result(return_code, stdout, stderr):
             + b"\n... [REVIEW OUTPUT TRUNCATED] ..."
             + b"\n\nVERDICT: REQUEST_CHANGES"
         ).decode("utf-8", errors="replace")
+    decoded_stdout = stdout.decode("utf-8", errors="replace")
     if return_code == 0:
-        return stdout.decode("utf-8", errors="replace")
+        return decoded_stdout
     decoded_stderr = stderr.decode("utf-8", errors="replace")
-    LAST_AGY_ERROR = decoded_stderr or f"reviewer exited with code {return_code}"
+    LAST_AGY_ERROR = (
+        decoded_stderr
+        or decoded_stdout
+        or f"reviewer exited with code {return_code}"
+    )
     print(
         f"Agy review failed: {decoded_stderr}",
         file=sys.stderr,
@@ -588,7 +594,7 @@ def post_pr_review(
             }[verdict],
         }
         temp_file.write_text(json.dumps(payload), encoding="utf-8")
-        subprocess.check_call(
+        subprocess.run(
             [
                 "gh",
                 "api",
@@ -600,11 +606,17 @@ def post_pr_review(
             ],
             cwd=WORKSPACE,
             env=gh_environment(),
+            check=True,
+            capture_output=True,
+            text=True,
         )
         print(f"Successfully posted {verdict} review on PR #{pr_number}")
         return True
     except Exception as error:
-        LAST_POST_ERROR = str(error)
+        details = getattr(error, "stderr", None) or getattr(error, "stdout", None)
+        if isinstance(details, bytes):
+            details = details.decode("utf-8", errors="replace")
+        LAST_POST_ERROR = details or str(error)
         print(f"Error posting review on PR #{pr_number}: {error}", file=sys.stderr)
         return False
     finally:
