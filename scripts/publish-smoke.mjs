@@ -18,7 +18,9 @@
  *   3. installs the packages that carry bins + their workspace deps into a
  *      clean temp project OUTSIDE the monorepo, with optional deps omitted (so
  *      a missing optionalDependency must degrade, not crash),
- *   4. asserts every declared bin file exists, and runs each executable CLI's
+ *   4. verifies the clean consumer resolves a patched Hono node server,
+ *   5. audits that dependency tree for high/critical advisories,
+ *   6. asserts every declared bin file exists, and runs each executable CLI's
  *      `--help`, asserting a clean exit and non-empty output.
  *
  * Run: node scripts/publish-smoke.mjs
@@ -54,6 +56,35 @@ export function runWithTempCleanup(getDirs, action) {
 export function isDirectRun(metaUrl, argvPath = process.argv[1], realpath = realpathSync) {
   if (!argvPath) return false;
   return fileURLToPath(metaUrl) === realpath(argvPath);
+}
+
+const MINIMUM_HONO_NODE_SERVER = [2, 0, 10];
+
+export function assertPatchedHonoTree(tree) {
+  const versions = [];
+  const visit = (node) => {
+    for (const [name, dependency] of Object.entries(node?.dependencies ?? {})) {
+      if (name === '@hono/node-server' && dependency?.version) versions.push(dependency.version);
+      visit(dependency);
+    }
+  };
+  visit(tree);
+  if (versions.length === 0) {
+    throw new Error('@hono/node-server is missing from the packed consumer dependency tree');
+  }
+
+  for (const version of versions) {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+    if (!match) throw new Error(`invalid @hono/node-server version: ${version}`);
+    const resolved = match.slice(1).map(Number);
+    for (let index = 0; index < MINIMUM_HONO_NODE_SERVER.length; index += 1) {
+      if (resolved[index] > MINIMUM_HONO_NODE_SERVER[index]) break;
+      if (resolved[index] < MINIMUM_HONO_NODE_SERVER[index]) {
+        throw new Error(`@hono/node-server ${version} is below required 2.0.10`);
+      }
+    }
+  }
+  return [...new Set(versions)].join(', ');
 }
 
 // Packages we install + run. web is a browser SPA (no runtime bin) so it is
@@ -136,7 +167,20 @@ export function main() {
       stdio: 'inherit',
     });
 
-    // 4a. Every declared bin file must exist in the installed package.
+    // Root-workspace overrides are not inherited by consumers. Verify the
+    // published manifest resolves the patched Hono line in this external tree.
+    const honoTree = JSON.parse(run('npm', ['ls', '--json', '--all'], { cwd: proj }));
+    const honoVersion = assertPatchedHonoTree(honoTree);
+    log(`  packed consumer resolves @hono/node-server@${honoVersion} ✓`);
+
+    // Audit the clean
+    // packed install so a remediation cannot pass only because the monorepo's
+    // root dependency policy masked a vulnerable published dependency tree.
+    log('auditing the clean packed consumer dependency tree…');
+    run('npm', ['audit', '--omit=dev', '--audit-level=high'], { cwd: proj, stdio: 'inherit' });
+    log('  packed consumer audit has no high/critical advisories ✓');
+
+    // 6a. Every declared bin file must exist in the installed package.
     for (const dirName of RUNTIME_DIRS) {
       const pj = JSON.parse(readFileSync(join(repoRoot, 'packages', dirName, 'package.json'), 'utf8'));
       for (const [binName, binPath] of Object.entries(pj.bin ?? {})) {
@@ -145,7 +189,7 @@ export function main() {
       }
     }
 
-    // 4b. Each executable CLI's --help must exit cleanly with non-empty output.
+    // 6b. Each executable CLI's --help must exit cleanly with non-empty output.
     // Put the project's node_modules/.bin on PATH so a bin that shells out to a
     // sibling bin (e.g. `fbeast` forwards non-mcp commands to `frankenbeast`)
     // resolves it — exactly as a real co-install does, where every package bin
