@@ -20,5 +20,6 @@
 - 2026-07-22T10:09:25Z — After declaring `@hono/node-server@^2.0.10`, `npx vitest run tests/unit/publish-smoke-cleanup.test.ts --reporter=verbose && node scripts/publish-smoke.mjs` passed 3/3 focused tests, resolved `@hono/node-server@2.0.11` in the clean external consumer, reported zero vulnerabilities, and passed every CLI smoke check.
 - 2026-07-22T10:13:00Z — `npm run test` passed 9/10 package tasks; one unrelated `@franken/web` alert-query test failed under the full run, then `npx vitest run src/components/chat-shell.test.tsx --fileParallelism=false --reporter=verbose` passed 20/20. `npm run lint`, `npm run typecheck`, and `npm run build` all passed.
 - 2026-07-22T10:13:48Z — A fresh `npm pack --workspace @franken/mcp-suite` manifest inspection confirmed `@hono/node-server: ^2.0.10`; `npm audit --omit=dev --audit-level=high` reported zero vulnerabilities at pre-commit head `a1b9ec9efcba832b9cc0aa85e2d2c2a41755bb62`.
+- 2026-07-22T10:15:15Z — Committed the publish-visible Hono floor and packed-consumer regression coverage as `39e1829043fc46fc20fd9fcfaa3207c3527960a8` (`fix(deps): require patched Hono in packed consumers`).
 
 No GitHub write, push, review trigger, thread mutation, or merge action was executed.

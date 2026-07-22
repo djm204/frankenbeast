@@ -11,7 +11,7 @@
 - [x] Declare a publish-visible patched Hono server dependency and regenerate the workspace lockfile.
 - [x] Re-run the focused unit test, package packing/external install, dependency-tree assertion, and consumer audit.
 - [x] Inspect the packed manifest and commit the focused correction with timestamped audit evidence.
-- [ ] Commit with a conventional commit message.
+- [x] Commit with a conventional commit message.
 - [ ] Route push and PR-body correction through approval-cop.
 - [ ] Reply to and resolve both Codex findings through approval-cop.
 - [ ] Trigger and obtain a fresh current-head Codex clean result within the authorized cap.
