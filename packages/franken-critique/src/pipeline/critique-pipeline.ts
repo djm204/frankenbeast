@@ -57,6 +57,19 @@ export class UnknownEvaluatorError extends ConfigurationError {
   }
 }
 
+export class RequiredEvaluatorSelectionError extends ConfigurationError {
+  readonly requiredEvaluatorNames: readonly string[];
+
+  constructor(requiredEvaluatorNames: readonly string[]) {
+    super(
+      `Evaluator selection must include required evaluators: ${requiredEvaluatorNames.join(', ')}`,
+      { context: { requiredEvaluatorNames } },
+    );
+    this.name = 'RequiredEvaluatorSelectionError';
+    this.requiredEvaluatorNames = requiredEvaluatorNames;
+  }
+}
+
 export class CritiquePipeline {
   private readonly evaluators: readonly Evaluator[];
 
@@ -83,6 +96,12 @@ export class CritiquePipeline {
       ];
       if (unknownNames.length > 0) {
         throw new UnknownEvaluatorError(unknownNames);
+      }
+      if (
+        registeredNames.has(SAFETY_EVALUATOR_NAME) &&
+        !selectedNames.includes(SAFETY_EVALUATOR_NAME)
+      ) {
+        throw new RequiredEvaluatorSelectionError([SAFETY_EVALUATOR_NAME]);
       }
     }
     const evaluators = hasSelector

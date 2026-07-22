@@ -7,6 +7,7 @@ import type {
 import {
   ConfigurationError,
   createScore,
+  RequiredEvaluatorSelectionError,
   UnknownEvaluatorError,
 } from '@franken/critique';
 import type {
@@ -31,6 +32,10 @@ describe('public critique type contracts', () => {
     expect(error.evaluatorNames).toEqual(['missing']);
     expect(error).toBeInstanceOf(ConfigurationError);
     expect(error.code).toBe('CONFIGURATION_INVALID');
+
+    const requiredError = new RequiredEvaluatorSelectionError(['safety']);
+    expect(requiredError).toBeInstanceOf(ConfigurationError);
+    expect(requiredError.requiredEvaluatorNames).toEqual(['safety']);
   });
 
   it('imports provider findings and critique pipeline results without alias confusion', () => {

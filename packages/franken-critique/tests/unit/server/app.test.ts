@@ -103,6 +103,32 @@ describe('Critique Hono Server', () => {
       expect((await res.json()).evaluatorsRun).toEqual(['selected']);
     });
 
+    it('rejects a selector that omits the registered safety evaluator', async () => {
+      const app = createCritiqueApp({
+        pipeline: new CritiquePipeline([
+          makePassEvaluator('safety'),
+          makePassEvaluator('complexity'),
+        ]),
+      });
+      const res = await app.request('/v1/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: 'const x = 1;',
+          evaluators: ['complexity'],
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: {
+          message: 'Evaluator selection must include required evaluators',
+          type: 'invalid_evaluators',
+          missingRequiredEvaluators: ['safety'],
+        },
+      });
+    });
+
     it('treats an empty evaluator selector as the default evaluator set', async () => {
       const app = createCritiqueApp({
         pipeline: new CritiquePipeline([

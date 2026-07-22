@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
+  RequiredEvaluatorSelectionError,
   UnknownEvaluatorError,
   type CritiquePipeline,
 } from '../pipeline/critique-pipeline.js';
@@ -191,6 +192,18 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
         { evaluatorNames: parsed.data.evaluators },
       );
     } catch (error) {
+      if (error instanceof RequiredEvaluatorSelectionError) {
+        return c.json(
+          {
+            error: {
+              message: 'Evaluator selection must include required evaluators',
+              type: 'invalid_evaluators',
+              missingRequiredEvaluators: error.requiredEvaluatorNames,
+            },
+          },
+          400,
+        );
+      }
       if (error instanceof UnknownEvaluatorError) {
         return c.json(
           {
