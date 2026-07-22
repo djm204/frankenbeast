@@ -62,7 +62,7 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
-function mockStdinError(errorMessage = 'write EPIPE', late = false) {
+function mockStdinError(errorMessage = 'write EPIPE', late = false, stdoutFrame?: string) {
   const stdout = new PassThrough();
   const stdin = new PassThrough();
   let hadErrorListener = false;
@@ -87,6 +87,7 @@ function mockStdinError(errorMessage = 'write EPIPE', late = false) {
     hadErrorListener = stdin.listenerCount('error') > 0;
     setImmediate(() => {
       if (late) {
+        if (stdoutFrame) stdout.write(`${stdoutFrame}\n`);
         stdout.end();
         setImmediate(() => {
           if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
@@ -317,6 +318,25 @@ describe('CodexCliAdapter', () => {
       expect(events).toEqual([{
         type: 'error',
         error: expect.stringContaining('late write EPIPE'),
+        retryable: false,
+      }]);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    });
+
+    it('lets a late stdin error preempt a successful terminal frame', async () => {
+      const { proc } = mockStdinError(
+        'partial prompt EPIPE',
+        true,
+        JSON.stringify({ type: 'done', usage: { input_tokens: 1, output_tokens: 1 } }),
+      );
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('partial prompt EPIPE'),
         retryable: false,
       }]);
       expect(proc.kill).toHaveBeenCalledWith('SIGTERM');

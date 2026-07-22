@@ -177,6 +177,7 @@ export class ClaudeCliAdapter implements ILlmProvider {
     let totalOutputTokens = 0;
     let emittedText = false;
     let emittedToolUse = false;
+    let sawTerminalFrame = false;
     let streamCompleted = false;
 
     try {
@@ -232,16 +233,10 @@ export class ClaudeCliAdapter implements ILlmProvider {
             };
             return;
           }
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
-          };
-          return;
+          // Delay success until close so a late stdin EPIPE can preempt a
+          // terminal frame produced from a partial prompt.
+          sawTerminalFrame = true;
+          break;
         } else if (type === 'content_block_start') {
           const block = parsed['content_block'] as Record<string, unknown>;
           if (block?.['type'] === 'tool_use') {
@@ -337,16 +332,8 @@ export class ClaudeCliAdapter implements ILlmProvider {
             };
             return;
           }
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
-          };
-          return;
+          sawTerminalFrame = true;
+          break;
         } else if (type === 'error') {
           const error = parsed['error'] as Record<string, unknown> | undefined;
           const message =
@@ -390,6 +377,16 @@ export class ClaudeCliAdapter implements ILlmProvider {
           type: 'error',
           error: `claude process exited with code ${exitCode}`,
           retryable: false,
+        };
+      } else if (sawTerminalFrame) {
+        streamCompleted = true;
+        yield {
+          type: 'done',
+          usage: {
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            totalTokens: totalInputTokens + totalOutputTokens,
+          },
         };
       } else if (!emittedText) {
         yield {

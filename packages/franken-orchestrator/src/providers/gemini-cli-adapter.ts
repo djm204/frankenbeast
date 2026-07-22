@@ -625,18 +625,7 @@ export class GeminiCliAdapter implements ILlmProvider {
             return;
           }
           sawTerminalFrame = true;
-
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-
-            },
-          };
-          return;
+          break;
         } else if (type === 'content_block_delta') {
           const delta = parsed['delta'] as Record<string, unknown>;
           if (delta?.['type'] === 'text_delta') {
@@ -712,16 +701,9 @@ export class GeminiCliAdapter implements ILlmProvider {
             };
             return;
           }
-          streamCompleted = true;
-          yield {
-            type: 'done',
-            usage: {
-              inputTokens: totalInputTokens,
-              outputTokens: totalOutputTokens,
-              totalTokens: totalInputTokens + totalOutputTokens,
-            },
-          };
-          return;
+          // Delay success until close so a late stdin EPIPE can preempt a
+          // terminal frame produced from a partial prompt.
+          break;
         } else if (type === 'error') {
           const message = this.stringifyGeminiContent(parsed['message'] ?? parsed['error'] ?? 'Unknown error');
           yield {

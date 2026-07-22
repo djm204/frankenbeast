@@ -208,16 +208,9 @@ export class CodexCliAdapter implements ILlmProvider {
           totalOutputTokens =
             (usage['output_tokens'] as number) ?? totalOutputTokens;
           if (type === 'done') {
-            streamCompleted = true;
-            yield {
-              type: 'done',
-              usage: {
-                inputTokens: totalInputTokens,
-                outputTokens: totalOutputTokens,
-                totalTokens: totalInputTokens + totalOutputTokens,
-              },
-            };
-            return;
+            // Do not report success until the child closes: a late stdin EPIPE
+            // means the terminal frame may describe only a partial prompt.
+            break;
           }
         } else if (type === 'error') {
           const message =
