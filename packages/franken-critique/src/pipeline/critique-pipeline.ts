@@ -1,5 +1,10 @@
 import { EVALUATOR_EXCEPTION_LOCATION } from '../types/evaluation.js';
-import type { Evaluator, EvaluationInput, EvaluationResult, CritiquePipelineResult } from '../types/evaluation.js';
+import type {
+  Evaluator,
+  EvaluationInput,
+  EvaluationResult,
+  CritiquePipelineResult,
+} from '../types/evaluation.js';
 import { createScore } from '../types/common.js';
 
 const SAFETY_EVALUATOR_NAME = 'safety';
@@ -15,7 +20,9 @@ function logEvaluatorException(evaluator: Evaluator, error: unknown): void {
   });
 }
 
-function createEvaluatorExceptionResult(evaluator: Evaluator): EvaluationResult {
+function createEvaluatorExceptionResult(
+  evaluator: Evaluator,
+): EvaluationResult {
   return {
     evaluatorName: evaluator.name,
     verdict: 'fail',
@@ -25,10 +32,26 @@ function createEvaluatorExceptionResult(evaluator: Evaluator): EvaluationResult 
         message: `Evaluator "${evaluator.name}" failed because an internal evaluator error occurred.`,
         severity: 'critical',
         location: EVALUATOR_EXCEPTION_LOCATION,
-        suggestion: 'Inspect trusted evaluator logs or dependencies before retrying the critique run.',
+        suggestion:
+          'Inspect trusted evaluator logs or dependencies before retrying the critique run.',
       },
     ],
   };
+}
+
+export interface CritiquePipelineRunOptions {
+  /** Optional allowlist of registered evaluator names to run. */
+  readonly evaluatorNames?: readonly string[] | undefined;
+}
+
+export class UnknownEvaluatorError extends Error {
+  readonly evaluatorNames: readonly string[];
+
+  constructor(evaluatorNames: readonly string[]) {
+    super(`Unknown evaluator selection: ${evaluatorNames.join(', ')}`);
+    this.name = 'UnknownEvaluatorError';
+    this.evaluatorNames = evaluatorNames;
+  }
 }
 
 export class CritiquePipeline {
@@ -42,15 +65,41 @@ export class CritiquePipeline {
     });
   }
 
-  async run(input: EvaluationInput): Promise<CritiquePipelineResult> {
-    if (this.evaluators.length === 0) {
-      return { verdict: 'pass', overallScore: createScore(1), results: [], shortCircuited: false };
+  async run(
+    input: EvaluationInput,
+    options: CritiquePipelineRunOptions = {},
+  ): Promise<CritiquePipelineResult> {
+    const selectedNames = options.evaluatorNames;
+    if (selectedNames) {
+      const registeredNames = new Set(
+        this.evaluators.map((evaluator) => evaluator.name),
+      );
+      const unknownNames = [
+        ...new Set(selectedNames.filter((name) => !registeredNames.has(name))),
+      ];
+      if (unknownNames.length > 0) {
+        throw new UnknownEvaluatorError(unknownNames);
+      }
+    }
+    const evaluators = selectedNames
+      ? this.evaluators.filter((evaluator) =>
+          selectedNames.includes(evaluator.name),
+        )
+      : this.evaluators;
+
+    if (evaluators.length === 0) {
+      return {
+        verdict: 'pass',
+        overallScore: createScore(1),
+        results: [],
+        shortCircuited: false,
+      };
     }
 
     const results: EvaluationResult[] = [];
     let shortCircuited = false;
 
-    for (const evaluator of this.evaluators) {
+    for (const evaluator of evaluators) {
       let result: EvaluationResult;
 
       try {
@@ -68,7 +117,10 @@ export class CritiquePipeline {
       results.push(result);
 
       // Short-circuit on safety failure
-      if (evaluator.name === SAFETY_EVALUATOR_NAME && result.verdict === 'fail') {
+      if (
+        evaluator.name === SAFETY_EVALUATOR_NAME &&
+        result.verdict === 'fail'
+      ) {
         shortCircuited = true;
         break;
       }
@@ -79,7 +131,8 @@ export class CritiquePipeline {
     );
     const hasFailure = results.some((r) => r.verdict === 'fail');
     const hasWarning = results.some(
-      (r) => r.verdict === 'warn' || (r.verdict === 'pass' && hasWarningFinding(r)),
+      (r) =>
+        r.verdict === 'warn' || (r.verdict === 'pass' && hasWarningFinding(r)),
     );
 
     return {
