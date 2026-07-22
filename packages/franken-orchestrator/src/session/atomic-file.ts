@@ -14,6 +14,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { threadId } from 'node:worker_threads';
 import { deterministicUuid, now as deterministicNow } from '@franken/types';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -33,6 +34,7 @@ export interface StateWriteTransactionJournal {
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly writerPid?: number;
+  readonly writerThreadId?: number;
   readonly writerInstanceId?: string;
 }
 
@@ -144,6 +146,9 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
   if (value.writerPid !== undefined && (!Number.isSafeInteger(value.writerPid) || value.writerPid <= 0)) {
     throw new Error(`state write journal ${journalPath} writerPid must be a positive safe integer`);
   }
+  if (value.writerThreadId !== undefined && (!Number.isSafeInteger(value.writerThreadId) || value.writerThreadId < 0)) {
+    throw new Error(`state write journal ${journalPath} writerThreadId must be a non-negative safe integer`);
+  }
   if (value.writerInstanceId !== undefined && (typeof value.writerInstanceId !== 'string' || value.writerInstanceId.length === 0)) {
     throw new Error(`state write journal ${journalPath} writerInstanceId must be a non-empty string`);
   }
@@ -155,6 +160,7 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
     ...(value.writerPid === undefined ? {} : { writerPid: value.writerPid }),
+    ...(value.writerThreadId === undefined ? {} : { writerThreadId: value.writerThreadId }),
     ...(value.writerInstanceId === undefined ? {} : { writerInstanceId: value.writerInstanceId }),
   };
 }
@@ -281,8 +287,8 @@ function journalWriterIsAlive(journal: StateWriteTransactionJournal): boolean {
     // the stale timeout so an active writer cannot be mistaken for a crash.
     return true;
   }
-  if (journal.writerPid === process.pid && journal.writerInstanceId !== undefined) {
-    return journal.writerInstanceId === PROCESS_INSTANCE_ID;
+  if (journal.writerPid === process.pid && journal.writerInstanceId !== undefined && journal.writerThreadId !== undefined) {
+    return journal.writerThreadId !== threadId || journal.writerInstanceId === PROCESS_INSTANCE_ID;
   }
   try {
     process.kill(journal.writerPid, 0);
@@ -302,6 +308,7 @@ function sameStateWriteTransaction(
     pathsReferenceSameFile(left.tempPath, right.tempPath) &&
     left.startedAt === right.startedAt &&
     left.writerPid === right.writerPid &&
+    left.writerThreadId === right.writerThreadId &&
     left.writerInstanceId === right.writerInstanceId
   );
 }
@@ -454,6 +461,7 @@ export function atomicWriteFileSync(
     tempPath: resolve(tmpPath),
     startedAt,
     writerPid: process.pid,
+    writerThreadId: threadId,
     writerInstanceId: PROCESS_INSTANCE_ID,
   };
   try {

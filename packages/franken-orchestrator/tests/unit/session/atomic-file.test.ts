@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { threadId } from 'node:worker_threads';
 import {
   atomicWriteFileSync,
   quarantineFile,
@@ -145,6 +146,7 @@ describe('atomic-file', () => {
           startedAt: '2999-01-01T00:00:00.000Z',
           updatedAt: '2999-01-01T00:00:01.000Z',
           writerPid: process.pid,
+          writerThreadId: threadId,
           writerInstanceId: 'crashed-process-instance',
         }),
         'utf8',
@@ -155,6 +157,35 @@ describe('atomic-file', () => {
       expect(existsSync(tempPath)).toBe(false);
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
       expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
+    });
+
+    it('retains a fresh journal owned by another worker thread in the same process', () => {
+      const dir = makeTmpDir('atomic-write-other-thread-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000013`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+          writerPid: process.pid,
+          writerThreadId: threadId + 1,
+          writerInstanceId: 'other-live-worker-instance',
+        }),
+        'utf8',
+      );
+
+      expect(() => atomicWriteFileSync(filePath, '{"replacement":true}')).toThrow(/still active/);
+
+      expect(existsSync(tempPath)).toBe(true);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
+      expect(readFileSync(filePath, 'utf-8')).toBe('{"old":true}');
     });
   });
 
