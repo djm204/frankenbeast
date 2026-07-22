@@ -210,7 +210,6 @@ export class CodexCliAdapter implements ILlmProvider {
           if (type === 'done') {
             // Do not report success until the child closes: a late stdin EPIPE
             // means the terminal frame may describe only a partial prompt.
-            break;
           }
         } else if (type === 'error') {
           const message =

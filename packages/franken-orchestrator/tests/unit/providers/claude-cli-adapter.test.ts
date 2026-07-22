@@ -275,6 +275,26 @@ describe('ClaudeCliAdapter', () => {
       expect(events[1]).toEqual({ type: 'done', usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 } });
     });
 
+    it('keeps draining partial-message output after message_stop', async () => {
+      mockSpawn([
+        JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'prefix' } }),
+        JSON.stringify({ type: 'message_stop' }),
+        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'suffix' }] } }),
+      ]);
+
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'Hi' }],
+        extraArgs: ['--include-partial-messages'],
+      }));
+
+      expect(events).toEqual([
+        { type: 'text', content: 'prefix' },
+        { type: 'text', content: 'suffix' },
+        { type: 'done', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+      ]);
+    });
+
     it('parses Claude CLI result wrapper frames', async () => {
       mockSpawn([
         JSON.stringify({

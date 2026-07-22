@@ -236,7 +236,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
           // Delay success until close so a late stdin EPIPE can preempt a
           // terminal frame produced from a partial prompt.
           sawTerminalFrame = true;
-          break;
         } else if (type === 'content_block_start') {
           const block = parsed['content_block'] as Record<string, unknown>;
           if (block?.['type'] === 'tool_use') {
@@ -333,7 +332,6 @@ export class ClaudeCliAdapter implements ILlmProvider {
             return;
           }
           sawTerminalFrame = true;
-          break;
         } else if (type === 'error') {
           const error = parsed['error'] as Record<string, unknown> | undefined;
           const message =

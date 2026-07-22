@@ -508,6 +508,7 @@ describe('CliLlmAdapter', () => {
           vi.spyOn(stdin, 'write').mockImplementation(() => {
             hadErrorListener = stdin.listenerCount('error') > 0;
             setImmediate(() => {
+              stderr.write('rate limit exceeded before prompt was accepted');
               if (hadErrorListener) {
                 stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
               }
@@ -524,8 +525,13 @@ describe('CliLlmAdapter', () => {
           throw new Error('expected execute to throw');
         } catch (error) {
           expect(error).toBeInstanceOf(Error);
-          expect((error as Error).message).toContain('write EPIPE');
-          expect((error as Error & { cause?: { kind?: string } }).cause?.kind).toBe('command_failed');
+          expect((error as Error).message).toContain('rate limit exceeded before prompt was accepted');
+          expect((error as Error & { cause?: { kind?: string; stderr?: string } }).cause).toEqual(
+            expect.objectContaining({
+              kind: 'rate_limit',
+              stderr: 'rate limit exceeded before prompt was accepted',
+            }),
+          );
         }
         expect(hadErrorListener).toBe(true);
       });
