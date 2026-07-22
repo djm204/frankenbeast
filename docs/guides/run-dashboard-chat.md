@@ -45,7 +45,7 @@ For a persistent selection, update the config used by the server:
 }
 ```
 
-`providers.overrides.<provider>.extraArgs` changes that provider's CLI arguments. For dashboard chat, set `chat.model` to override the conversational model; it takes precedence over a model in the selected provider override. Keep provider credentials in the provider's normal environment or credential store, not in this JSON file.
+`providers.overrides.<provider>.extraArgs` changes that provider's CLI arguments. For dashboard chat, `providers.overrides.<selected-provider>.model` has the highest model precedence. When that field is absent, `chat.model` overrides the provider's built-in chat model. Remove a stale selected-provider model override (or set it to the same value) when changing `chat.model`. Keep provider credentials in the provider's normal environment or credential store, not in this JSON file.
 
 Command overrides are intentionally fail-closed. Do not add `command` when the provider's normal binary is sufficient. To use a wrapper or nonstandard binary, put the override in an explicit operator-owned config outside the repository, set `trustCommandOverride: true`, restrict an absolute wrapper path with `trustedCommandPaths`, and start the server with both `--config <operator-config.json>` and `--trust-provider-command-overrides`:
 
@@ -211,6 +211,7 @@ and marker-looking text nested there must not be treated as a real prompt bounda
 - pass `--provider <name>` explicitly to distinguish a bad `providers.default` from a provider runtime failure
 - if fallback selection is unexpected, pass `--providers <comma-separated-list>` explicitly and check `providers.fallbackChain`
 - if you use a config file, pass `--config <path>` and confirm that file contains `providers` and `chat.model` at the top level
+- if `chat.model` appears to be ignored, check `providers.overrides.<selected-provider>.model`, which takes precedence
 - if a command override is refused, do not weaken repository config; use the operator-owned config and explicit trust flow above
 
 `The UI loads but does not connect`
