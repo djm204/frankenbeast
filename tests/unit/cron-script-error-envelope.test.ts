@@ -1334,7 +1334,7 @@ describe('cron script error envelope runner', () => {
       '--',
       process.execPath,
       '-e',
-      `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); process.stderr.write('ready with zombie candidate\n'); setInterval(() => {}, 1000);`,
+      `const { spawn } = require('node:child_process'); spawn(process.execPath, ['-e', 'process.exit(0)'], { stdio: ['ignore', 'ignore', 'ignore'] }); process.on('SIGTERM', () => process.exit(0)); process.stderr.write('ready with zombie candidate\\n'); setInterval(() => {}, 1000);`,
     ], {
       cwd: ROOT,
       env: { ...process.env, TZ: 'UTC', CRON_SCRIPT_KILL_GRACE_MS: '5000' },

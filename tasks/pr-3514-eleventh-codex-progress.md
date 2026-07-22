@@ -1,0 +1,22 @@
+# PR 3514 Eleventh-Round Codex Remediation Progress
+
+- [x] Verify exact local/origin/PR head and fully paginate the live Codex thread set.
+- [x] Inventory the eight fresh exact-head findings from review 4752970875.
+- [x] RED/GREEN: commented destructured child_process aliases remain inert.
+- [x] RED/GREEN: assignment-only aliases declared later in variable lists use declaration scope.
+- [x] RED/GREEN: imported child_process namespace aliases honor parameter shadowing.
+- [x] RED/GREEN: template-literal child_process module specifiers are recognized.
+- [x] RED/GREEN: var child_process aliases use function scope rather than block scope.
+- [x] RED/GREEN: scoped spawn method aliases do not leak into file-wide call names.
+- [x] RED/GREEN: typed casts on bound spawn aliases are recognized.
+- [x] RED/GREEN: split assignment followed by dotted spawn chains is recognized.
+- [x] Address independent review blockers for assignment-only `var` scope, arrow/multiline function scope, and multiline template specifiers.
+- [x] RED/GREEN: cover independent re-review defects for `var` spawn-alias lifetime, multiline declarations, standalone-dot chains, comprehensive alias shadowing, method scopes, and bound executable position.
+- [x] Run focused hardcoded-secrets tests (79/79), syntax, and diff checks.
+- [x] Re-run security lint, root lint, typecheck, build, and full npm test after final hardening.
+- [x] Commit with David Mendez <me@davidmendez.dev>.
+- [ ] Publish the exact validated commit through approval-cop only.
+- [ ] Reply to and resolve exactly the eight fresh Codex threads through approval-cop only.
+- [ ] Trigger and poll one authorized fresh exact-head Codex review through approval-cop only.
+- [ ] Confirm exact remote head, green CI, fully paginated zero unresolved Codex threads, fresh Codex clean result, and CLEAN mergeability.
+- [ ] Deliver exact closeout evidence to t_3f087d44, t_bdaa2232, and t_844d8fe2.
