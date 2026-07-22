@@ -10,7 +10,7 @@ import {
   seededRandom,
   type ServerSocketEvent,
 } from '@franken/types';
-import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt } from './use-chat-session';
+import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt, SessionStatus } from './chat-session-types';
 
 export const EMPTY_TOKEN_TOTALS: TokenTotals = {
   cheap: 0,
@@ -84,6 +84,32 @@ export function makeBanner(
     actionLabel,
     ...(code ? { code } : {}),
   };
+}
+
+export function approvalReconciliationResult(
+  session: ChatSession,
+  approved: boolean,
+): { error: string | null; banner: ChatErrorBanner | null; status: SessionStatus } {
+  if (session.pendingApproval || session.state === 'pending_approval') {
+    return { error: 'The server did not confirm the approval response. Try again.', banner: null, status: 'error' };
+  }
+  if (session.state === 'failed') {
+    const message = 'The approved action failed. Review the transcript and try again.';
+    return {
+      error: message,
+      banner: makeBanner('Approved action failed', message, 'dismiss', 'Dismiss', 'APPROVAL_EXECUTION_FAILED'),
+      status: 'error',
+    };
+  }
+  if (approved && session.state === 'rejected') {
+    const message = 'The server rejected the approved action before it could run. Recreate the action and try again.';
+    return {
+      error: message,
+      banner: makeBanner('Approved action was rejected', message, 'dismiss', 'Dismiss', 'APPROVAL_EXECUTION_REJECTED'),
+      status: 'error',
+    };
+  }
+  return { error: null, banner: null, status: session.state === 'executing' ? 'streaming' : 'idle' };
 }
 
 function hasDeterministicSeed(): boolean {

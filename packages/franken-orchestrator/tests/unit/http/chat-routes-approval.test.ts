@@ -116,6 +116,53 @@ describe('chat approval route persistence', () => {
     expect(staleBody.data).toMatchObject({ approved: true, state: 'approved', pendingApproval: null });
   });
 
+  it('persists executing while HTTP fallback approval execution is in flight', async () => {
+    const runResult = {
+      displayMessages: [{ kind: 'reply' as const, content: 'deployed' }],
+      events: [],
+      pendingApproval: false,
+      state: 'active' as const,
+      transcript: [],
+      beastContext: null,
+      providerContext: null,
+    };
+    let finishExecution!: () => void;
+    const runtime = {
+      run: vi.fn().mockReturnValue(new Promise<typeof runResult>((resolve) => {
+        finishExecution = () => resolve(runResult);
+      })),
+    };
+    const app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+      approvalAuditLog: new FileApprovalAuditLog(join(sessionStoreDir, 'in-flight-approval-audit.jsonl')),
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      tool: 'execution',
+      command: 'deploy staging',
+    };
+    sessionStore.save(session);
+
+    const responsePromise = app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: true }),
+    });
+
+    await vi.waitFor(() => expect(runtime.run).toHaveBeenCalledTimes(1));
+    expect(sessionStore.get(session.id)?.state).toBe('executing');
+    expect(sessionStore.get(session.id)?.pendingApproval).toBeNull();
+
+    finishExecution();
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect(sessionStore.get(session.id)?.state).toBe('approved');
+  });
+
   it('records HTTP fallback approval execution and rejects replayed consumed approvals', async () => {
     const auditPath = join(sessionStoreDir, 'hitl-approval-audit.jsonl');
     const runtime = {
