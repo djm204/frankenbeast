@@ -1,7 +1,6 @@
 import type { CliSkillExecutor } from './skills/cli-skill-executor.js';
 import type { PrCreator } from './closure/pr-creator.js';
 import type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
-import type { SessionToken } from '@franken/governor';
 
 /**
  * BeastLoopDeps — dependency injection interface for the orchestrator.
@@ -181,7 +180,17 @@ export interface ApprovalOutcome {
   readonly decision: 'approved' | 'rejected' | 'abort';
   readonly reason?: string | undefined;
   /** Scope-bound authorization artifact issued by the governor for an approval. */
-  readonly token?: SessionToken | undefined;
+  readonly token?: ApprovalSessionToken | undefined;
+}
+
+/** Minimal governor session-token contract exposed across the orchestrator port. */
+export interface ApprovalSessionToken {
+  readonly tokenId: string;
+  readonly approvalId: string;
+  readonly scope: string;
+  readonly grantedBy: string;
+  readonly grantedAt: Date;
+  readonly expiresAt: Date;
 }
 
 /** What the orchestrator needs from MOD-08 (Heartbeat). */
