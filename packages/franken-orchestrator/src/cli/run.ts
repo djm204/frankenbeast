@@ -1672,6 +1672,8 @@ export async function main(): Promise<void> {
   // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
+  try {
+
   // Resolve base branch. Resume usually starts from the interrupted run's
   // feature branch, so infer the original base from git reflog unless the
   // user supplied an explicit --base-branch override.
@@ -1760,6 +1762,9 @@ export async function main(): Promise<void> {
   // invoking frankenbeast for no-change tasks would see a spurious nonzero exit.
   if (result && result.status !== 'completed' && result.status !== 'no-op') {
     process.exit(1);
+  }
+  } finally {
+    io.close();
   }
 }
 
