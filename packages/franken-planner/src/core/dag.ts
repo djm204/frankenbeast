@@ -257,7 +257,7 @@ export class PlanGraph {
 
   // ─── Mutations (all return new PlanGraph — immutable) ──────────────────────
 
-  addTask(task: Task, dependsOn: TaskId[] = []): PlanGraph {
+  addTask(task: Task, dependsOn: TaskId[] = task.dependsOn): PlanGraph {
     if (this._nodes.has(task.id)) {
       throw new DuplicateTaskError(task.id);
     }
