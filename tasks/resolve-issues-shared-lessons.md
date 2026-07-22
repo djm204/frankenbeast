@@ -507,3 +507,7 @@
 
 ## 2026-07-22 — Chat session hook source hygiene
 - `franken-web` enforces a sub-900-line limit on `use-chat-session.ts`; when asynchronous recovery behavior grows the hook, move its public type contracts into a dedicated type-only module and re-export them from the hook so callers remain compatible without weakening the source-hygiene test.
+
+## 2026-07-22 — Chat WebSocket reconnect lifecycle
+- Browser `1006` closes conflate rejected upgrades with transient setup outages; use a generous bounded setup-failure threshold, a lower explicit-authentication threshold, and reset counters only on the protocol-level ready event rather than socket open.
+- Reconnect ownership must cover timers and refresh promises: retry transient API failures through the same backoff controller, classify fatal HTTP statuses with structured errors, and route manual/online recovery through that controller so slow refreshes cannot race newer ticket requests.

@@ -8,4 +8,5 @@
 - [x] Stopped after two explicit authentication failures or eight browser-ambiguous setup failures while preserving capped retries through transient outages.
 - [x] Added focused coverage for delayed retries, exponential/capped jitter, transient and sustained pre-open failures, repeated explicit authentication failures, successful-ready reset, manual reconnect races, and unmount cancellation.
 - [x] Passed `@franken/web` tests (722), typecheck, lint (0 errors; existing warnings), and production build.
-- [ ] Open PR, pass CI and current-head GitHub Codex review, then merge.
+- [x] Opened PR #3640 and passed CI plus current-head GitHub Codex review.
+- [ ] Merge PR #3640 and verify issue closure.
