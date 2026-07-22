@@ -1,5 +1,5 @@
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { ISecretStore, SecretStoreDetection, SecretStoreOptions } from '../secret-store.js';
 
@@ -17,19 +17,40 @@ function createSecretsRecord(): Record<string, string> {
 }
 
 async function writeFileAtomic(filePath: string, data: string | Buffer): Promise<void> {
+  let targetPath = filePath;
+  let mode = 0o600;
+  try {
+    targetPath = await realpath(filePath);
+    mode = (await stat(targetPath)).mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
   const tempPath = join(
-    dirname(filePath),
-    `.${basename(filePath)}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`,
+    dirname(targetPath),
+    `.${basename(targetPath)}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`,
   );
   let tempFile: Awaited<ReturnType<typeof open>> | undefined;
 
   try {
-    tempFile = await open(tempPath, 'wx', 0o600);
+    tempFile = await open(tempPath, 'wx', mode);
     await tempFile.writeFile(data);
     await tempFile.sync();
     await tempFile.close();
     tempFile = undefined;
-    await rename(tempPath, filePath);
+    await rename(tempPath, targetPath);
+
+    let parentDir: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      parentDir = await open(dirname(targetPath), 'r');
+      await parentDir.sync();
+    } catch {
+      // Some platforms/filesystems do not support syncing directory handles.
+    } finally {
+      await parentDir?.close().catch(() => undefined);
+    }
   } catch (error) {
     await tempFile?.close().catch(() => undefined);
     await rm(tempPath, { force: true }).catch(() => undefined);

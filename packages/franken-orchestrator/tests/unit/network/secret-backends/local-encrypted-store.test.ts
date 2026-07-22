@@ -1,18 +1,20 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readFile, readdir, rename, rm, stat, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LocalEncryptedStore } from '../../../../src/network/secret-backends/local-encrypted-store.js';
 import { testCredential } from '../../../support/test-credentials.js';
 
 const fsMocks = vi.hoisted(() => ({
+  open: vi.fn(),
   rename: vi.fn(),
 }));
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
+  fsMocks.open.mockImplementation(actual.open);
   fsMocks.rename.mockImplementation(actual.rename);
-  return { ...actual, rename: fsMocks.rename };
+  return { ...actual, open: fsMocks.open, rename: fsMocks.rename };
 });
 
 const TEST_SLACK_BOT_TOKEN = testCredential('TEST_SLACK_BOT_TOKEN');
@@ -22,6 +24,7 @@ describe('LocalEncryptedStore', () => {
   let store: LocalEncryptedStore;
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     tempDir = await mkdtemp(join(tmpdir(), 'secret-test-'));
     store = new LocalEncryptedStore({
       projectRoot: tempDir,
@@ -87,6 +90,37 @@ describe('LocalEncryptedStore', () => {
       expect(await readFile(encPath)).toEqual(originalCiphertext);
       expect((await readdir(secretsDir)).filter((name) => name.includes('secrets.enc.tmp'))).toEqual([]);
       expect(await store.resolve('key')).toBe('value1');
+    });
+
+    it('fsyncs the parent directory after replacing the ciphertext', async () => {
+      await store.store('key', 'value');
+      const secretsDir = join(tempDir, '.fbeast');
+
+      expect(fsMocks.open).toHaveBeenCalledWith(secretsDir, 'r');
+    });
+
+    it('preserves existing ciphertext permissions when replacing it', async () => {
+      await store.store('key', 'value1');
+      const encPath = join(tempDir, '.fbeast', 'secrets.enc');
+      await chmod(encPath, 0o640);
+
+      await store.store('key', 'value2');
+
+      expect((await stat(encPath)).mode & 0o777).toBe(0o640);
+    });
+
+    it('atomically replaces the target of an existing ciphertext symlink', async () => {
+      await store.store('key', 'value1');
+      const encPath = join(tempDir, '.fbeast', 'secrets.enc');
+      const linkedEncPath = join(tempDir, 'persisted-secrets.enc');
+      await rename(encPath, linkedEncPath);
+      await symlink(linkedEncPath, encPath);
+
+      await store.store('key', 'value2');
+
+      expect((await lstat(encPath)).isSymbolicLink()).toBe(true);
+      expect(await store.resolve('key')).toBe('value2');
+      expect((await stat(linkedEncPath)).isFile()).toBe(true);
     });
 
     it('handles multiple secrets', async () => {
