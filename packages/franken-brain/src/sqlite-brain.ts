@@ -8182,8 +8182,8 @@ const STOPWORDS = new Set([
 
 // --- Helpers ---
 
-const RECALL_LITERAL_LIKE_CHARACTERS = new Set(['%', '_', '\\']);
-const RECALL_BOUNDARY_PUNCTUATION = /[\p{P}\p{S}]/u;
+const RECALL_LEADING_WRAPPERS = new Set(Array.from('"\'`“‘«‹([{<（［｛〈《「『【〔〖〘〚,;:!?，；：！？'));
+const RECALL_TRAILING_WRAPPERS = new Set(Array.from('"\'`”’»›)]}>）］｝〉》」』】〕〗〙〛.,;:!?。，；：！？'));
 
 function normalizeRecallKeywords(query: string): string[] {
   return query
@@ -8193,23 +8193,15 @@ function normalizeRecallKeywords(query: string): string[] {
       const characters = Array.from(word);
       let start = 0;
       let end = characters.length;
-      while (
-        start < end
-        && RECALL_BOUNDARY_PUNCTUATION.test(characters[start]!)
-        && !RECALL_LITERAL_LIKE_CHARACTERS.has(characters[start]!)
-      ) {
+      while (start < end && RECALL_LEADING_WRAPPERS.has(characters[start]!)) {
         start += 1;
       }
-      while (
-        end > start
-        && RECALL_BOUNDARY_PUNCTUATION.test(characters[end - 1]!)
-        && !RECALL_LITERAL_LIKE_CHARACTERS.has(characters[end - 1]!)
-      ) {
+      while (end > start && RECALL_TRAILING_WRAPPERS.has(characters[end - 1]!)) {
         end -= 1;
       }
       return characters.slice(start, end).join('');
     })
-    .filter((word) => word.length > 2)
+    .filter((word) => word.length > 2 || /^[\p{L}\p{N}]#$/u.test(word))
     .filter((word) => !STOPWORDS.has(word));
 }
 

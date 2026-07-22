@@ -124,6 +124,30 @@ describe('EpisodicMemory.recall()', () => {
   });
 
   it.each([
+    ['C++', 'C++ compiler selected', 'compiler selected'],
+    ['C#', 'C# compiler selected', 'compiler selected'],
+    ['F#', 'F# compiler selected', 'compiler selected'],
+    ['.env', '.env file missing', 'env file missing'],
+    ['--dry-run', '--dry-run enabled', 'dry-run enabled'],
+    ['/app/src/auth.ts', '/app/src/auth.ts failed', 'app/src/auth.ts failed'],
+  ])('preserves significant punctuation in %s recall terms', (query, exactSummary, distractorSummary) => {
+    brain.episodic.record({
+      type: 'observation',
+      summary: exactSummary,
+      createdAt: '2026-03-18T10:30:00Z',
+    });
+    brain.episodic.record({
+      type: 'observation',
+      summary: distractorSummary,
+      createdAt: '2026-03-18T10:31:00Z',
+    });
+
+    const results = brain.episodic.recall(query);
+
+    expect(results[0]!.summary).toBe(exactSummary);
+  });
+
+  it.each([
     ['percent', '100%', '100% completion rate achieved', '100 percent complete'],
     ['underscore', 'token_ab', 'token_ab accepted', 'tokenXab accepted'],
     ['backslash', String.raw`C:\\temp`, String.raw`C:\\temp created`, 'C:temp created'],
