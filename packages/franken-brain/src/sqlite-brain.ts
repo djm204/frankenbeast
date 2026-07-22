@@ -994,7 +994,10 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   );
 }
 
-function stringifyCheckpointState(state: ExecutionState, maxBytes: number): string {
+function stringifyCheckpointState(
+  state: ExecutionState,
+  maxBytes?: number,
+): string {
   let serialized: string | undefined;
   try {
     serialized = JSON.stringify(state);
@@ -1013,12 +1016,13 @@ function stringifyCheckpointState(state: ExecutionState, maxBytes: number): stri
   }
 
   const byteLength = Buffer.byteLength(serialized, 'utf8');
-  if (byteLength > maxBytes) {
+  const byteLimit = maxBytes;
+  if (byteLimit !== undefined && byteLength > byteLimit) {
     throw new CheckpointSerializationError(
       'CHECKPOINT_SIZE_LIMIT_EXCEEDED',
-      `Checkpoint state is ${byteLength} bytes, exceeding maxValueBytes (${maxBytes})`,
+      `Checkpoint state is ${byteLength} bytes, exceeding maxValueBytes (${byteLimit})`,
       byteLength,
-      maxBytes,
+      byteLimit,
     );
   }
 
@@ -6494,12 +6498,8 @@ export class SqliteBrain implements IBrain {
     });
 
     try {
-      const checkpointMaxBytes = {
-        ...DEFAULT_WORKING_MEMORY_LIMITS,
-        ...workingMemoryLimits,
-      }.maxValueBytes;
       const serializedCheckpoint = snapshot.checkpoint
-        ? stringifyCheckpointState(snapshot.checkpoint, checkpointMaxBytes)
+        ? stringifyCheckpointState(snapshot.checkpoint)
         : undefined;
       const insertEvent = brain.db.prepare(
         `INSERT INTO episodic_events (id, type, step, summary, details, created_at)

@@ -6619,6 +6619,28 @@ describe('SqliteBrain', () => {
       bounded.close();
     });
 
+    it('hydrate() restores legacy oversized checkpoints while enforcing the budget on new writes', () => {
+      const legacy = new SqliteBrain(':memory:', { maxValueBytes: 4096 });
+      const oversized = makeState({ context: { payload: 'x'.repeat(1024) } });
+      legacy.recovery.checkpoint(oversized);
+      const snapshot = legacy.serialize();
+      legacy.close();
+
+      const hydrated = SqliteBrain.hydrate(snapshot, ':memory:', {
+        maxValueBytes: 512,
+      });
+      expect(hydrated.recovery.lastCheckpoint()).toEqual(oversized);
+      expect(() => hydrated.recovery.checkpoint(oversized)).toThrowError(
+        expect.objectContaining({
+          code: 'CHECKPOINT_SIZE_LIMIT_EXCEEDED',
+          maxBytes: 512,
+        }),
+      );
+      expect(hydrated.recovery.lastCheckpoint()).toEqual(oversized);
+
+      hydrated.close();
+    });
+
     it('checkpoint() flushes working memory to SQLite', () => {
       brain.working.set('key1', 'value1');
 
