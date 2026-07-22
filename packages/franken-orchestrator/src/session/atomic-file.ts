@@ -23,6 +23,7 @@ const WRITE_CHUNK_BYTES = 1024 * 1024;
 // Node exposes one time origin for the entire process, shared by worker threads
 // while changing across process restarts (including PID reuse).
 const PROCESS_INSTANCE_ID = performance.timeOrigin.toString();
+const PROCESS_START_TIME_TICKS = readLinuxProcessStartTimeTicks(process.pid);
 let writeCounter = 0;
 
 export type StateWriteJournalPhase = 'preparing' | 'writing-temp' | 'renaming';
@@ -35,6 +36,7 @@ export interface StateWriteTransactionJournal {
   readonly startedAt: string;
   readonly updatedAt: string;
   readonly writerPid?: number;
+  readonly writerProcessStartTimeTicks?: string;
   readonly writerInstanceId?: string;
 }
 
@@ -146,6 +148,12 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
   if (value.writerPid !== undefined && (!Number.isSafeInteger(value.writerPid) || value.writerPid <= 0)) {
     throw new Error(`state write journal ${journalPath} writerPid must be a positive safe integer`);
   }
+  if (
+    value.writerProcessStartTimeTicks !== undefined &&
+    (typeof value.writerProcessStartTimeTicks !== 'string' || value.writerProcessStartTimeTicks.length === 0)
+  ) {
+    throw new Error(`state write journal ${journalPath} writerProcessStartTimeTicks must be a non-empty string`);
+  }
   if (value.writerInstanceId !== undefined && (typeof value.writerInstanceId !== 'string' || value.writerInstanceId.length === 0)) {
     throw new Error(`state write journal ${journalPath} writerInstanceId must be a non-empty string`);
   }
@@ -157,6 +165,9 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
     ...(value.writerPid === undefined ? {} : { writerPid: value.writerPid }),
+    ...(value.writerProcessStartTimeTicks === undefined
+      ? {}
+      : { writerProcessStartTimeTicks: value.writerProcessStartTimeTicks }),
     ...(value.writerInstanceId === undefined ? {} : { writerInstanceId: value.writerInstanceId }),
   };
 }
@@ -277,6 +288,26 @@ function isStaleJournal(journal: StateWriteTransactionJournal): boolean {
   return Date.now() - updatedAtMs >= STALE_JOURNAL_AGE_MS;
 }
 
+function readLinuxProcessStartTimeTicks(pid: number): string | undefined {
+  if (process.platform !== 'linux' || !Number.isSafeInteger(pid) || pid <= 0) {
+    return undefined;
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const endOfCommand = stat.lastIndexOf(')');
+    if (endOfCommand < 0) {
+      return undefined;
+    }
+    const fieldsFromState = stat.slice(endOfCommand + 2).trim().split(/\s+/);
+    const startTimeTicks = fieldsFromState[19];
+    return typeof startTimeTicks === 'string' && startTimeTicks.length > 0
+      ? startTimeTicks
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function journalWriterIsAlive(journal: StateWriteTransactionJournal): boolean {
   if (journal.writerPid === undefined) {
     // Legacy journals predate writer ownership metadata and remain protected by
@@ -285,6 +316,12 @@ function journalWriterIsAlive(journal: StateWriteTransactionJournal): boolean {
   }
   if (journal.writerPid === process.pid && journal.writerInstanceId !== undefined) {
     return journal.writerInstanceId === PROCESS_INSTANCE_ID;
+  }
+  if (journal.writerProcessStartTimeTicks !== undefined) {
+    const liveProcessStartTimeTicks = readLinuxProcessStartTimeTicks(journal.writerPid);
+    if (liveProcessStartTimeTicks !== undefined) {
+      return liveProcessStartTimeTicks === journal.writerProcessStartTimeTicks;
+    }
   }
   try {
     process.kill(journal.writerPid, 0);
@@ -304,6 +341,7 @@ function sameStateWriteTransaction(
     pathsReferenceSameFile(left.tempPath, right.tempPath) &&
     left.startedAt === right.startedAt &&
     left.writerPid === right.writerPid &&
+    left.writerProcessStartTimeTicks === right.writerProcessStartTimeTicks &&
     left.writerInstanceId === right.writerInstanceId
   );
 }
@@ -456,6 +494,9 @@ export function atomicWriteFileSync(
     tempPath: resolve(tmpPath),
     startedAt,
     writerPid: process.pid,
+    ...(PROCESS_START_TIME_TICKS === undefined
+      ? {}
+      : { writerProcessStartTimeTicks: PROCESS_START_TIME_TICKS }),
     writerInstanceId: PROCESS_INSTANCE_ID,
   };
   try {

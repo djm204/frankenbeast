@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -184,6 +185,48 @@ describe('atomic-file', () => {
       expect(existsSync(tempPath)).toBe(true);
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
       expect(readFileSync(filePath, 'utf-8')).toBe('{"old":true}');
+    });
+
+    it.runIf(process.platform === 'linux')('recovers when an unrelated live process reused the writer PID', () => {
+      const dir = makeTmpDir('atomic-write-reused-pid-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000014`;
+      const journalPath = stateWriteJournalPath(filePath);
+      const unrelatedProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], {
+        stdio: 'ignore',
+      });
+      const writerPid = unrelatedProcess.pid;
+      if (writerPid === undefined) {
+        unrelatedProcess.kill();
+        throw new Error('Expected the unrelated test process to have a PID');
+      }
+
+      try {
+        writeFileSync(tempPath, '{"new":');
+        writeFileSync(
+          journalPath,
+          JSON.stringify({
+            schemaVersion: 1,
+            targetPath: filePath,
+            tempPath,
+            phase: 'writing-temp',
+            startedAt: '2999-01-01T00:00:00.000Z',
+            updatedAt: '2999-01-01T00:00:01.000Z',
+            writerPid,
+            writerProcessStartTimeTicks: 'reused-process-start',
+            writerInstanceId: 'crashed-process-instance',
+          }),
+          'utf8',
+        );
+
+        atomicWriteFileSync(filePath, '{"replacement":true}');
+
+        expect(existsSync(tempPath)).toBe(false);
+        expect(existsSync(journalPath)).toBe(false);
+        expect(readFileSync(filePath, 'utf8')).toBe('{"replacement":true}');
+      } finally {
+        unrelatedProcess.kill();
+      }
     });
   });
 
