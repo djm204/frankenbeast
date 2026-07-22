@@ -165,7 +165,16 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setApprovalError(approvalPending
           ? 'The server did not confirm the approval response. Try again.'
           : approvalFailed ? 'The approved action failed. Review the transcript and try again.' : null);
-        setStatus(approvalPending || approvalFailed ? 'error' : refreshed.state === 'approved' ? 'streaming' : 'idle');
+        if (approvalFailed) {
+          addErrorBanner(makeBanner(
+            'Approved action failed',
+            'The approved action failed. Review the transcript and try again.',
+            'dismiss',
+            'Dismiss',
+            'APPROVAL_EXECUTION_FAILED',
+          ));
+        }
+        setStatus(approvalPending || approvalFailed ? 'error' : 'idle');
       })
       .catch((error) => {
         if (!sessionStillCurrent(capturedSessionId)
@@ -476,7 +485,13 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         case 'assistant.message.complete':
           setShowTypingIndicator(false);
           setStatus('idle');
-          if (approvalResolvingRef.current) updateApprovalResolving(false);
+          if (approvalResolvingRef.current) {
+            readyRef.current = true;
+            setPendingApproval(null);
+            setSessionState('approved');
+            setApprovalError(null);
+            updateApprovalResolving(false);
+          }
           if (payload.modelTier) {
             setTier(payload.modelTier);
           }

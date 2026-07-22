@@ -1092,6 +1092,8 @@ describe('useChatSession', () => {
 
     expect(result.current.approvalResolving).toBe(false);
     expect(result.current.status).toBe('idle');
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
     expect(mockGetSession).not.toHaveBeenCalled();
   });
 
@@ -1145,7 +1147,7 @@ describe('useChatSession', () => {
     expect(result.current.approvalError).toBeNull();
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
-    expect(result.current.status).toBe('streaming');
+    expect(result.current.status).toBe('idle');
     expect(result.current.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'assistant', content: 'Approved command output' }),
     ]));
@@ -1216,6 +1218,11 @@ describe('useChatSession', () => {
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('failed');
     expect(result.current.status).toBe('error');
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Approved action failed',
+      message: expect.stringContaining('approved action failed'),
+      action: 'dismiss',
+    });
     expect(result.current.messages).toEqual(expect.arrayContaining([
       expect.objectContaining({ content: 'Approved action exited with status 1' }),
     ]));
