@@ -24,7 +24,7 @@ The rest of the dashboard continues using React hooks. No migration of existing 
 
 ## Implementation
 
-The accepted design is implemented in `packages/franken-web/src/stores/beast-store.ts`. Wizard values, navigation, mode, and validation errors live in `useBeastStore`; the wizard dialog and every step component subscribe through scoped selectors rather than subscribing to the entire store. `BeastsPage` calls `resetWizard()` before each new create flow so state survives step unmounts but does not leak between launches.
+The accepted design is implemented in `packages/franken-web/src/stores/beast-store.ts`. Wizard values, navigation, mode, validation errors, and the canonical `isWizardDirty` flag live in `useBeastStore`; updates from any step mark the draft dirty, and `resetWizard()` clears both the draft and its dirty state. The wizard dialog and every step component subscribe through scoped selectors rather than subscribing to the entire store. `BeastsPage` calls `resetWizard()` before each new create flow so state survives step unmounts but does not leak between launches.
 
 Local-only presentation state, such as the skills search query or dialog loading state, remains in React hooks as required by the boundary above. Store behavior is covered by `src/stores/beast-store.test.ts`, dialog behavior by `src/components/beasts/wizard-dialog.test.tsx`, and the scoped-selector boundary by `tests/components/beasts/wizard-zustand-architecture.test.ts`.
 

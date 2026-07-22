@@ -14,6 +14,7 @@ interface WizardSlice {
   wizardStep: number;
   highestCompleted: number;
   wizardMode: WizardMode;
+  isWizardDirty: boolean;
   stepValues: StepValues;
   validationErrors: ValidationErrors;
   nextStep: () => void;
@@ -52,6 +53,7 @@ export const useBeastStore = create<BeastStore>()((set, get) => ({
   wizardStep: 0,
   highestCompleted: -1,
   wizardMode: 'wizard' as WizardMode,
+  isWizardDirty: false,
   stepValues: {},
   validationErrors: {},
 
@@ -72,6 +74,7 @@ export const useBeastStore = create<BeastStore>()((set, get) => ({
   setStepValues: (step, values) =>
     set((s) => ({
       stepValues: { ...s.stepValues, [step]: values },
+      isWizardDirty: true,
     })),
 
   setValidationErrors: (step, errors) =>
@@ -101,6 +104,7 @@ export const useBeastStore = create<BeastStore>()((set, get) => ({
       wizardStep: 0,
       highestCompleted: -1,
       wizardMode: 'wizard' as WizardMode,
+      isWizardDirty: false,
       stepValues: {},
       validationErrors: {},
     }),
