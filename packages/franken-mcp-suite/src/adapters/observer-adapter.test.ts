@@ -23,6 +23,14 @@ function legacy16AuditHash(metadata: string, parentHash?: string): string {
   return parentHash ? legacy16(`${parentHash}:${inputHash}`) : inputHash.slice(0, 16);
 }
 
+function legacy16HexAuditHash(metadata: string, parentHash?: string): string {
+  const inputHash = `sha256:${createHash('sha256').update(metadata).digest('hex')}`;
+  const chainedHash = parentHash
+    ? `sha256:${createHash('sha256').update(`${parentHash}:${inputHash}`).digest('hex')}`
+    : inputHash;
+  return `sha256:${chainedHash.slice('sha256:'.length, 'sha256:'.length + 16)}`;
+}
+
 function mutateAuditTrailDirectly(dbPath: string, mutation: (db: ReturnType<typeof createSqliteStore>['db']) => void): void {
   const store = createSqliteStore(dbPath);
   store.setAuditTrailMutationEnabled(true);
@@ -351,6 +359,34 @@ describe('ObserverAdapter', () => {
     expect(verification).toEqual({ ok: true, checked: 2 });
     expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[0]!.parentHash).toBeNull();
+    expect(trail[1]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
+  });
+
+  it('verifies and migrates legacy audit hashes with 16 hexadecimal digest characters', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const firstMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory', step: 1 });
+    const secondMetadata = JSON.stringify({ sessionId, eventType: 'tool_result', tool: 'memory', ok: true });
+    const firstLegacyHash = legacy16HexAuditHash(firstMetadata);
+    const secondLegacyHash = legacy16HexAuditHash(secondMetadata, firstLegacyHash);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', firstMetadata, firstLegacyHash, null);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_result', secondMetadata, secondLegacyHash, firstLegacyHash);
+    db.close();
+
+    expect(firstLegacyHash).toMatch(/^sha256:[a-f0-9]{16}$/);
+    expect(secondLegacyHash).toMatch(/^sha256:[a-f0-9]{16}$/);
+    await expect(observer.verify(sessionId)).resolves.toEqual({ ok: true, checked: 2 });
+    const trail = await observer.trail(sessionId);
+    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[1]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
   });
