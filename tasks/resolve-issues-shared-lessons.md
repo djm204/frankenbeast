@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-22 — Deterministic root release repair
+- When repairing GitHub's latest-release marker in a multi-package repository, fetch a bounded but churn-tolerant release window with explicit draft/prerelease exclusion, filter only bare root semver tags, and sort parsed numeric version tuples instead of trusting API creation order. Resolve the replacement candidate before demoting the current latest release so an empty bounded result fails without leaving the repository markerless.
+
 ## 2026-07-22 — Shared chat command completion catalogs
 - When adding interactive completion for chat commands, derive or cross-check the catalog against every command accepted by the shared runtime, not only the commands handled locally by one CLI wrapper. Approval commands such as `/approve` and `/reject` can be runtime-owned even when the readline layer has no dedicated branch; keep both attached and local chat interfaces on one completer and test paired command prefixes explicitly.
 
