@@ -1,6 +1,6 @@
 export interface CritiqueErrorOptions {
   readonly context?: Readonly<Record<string, unknown>>;
-  readonly cause?: Error;
+  readonly cause?: unknown;
 }
 
 export class CritiqueError extends Error {
