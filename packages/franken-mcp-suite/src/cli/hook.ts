@@ -84,7 +84,7 @@ const RAW_SECRET_HINTS = [
   '-key',
 ] as const;
 const CREDENTIAL_URL_HINT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:[^\s@/]+@/i;
-const CAMEL_CASE_SECRET_KEY_HINT = /[A-Za-z0-9](?:Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b/;
+const CAMEL_CASE_SECRET_KEY_HINT = /[A-Za-z0-9](?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b/;
 const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
 
 function containsRawSecretHint(text: string): boolean {
@@ -111,6 +111,11 @@ function containsOversizedSecretIndicator(text: string): boolean {
   for (const match of text.matchAll(tupleKeyPattern)) {
     if (isSensitiveAssignmentKey(match[1]!)) return true;
   }
+
+  const pairLabelPattern = /\\*["'](?:name|key)\\*["']\s*:\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']/gi;
+  for (const match of text.matchAll(pairLabelPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
   return false;
 }
 
@@ -127,14 +132,20 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
     : redacted
       .replace(/(authorization\s*:\s*)[\s\S]*?(?=(?<!\\)"\s*[,}]|\r?\n|$)/gi, '$1[REDACTED]')
       .replace(/(\bcookie\s*:\s*)[\s\S]*?(?=(?<!\\)"\s*[,}]|\r?\n|$)/gi, '$1[REDACTED]')
+      .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}Authorization\s*=\s*)(?:Basic|Bearer|Token)\s+\S+/gi, '$1[REDACTED]')
       .replace(/(\bauthorization\b\s*=\s*)AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+/gi, '$1[REDACTED]')
       .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*(?:\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*)+|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]');
 
   return redacted
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
-    .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
+    .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
-    .replace(/(--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
+    .replace(
+      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
+      (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
+        ? `${prefix}[REDACTED]`
+        : match,
+    )
     .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
 }
 

@@ -430,6 +430,31 @@ describe('fbeast-hook runtime', () => {
     expect(result.observerLogs[0]!.metadata).toContain('JWTToken=[REDACTED]');
   });
 
+  it('redacts camel-case authorization assignments from raw post-tool payloads', async () => {
+    const secret = ['proxy', 'authorization', 'raw'].join('-');
+    const payload = `proxyAuthorization=Basic ${secret}`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata).toContain('proxyAuthorization=[REDACTED]');
+  });
+
+  it('redacts prefixed option-style credential flags', async () => {
+    const authSecret = ['proxy', 'flag', 'fixture'].join('-');
+    const keySecret = ['openai', 'flag', 'fixture'].join('-');
+    const payload = `--proxy-authorization Basic ${authSecret} --openai-api-key ${keySecret} --format json`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = result.observerLogs[0]!.metadata;
+
+    expect(metadata).not.toContain(authSecret);
+    expect(metadata).not.toContain(keySecret);
+    expect(metadata).toContain('--proxy-authorization [REDACTED]');
+    expect(metadata).toContain('--openai-api-key [REDACTED]');
+    expect(metadata).toContain('--format json');
+  });
+
   it('redacts secrets from JSON embedded in text fields', async () => {
     const secret = ['embedded', 'json', 'fixture'].join('-');
     const payload = JSON.stringify({
@@ -541,6 +566,20 @@ describe('fbeast-hook runtime', () => {
     const payload = JSON.stringify({
       output: 'x'.repeat(70_000),
       headers: [['Set-Cookie', `sid=${secret}; Path=/; HttpOnly`]],
+    });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('redacts oversized reversed value/name credential pairs', async () => {
+    const secret = ['oversized', 'reversed', 'pair'].join('-');
+    const payload = JSON.stringify({
+      output: 'x'.repeat(70_000),
+      env: [{ value: secret, name: 'OPENAI_API_KEY' }],
     });
 
     const result = await runHookForTest(['post-tool', 'read_file', payload]);
