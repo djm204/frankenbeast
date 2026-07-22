@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.9.0...franken-web-v0.9.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **web:** reconcile timed-out approval responses ([#3588](https://github.com/djm204/frankenbeast/issues/3588)) ([45f042a](https://github.com/djm204/frankenbeast/commit/45f042aa12b2780831ec386431701165b26d3c57))
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.8.0...franken-web-v0.9.0) (2026-07-22)
 
 

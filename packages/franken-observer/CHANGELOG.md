@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.3...franken-observer-v0.11.4) (2026-07-22)
+
+
+### Bug Fixes
+
+* **observer:** reset trace server state after stop ([#3601](https://github.com/djm204/frankenbeast/issues/3601)) ([cbc1b5c](https://github.com/djm204/frankenbeast/commit/cbc1b5ca2dfa67c5f91a6a25a5db30057ca6ed83))
+
 ## [0.11.3](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.2...franken-observer-v0.11.3) (2026-07-22)
 
 

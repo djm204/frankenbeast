@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.9.2](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.9.1...franken-mcp-suite-v0.9.2) (2026-07-22)
+
+
+### Bug Fixes
+
+* **mcp:** cover prefixed credential forms ([36338f5](https://github.com/djm204/frankenbeast/commit/36338f5ad38cc3a297a43c2e779b31ed876ff514))
+* **mcp:** cover serialized header redaction ([483ac18](https://github.com/djm204/frankenbeast/commit/483ac185667dee22da89464831c2a55f0ebe30a6))
+* **mcp:** redact credential pair structures ([9ace190](https://github.com/djm204/frankenbeast/commit/9ace190962eab939e9a93bd3cb38568bd12edb1f))
+* **mcp:** redact post-tool observer payload secrets ([52d47e4](https://github.com/djm204/frankenbeast/commit/52d47e421f95c0f9e40cd225e324cbb40454b248))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.10.2 to 0.10.3
+    * @franken/observer bumped from 0.11.3 to 0.11.4
+    * @franken/orchestrator bumped from 0.57.0 to 0.57.1
+
 ## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.9.0...franken-mcp-suite-v0.9.1) (2026-07-22)
 
 
