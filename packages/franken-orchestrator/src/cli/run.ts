@@ -2320,7 +2320,7 @@ export function runDirectCli(
       }
     })
     .catch((error) => {
-      console.error('Fatal:', error instanceof Error ? error.message : error);
+      console.error('Fatal:', error);
       exit(1);
     });
 }
