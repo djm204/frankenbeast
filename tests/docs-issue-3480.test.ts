@@ -1,5 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { OrchestratorConfigSchema } from "../packages/franken-orchestrator/src/config/orchestrator-config.js";
 
@@ -25,6 +27,9 @@ describe("issue #3480 runnable example projects", () => {
     expect(readText("README.md")).toContain("[examples](examples/README.md)");
     expect(readText("docs/guides/quickstart.md")).toContain(
       "[sample projects](../../examples/README.md)",
+    );
+    expect(readText("docs/ARCHITECTURE.md")).toContain(
+      "[`examples/`](../examples/README.md)",
     );
   });
 
@@ -77,5 +82,34 @@ describe("issue #3480 runnable example projects", () => {
       enableTracing: false,
     });
     expect(OrchestratorConfigSchema.safeParse(config).success).toBe(true);
+
+    const readme = readText("examples/orchestrator-config/README.md");
+    expect(readme.indexOf("npm run plan")).toBeLessThan(
+      readme.indexOf("npm start"),
+    );
+    expect(
+      existsSync(
+        resolve(ROOT, "examples/orchestrator-config/docs/sample-design.md"),
+      ),
+    ).toBe(true);
+  });
+
+  it("prints package-specific next steps for examples without start scripts", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "frankenbeast-examples-"));
+    const target = join(tempRoot, "cli-plan");
+
+    try {
+      const result = spawnSync(
+        "bash",
+        [resolve(ROOT, "scripts/create-project.sh"), "cli-plan", target],
+        { cwd: ROOT, encoding: "utf8" },
+      );
+
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(result.stdout).toContain("See README.md");
+      expect(result.stdout).not.toContain("npm start");
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 });

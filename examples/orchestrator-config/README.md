@@ -7,9 +7,10 @@ From a Frankenbeast checkout, first run `npm run local:link` at the repository r
 ```bash
 npm ci
 npm run help
+npm run plan
 npm start
 ```
 
-`npm start` runs `frankenbeast run --config .fbeast/config.json`. A run needs generated chunks under `.fbeast/plans/`; create them with `frankenbeast plan --design-doc <path>` first or pass an existing plan directory using supported CLI arguments after `--`.
+`npm run plan` creates chunks under `.fbeast/plans/` from the bundled design document. `npm start` then runs those chunks with `frankenbeast run --config .fbeast/config.json`. Replace the bundled document or pass an existing plan directory using supported CLI arguments after `--` when adapting the example.
 
 Configuration precedence is CLI flags, then `FRANKEN_*` environment variables, then this JSON file, then built-in defaults. The sample uses valid conservative budgets and keeps heartbeat/tracing opt-in features disabled.
