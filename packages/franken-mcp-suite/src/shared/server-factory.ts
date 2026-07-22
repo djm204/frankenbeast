@@ -1,9 +1,6 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { Server } from '@modelcontextprotocol/server';
+import type { CallToolResult, ListToolsResult } from '@modelcontextprotocol/server';
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { createHash } from 'node:crypto';
 
 export interface ToolContent {
@@ -1226,17 +1223,17 @@ export function createMcpServer(
   };
   server.onclose = closeResources;
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => ({
     tools: tools.map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
-    })),
+    })) as unknown as ListToolsResult['tools'],
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request): Promise<Record<string, unknown>> => {
+  server.setRequestHandler('tools/call', async (request): Promise<CallToolResult> => {
     const { name: toolName, arguments: args } = request.params;
-    return { ...(await dispatchTool(toolMap, toolName, args, options)) };
+    return dispatchTool(toolMap, toolName, args, options) as unknown as CallToolResult;
   });
 
   return {

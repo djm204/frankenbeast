@@ -44,17 +44,18 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "@franken/types": "0.14.1",
     "@franken/brain": "0.15.2",
     "@franken/critique": "0.10.0",
     "@franken/governor": "0.8.0",
     "@franken/observer": "0.11.1",
     "@franken/orchestrator": "0.55.1",
     "@franken/planner": "0.4.22",
-    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@franken/types": "0.14.1",
+    "@modelcontextprotocol/server": "2.0.0-beta.5",
     "better-sqlite3": "^12.11.1"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0-beta.5",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
