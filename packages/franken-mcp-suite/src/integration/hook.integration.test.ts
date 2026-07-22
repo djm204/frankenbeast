@@ -63,6 +63,17 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('[REDACTED]');
   });
 
+  it('preserves shell commands after redacted authorization headers for governance', async () => {
+    const credential = ['Token', 'opaque', 'fixture'].join(' ');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `curl -H 'Authorization: ${credential}' https://api.example.com && rm -rf /tmp/nope`,
+    });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).not.toContain(credential);
+    expect(seen).toContain('rm -rf /tmp/nope');
+  });
+
   it('redacts prefixed env-style credential assignments before governor persistence', async () => {
     const values = [
       ['openai', 'fixture', 'value'].join('-'),
@@ -201,11 +212,54 @@ describe('fbeast-hook runtime', () => {
         databasePassword: '[REDACTED]',
         signingSecret: '[REDACTED]',
         headers: { Authorization: '[REDACTED]' },
-        diagnostic: 'Authorization: Bearer [REDACTED]',
+        diagnostic: 'Authorization: [REDACTED]',
       },
     });
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
     expect(result.observerLogs[0]!.metadata).not.toContain(basicCredential);
+  });
+
+  it('redacts every authorization header scheme from embedded post-tool output', async () => {
+    const tokenCredential = ['Token', 'opaque', 'credential'].join(' ');
+    const sigCredential = ['AWS4-HMAC-SHA256', 'Credential=fixture/signed'].join(' ');
+    const payload = JSON.stringify({
+      output: `Authorization: ${tokenCredential}\nAuthorization: ${sigCredential}`,
+    });
+
+    const result = await runHookForTest(['post-tool', 'http_trace', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(tokenCredential);
+    expect(result.observerLogs[0]!.metadata).not.toContain(sigCredential);
+    expect(result.observerLogs[0]!.metadata.match(/Authorization: \[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it('redacts acronym-prefixed and cookie credential keys from JSON post-tool payloads', async () => {
+    const secret = ['credential', 'fixture', 'value'].join('-');
+    const payload = JSON.stringify({
+      DBPassword: secret,
+      JWTToken: secret,
+      sessionCookie: secret,
+      setCookie: secret,
+      cookie: secret,
+      credentials: secret,
+      passphrase: secret,
+    });
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+    const loggedPayload = JSON.parse(metadata.payload) as Record<string, string>;
+
+    expect(Object.values(loggedPayload)).toEqual(Array(7).fill('[REDACTED]'));
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('preserves benign JSON post-tool payload bytes exactly', async () => {
+    const payload = '{\n  "status": "ok",\n  "duplicate": 1,\n  "duplicate": 2,\n  "ratio": 1.00\n}';
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe(payload);
   });
 
   it('redacts authorization and generic key assignments from raw post-tool payloads before observer logging', async () => {
@@ -271,6 +325,26 @@ describe('fbeast-hook runtime', () => {
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as {
       payload: string;
     };
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('preserves oversized benign payloads with key-like terms', async () => {
+    const payload = `${'x'.repeat(70_000)} public_key documentation sort_key foreign-key token guide cookie policy password advice`;
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe(payload);
+  });
+
+  it('whole-redacts oversized payloads with generic credential assignments', async () => {
+    const secret = ['oversized', 'generic', 'key', 'fixture'].join('-');
+    const payload = `${'x'.repeat(70_000)} OPENAI_KEY=${secret}`;
+
+    const result = await runHookForTest(['post-tool', 'write_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
     expect(metadata.payload).toBe('[post-tool-payload-redacted]');
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
   });
