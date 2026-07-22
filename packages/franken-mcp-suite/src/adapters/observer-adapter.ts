@@ -394,13 +394,19 @@ function buildEventBaseHash(sessionId: string, eventType: string, metadata: stri
   return hashContent(`${sessionId}:${eventType}:${inputHash ?? ''}:${metadata}`);
 }
 
-function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string {
-  const baseHash = inputHash ?? hashContent('');
-  if (!parentHash) {
-    return baseHash.slice(0, 16);
-  }
+const SHA256_PREFIX = 'sha256:';
+const LEGACY_AUDIT_DIGEST_HEX_LENGTH = 16;
+// Older adapters truncated the entire prefixed hash to 16 characters, leaving nine digest characters.
+const HISTORICAL_LEGACY_AUDIT_DIGEST_HEX_LENGTH = 16 - SHA256_PREFIX.length;
 
-  return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
+function buildLegacy16AuditHash(
+  inputHash?: string,
+  parentHash?: string,
+  digestHexLength = LEGACY_AUDIT_DIGEST_HEX_LENGTH,
+): string {
+  const baseHash = inputHash ?? hashContent('');
+  const fullHash = parentHash ? hashContent(`${parentHash}:${baseHash}`) : baseHash;
+  return `${SHA256_PREFIX}${fullHash.slice(SHA256_PREFIX.length, SHA256_PREFIX.length + digestHexLength)}`;
 }
 
 function buildMatchingLegacy16Hash(
@@ -408,10 +414,11 @@ function buildMatchingLegacy16Hash(
   parentHash: string | undefined,
   parsedMetadata: unknown,
 ): string | undefined {
-  if (!isLegacy16Hash(row.hash)) return undefined;
+  const digestHexLength = legacy16DigestHexLength(row.hash);
+  if (digestHexLength === undefined) return undefined;
 
   for (const metadata of legacyMetadataCandidates(row.payload, parsedMetadata)) {
-    const expected = buildLegacy16AuditHash(hashContent(metadata), parentHash);
+    const expected = buildLegacy16AuditHash(hashContent(metadata), parentHash, digestHexLength);
     if (row.hash === expected) return expected;
   }
 
@@ -419,7 +426,18 @@ function buildMatchingLegacy16Hash(
 }
 
 function isLegacy16Hash(hash: string | undefined): hash is string {
-  return /^sha256:[a-f0-9]{9}$/.test(hash ?? '');
+  return legacy16DigestHexLength(hash) !== undefined;
+}
+
+function legacy16DigestHexLength(hash: string | undefined): number | undefined {
+  if (!hash?.startsWith(SHA256_PREFIX)) return undefined;
+  const digest = hash.slice(SHA256_PREFIX.length);
+  if (!/^[a-f0-9]+$/.test(digest)) return undefined;
+  if (digest.length === LEGACY_AUDIT_DIGEST_HEX_LENGTH) return LEGACY_AUDIT_DIGEST_HEX_LENGTH;
+  if (digest.length === HISTORICAL_LEGACY_AUDIT_DIGEST_HEX_LENGTH) {
+    return HISTORICAL_LEGACY_AUDIT_DIGEST_HEX_LENGTH;
+  }
+  return undefined;
 }
 
 function legacyMetadataCandidates(storedMetadata: string, parsedMetadata: unknown): string[] {
