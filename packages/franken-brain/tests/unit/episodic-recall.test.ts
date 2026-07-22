@@ -130,6 +130,11 @@ describe('EpisodicMemory.recall()', () => {
     ['.env', '.env file missing', 'env file missing'],
     ['--dry-run', '--dry-run enabled', 'dry-run enabled'],
     ['/app/src/auth.ts', '/app/src/auth.ts failed', 'app/src/auth.ts failed'],
+    ['[P1]', '[P1] incident', 'incident'],
+    ['[CI]', '[CI] failed', 'CI failed'],
+    ['<T>', '<T> generic type', 'generic type'],
+    ['<init>', '<init> method failed', 'init method failed'],
+    ['!important', '!important declaration', 'important declaration'],
   ])('preserves significant punctuation in %s recall terms', (query, exactSummary, distractorSummary) => {
     brain.episodic.record({
       type: 'observation',
@@ -145,6 +150,10 @@ describe('EpisodicMemory.recall()', () => {
     const results = brain.episodic.recall(query);
 
     expect(results[0]!.summary).toBe(exactSummary);
+  });
+
+  it('does not turn punctuation-only queries into recent-memory reads', () => {
+    expect(brain.episodic.recall('???')).toEqual([]);
   });
 
   it.each([
