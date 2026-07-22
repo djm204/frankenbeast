@@ -56,9 +56,14 @@ export class CodexCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const spawnState: { message: string | undefined; source: 'spawn' | 'stdin' | undefined } = {
+    const spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+      closeStream: (() => void) | undefined;
+    } = {
       message: undefined,
       source: undefined,
+      closeStream: undefined,
     };
     proc.once('error', (error) => {
       spawnState.message = error.message;
@@ -69,6 +74,8 @@ export class CodexCliAdapter implements ILlmProvider {
         spawnState.message = error.message;
         spawnState.source = 'stdin';
       }
+      spawnState.closeStream?.();
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
     });
 
     const userContent = request.messages
@@ -160,9 +167,15 @@ export class CodexCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
-    spawnState: { message: string | undefined; source: 'spawn' | 'stdin' | undefined },
+    spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+      closeStream: (() => void) | undefined;
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
+    spawnState.closeStream = () => rl.close();
+    if (spawnState.source === 'stdin') rl.close();
     proc.once('error', () => {
       rl.close();
     });
@@ -222,10 +235,6 @@ export class CodexCliAdapter implements ILlmProvider {
         }
       }
 
-      // Stream ended without a done/error frame — check spawn/exit status
-      const exitCode = await new Promise<number | null>((resolve) => {
-        proc.on('close', resolve);
-      });
       if (spawnState.message) {
         streamCompleted = true;
         yield {
@@ -237,6 +246,10 @@ export class CodexCliAdapter implements ILlmProvider {
         };
         return;
       }
+      // Stream ended without a done/error frame — check its exit status.
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
       if (exitCode !== 0 && exitCode !== null) {
         yield {
           type: 'error',

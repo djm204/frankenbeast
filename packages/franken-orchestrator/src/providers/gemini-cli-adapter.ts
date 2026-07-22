@@ -104,9 +104,14 @@ export class GeminiCliAdapter implements ILlmProvider {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      const spawnState: { message: string | undefined; source: 'spawn' | 'stdin' | undefined } = {
+      const spawnState: {
+        message: string | undefined;
+        source: 'spawn' | 'stdin' | undefined;
+        closeStream: (() => void) | undefined;
+      } = {
         message: undefined,
         source: undefined,
+        closeStream: undefined,
       };
       proc.once('error', (error) => {
         spawnState.message = error.message;
@@ -117,6 +122,8 @@ export class GeminiCliAdapter implements ILlmProvider {
           spawnState.message = error.message;
           spawnState.source = 'stdin';
         }
+        spawnState.closeStream?.();
+        if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
       });
 
       const userContent = request.messages
@@ -547,9 +554,15 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
-    spawnState: { message: string | undefined; source: 'spawn' | 'stdin' | undefined },
+    spawnState: {
+      message: string | undefined;
+      source: 'spawn' | 'stdin' | undefined;
+      closeStream: (() => void) | undefined;
+    },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
+    spawnState.closeStream = () => rl.close();
+    if (spawnState.source === 'stdin') rl.close();
     proc.once('error', () => {
       rl.close();
     });
@@ -736,10 +749,6 @@ export class GeminiCliAdapter implements ILlmProvider {
         }
       }
 
-      // Stream ended without message_stop/result/error — check exit code
-      const exitCode = await new Promise<number | null>((resolve) => {
-        proc.on('close', resolve);
-      });
       if (spawnState.message) {
         streamCompleted = true;
         yield {
@@ -751,6 +760,10 @@ export class GeminiCliAdapter implements ILlmProvider {
         };
         return;
       }
+      // Stream ended without message_stop/result/error — check its exit code.
+      const exitCode = await new Promise<number | null>((resolve) => {
+        proc.on('close', resolve);
+      });
       if (exitCode !== 0 && exitCode !== null) {
         yield {
           type: 'error',

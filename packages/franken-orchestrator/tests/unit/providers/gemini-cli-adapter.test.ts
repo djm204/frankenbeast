@@ -85,16 +85,11 @@ function mockStdinError(errorMessage = 'write EPIPE') {
     hadErrorListener = stdin.listenerCount('error') > 0;
     setImmediate(() => {
       if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
-      stdout.end();
-      setImmediate(() => {
-        proc.exitCode = 1;
-        proc.emit('close', 1);
-      });
     });
     return true;
   });
   (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
-  return { hadErrorListener: () => hadErrorListener };
+  return { hadErrorListener: () => hadErrorListener, proc };
 }
 
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
@@ -385,13 +380,14 @@ describe('GeminiCliAdapter', () => {
     });
 
     it('handles child stdin errors through the provider error path', async () => {
-      const { hadErrorListener } = mockStdinError();
+      const { hadErrorListener, proc } = mockStdinError();
       const events = await collectEvents(adapter.execute({
         systemPrompt: 'sys',
         messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
       }));
 
       expect(hadErrorListener()).toBe(true);
+      expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
       expect(events).toEqual([{
         type: 'error',
         error: expect.stringContaining('write EPIPE'),
