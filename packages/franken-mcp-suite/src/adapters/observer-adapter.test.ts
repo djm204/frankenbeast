@@ -104,6 +104,43 @@ describe('ObserverAdapter', () => {
     }
   });
 
+  it('preserves and surfaces malformed metadata already stored by older adapters', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const metadata = '{"token":"must-not-leak"';
+    const auditEvent = createAuditEvent('tool_call', metadata, {
+      phase: 'mcp',
+      provider: 'fbeast-mcp',
+      input: metadata,
+    });
+    const hash = hashContent(`${sessionId}:tool_call:${auditEvent.inputHash ?? ''}:${metadata}`);
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare(`
+        INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(sessionId, 'tool_call', metadata, hash, null);
+    });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await expect(observer.verify(sessionId)).resolves.toEqual({ ok: true, checked: 1 });
+      await expect(observer.log({
+        event: 'tool_result',
+        metadata: JSON.stringify({ ok: true }),
+        sessionId,
+      })).resolves.toEqual(expect.objectContaining({ hash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }));
+
+      expect(await observer.trail(sessionId)).toHaveLength(2);
+      const warnings = stderr.mock.calls.map(([message]) => String(message));
+      expect(warnings).toHaveLength(2);
+      expect(warnings.every((warning) => warning.includes('"code":"OBSERVER_STORED_METADATA_INVALID_JSON"'))).toBe(true);
+      expect(warnings.join('\n')).not.toContain('must-not-leak');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it('chains later audit hashes through the previous entry hash', async () => {
     const secondHashFrom = async (firstMetadata: string): Promise<string> => {
       const observer = createObserverAdapter(tracked(tmpDbPath()));

@@ -115,7 +115,7 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
     async log(input) {
       let payload: unknown;
       try {
-        payload = parseMetadata(input.metadata);
+        payload = JSON.parse(input.metadata);
       } catch (cause) {
         metadataParseRejections += 1;
         const error = new ObserverMetadataParseError(input.event, metadataParseRejections, { cause });
@@ -267,7 +267,7 @@ function validateAuditTail(
   const previousHash = rows[1]?.hash;
   const actualParentHash = tail.parentHash ?? undefined;
   const metadata = tail.payload;
-  const payload = parseMetadata(metadata);
+  const payload = parseStoredMetadata(metadata);
   const auditEvent = createAuditEvent(tail.eventType, payload, {
     phase: 'mcp',
     provider: 'fbeast-mcp',
@@ -310,7 +310,7 @@ function inspectAuditTrail(
 
   for (const [index, row] of rows.entries()) {
     const metadata = row.payload;
-    const payload = parseMetadata(metadata);
+    const payload = parseStoredMetadata(metadata);
     const auditEvent = createAuditEvent(row.eventType, payload, {
       phase: 'mcp',
       provider: 'fbeast-mcp',
@@ -439,7 +439,7 @@ function prettyOneLineJson(value: Record<string, unknown>): string {
 }
 
 function legacy16RowIsBoundToTrail(row: AuditTrailRow, sessionId: string): boolean {
-  const payload = parseMetadata(row.payload);
+  const payload = parseStoredMetadata(row.payload);
   if (!isPlainObject(payload)) return false;
 
   const payloadSession = payload['sessionId'] ?? payload['session_id'];
@@ -460,8 +460,18 @@ function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number
   }
 }
 
-function parseMetadata(metadata: string): unknown {
-  return JSON.parse(metadata);
+function parseStoredMetadata(metadata: string): unknown {
+  try {
+    return JSON.parse(metadata);
+  } catch {
+    process.stderr.write(`[fbeast-observer] ${JSON.stringify({
+      level: 'warn',
+      code: 'OBSERVER_STORED_METADATA_INVALID_JSON',
+      metadataBytes: Buffer.byteLength(metadata),
+      metadataHash: hashContent(metadata),
+    })}\n`);
+    return metadata;
+  }
 }
 
 function canonicalMetadata(metadata: unknown): string {
