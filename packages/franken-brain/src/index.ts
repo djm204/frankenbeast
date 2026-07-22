@@ -1,6 +1,7 @@
 export {
   SqliteBrain,
   WorkingMemoryLimitError,
+  CheckpointSerializationError,
   WorkingMemoryKeyError,
   WorkingMemoryHydrationLimitError,
   CorruptWorkingMemoryRowError,
@@ -20,6 +21,7 @@ export {
   SqliteMemoryReviewQueue,
   SqliteMemoryAccessAuditTrail,
   type WorkingMemoryLimits,
+  type CheckpointSerializationErrorCode,
   type WorkingMemoryKeyErrorReason,
   type WorkingMemoryHydrationLimits,
   type SqliteBrainOptions,

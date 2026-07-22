@@ -879,6 +879,22 @@ export class WorkingMemoryLimitError extends Error {
   }
 }
 
+export type CheckpointSerializationErrorCode =
+  | 'CHECKPOINT_NOT_PERSISTABLE'
+  | 'CHECKPOINT_SIZE_LIMIT_EXCEEDED';
+
+export class CheckpointSerializationError extends Error {
+  constructor(
+    readonly code: CheckpointSerializationErrorCode,
+    message: string,
+    readonly byteLength?: number,
+    readonly maxBytes?: number,
+  ) {
+    super(message);
+    this.name = 'CheckpointSerializationError';
+  }
+}
+
 export type WorkingMemoryKeyErrorReason =
   | 'empty'
   | 'control_character'
@@ -976,6 +992,41 @@ function stringifyWorkingMemoryValue(key: string, value: unknown): string {
   throw new WorkingMemoryLimitError(
     `Working memory value for "${key}" is not JSON-serializable and could not be persisted`,
   );
+}
+
+function stringifyCheckpointState(
+  state: ExecutionState,
+  maxBytes?: number,
+): string {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(state);
+  } catch (error) {
+    throw new CheckpointSerializationError(
+      'CHECKPOINT_NOT_PERSISTABLE',
+      `Checkpoint state is not JSON-serializable and could not be persisted: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (serialized === undefined) {
+    throw new CheckpointSerializationError(
+      'CHECKPOINT_NOT_PERSISTABLE',
+      'Checkpoint state is not JSON-serializable and could not be persisted',
+    );
+  }
+
+  const byteLength = Buffer.byteLength(serialized, 'utf8');
+  const byteLimit = maxBytes;
+  if (byteLimit !== undefined && byteLength > byteLimit) {
+    throw new CheckpointSerializationError(
+      'CHECKPOINT_SIZE_LIMIT_EXCEEDED',
+      `Checkpoint state is ${byteLength} bytes, exceeding maxValueBytes (${byteLimit})`,
+      byteLength,
+      byteLimit,
+    );
+  }
+
+  return serialized;
 }
 
 function hashMemoryAccessValue(
@@ -3163,14 +3214,22 @@ interface CheckpointRow {
 class SqliteRecoveryMemory implements IRecoveryMemory {
   constructor(
     private db: Database.Database,
+    private maxCheckpointBytes: number,
     private flushWorkingMemory?: () => (() => void) | void,
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
   ) {}
 
   checkpoint(state: ExecutionState): { id: string } {
+    let serializedState: string;
     try {
-      assertCheckpointNotDeletionGuarded(this.db, state, this.encryption);
+      serializedState = stringifyCheckpointState(state, this.maxCheckpointBytes);
+      assertCheckpointNotDeletionGuarded(
+        this.db,
+        state,
+        serializedState,
+        this.encryption,
+      );
     } catch (error) {
       this.audit?.({
         operation: 'recovery.checkpoint',
@@ -3194,8 +3253,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
           `INSERT INTO checkpoints (state, created_at, schema_version) VALUES (?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         )
         .run(
-          this.encryption?.encrypt(JSON.stringify(state)) ??
-            JSON.stringify(state),
+          this.encryption?.encrypt(serializedState) ?? serializedState,
           state.timestamp,
         );
       const checkpoint = { id: String(result.lastInsertRowid) };
@@ -5520,13 +5578,14 @@ export class SqliteBrain implements IBrain {
     migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
     this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
     this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
+    const limits = {
+      ...DEFAULT_WORKING_MEMORY_LIMITS,
+      ...workingMemoryLimits,
+    };
     try {
       this.working = new SqliteWorkingMemory(
         this.db,
-        {
-          ...DEFAULT_WORKING_MEMORY_LIMITS,
-          ...workingMemoryLimits,
-        },
+        limits,
         options.hydrateWorkingMemoryFromDb ?? true,
         encryption,
         (event) => this.auditRecorder(event),
@@ -5544,6 +5603,7 @@ export class SqliteBrain implements IBrain {
     );
     this.recovery = new SqliteRecoveryMemory(
       this.db,
+      limits.maxValueBytes,
       () => this.working.flushToDb(),
       encryption,
       (event) => this.auditRecorder(event),
@@ -6446,6 +6506,9 @@ export class SqliteBrain implements IBrain {
     });
 
     try {
+      const serializedCheckpoint = snapshot.checkpoint
+        ? stringifyCheckpointState(snapshot.checkpoint)
+        : undefined;
       const insertEvent = brain.db.prepare(
         `INSERT INTO episodic_events (id, type, step, summary, details, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
@@ -6529,11 +6592,15 @@ export class SqliteBrain implements IBrain {
           );
         }
 
-        if (snapshot.checkpoint) {
-          assertCheckpointNotDeletionGuarded(brain.db, snapshot.checkpoint, brain.encryption);
+        if (snapshot.checkpoint && serializedCheckpoint) {
+          assertCheckpointNotDeletionGuarded(
+            brain.db,
+            snapshot.checkpoint,
+            serializedCheckpoint,
+            brain.encryption,
+          );
           insertCheckpoint.run(
-            brain.encryption?.encrypt(JSON.stringify(snapshot.checkpoint)) ??
-              JSON.stringify(snapshot.checkpoint),
+            brain.encryption?.encrypt(serializedCheckpoint) ?? serializedCheckpoint,
             snapshot.checkpoint.timestamp,
           );
         }
@@ -8019,13 +8086,18 @@ function hasAnyDeletionQueryGuard(db: Database.Database, scope: string, values: 
   return false;
 }
 
-function assertCheckpointNotDeletionGuarded(db: Database.Database, state: ExecutionState, encryption?: MemoryCipher): void {
+function assertCheckpointNotDeletionGuarded(
+  db: Database.Database,
+  state: ExecutionState,
+  serializedState: string,
+  encryption?: MemoryCipher,
+): void {
   const context = state.context;
   const candidates: Array<[string, string | undefined]> = [
     ...objectMetadataStrings(context, ['category', 'categories', 'kind']).map(value => ['category', value] as [string, string]),
-    ...extractStructuredMarkerValues(valueToSearchText(state), 'category').map(value => ['category', value] as [string, string]),
+    ...extractStructuredMarkerValues(serializedState, 'category').map(value => ['category', value] as [string, string]),
     ...objectMetadataStrings(context, ['sourceScope', 'source', 'scope', 'sourceId']).map(value => ['sourceScope', value] as [string, string]),
-    ...extractStructuredMarkerValues(valueToSearchText(state), 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
+    ...extractStructuredMarkerValues(serializedState, 'sourceScope').map(value => ['sourceScope', value] as [string, string]),
   ];
   for (const [kind, value] of candidates) {
     if (!value) continue;
@@ -8037,8 +8109,7 @@ function assertCheckpointNotDeletionGuarded(db: Database.Database, state: Execut
   }
   const queryGuardIndex = readQueryGuardIndex(db, 'checkpoint');
   if (queryGuardIndex.lengths.size > 0 || queryGuardIndex.hasLegacyHashes) {
-    const text = valueToSearchText(state);
-    const values = queryGuardCandidatesForReplay(text, queryGuardIndex);
+    const values = queryGuardCandidatesForReplay(serializedState, queryGuardIndex);
     if (hasAnyDeletionQueryGuard(db, 'checkpoint', values, encryption)) {
       throw new MemoryDeletionGuardError('Refusing to store checkpoint because it matches a prior right-to-forget query guard');
     }

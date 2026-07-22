@@ -6576,9 +6576,69 @@ describe('SqliteBrain', () => {
     });
 
     it('checkpoint() stores execution state and returns id', () => {
-      const result = brain.recovery.checkpoint(makeState());
+      const state = makeState();
+      const result = brain.recovery.checkpoint(state);
       expect(result.id).toBeDefined();
       expect(typeof result.id).toBe('string');
+      expect(brain.recovery.lastCheckpoint()).toEqual(state);
+    });
+
+    it('checkpoint() rejects circular state with a controlled persistence error', () => {
+      const context: Record<string, unknown> = {};
+      context.self = context;
+
+      expect(() => brain.recovery.checkpoint(makeState({ context }))).toThrowError(
+        expect.objectContaining({
+          name: 'CheckpointSerializationError',
+          code: 'CHECKPOINT_NOT_PERSISTABLE',
+          message: expect.stringMatching(/not JSON-serializable.*could not be persisted/),
+        }),
+      );
+      expect(brain.recovery.lastCheckpoint()).toBeNull();
+    });
+
+    it('checkpoint() rejects state larger than the configured value byte budget without replacing the last usable state', () => {
+      const bounded = new SqliteBrain(':memory:', { maxValueBytes: 512 });
+      const previous = makeState();
+      bounded.recovery.checkpoint(previous);
+
+      expect(() =>
+        bounded.recovery.checkpoint(
+          makeState({ context: { payload: 'x'.repeat(1024) } }),
+        ),
+      ).toThrowError(
+        expect.objectContaining({
+          name: 'CheckpointSerializationError',
+          code: 'CHECKPOINT_SIZE_LIMIT_EXCEEDED',
+          maxBytes: 512,
+          message: expect.stringMatching(/Checkpoint state is \d+ bytes, exceeding maxValueBytes \(512\)/),
+        }),
+      );
+      expect(bounded.recovery.lastCheckpoint()).toEqual(previous);
+
+      bounded.close();
+    });
+
+    it('hydrate() restores legacy oversized checkpoints while enforcing the budget on new writes', () => {
+      const legacy = new SqliteBrain(':memory:', { maxValueBytes: 4096 });
+      const oversized = makeState({ context: { payload: 'x'.repeat(1024) } });
+      legacy.recovery.checkpoint(oversized);
+      const snapshot = legacy.serialize();
+      legacy.close();
+
+      const hydrated = SqliteBrain.hydrate(snapshot, ':memory:', {
+        maxValueBytes: 512,
+      });
+      expect(hydrated.recovery.lastCheckpoint()).toEqual(oversized);
+      expect(() => hydrated.recovery.checkpoint(oversized)).toThrowError(
+        expect.objectContaining({
+          code: 'CHECKPOINT_SIZE_LIMIT_EXCEEDED',
+          maxBytes: 512,
+        }),
+      );
+      expect(hydrated.recovery.lastCheckpoint()).toEqual(oversized);
+
+      hydrated.close();
     });
 
     it('checkpoint() flushes working memory to SQLite', () => {
