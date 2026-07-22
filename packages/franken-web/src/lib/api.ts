@@ -43,7 +43,6 @@ export function toSocketUrl(baseUrl: string, sessionId: string, _token?: string)
   url.pathname = `${url.pathname.replace(/\/$/, '')}/v1/chat/ws`;
   url.search = '';
   url.searchParams.set('sessionId', sessionId);
-  url.searchParams.set('features', 'message-kind');
   return url.toString();
 }
 

@@ -282,7 +282,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setCostUsd(session.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(session) ? 'available' : 'unavailable');
         setTokenTelemetryStatus(sessionHasTokenTelemetry(session) ? 'available' : 'unavailable');
-        setStatus('idle');
+        setStatus(session.state === 'executing' ? 'streaming' : 'idle');
       } catch (error) {
         if (!cancelled) {
           setStatus('error');
@@ -421,6 +421,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             setPendingApproval(payload.pendingApproval ?? null);
             setSessionState(payload.state);
             setProjectId(payload.projectId);
+            setStatus(payload.state === 'executing' ? 'streaming' : 'idle');
           }
           return;
         case 'message.accepted': {
@@ -470,15 +471,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         case 'assistant.message.complete':
           setShowTypingIndicator(false);
           setStatus('idle');
-          if (approvalResolvingRef.current && payload.kind === 'approval') {
-            const approved = approvalDecisionRef.current !== false;
-            readyRef.current = true;
-            setPendingApproval(null);
-            setSessionState(approved ? 'approved' : 'rejected');
-            setApprovalError(null);
-            approvalDecisionRef.current = null;
-            updateApprovalResolving(false);
-          }
           if (payload.modelTier) {
             setTier(payload.modelTier);
           }
@@ -539,7 +531,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
             void refreshSession();
           }
           setShowTypingIndicator(false);
-          updateApprovalResolving(false);
+          if (!approvalResolvingRef.current) {
+            updateApprovalResolving(false);
+          }
           setApprovalError(payload.message);
           setActivity((current) => [
             ...current,

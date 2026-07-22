@@ -104,7 +104,7 @@ describe('useChatSession error banners', () => {
       expect(MockWebSocket.instances).toHaveLength(1);
     });
 
-    expect(MockWebSocket.instances[0]!.url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=session-1&features=message-kind');
+    expect(MockWebSocket.instances[0]!.url).toBe('ws://localhost:3000/v1/chat/ws?sessionId=session-1');
     expect(MockWebSocket.instances[0]!.url).not.toContain('socket-token');
     expect(MockWebSocket.instances[0]!.protocols).toEqual([
       'franken.chat.v1',

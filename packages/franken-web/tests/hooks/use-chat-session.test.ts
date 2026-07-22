@@ -250,6 +250,27 @@ describe('useChatSession', () => {
     expect(result.current.tokenTelemetryStatus).toBe('available');
   });
 
+  it('maps an executing session.ready snapshot to streaming', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+    await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    const socket = MockWebSocket.instances[0]!;
+
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'session.ready',
+        sessionId: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'executing',
+        pendingApproval: null,
+      });
+    });
+
+    expect(result.current.sessionState).toBe('executing');
+    expect(result.current.status).toBe('streaming');
+  });
+
   it('streams assistant messages and updates receipts', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
@@ -1058,7 +1079,7 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('streaming');
   });
 
-  it('does not resolve an approval from an unrelated assistant completion', async () => {
+  it('does not resolve an approval from its delayed prompt completion', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -1095,6 +1116,7 @@ describe('useChatSession', () => {
         type: 'assistant.message.complete',
         messageId: 'assistant-before-approval-result',
         content: 'Approval request display complete',
+        kind: 'approval',
         timestamp: '2026-03-09T00:00:07Z',
       });
     });
@@ -1114,9 +1136,10 @@ describe('useChatSession', () => {
     expect(mockGetSession).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps a dropped rejection resolution rejected when its completion arrives', async () => {
+  it('reconciles a dropped rejection resolution after its completion arrives', async () => {
     const { result } = renderHook(() => useChatSession(opts));
     await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    vi.useFakeTimers();
     const socket = MockWebSocket.instances[0]!;
     act(() => {
       socket.open();
@@ -1126,6 +1149,18 @@ describe('useChatSession', () => {
         timestamp: '2026-03-09T00:00:06Z',
       });
     });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'rejected',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:20Z',
+    });
     await act(async () => result.current.approve(false));
     act(() => socket.message({
       type: 'assistant.message.complete',
@@ -1134,6 +1169,13 @@ describe('useChatSession', () => {
       kind: 'approval',
       timestamp: '2026-03-09T00:00:07Z',
     }));
+
+    expect(result.current.approvalResolving).toBe(true);
+    expect(result.current.pendingApproval).not.toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
 
     expect(result.current.approvalResolving).toBe(false);
     expect(result.current.pendingApproval).toBeNull();
@@ -1320,7 +1362,7 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('error');
   });
 
-  it('surfaces a failed approved action from REST reconciliation', async () => {
+  it('keeps reconciling after an approved action error when resolution was dropped', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -1356,6 +1398,17 @@ describe('useChatSession', () => {
 
     await act(async () => {
       await result.current.approve(true);
+    });
+    act(() => socket.message({
+      type: 'turn.error',
+      code: 'APPROVAL_EXECUTION_FAILED',
+      message: 'Approved action exited with status 1',
+      timestamp: '2026-03-09T00:00:07Z',
+    }));
+    expect(result.current.approvalResolving).toBe(true);
+    expect(result.current.pendingApproval).not.toBeNull();
+
+    await act(async () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
 
@@ -1915,6 +1968,7 @@ describe('useChatSession', () => {
     await waitFor(() => {
       expect(result.current.sessionId).toBe('existing-sess');
     });
+    expect(result.current.status).toBe('streaming');
 
     await waitFor(() => {
       expect(MockWebSocket.instances).toHaveLength(1);

@@ -538,7 +538,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           requester: approvalRequester(c),
         });
         session.pendingApproval = null;
-        session.state = 'approved';
+        session.state = 'executing';
         session.updatedAt = isoNow();
         sessionStore.save(session);
         try {
