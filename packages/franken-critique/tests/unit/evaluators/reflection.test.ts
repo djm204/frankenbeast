@@ -125,6 +125,56 @@ describe('ReflectionEvaluator', () => {
       expect(prompt).toContain('"self":"[Circular]"');
     });
 
+    it('returns a classified failure when reflection input formatting throws', async () => {
+      const formattingError = new Error('hostile toJSON failed');
+      const objective = {
+        toJSON(): never {
+          throw formattingError;
+        },
+      };
+      const logged = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const evaluator = new ReflectionEvaluator({ llmClient: mockLlm });
+
+      const result = await evaluator.evaluate({
+        content: 'Checked reflection evaluator',
+        source: 'task-3579',
+        metadata: {
+          taskId: '3579',
+          phase: 'execution',
+          objective,
+        },
+      });
+
+      expect(mockLlm.complete).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        evaluatorName: 'reflection',
+        verdict: 'fail',
+        score: 0,
+        findings: [
+          {
+            message: expect.stringContaining(
+              'CRITIQUE_REFLECTION_FORMAT_ERROR',
+            ),
+            severity: 'critical',
+            location: 'internal:evaluator-exception',
+          },
+        ],
+      });
+      expect(logged).toHaveBeenCalledWith(
+        'Reflection evaluator input formatting failed',
+        expect.objectContaining({
+          code: 'CRITIQUE_REFLECTION_FORMAT_ERROR',
+          evaluatorName: 'reflection',
+          field: 'objective',
+          source: 'task-3579',
+          taskId: '3579',
+          phase: 'execution',
+          error: formattingError,
+        }),
+      );
+      logged.mockRestore();
+    });
+
     it('returns pass verdict and parsed severity for low-severity reflection', async () => {
       mockLlm.complete.mockResolvedValue('SEVERITY: 3\nApproach is sound');
       const evaluator = new ReflectionEvaluator({ llmClient: mockLlm });
