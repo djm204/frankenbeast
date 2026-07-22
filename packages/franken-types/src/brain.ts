@@ -66,8 +66,15 @@ export interface IEpisodicMemory {
 export interface IRecoveryMemory {
   checkpoint(state: ExecutionState): { id: string };
   lastCheckpoint(): ExecutionState | null;
-  listCheckpoints(): Array<{ id: string; timestamp: string }>;
+  listCheckpoints(options?: CheckpointListOptions): Array<{ id: string; timestamp: string }>;
   clearCheckpoints(): void;
+}
+
+export interface CheckpointListOptions {
+  /** Maximum rows to return. Defaults to 100 and cannot exceed 1000. */
+  limit?: number;
+  /** Return checkpoints with IDs lower than this exclusive cursor. */
+  cursor?: string;
 }
 
 // --- Data Types ---

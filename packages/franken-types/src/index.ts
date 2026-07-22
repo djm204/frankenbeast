@@ -69,6 +69,7 @@ export type {
   IWorkingMemory,
   IEpisodicMemory,
   IRecoveryMemory,
+  CheckpointListOptions,
   EpisodicEventType,
   EpisodicEvent,
   LearningCooldownOptions,
