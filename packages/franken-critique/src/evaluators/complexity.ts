@@ -10,6 +10,7 @@ import { createScore } from '../types/common.js';
 const MAX_PARAMS = 5;
 const MAX_NESTING = 4;
 const MAX_FUNCTION_LINES = 50;
+const MAX_CONTENT_LENGTH = 1024 * 1024;
 
 interface FunctionBlock {
   params: string;
@@ -599,6 +600,22 @@ export class ComplexityEvaluator implements Evaluator {
   readonly category = 'heuristic' as const;
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
+    if (input.content.length > MAX_CONTENT_LENGTH) {
+      return {
+        evaluatorName: this.name,
+        verdict: 'warn',
+        score: createScore(0.5),
+        findings: [
+          {
+            message: `Complexity evaluation skipped because content exceeds the ${MAX_CONTENT_LENGTH} character limit.`,
+            severity: 'warning',
+            suggestion:
+              'Split the content into smaller units before evaluating complexity',
+          },
+        ],
+      };
+    }
+
     if (!input.content.trim()) {
       return {
         evaluatorName: this.name,

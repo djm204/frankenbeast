@@ -22,6 +22,23 @@ describe('ComplexityEvaluator', () => {
     expect(result.score).toBeGreaterThan(0.5);
   });
 
+  it('skips complexity scans when content exceeds the input limit', async () => {
+    const evaluator = new ComplexityEvaluator();
+    const content = '{'.repeat(1024 * 1024 + 1);
+
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('warn');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'exceeds the 1048576 character limit',
+        ),
+        severity: 'warning',
+      }),
+    ]);
+  });
+
   it('ignores braces and nested patterns inside comments', async () => {
     const evaluator = new ComplexityEvaluator();
     const content = `function sample(value: boolean) {\n  // if (value) {\n  //   doThing();\n  // }\n  return value ? 'ok' : 'skip';\n}`;
