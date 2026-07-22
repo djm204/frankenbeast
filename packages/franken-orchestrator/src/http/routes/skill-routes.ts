@@ -49,8 +49,18 @@ const SkillInstallConfigSchema = z.object({
 
 const SkillToolDefinitionSchema = z.object({
   name: z.string().min(1).max(MAX_SKILL_NAME_LENGTH),
+  title: BoundedString.optional(),
   description: BoundedString,
   inputSchema: BoundedInputSchema,
+  outputSchema: BoundedInputSchema.optional(),
+  annotations: z.object({
+    title: BoundedString.optional(),
+    readOnlyHint: z.boolean().optional(),
+    destructiveHint: z.boolean().optional(),
+    idempotentHint: z.boolean().optional(),
+    openWorldHint: z.boolean().optional(),
+  }).strict().optional(),
+  _meta: BoundedInputSchema.optional(),
   requiresHitl: z.boolean().optional(),
 }).strict();
 

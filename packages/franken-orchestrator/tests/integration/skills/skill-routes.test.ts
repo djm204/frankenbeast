@@ -126,8 +126,12 @@ describe('Skill API routes', () => {
             authFields: [],
             toolDefinitions: [{
               name: 'linear.search',
+              title: 'Search Linear',
               description: 'Search Linear issues',
               inputSchema: { type: 'object' },
+              outputSchema: { type: 'object' },
+              annotations: { readOnlyHint: true, openWorldHint: false },
+              _meta: { provider: 'linear' },
             }],
           },
         }),
