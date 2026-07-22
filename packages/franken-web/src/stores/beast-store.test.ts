@@ -35,6 +35,28 @@ describe('beast-store wizardSlice', () => {
     expect(useBeastStore.getState().wizardMode).toBe('form');
     expect(useBeastStore.getState().stepValues[0]).toEqual({ name: 'Keep' });
   });
+
+  it('tracks wizard changes across steps in one canonical dirty flag', () => {
+    const { setStepValues } = useBeastStore.getState();
+
+    expect(useBeastStore.getState().isWizardDirty).toBe(false);
+
+    setStepValues(0, { name: 'TestAgent' });
+    expect(useBeastStore.getState().isWizardDirty).toBe(true);
+
+    setStepValues(4, { selectedSkills: ['code-review'] });
+    expect(useBeastStore.getState().isWizardDirty).toBe(true);
+  });
+
+  it('clears wizard dirty state with the rest of the wizard draft', () => {
+    const { setStepValues } = useBeastStore.getState();
+    setStepValues(6, { preset: 'feature-branch' });
+
+    useBeastStore.getState().resetWizard();
+
+    expect(useBeastStore.getState().isWizardDirty).toBe(false);
+    expect(useBeastStore.getState().stepValues).toEqual({});
+  });
 });
 
 describe('beast-store agentEditSlice', () => {
