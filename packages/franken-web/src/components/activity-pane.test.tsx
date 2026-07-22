@@ -81,6 +81,22 @@ describe('ActivityPane', () => {
     );
   });
 
+  it('does not re-announce historical activity when the pane mounts', () => {
+    render(
+      <ActivityPane
+        events={[
+          {
+            type: 'turn.execution.complete',
+            data: { summary: 'Historical completion' },
+            timestamp: '2026-07-05T01:02:03.000Z',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole('status').textContent).toBe('');
+  });
+
   it('renders runtime activity as a readable timeline with status chips and artifact links', () => {
     render(
       <ActivityPane

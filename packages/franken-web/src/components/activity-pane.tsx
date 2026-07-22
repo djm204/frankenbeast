@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ActivityEvent } from '../hooks/use-chat-session';
 import { SafeMarkdownText } from './safe-markdown-text';
 import { usePinnedScroll } from './use-pinned-scroll';
@@ -216,14 +216,26 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
   const latestEvent = events[events.length - 1];
   const latestAnnouncement = latestEvent ? announcementForActivity(latestEvent, events.length) : '';
   const [announcement, setAnnouncement] = useState('');
+  const previousEventCountRef = useRef(events.length);
+  const previousResetKeyRef = useRef(resetKey);
   const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll<HTMLOListElement, HTMLLIElement>(
     events.length,
     resetKey,
   );
 
   useEffect(() => {
+    const previousEventCount = previousEventCountRef.current;
+    const resetChanged = !Object.is(previousResetKeyRef.current, resetKey);
+    previousEventCountRef.current = events.length;
+    previousResetKeyRef.current = resetKey;
+
+    if (resetChanged || events.length <= previousEventCount) {
+      setAnnouncement('');
+      return;
+    }
+
     setAnnouncement(latestAnnouncement);
-  }, [latestAnnouncement]);
+  }, [events.length, latestAnnouncement, resetKey]);
 
   return (
     <section className="rail-card terminal-activity" aria-label="Activity">
