@@ -203,6 +203,13 @@ const records = counter.allModels().map((model) => ({
 }))
 calc.totalCost(records)
 
+// Governance and dashboards can opt into structured attribution instead of
+// conflating an unpriced model with a legitimately free model.
+const attributed = calc.totalCostWithAttribution(records)
+if (attributed.unknownModelCount > 0) {
+  console.warn(`Missing pricing for: ${attributed.unknownModels.join(', ')}`)
+}
+
 // Extend the pricing table
 const myPricing = { ...DEFAULT_PRICING, 'my-local-model': { promptPerMillion: 0, completionPerMillion: 0 } }
 const customCalc = new CostCalculator(myPricing)

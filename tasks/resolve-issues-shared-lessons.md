@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-22 — Isolated monorepo worktree dependencies
+- Do not symlink a fresh worktree's root `node_modules` to another checkout when npm workspace packages are symlinked within it: internal imports can resolve that other checkout's stale build outputs and produce misleading missing-export errors. Run a local `npm ci`, then build prerequisite workspace packages before package-level typecheck/build gates.
+
 ## 2026-07-22 — Post-tool authorization and nested-string redaction
 - Use separate redaction modes for executable pre-tool shell context and inert post-tool output: shell assignments must stop at the first token so governance still sees the command, while post-tool output can consume known structured multi-token authorization values.
 - Authorization redaction must treat quoted header values and structured multi-token schemes (including AWS `Credential`/`SignedHeaders`/`Signature` parameters) as one secret-bearing value while stopping before shell control/substitution boundaries.
