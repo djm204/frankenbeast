@@ -54,6 +54,8 @@ describe('redactOTELPayloadSecrets', () => {
     const acronymApiKeySecret = ['acronym', 'api', 'credential'].join('-')
     const sigV4Secret = ['sigv4', 'signature', 'credential'].join('-')
     const truncatedHeaderSecret = ['truncated', 'header', 'credential'].join('-')
+    const singleTupleSecret = ['single', 'tuple', 'credential'].join('-')
+    const singleFieldSecret = ['single', 'field', 'credential'].join('-')
     const aliasSecrets = ['sshKey', 'signing_key', 'gpg_key', 'PAT', 'webhookUrl']
       .map(key => [key, `${key}-credential`] as const)
     const geminiSecret = `AIza${'e'.repeat(35)}`
@@ -104,6 +106,9 @@ describe('redactOTELPayloadSecrets', () => {
       JSON.stringify({ Name: 'Authorization', Value: `Basic ${capitalizedHeaderSecret}` }),
       `--auth AWS4-HMAC-SHA256 Credential=scope, SignedHeaders=host, Signature=${sigV4Secret}`,
       `{"name":"x-api-key","value":"${truncatedHeaderSecret}"`,
+      `[['x-api-key','${singleTupleSecret}']]`,
+      `{'password': '${singleFieldSecret}'}`,
+      'tool:execute tokens=504',
       'safe diagnostic value',
     )
     input.resourceSpans[0]!.resource.attributes.push({
@@ -159,11 +164,14 @@ describe('redactOTELPayloadSecrets', () => {
       acronymApiKeySecret,
       sigV4Secret,
       truncatedHeaderSecret,
+      singleTupleSecret,
+      singleFieldSecret,
     ]) {
       expect(output).not.toContain(secret)
     }
     expect(output).toContain('[REDACTED]')
     expect(output).toContain('safe diagnostic value')
+    expect(output).toContain('tool:execute tokens=504')
 
     for (const key of ['promptTokens', 'inputTokens', 'outputTokens', 'cached_tokens']) {
       input.resourceSpans[0]!.resource.attributes.push({ key, value: { intValue: 42 } })

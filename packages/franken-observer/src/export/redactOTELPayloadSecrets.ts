@@ -2,7 +2,7 @@ import type { OTELAttribute, OTELAttributeValue, OTELPayload } from './OTELSeria
 
 const REDACTED = '[REDACTED]'
 const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passphrases?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|signatures?|api_?keys?|private_?keys?|access_?keys?|ssh_?keys?|signing_?keys?|gpg_?keys?|pats?|personal_?access_?tokens?|webhook_?urls?|claude_?sessions?)(?:$|_)/iu
-const TOKEN_METRIC_KEY_RE = /(?:^|_)(?:prompt|completion|total|input|output|cached|reasoning)_tokens?(?:$|_)/iu
+const TOKEN_METRIC_KEY_RE = /(?:^|_)(?:(?:prompt|completion|total|input|output|cached|reasoning)_tokens?|tokens?)(?:$|_)/iu
 const AUTH_SCHEME_VALUE = String.raw`(?:Basic|Bearer|Token|ApiKey|Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\s+[^\s,;]+`
 const SENSITIVE_ASSIGNMENT_RE = new RegExp(
   String.raw`\b([A-Za-z_][A-Za-z0-9_.-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|${AUTH_SCHEME_VALUE}|[^\s,;]+)`,
@@ -13,11 +13,13 @@ const SENSITIVE_FLAG_RE = new RegExp(
   'giu',
 )
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/gu
+const SENSITIVE_SINGLE_QUOTED_FIELD_RE = /('([^'\\]*(?:\\.[^'\\]*)*)'\s*:\s*)('(?:\\.|[^'\\])*'|'(?:\\.|[^'\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/gu
 const ESCAPED_SENSITIVE_JSON_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*\\+")[^"\r\n]*?(\\+")/gu
 const SENSITIVE_JSON_COLLECTION_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)(\[[^\]\r\n]*(?:\]|$)|\{[^}\r\n]*(?:\}|$))/gu
 const ESCAPED_SENSITIVE_JSON_COLLECTION_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*)(\[[^\]\r\n]*(?:\]|$)|\{[^}\r\n]*(?:\}|$))/gu
-const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_.-]*)(\s*[=:]\s*)[^\r\n]*?(?=\s+[A-Za-z_][A-Za-z0-9_.-]*\s*[=:]|$)/gu
+const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_.-]*)(\s*[=:]\s*)([^\r\n]*?)(?=\s+[A-Za-z_][A-Za-z0-9_.-]*\s*[=:]|$)/gu
 const SENSITIVE_HEADER_TUPLE_RE = /(\[\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*")[^"\r\n]*("\s*\])/gu
+const SENSITIVE_SINGLE_QUOTED_HEADER_TUPLE_RE = /(\[\s*'([^'\\]*(?:\\.[^'\\]*)*)'\s*,\s*')[^'\r\n]*('\s*\])/gu
 const SENSITIVE_HEADER_OBJECT_RE = /("(?:key|name)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*"(?:value|values)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/giu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
@@ -45,6 +47,11 @@ function isSensitiveKey(key: string): boolean {
 function isNumericTokenMetric(key: string, value: OTELAttributeValue): boolean {
   return TOKEN_METRIC_KEY_RE.test(normalizeSensitiveKey(key))
     && (value.intValue !== undefined || value.doubleValue !== undefined)
+}
+
+function isNumericTokenMetricText(key: string, value: string): boolean {
+  return TOKEN_METRIC_KEY_RE.test(normalizeSensitiveKey(key))
+    && /^\s*\d+(?:\.\d+)?\s*$/u.test(value)
 }
 
 function redactEmbeddedJson(value: string): string {
@@ -115,10 +122,15 @@ function redactPlainText(value: string): string {
   return redactEmbeddedJson(value)
     .replace(PRIVATE_KEY_RE, REDACTED)
     .replace(COOKIE_HEADER_RE, REDACTED)
-    .replace(SENSITIVE_LINE_ASSIGNMENT_RE, (match, key: string, separator: string) =>
-      isSensitiveKey(key) ? `${key}${separator}${REDACTED}` : match,
+    .replace(SENSITIVE_LINE_ASSIGNMENT_RE, (match, key: string, separator: string, child: string) =>
+      isSensitiveKey(key) && !isNumericTokenMetricText(key, child)
+        ? `${key}${separator}${REDACTED}`
+        : match,
     )
     .replace(SENSITIVE_HEADER_TUPLE_RE, (match, prefix: string, key: string, suffix: string) =>
+      isSensitiveKey(key) ? `${prefix}${REDACTED}${suffix}` : match,
+    )
+    .replace(SENSITIVE_SINGLE_QUOTED_HEADER_TUPLE_RE, (match, prefix: string, key: string, suffix: string) =>
       isSensitiveKey(key) ? `${prefix}${REDACTED}${suffix}` : match,
     )
     .replace(SENSITIVE_HEADER_OBJECT_RE, (match, prefix: string, key: string) =>
@@ -139,11 +151,18 @@ function redactPlainText(value: string): string {
     .replace(SENSITIVE_FLAG_RE, (match, leading: string, flag: string, key: string, separator: string) =>
       isSensitiveKey(key) ? `${leading}${flag}${separator}${REDACTED}` : match,
     )
-    .replace(SENSITIVE_ASSIGNMENT_RE, (match, key: string, separator: string) =>
-      isSensitiveKey(key) ? `${key}${separator}${REDACTED}` : match,
+    .replace(SENSITIVE_ASSIGNMENT_RE, (match, key: string, separator: string, child: string) =>
+      isSensitiveKey(key) && !isNumericTokenMetricText(key, child)
+        ? `${key}${separator}${REDACTED}`
+        : match,
     )
     .replace(SENSITIVE_JSON_FIELD_RE, (match, prefix: string, key: string) =>
       isSensitiveKey(key) ? `${prefix}"${REDACTED}"` : match,
+    )
+    .replace(SENSITIVE_SINGLE_QUOTED_FIELD_RE, (match, prefix: string, key: string, child: string) =>
+      isSensitiveKey(key) && !isNumericTokenMetricText(key, child)
+        ? `${prefix}'${REDACTED}'`
+        : match,
     )
     .replace(ESCAPED_SENSITIVE_JSON_FIELD_RE, (match, prefix: string, key: string, suffix: string) =>
       isSensitiveKey(key) ? `${prefix}${REDACTED}${suffix}` : match,
