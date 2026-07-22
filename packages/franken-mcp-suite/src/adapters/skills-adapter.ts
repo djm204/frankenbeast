@@ -48,6 +48,9 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
     },
 
     async info(skillId) {
+      if (!isInstalledSkill(skillsDir, skillId)) {
+        return undefined;
+      }
       const summary = readSkillSummary(skillsDir, skillId, readEnabledSkills(configPath));
 
       if (!summary) {
@@ -70,6 +73,19 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
       };
     },
   };
+}
+
+function isInstalledSkill(skillsDir: string, skillId: string): boolean {
+  if (!existsSync(skillsDir)) {
+    return false;
+  }
+
+  try {
+    return readdirSync(skillsDir, { withFileTypes: true })
+      .some((entry) => entry.isDirectory() && entry.name === skillId);
+  } catch {
+    return false;
+  }
 }
 
 function listInstalledSkills(skillsDir: string, enabledSkills: Set<string>): SkillsListEntry[] {

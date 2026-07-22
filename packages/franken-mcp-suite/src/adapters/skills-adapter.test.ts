@@ -117,6 +117,15 @@ describe('SkillsAdapter filesystem race handling', () => {
     });
   });
 
+  it('rejects skill IDs that traverse outside the installed skills directory', async () => {
+    const outsideDir = join(root, 'outside');
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(join(outsideDir, 'mcp.json'), JSON.stringify({ mcpServers: { escaped: { command: 'escaped' } } }));
+    await writeFile(join(outsideDir, 'context.md'), '# Escaped skill');
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('../outside')).resolves.toBeUndefined();
+  });
+
   it('rejects mcp.json that does not match the MCP manifest schema', async () => {
     const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
     await createSkill('broken', { mcp: { mcpServers: 'not-an-object' } });
