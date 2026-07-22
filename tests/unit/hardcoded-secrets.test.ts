@@ -1773,6 +1773,115 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/optional-chain-spawn-cron.mjs:4');
   });
 
+  it('rejects assigned CommonJS child_process namespace crontab stdin writes', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'assigned-commonjs-cron.cjs'),
+      [
+        'let cp;',
+        "cp = require('node:child_process');",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/assigned-commonjs-cron.cjs:5');
+  });
+
+  it('rejects direct require crontab spawn calls split after assignment', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'split-assignment-require-cron.cjs'),
+      [
+        'const installer =',
+        "  require('node:child_process').spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/split-assignment-require-cron.cjs:4');
+  });
+
+  it('rejects multiline dynamic-import namespace crontab stdin writes', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'multiline-dynamic-import-cron.mjs'),
+      [
+        'const cp = await import(',
+        "  'node:child_process',",
+        ');',
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/multiline-dynamic-import-cron.mjs:6');
+  });
+
+  it('rejects bound namespace spawn aliases used for crontab stdin writes', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'bound-spawn-alias-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const run = cp.spawn.bind(cp);',
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/bound-spawn-alias-cron.mjs:5');
+  });
+
+  it('rejects typed destructured require spawn aliases used for crontab stdin writes', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'typed-destructured-require-cron.ts'),
+      [
+        "const { spawn: run } = require('node:child_process') as typeof import('node:child_process');",
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/typed-destructured-require-cron.ts:4');
+  });
+
   it('rejects Codex round 28 cron scanner bypasses', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');

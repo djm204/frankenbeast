@@ -1020,6 +1020,13 @@ function collectProgrammaticCrontabAliases(lines) {
         if (/['"](?:node:)?child_process['"]/.test(aliasDeclaration) || /;\s*(?:(?:\/\/|\/\*).*)?$/.test(lines[cursor])) break;
       }
     }
+    if (/\bimport\s*\(/.test(line) && groupingDepthDelta(line) > 0) {
+      let depth = groupingDepthDelta(line);
+      for (let cursor = index + 1; depth > 0 && cursor < Math.min(lines.length, index + 10); cursor += 1) {
+        aliasDeclaration += ` ${lines[cursor].trim()}`;
+        depth += groupingDepthDelta(lines[cursor]);
+      }
+    }
     const esmImport = aliasDeclaration.match(/^\s*import\s+(.+?)\s+from\s*['"](?:node:)?child_process['"]\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (esmImport) {
       const namespaceAlias = esmImport[1].match(/(?:^|,\s*)\*\s+as\s+([A-Za-z_$][\w$]*)$/);
@@ -1029,11 +1036,11 @@ function collectProgrammaticCrontabAliases(lines) {
         if (alias) childProcessModuleAliases.add(alias);
       }
     }
-    const commonJsAliasPattern = /(?:^\s*(?:const|let|var)\s+|,\s*)([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*(?:as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\))(?:\s+as\s+[^,;]+)?(?=\s*(?:,|;|\/\/|\/\*|$))/gu;
+    const commonJsAliasPattern = /(?:^\s*(?:(?:const|let|var)\s+)?|,\s*)([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*(?:as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\))(?:\s+as\s+[^,;]+)?(?=\s*(?:,|;|\/\/|\/\*|$))/gu;
     for (const commonJsAlias of line.matchAll(commonJsAliasPattern)) childProcessModuleAliases.add(commonJsAlias[1]);
     const importEqualsAlias = line.match(/^\s*import\s+([A-Za-z_$][\w$]*)\s*=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*;?\s*(?:(?:\/\/|\/\*).*?)?$/);
     if (importEqualsAlias) childProcessModuleAliases.add(importEqualsAlias[1]);
-    const dynamicImportAlias = line.match(/(?:^|[,;]\s*)(?:const|let|var)?\s*([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:await\s+)?import\s*\(\s*['"](?:node:)?child_process['"]\s*\)/);
+    const dynamicImportAlias = aliasDeclaration.match(/(?:^|[,;]\s*)(?:const|let|var)?\s*([A-Za-z_$][\w$]*)(?:\s*:\s*[^=,]+)?\s*=\s*(?:await\s+)?import\s*\(\s*['"](?:node:)?child_process['"]\s*,?\s*\)/);
     if (dynamicImportAlias) childProcessModuleAliases.add(dynamicImportAlias[1]);
   }
   for (const [index, line] of lines.entries()) {
@@ -1044,7 +1051,7 @@ function collectProgrammaticCrontabAliases(lines) {
         if (imported) callNames.add(imported[1] ?? part.trim());
       }
     }
-    const childProcessAliases = line.match(/^\s*(?:import|const|let|var)\s*\{([^}]+)\}\s*(?:from\s*['"](?:node:)?child_process['"]|=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\))\s*;?$/);
+    const childProcessAliases = line.match(/^\s*(?:import|const|let|var)\s*\{([^}]+)\}\s*(?:from\s*['"](?:node:)?child_process['"]|=\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?)\s*;?$/);
     if (childProcessAliases) {
       for (const part of childProcessAliases[1].split(',')) {
         const imported = part.trim().match(/^(execFileSync|execFile|spawnSync|spawn|execSync|exec)(?:\s*(?:as|:)\s*([A-Za-z_$][\w$]*))?$/);
@@ -1076,9 +1083,11 @@ function collectProgrammaticCrontabAliases(lines) {
     const directRequireExpressionPattern = String.raw`(?:require\s*\(\s*['"](?:node:)?child_process['"]\s*\)|\(\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)(?:\s+as\s+typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\))?\s*\)|\(\s*<\s*typeof\s+import\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*>\s*require\s*\(\s*['"](?:node:)?child_process['"]\s*\)\s*\))`;
     const qualifiedChildProcessCallPattern = String.raw`(?:(?:${childProcessQualifierPattern})\s*${childProcessMethodPattern}|${directRequireExpressionPattern}\s*${childProcessMethodPattern})`;
     const namespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*;?\\s*$`, 'u'));
-    if (namespaceMethodAlias) {
-      spawnCallNames.add(namespaceMethodAlias[1]);
-      callNames.add(namespaceMethodAlias[1]);
+    const boundNamespaceMethodAlias = line.match(new RegExp(`^\\s*(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:${childProcessQualifierPattern})\\s*${childProcessMethodPattern}\\s*\\.\\s*bind\\s*\\(\\s*(?:${childProcessQualifierPattern})\\s*\\)\\s*;?\\s*$`, 'u'));
+    const spawnMethodAlias = namespaceMethodAlias ?? boundNamespaceMethodAlias;
+    if (spawnMethodAlias) {
+      spawnCallNames.add(spawnMethodAlias[1]);
+      callNames.add(spawnMethodAlias[1]);
     }
     const namespaceDestructuredMethods = line.match(new RegExp(`^\\s*(?:const|let|var)\\s*\\{([^}]+)\\}\\s*=\\s*(?:${childProcessQualifierPattern})\\s*;?\\s*$`, 'u'));
     if (namespaceDestructuredMethods) {
@@ -1098,8 +1107,10 @@ function collectProgrammaticCrontabAliases(lines) {
     const splitSpawn = splitQualifier ? lines[index + 1]?.match(new RegExp(`^\\s*${childProcessMethodPattern}\\s*\\((.*)$`, 'u')) : null;
     const splitDottedQualifier = line.match(new RegExp(`^\\s*(?:(?:const|let|var)\\s+)?([A-Za-z_$][\\w$]*)(?:\\s*:\\s*[^=]+)?\\s*=\\s*(?:(?:${childProcessQualifierPattern})|${directRequireExpressionPattern})\\s*(?:\\.|\\?\\.)\\s*$`, 'u'));
     const splitDottedSpawn = splitDottedQualifier ? lines[index + 1]?.match(/^\s*spawn(?:\s*\?\.)?\s*\((.*)$/u) : null;
-    if (!spawnedProcess && ((splitQualifier && splitSpawn) || (splitDottedQualifier && splitDottedSpawn))) {
-      spawnedProcess = ['', splitQualifier?.[1] ?? splitDottedQualifier[1], splitSpawn?.[1] ?? splitDottedSpawn[1]];
+    const splitAssignment = line.match(/^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)(?:\s*:\s*[^=]+)?\s*=\s*$/u);
+    const splitAssignedCall = splitAssignment ? lines[index + 1]?.match(new RegExp(`^\\s*(?:${qualifiedChildProcessCallPattern}|${spawnCallPattern})\\s*\\((.*)$`, 'u')) : null;
+    if (!spawnedProcess && ((splitQualifier && splitSpawn) || (splitDottedQualifier && splitDottedSpawn) || (splitAssignment && splitAssignedCall))) {
+      spawnedProcess = ['', splitQualifier?.[1] ?? splitDottedQualifier?.[1] ?? splitAssignment[1], splitSpawn?.[1] ?? splitDottedSpawn?.[1] ?? splitAssignedCall[1]];
       spawnStartIndex = index + 1;
       spawnStartLine = lines[spawnStartIndex];
     }
