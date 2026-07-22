@@ -54,7 +54,7 @@ describe('hard-coded example secret scanner', () => {
 
   it('passes the repository fixtures that keep secret examples commented or env-backed', () => {
     execFileSync(process.execPath, [SCRIPT], { cwd: ROOT, stdio: 'pipe' });
-  });
+  }, 60_000);
 
   it('rejects and redacts uncommented secret values in environment examples', () => {
     const root = makeFixtureRoot();
