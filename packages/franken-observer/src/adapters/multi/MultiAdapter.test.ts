@@ -157,6 +157,55 @@ describe('MultiAdapter', () => {
   })
 
   describe('listTraceIds()', () => {
+    it('bounds default fan-out when the adapter count exceeds the concurrency limit', async () => {
+      let active = 0
+      let maxActive = 0
+      const adapters = Array.from({ length: 6 }, (_, index): ExportAdapter => ({
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn(async () => {
+          active += 1
+          maxActive = Math.max(maxActive, active)
+          await Promise.resolve()
+          active -= 1
+          return [`trace-${index}`]
+        }),
+      }))
+      const multi = new MultiAdapter({ adapters })
+
+      await expect(multi.listTraceIds()).resolves.toHaveLength(6)
+      expect(maxActive).toBe(4)
+    })
+
+    it('uses the configured list fan-out concurrency', async () => {
+      let active = 0
+      let maxActive = 0
+      const adapters = Array.from({ length: 5 }, (_, index): ExportAdapter => ({
+        flush: vi.fn().mockResolvedValue(undefined),
+        queryByTraceId: vi.fn().mockResolvedValue(null),
+        listTraceIds: vi.fn(async () => {
+          active += 1
+          maxActive = Math.max(maxActive, active)
+          await Promise.resolve()
+          active -= 1
+          return [`trace-${index}`]
+        }),
+      }))
+      const multi = new MultiAdapter({ adapters, listTraceIdsConcurrency: 2 })
+
+      await expect(multi.listTraceIds()).resolves.toHaveLength(5)
+      expect(maxActive).toBe(2)
+    })
+
+    it.each([0, -1, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+      'rejects invalid list fan-out concurrency %s',
+      listTraceIdsConcurrency => {
+        expect(() => new MultiAdapter({ adapters: [], listTraceIdsConcurrency })).toThrow(
+          'listTraceIdsConcurrency must be a positive safe integer',
+        )
+      },
+    )
+
     it('returns the union of all adapters trace ids', async () => {
       const a = new InMemoryAdapter()
       const b = new InMemoryAdapter()
