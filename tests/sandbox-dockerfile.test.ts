@@ -80,6 +80,29 @@ function collectRequestedPaths(args: readonly string[]): string[] {
   return paths;
 }
 
+interface DockerUser {
+  user: string;
+  group?: string;
+}
+
+function parseDockerUser(contents: string): DockerUser | undefined {
+  const match = contents.match(/^USER\s+([^\s:]+)(?::([^\s:]+))?\s*$/mu);
+  if (!match?.[1]) {
+    return undefined;
+  }
+
+  return { user: match[1], ...(match[2] ? { group: match[2] } : {}) };
+}
+
+function isNonRootDockerUser(contents: string): boolean {
+  const directive = parseDockerUser(contents);
+  if (!directive || directive.user === '0' || directive.user === 'root') {
+    return false;
+  }
+
+  return directive.group !== '0' && directive.group !== 'root';
+}
+
 const explicitDockerfileTestRequest = collectRequestedPaths(process.argv.slice(2))
   .includes('tests/sandbox-dockerfile.test.ts');
 const runDockerBuild = readVitestFlag(process.env, 'DOCKER_BUILD') || explicitDockerfileTestRequest;
@@ -119,11 +142,22 @@ describe('sandbox Dockerfile', () => {
     });
   }, 60_000);
 
-  it('declares a non-root default container UID', () => {
-    const userDirective = dockerfile.match(/^USER\s+([^\s:]+)(?::[^\s]+)?\s*$/mu);
+  it('declares a non-root default container UID and GID', () => {
+    const userDirective = parseDockerUser(dockerfile);
 
-    expect(userDirective, 'Dockerfile must declare a valid USER directive').not.toBeNull();
-    expect(userDirective?.[1]).not.toBe('root');
-    expect(userDirective?.[1]).not.toBe('0');
+    expect(userDirective, 'Dockerfile must declare a valid USER directive').toBeDefined();
+    expect(
+      isNonRootDockerUser(dockerfile),
+      'Dockerfile USER must not use the root user or group',
+    ).toBe(true);
+  });
+
+  it.each([
+    ['numeric root user', 'USER 0'],
+    ['named root user', 'USER root'],
+    ['numeric root group', 'USER 1000:0'],
+    ['named root group', 'USER sandbox:root'],
+  ])('rejects a %s in the USER directive', (_description, directive) => {
+    expect(isNonRootDockerUser(directive)).toBe(false);
   });
 });
