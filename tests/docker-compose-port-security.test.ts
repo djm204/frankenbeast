@@ -11,6 +11,23 @@ function readRepoFile(path: string): string {
 }
 
 describe("docker compose published-port security", () => {
+  it("disables anonymous Grafana access by default with an explicit local opt-in", () => {
+    const compose = readRepoFile("docker-compose.yml");
+    const envExample = readRepoFile(".env.example");
+    const quickstart = readRepoFile("docs/guides/quickstart.md");
+
+    expect(compose).toContain(
+      "GF_AUTH_ANONYMOUS_ENABLED=${GRAFANA_ANONYMOUS_ENABLED:-false}",
+    );
+    expect(compose).not.toMatch(/GF_AUTH_ANONYMOUS_ENABLED=true/u);
+    expect(envExample).toContain("GRAFANA_ANONYMOUS_ENABLED=true");
+    expect(quickstart).toContain(
+      "GRAFANA_ANONYMOUS_ENABLED=true docker compose up -d grafana",
+    );
+    expect(quickstart).toContain("remains bound to `127.0.0.1`");
+    expect(quickstart).toContain("Do not combine this opt-in");
+  });
+
   it("binds every default development port to IPv4 localhost", () => {
     const compose = readRepoFile("docker-compose.yml");
 
