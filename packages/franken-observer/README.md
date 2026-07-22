@@ -814,12 +814,14 @@ detector.on('loop-detected', result => {
 
 When `send(payload, { idempotencyKey, target })` receives an idempotency key, `WebhookNotifier` records a delivery receipt with `pending`, `sent`, `skipped`, or `failed`, an ISO timestamp, the logical target, and a SHA-256 content hash. A later call with the same key, target, and content hash is skipped after a successful receipt or a non-stale pending reservation; changed content, a different target, a stale pending reservation, or a prior failed receipt is delivered again. Receipt stores must implement atomic `reserve()` plus content-hash lookup so overlapping cron/status runs cannot both POST the same logical notification. The in-memory receipt store is useful for one process, while status, approval, and doctor/loop notification runners should pass a durable `WebhookDeliveryReceiptStore` so repeated cron/status runs do not duplicate Discord or webhook messages across restarts. If no logical target is provided, the notifier stores a redacted endpoint plus a short SHA-256 URL discriminator rather than the raw webhook URL.
 
-Retries are opt-in through `retry`. When enabled, `WebhookNotifier` retries only transient failures: network errors, HTTP 429, and HTTP 5xx responses. Non-transient 4xx responses fail immediately so invalid payloads or credentials do not create retry storms. Retry delays use exponential backoff (`baseDelayMs * 2^attempt`), jitter is enabled by default to spread concurrent webhook traffic, and the final delay is always capped by `maxDelayMs` even after jitter is applied.
+Retries are opt-in through `retry`. Every delivery attempt has a 10-second deadline by default; set `deliveryTimeoutMs` to a positive millisecond value no greater than `2147483647` to tune it. A timed-out attempt is aborted and follows the normal network-error retry policy. Callers can also pass `send(payload, { signal })`; caller cancellation aborts the active request and stops pending DNS/backoff work and further retries. When enabled, `WebhookNotifier` retries only transient failures: network errors, HTTP 429, and HTTP 5xx responses. Non-transient 4xx responses fail immediately so invalid payloads or credentials do not create retry storms. Retry delays use exponential backoff (`baseDelayMs * 2^attempt`), jitter is enabled by default to spread concurrent webhook traffic, and the final delay is always capped by `maxDelayMs` even after jitter is applied.
 
 ```ts
 const notifier = new WebhookNotifier({
   url: process.env.SLACK_WEBHOOK_URL!,
   allowedTargetOrigins: ['https://hooks.slack.com'],
+  // Abort each individual delivery attempt after this deadline (default: 10 seconds).
+  deliveryTimeoutMs: 5_000,
   retry: {
     maxRetries: 3,      // initial request + up to 3 retries
     baseDelayMs: 200,  // first retry waits about 200ms before jitter

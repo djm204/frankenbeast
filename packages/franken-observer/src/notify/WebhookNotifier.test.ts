@@ -152,6 +152,7 @@ describe('WebhookNotifier', () => {
       const payload = { type: 'status', runId: 'run-concurrent', state: 'green' }
 
       const first = notifier.send(payload, { idempotencyKey: 'status:run-concurrent' })
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
       const secondReceipt = await notifier.send(payload, { idempotencyKey: 'status:run-concurrent' })
       releaseFetch()
       const firstReceipt = await first
@@ -637,6 +638,273 @@ describe('WebhookNotifier', () => {
       expect(Date.now() - startedAt).toBeLessThan(750)
     })
 
+    it('keeps the delivery deadline active while reading an error body', async () => {
+      const cancel = vi.fn()
+      const stream = new ReadableStream<Uint8Array>({ cancel })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier({ deliveryTimeoutMs: 10 })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery timed out after 10ms',
+      )
+      expect(cancel).toHaveBeenCalled()
+    })
+
+    it('cancels a stalled error-body read when the caller aborts', async () => {
+      const controller = new AbortController()
+      const pull = vi.fn()
+      const cancel = vi.fn()
+      const stream = new ReadableStream<Uint8Array>({ pull, cancel })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier({ deliveryTimeoutMs: 1_000 })
+      const delivery = notifier.send({ type: 'test' }, { signal: controller.signal })
+      await vi.waitFor(() => expect(pull).toHaveBeenCalled())
+
+      controller.abort(new Error('cancelled during response body'))
+
+      await expect(delivery).rejects.toThrow('cancelled during response body')
+      expect(cancel).toHaveBeenCalled()
+    })
+
+    it('passes a delivery deadline signal to fetch', async () => {
+      const notifier = createNotifier()
+
+      await notifier.send({ type: 'test' })
+
+      const [, init] = mockFetch.mock.calls[0]
+      expect(init.signal).toBeInstanceOf(AbortSignal)
+    })
+
+    it('cleans up the delivery timeout after delivery', async () => {
+      let receivedSignal: AbortSignal | undefined
+      mockFetch.mockImplementation(async (_url, init) => {
+        receivedSignal = init?.signal
+        return { ok: true, status: 200, statusText: 'OK' }
+      })
+      const notifier = createNotifier({ deliveryTimeoutMs: 10 })
+
+      await notifier.send({ type: 'test' })
+      await new Promise(resolve => setTimeout(resolve, 20))
+
+      expect(receivedSignal?.aborted).toBe(false)
+    })
+
+    it('cleans up caller-signal listeners after delivery', async () => {
+      const controller = new AbortController()
+      const addSpy = vi.spyOn(controller.signal, 'addEventListener')
+      const removeSpy = vi.spyOn(controller.signal, 'removeEventListener')
+      const notifier = createNotifier()
+
+      await notifier.send({ type: 'test' }, { signal: controller.signal })
+
+      const abortListeners = addSpy.mock.calls
+        .filter(([type]) => type === 'abort')
+        .map(([, listener]) => listener)
+      expect(abortListeners.length).toBeGreaterThan(0)
+      for (const listener of abortListeners) {
+        expect(removeSpy).toHaveBeenCalledWith('abort', listener)
+      }
+    })
+
+    it('aborts and rejects a hung delivery after the configured timeout', async () => {
+      let receivedSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url, init) => {
+        receivedSignal = init?.signal
+        return new Promise(() => undefined)
+      })
+      const notifier = createNotifier({ deliveryTimeoutMs: 10 })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery timed out after 10ms',
+      )
+      expect(receivedSignal?.aborted).toBe(true)
+    })
+
+    it('retries a timed-out delivery with a fresh signal', async () => {
+      const signals: AbortSignal[] = []
+      mockFetch
+        .mockImplementationOnce((_url, init) => {
+          signals.push(init?.signal as AbortSignal)
+          return new Promise(() => undefined)
+        })
+        .mockImplementationOnce(async (_url, init) => {
+          signals.push(init?.signal as AbortSignal)
+          return { ok: true, status: 200, statusText: 'OK' }
+        })
+      const notifier = createNotifier({
+        deliveryTimeoutMs: 10,
+        retry: { maxRetries: 1, jitter: false },
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+
+      await expect(notifier.send({ type: 'test' })).resolves.toMatchObject({ status: 'sent' })
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[1]?.aborted).toBe(false)
+      expect(signals[1]).not.toBe(signals[0])
+    })
+
+    it('honours caller cancellation without retrying', async () => {
+      const controller = new AbortController()
+      let receivedSignal: AbortSignal | undefined
+      mockFetch.mockImplementation((_url, init) => {
+        receivedSignal = init?.signal
+        return new Promise(() => undefined)
+      })
+      const notifier = createNotifier({
+        deliveryTimeoutMs: 1_000,
+        retry: { maxRetries: 2 },
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+      const delivery = notifier.send({ type: 'test' }, { signal: controller.signal })
+      await vi.waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1))
+
+      controller.abort(new Error('delivery cancelled'))
+
+      await expect(delivery).rejects.toThrow('delivery cancelled')
+      expect(receivedSignal?.aborted).toBe(true)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('rejects a pre-cancelled delivery before starting fetch', async () => {
+      const controller = new AbortController()
+      controller.abort(new Error('already cancelled'))
+      const notifier = createNotifier({ retry: { maxRetries: 2 } })
+
+      await expect(notifier.send({ type: 'test' }, { signal: controller.signal })).rejects.toThrow(
+        'already cancelled',
+      )
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('stops a retry while waiting in backoff after caller cancellation', async () => {
+      const controller = new AbortController()
+      let resolveSleep!: () => void
+      const sleep = vi.fn(() => new Promise<void>(resolve => { resolveSleep = resolve }))
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'))
+      const notifier = createNotifier({
+        retry: { maxRetries: 1, jitter: false },
+        sleep,
+      })
+      let settled: 'cancelled' | 'resolved' | undefined
+      const delivery = notifier.send({ type: 'test' }, { signal: controller.signal })
+        .then(() => { settled = 'resolved' }, error => {
+          if ((error as Error).message === 'cancelled during backoff') settled = 'cancelled'
+        })
+      await vi.waitFor(() => expect(sleep).toHaveBeenCalledTimes(1))
+
+      controller.abort(new Error('cancelled during backoff'))
+      await vi.waitFor(() => expect(settled).toBe('cancelled'))
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      resolveSleep()
+      await delivery
+    })
+
+    it('clears the default backoff timer after caller cancellation', async () => {
+      const controller = new AbortController()
+      const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'))
+      const notifier = createNotifier({
+        retry: {
+          maxRetries: 1,
+          baseDelayMs: 30_000,
+          maxDelayMs: 30_000,
+          jitter: false,
+        },
+      })
+      const delivery = notifier.send({ type: 'test' }, { signal: controller.signal })
+      await vi.waitFor(() => {
+        expect(setTimeoutSpy.mock.calls.some(([, delay]) => delay === 30_000)).toBe(true)
+      })
+      const backoffCallIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 30_000)
+      const backoffTimer = setTimeoutSpy.mock.results[backoffCallIndex]?.value
+
+      controller.abort(new Error('cancelled during default backoff'))
+
+      await expect(delivery).rejects.toThrow('cancelled during default backoff')
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(backoffTimer)
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops a stalled DNS lookup after caller cancellation without starting HTTPS', async () => {
+      const controller = new AbortController()
+      let resolveDns!: (addresses: string[]) => void
+      const dnsLookup = vi.fn(() => new Promise<string[]>(resolve => { resolveDns = resolve }))
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+      let settled: 'cancelled' | 'resolved' | undefined
+      const delivery = notifier.send({ type: 'test' }, { signal: controller.signal })
+        .then(() => { settled = 'resolved' }, error => {
+          if ((error as Error).message === 'cancelled during DNS') settled = 'cancelled'
+        })
+      await vi.waitFor(() => expect(dnsLookup).toHaveBeenCalledTimes(1))
+
+      controller.abort(new Error('cancelled during DNS'))
+      await vi.waitFor(() => expect(settled).toBe('cancelled'))
+
+      expect(httpsRequest).not.toHaveBeenCalled()
+      resolveDns(['203.0.113.10'])
+      await delivery
+    })
+
+    it('times out a stalled DNS lookup before starting HTTPS', async () => {
+      const dnsLookup = vi.fn(() => new Promise<string[]>(() => undefined))
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+        deliveryTimeoutMs: 10,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery timed out after 10ms',
+      )
+      expect(httpsRequest).not.toHaveBeenCalled()
+    })
+
+    it('retries a DNS lookup that exceeds the per-attempt delivery deadline', async () => {
+      mockPinnedHttpsResponse()
+      const dnsLookup = vi.fn()
+        .mockImplementationOnce(() => new Promise<string[]>(() => undefined))
+        .mockResolvedValueOnce(['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+        deliveryTimeoutMs: 10,
+        retry: { maxRetries: 1, jitter: false },
+        sleep: vi.fn().mockResolvedValue(undefined),
+      })
+
+      await expect(notifier.send({ type: 'test' })).resolves.toMatchObject({ status: 'sent' })
+      expect(dnsLookup).toHaveBeenCalledTimes(2)
+      expect(httpsRequest).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])(
+      'rejects invalid deliveryTimeoutMs value %s',
+      deliveryTimeoutMs => {
+        expect(() => createNotifier({ deliveryTimeoutMs })).toThrow(
+          'deliveryTimeoutMs must be a finite positive number no greater than 2147483647',
+        )
+      },
+    )
+
     it('rethrows if fetch itself rejects (network error)', async () => {
       mockFetch.mockRejectedValue(new Error('ECONNREFUSED'))
       const notifier = createNotifier()
@@ -830,6 +1098,47 @@ describe('WebhookNotifier', () => {
         'Injected fetch cannot safely pin DNS-validated webhook addresses',
       )
       expect(mockFetch).not.toHaveBeenCalled()
+    })
+
+    it('aborts a stalled default pinned HTTPS request at the delivery deadline', async () => {
+      const request = new EventEmitter() as EventEmitter & {
+        write: ReturnType<typeof vi.fn>
+        end: ReturnType<typeof vi.fn>
+        destroy: ReturnType<typeof vi.fn>
+      }
+      request.write = vi.fn()
+      request.end = vi.fn()
+      request.destroy = vi.fn()
+      vi.mocked(httpsRequest).mockReturnValue(request as never)
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+        deliveryTimeoutMs: 10,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery timed out after 10ms',
+      )
+      expect(request.destroy).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'WebhookDeliveryTimeoutError',
+      }))
+    })
+
+    it('removes the deadline abort listener after a pinned HTTPS response', async () => {
+      mockPinnedHttpsResponse()
+      const removeEventListener = vi.spyOn(AbortSignal.prototype, 'removeEventListener')
+      const dnsLookup = vi.fn(async () => ['203.0.113.10'])
+      const notifier = new WebhookNotifier({
+        url: 'https://webhooks.example.com/api/webhooks/123/secret',
+        allowedTargets: ['https://webhooks.example.com/api/webhooks/'],
+        dnsLookup,
+      })
+
+      await notifier.send({ type: 'test' })
+
+      expect(removeEventListener).toHaveBeenCalledWith('abort', expect.any(Function))
     })
 
     it('preserves response bodies from the default pinned HTTPS transport', async () => {
