@@ -2584,6 +2584,7 @@ const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
   (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) /
     RECALL_VARIABLES_PER_KEYWORD,
 );
+const MAX_CROSS_CHUNK_RECALL_CANDIDATES = 10_000;
 
 interface EpisodicRow {
   id: number;
@@ -2836,10 +2837,14 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           result = this.recent(limit, reportCorruptDetails);
         } else {
           const eventsById = new Map<number, EpisodicEvent>();
-          for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
+          const keywordChunks = chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY);
+          const candidateLimit = keywordChunks.length === 1
+            ? limit
+            : MAX_CROSS_CHUNK_RECALL_CANDIDATES;
+          for (const chunk of keywordChunks) {
             const events = collectRowsToEvents(
               (batchLimit, offset) => this.recallKeywordChunk(chunk, batchLimit, offset),
-              limit,
+              candidateLimit,
               this.encryption,
               reportCorruptDetails,
               (event) => recallEventScore(event, keywords) > 0,
@@ -6254,11 +6259,19 @@ export class SqliteBrain implements IBrain {
         if (isRightToForgetAuditEvent(candidateEvent)) return false;
         if (isQuarantinedEpisodicDetails(candidateEvent)) {
           // Persisted quarantine envelopes contain synthetic diagnostics, not
-          // the original corrupt payload, and must never become deletion input.
-          // Fresh malformed rows may still be removed when their raw payload
-          // itself matches the selector, regardless of the event's domain type.
-          return detailsWereMalformed
-            && episodicRowMatchesSelector('', '', details, selector);
+          // the original corrupt payload. Keep audit-envelope summary/step
+          // protected, but preserve matching on readable domain fields for
+          // ordinary corrupt events.
+          if (isQuarantinedRightToForgetAuditEvent(candidateEvent)) {
+            return detailsWereMalformed
+              && episodicRowMatchesSelector('', '', details, selector);
+          }
+          return episodicRowMatchesSelector(
+            step,
+            summary,
+            detailsWereMalformed ? details : null,
+            selector,
+          );
         }
         return episodicRowMatchesSelector(step, summary, details, selector);
       })

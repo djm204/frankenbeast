@@ -1547,6 +1547,12 @@ export function createBrainAdapter(
 
     async memoryRetentionReport(input = {}) {
       const readScope = resolveMemoryReadScope(input);
+      if (
+        input.maxEntries !== undefined
+        && (!Number.isSafeInteger(input.maxEntries) || input.maxEntries < 1)
+      ) {
+        throw new Error("maxEntries must be a positive safe integer");
+      }
       const reportOptions: MemoryRetentionReportOptions = {
         ...(input.now === undefined ? {} : { now: input.now }),
         ...(input.expiryHorizonMs === undefined ? {} : { expiryHorizonMs: input.expiryHorizonMs }),

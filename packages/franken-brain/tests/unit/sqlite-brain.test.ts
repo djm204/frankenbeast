@@ -931,6 +931,25 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(ordinaryEventId);
     });
 
+    it('matches readable summary fields on ordinary corrupt events', () => {
+      brain.episodic.record({
+        type: 'success',
+        summary: 'delete corrupt summary',
+        details: { marker: 'will-corrupt' },
+        createdAt: '2026-07-20T00:00:00.000Z',
+      });
+      const ordinaryEventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        '{"marker":"broken"',
+        ordinaryEventId,
+      );
+
+      brain.rightToForget({ query: 'corrupt summary' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).not.toContain(ordinaryEventId);
+    });
+
     it('deletes quarantined audit rows when their malformed details contain the selector', () => {
       brain.working.set('task', 'delete project note');
       const first = brain.rightToForget({ query: 'delete project' });
@@ -6144,6 +6163,29 @@ describe('SqliteBrain', () => {
       expect(
         brain.episodic.recall(query, 10).map((event) => event.summary),
       ).toEqual(['late match kw1199', 'early match kw0000']);
+    });
+
+    it('preserves global ranking across recall keyword chunks', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'older combined kw0000 kw1199 match',
+        createdAt: '2026-07-10T00:00:00.000Z',
+      }));
+      brain.episodic.record(makeEvent({
+        summary: 'newer first-chunk kw0000 match',
+        createdAt: '2026-07-10T00:02:00.000Z',
+      }));
+      brain.episodic.record(makeEvent({
+        summary: 'newer last-chunk kw1199 match',
+        createdAt: '2026-07-10T00:01:00.000Z',
+      }));
+      const query = Array.from(
+        { length: 1200 },
+        (_, i) => `kw${String(i).padStart(4, '0')}`,
+      ).join(' ');
+
+      expect(brain.episodic.recall(query, 1).map((event) => event.summary)).toEqual([
+        'older combined kw0000 kw1199 match',
+      ]);
     });
 
     it('quarantines corrupt persisted details while keeping recent and failure rows available', () => {

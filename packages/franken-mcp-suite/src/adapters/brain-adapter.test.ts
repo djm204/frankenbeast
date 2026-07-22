@@ -1291,6 +1291,19 @@ describe("createBrainAdapter", () => {
     expect(report.compactionCandidates).toEqual([]);
   });
 
+  it("rejects invalid all-scope retention budgets before post-filtering", async () => {
+    const brain = createBrainAdapter("/tmp/invalid-all-retention.db");
+
+    for (const maxEntries of [0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(brain.memoryRetentionReport({
+        readScope: "all",
+        maxEntries,
+      })).rejects.toThrow("maxEntries must be a positive safe integer");
+    }
+
+    expect(brainInstances[0].memoryRetentionReport).not.toHaveBeenCalled();
+  });
+
   it("counts existing scoped compaction candidates before applying retention budgets", async () => {
     const brain = createBrainAdapter("/tmp/beast.db");
     brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
