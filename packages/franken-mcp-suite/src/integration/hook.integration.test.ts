@@ -74,6 +74,16 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('rm -rf /tmp/nope');
   });
 
+  it('preserves shell substitutions after redacted authorization headers for governance', async () => {
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const context = ['curl -H', "'Authorization:", 'Token', 'fixture', substitution + "'", 'https://api.example.com'].join(' ');
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).not.toContain('Token fixture');
+    expect(seen).toContain(substitution);
+  });
+
   it('redacts prefixed env-style credential assignments before governor persistence', async () => {
     const values = [
       ['openai', 'fixture', 'value'].join('-'),
@@ -285,6 +295,24 @@ describe('fbeast-hook runtime', () => {
     expect(keyOnlyResult.observerLogs[0]!.metadata).toContain('private_key=[REDACTED]');
   });
 
+  it('redacts raw cookie, credentials, passphrase, and multiword authorization assignments', async () => {
+    const secret = ['raw', 'credential', 'fixture'].join('-');
+    const payload = [
+      `Set-Cookie: session=${secret}`,
+      `sessionCookie=${secret}`,
+      `credentials=${secret}`,
+      `passphrase=${secret}`,
+      `--cookie ${secret}`,
+      `authorization=Basic ${secret}`,
+      `authorization=Token ${secret}`,
+    ].join('\n');
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata.match(/\[REDACTED\]/g)).toHaveLength(7);
+  });
+
   it('redacts long URL userinfo credentials from raw post-tool payloads', async () => {
     const username = 'u'.repeat(300);
     const password = 'p'.repeat(300);
@@ -341,6 +369,18 @@ describe('fbeast-hook runtime', () => {
   it('whole-redacts oversized payloads with generic credential assignments', async () => {
     const secret = ['oversized', 'generic', 'key', 'fixture'].join('-');
     const payload = `${'x'.repeat(70_000)} OPENAI_KEY=${secret}`;
+
+    const result = await runHookForTest(['post-tool', 'write_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('short-circuits oversized assignment scans without materializing every match', async () => {
+    const secret = ['late', 'oversized', 'fixture'].join('-');
+    const benignAssignments = Array.from({ length: 5_000 }, (_, index) => `field_${index}: value`).join(' ');
+    const payload = `${benignAssignments} OPENAI_KEY=${secret}`;
 
     const result = await runHookForTest(['post-tool', 'write_file', payload]);
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };

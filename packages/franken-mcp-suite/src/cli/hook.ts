@@ -103,19 +103,22 @@ function containsOversizedSecretIndicator(text: string): boolean {
   }
 
   const assignmentPattern = /\b([A-Za-z][A-Za-z0-9_-]{0,127})\b["']?\s*[=:]/g;
-  return Array.from(text.matchAll(assignmentPattern))
-    .some((match) => isSensitiveAssignmentKey(match[1]!));
+  for (const match of text.matchAll(assignmentPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  return false;
 }
 
 function redactRawSecrets(text: string): string {
   if (!containsRawSecretHint(text)) return text;
   return text
-    .replace(/(authorization\s*:\s*)[^\r\n;&|<>]+/gi, '$1[REDACTED]')
+    .replace(/(authorization\s*:\s*)(?:\$(?!\()|[^$\r\n;&|<>`])+/gi, '$1[REDACTED]')
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
-    .replace(/(\bauthorization\b\s*=\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
-    .replace(/(\b[a-z][A-Za-z0-9]{0,127}(?:Password|Passwd|Pwd|Secret|Token|Key)\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
-    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
-    .replace(/(--(?:authorization|password|passwd|pwd|secret|token|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
+    .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=)[^\s=\\;&|<>()$`]+|[^\s=\\;&|<>()$`]+)/gi, '$1[REDACTED]')
+    .replace(/(\bauthorization\b\s*=\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*')/gi, '$1[REDACTED]')
+    .replace(/(\b[a-z][A-Za-z0-9]{0,127}(?:Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials|Passphrase)\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
+    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
+    .replace(/(--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
     .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
 }
 
