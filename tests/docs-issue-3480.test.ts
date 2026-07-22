@@ -90,9 +90,13 @@ describe("issue #3480 runnable example projects", () => {
     expect(readme.indexOf("npm run plan")).toBeLessThan(
       readme.indexOf("npm start"),
     );
-    expect(
-      readJson("examples/orchestrator-config/package.json").scripts,
-    ).toMatchObject({ setup: "git init" });
+    const scripts = readJson("examples/orchestrator-config/package.json")
+      .scripts as Record<string, string>;
+    expect(scripts.setup).toContain("git init -b main");
+    expect(scripts.setup).toContain("git commit");
+    expect(readText("examples/orchestrator-config/.gitignore")).toContain(
+      "!.fbeast/config.json",
+    );
     expect(
       existsSync(
         resolve(ROOT, "examples/orchestrator-config/docs/sample-design.md"),
