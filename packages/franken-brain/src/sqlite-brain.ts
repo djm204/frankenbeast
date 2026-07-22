@@ -13,6 +13,7 @@ import type {
   IWorkingMemory,
   IEpisodicMemory,
   IRecoveryMemory,
+  CheckpointListOptions,
   BrainSnapshot,
   BrainSerializeOptions,
   MemoryDeletionGuardSnapshot,
@@ -3212,6 +3213,30 @@ interface CheckpointRow {
   created_at: string;
 }
 
+export const DEFAULT_CHECKPOINT_LIST_LIMIT = 100;
+export const MAX_CHECKPOINT_LIST_LIMIT = 1_000;
+const MAX_SQLITE_ROW_ID = 9_223_372_036_854_775_807n;
+
+function normalizeCheckpointListOptions(options: CheckpointListOptions = {}): {
+  limit: number;
+  cursor?: string;
+} {
+  const limit = options.limit ?? DEFAULT_CHECKPOINT_LIST_LIMIT;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_CHECKPOINT_LIST_LIMIT) {
+    throw new RangeError(
+      `Checkpoint list limit must be a positive safe integer no greater than ${MAX_CHECKPOINT_LIST_LIMIT}`,
+    );
+  }
+
+  if (options.cursor === undefined) {
+    return { limit };
+  }
+  if (!/^[1-9]\d*$/.test(options.cursor) || BigInt(options.cursor) > MAX_SQLITE_ROW_ID) {
+    throw new RangeError('Checkpoint list cursor must be a positive SQLite row ID');
+  }
+  return { limit, cursor: options.cursor };
+}
+
 class SqliteRecoveryMemory implements IRecoveryMemory {
   constructor(
     private db: Database.Database,
@@ -3339,16 +3364,29 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
     }
   }
 
-  listCheckpoints(): Array<{ id: string; timestamp: string }> {
+  listCheckpoints(options?: CheckpointListOptions): Array<{ id: string; timestamp: string }> {
     try {
-      const rows = this.db
-        .prepare(`SELECT id, created_at FROM checkpoints ORDER BY id ASC`)
-        .all() as Array<{ id: number; created_at: string }>;
+      const { limit, cursor } = normalizeCheckpointListOptions(options);
+      const rows = (cursor === undefined
+        ? this.db
+            .prepare(
+              `SELECT id, created_at FROM (
+                 SELECT id, created_at FROM checkpoints ORDER BY id DESC LIMIT ?
+               ) ORDER BY id ASC`,
+            )
+            .all(limit)
+        : this.db
+            .prepare(
+              `SELECT id, created_at FROM (
+                 SELECT id, created_at FROM checkpoints WHERE id < ? ORDER BY id DESC LIMIT ?
+               ) ORDER BY id ASC`,
+            )
+            .all(cursor, limit)) as Array<{ id: number; created_at: string }>;
       this.audit?.({
         operation: 'recovery.listCheckpoints',
         store: 'recovery',
         outcome: 'success',
-        details: { count: rows.length },
+        details: { count: rows.length, limit, ...(cursor === undefined ? {} : { cursor }) },
       });
       return rows.map((r) => ({ id: String(r.id), timestamp: r.created_at }));
     } catch (error) {

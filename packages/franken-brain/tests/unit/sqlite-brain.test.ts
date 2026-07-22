@@ -6754,7 +6754,7 @@ describe('SqliteBrain', () => {
       expect(brain.recovery.lastCheckpoint()).toBeNull();
     });
 
-    it('listCheckpoints() returns all with id and timestamp', () => {
+    it('listCheckpoints() returns checkpoint metadata in ascending order', () => {
       brain.recovery.checkpoint(
         makeState({ timestamp: '2026-03-18T10:00:00Z' }),
       );
@@ -6764,8 +6764,44 @@ describe('SqliteBrain', () => {
 
       const list = brain.recovery.listCheckpoints();
       expect(list).toHaveLength(2);
-      expect(list[0]!.id).toBeDefined();
-      expect(list[0]!.timestamp).toBeDefined();
+      expect(list.map((checkpoint) => checkpoint.id)).toEqual(['1', '2']);
+      expect(list[0]!.timestamp).toBe('2026-03-18T10:00:00Z');
+    });
+
+    it('bounds checkpoint listings by default and pages through older checkpoints', () => {
+      for (let step = 1; step <= 101; step += 1) {
+        brain.recovery.checkpoint(
+          makeState({
+            step,
+            timestamp: `2026-03-18T10:${String(step).padStart(3, '0')}:00Z`,
+          }),
+        );
+      }
+
+      const latestPage = brain.recovery.listCheckpoints();
+      expect(latestPage).toHaveLength(100);
+      expect(latestPage[0]!.id).toBe('2');
+      expect(latestPage.at(-1)!.id).toBe('101');
+
+      const latestThree = brain.recovery.listCheckpoints({ limit: 3 });
+      expect(latestThree.map((checkpoint) => checkpoint.id)).toEqual(['99', '100', '101']);
+
+      const olderPage = brain.recovery.listCheckpoints({
+        limit: 3,
+        cursor: latestThree[0]!.id,
+      });
+      expect(olderPage.map((checkpoint) => checkpoint.id)).toEqual(['96', '97', '98']);
+    });
+
+    it.each([
+      { limit: 0 },
+      { limit: 1_001 },
+      { limit: 1.5 },
+      { cursor: '0' },
+      { cursor: 'not-an-id' },
+      { cursor: '9223372036854775808' },
+    ])('rejects invalid checkpoint list options %#', (options) => {
+      expect(() => brain.recovery.listCheckpoints(options)).toThrow(RangeError);
     });
   });
 
