@@ -32,6 +32,11 @@ describe('redactOTELPayloadSecrets', () => {
     const redisSecret = ['redis', 'tls', 'credential'].join('-')
     const genericUrlSecret = ['generic', 'url', 'credential'].join('-')
     const flagSecret = ['command', 'flag', 'credential'].join('-')
+    const proxyAuthSecret = ['proxy', 'auth', 'credential'].join('-')
+    const basicAuthSecret = ['basic', 'auth', 'credential'].join('-')
+    const tupleAuthSecret = ['tuple', 'auth', 'credential'].join('-')
+    const tupleApiKeySecret = ['tuple', 'api', 'credential'].join('-')
+    const truncatedAuthSecret = ['truncated', 'auth', 'credential'].join('-')
     const geminiSecret = `AIza${'e'.repeat(35)}`
     const slackSecret = ['slack', 'webhook', 'credential'].join('-')
     const jwtSecret = `eyJ${'a'.repeat(16)}.${'b'.repeat(16)}.${'c'.repeat(16)}`
@@ -53,6 +58,10 @@ describe('redactOTELPayloadSecrets', () => {
       `rediss://:${redisSecret}@cache.example.test:6380/0`,
       `https://user:${genericUrlSecret}@example.test/path`,
       `--api-key ${flagSecret}`,
+      `proxyAuthorization=Bearer ${proxyAuthSecret}`,
+      `--auth Basic ${basicAuthSecret}`,
+      JSON.stringify([['Authorization', `Basic ${tupleAuthSecret}`], ['x-api-key', tupleApiKeySecret]]),
+      `{"Authorization":"Token ${truncatedAuthSecret}`,
       geminiSecret,
       `https://hooks.slack.com/services/T000/B000/${slackSecret}`,
       jwtSecret,
@@ -83,6 +92,11 @@ describe('redactOTELPayloadSecrets', () => {
       redisSecret,
       genericUrlSecret,
       flagSecret,
+      proxyAuthSecret,
+      basicAuthSecret,
+      tupleAuthSecret,
+      tupleApiKeySecret,
+      truncatedAuthSecret,
       geminiSecret,
       slackSecret,
       jwtSecret,
@@ -93,5 +107,15 @@ describe('redactOTELPayloadSecrets', () => {
     }
     expect(output).toContain('[REDACTED]')
     expect(output).toContain('safe diagnostic value')
+  })
+
+  it('handles unmatched JSON openers without repeatedly rescanning the suffix', () => {
+    const secret = ['unmatched', 'brace', 'credential'].join('-')
+    const input = payloadWith(`${'{'.repeat(20_000)} password=${secret}`)
+
+    const output = JSON.stringify(redactOTELPayloadSecrets(input))
+
+    expect(output).not.toContain(secret)
+    expect(output).toContain('[REDACTED]')
   })
 })

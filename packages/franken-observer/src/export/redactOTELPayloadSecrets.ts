@@ -2,9 +2,16 @@ import type { OTELAttribute, OTELAttributeValue, OTELPayload } from './OTELSeria
 
 const REDACTED = '[REDACTED]'
 const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?)(?:$|_)/iu
-const SENSITIVE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
-const SENSITIVE_FLAG_RE = /(^|\s)(--([A-Za-z][A-Za-z0-9_-]*))(\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)/gu
-const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu
+const AUTH_SCHEME_VALUE = String.raw`(?:Basic|Bearer|Token)\s+[^\s,;]+`
+const SENSITIVE_ASSIGNMENT_RE = new RegExp(
+  String.raw`\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|${AUTH_SCHEME_VALUE}|[^\s,;]+)`,
+  'giu',
+)
+const SENSITIVE_FLAG_RE = new RegExp(
+  String.raw`(^|\s)(--([A-Za-z][A-Za-z0-9_-]*))(\s+)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|${AUTH_SCHEME_VALUE}|[^\s,;]+)`,
+  'giu',
+)
+const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/gu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
 const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)[^\r\n]+/giu
@@ -64,6 +71,12 @@ function redactEmbeddedJson(value: string): string {
       }
     }
 
+    if (stack.length > 0 || quoted) {
+      // No balanced JSON candidate starts here. Preserve the remaining text for
+      // the linear regex passes below instead of rescanning every later opener.
+      return output + value.slice(absoluteStart)
+    }
+
     const candidate = value.slice(absoluteStart, end)
     try {
       output += JSON.stringify(redactJsonValue(JSON.parse(candidate)))
@@ -101,7 +114,12 @@ function redactPlainText(value: string): string {
 
 function redactJsonValue(value: unknown): unknown {
   if (typeof value === 'string') return redactPlainText(value)
-  if (Array.isArray(value)) return value.map(redactJsonValue)
+  if (Array.isArray(value)) {
+    if (value.length >= 2 && typeof value[0] === 'string' && isSensitiveKey(value[0])) {
+      return [redactPlainText(value[0]), REDACTED, ...value.slice(2).map(redactJsonValue)]
+    }
+    return value.map(redactJsonValue)
+  }
   if (value === null || typeof value !== 'object') return value
 
   return Object.fromEntries(Object.entries(value).map(([key, child]) => [
