@@ -1,8 +1,8 @@
 import type { OTELAttribute, OTELAttributeValue, OTELPayload } from './OTELSerializer.js'
 
 const REDACTED = '[REDACTED]'
-const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?)(?:$|_)/iu
-const AUTH_SCHEME_VALUE = String.raw`(?:Basic|Bearer|Token)\s+[^\s,;]+`
+const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?|ssh_?keys?|signing_?keys?|gpg_?keys?|pats?|personal_?access_?tokens?|webhook_?urls?)(?:$|_)/iu
+const AUTH_SCHEME_VALUE = String.raw`(?:Basic|Bearer|Token|ApiKey|Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\s+[^\s,;]+`
 const SENSITIVE_ASSIGNMENT_RE = new RegExp(
   String.raw`\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|${AUTH_SCHEME_VALUE}|[^\s,;]+)`,
   'giu',
@@ -12,6 +12,7 @@ const SENSITIVE_FLAG_RE = new RegExp(
   'giu',
 )
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/gu
+const ESCAPED_SENSITIVE_JSON_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*\\+")[^"\r\n]*?(\\+")/gu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
 const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)[^\r\n]+/giu
@@ -109,6 +110,9 @@ function redactPlainText(value: string): string {
     .replace(SENSITIVE_JSON_FIELD_RE, (match, prefix: string, key: string) =>
       isSensitiveKey(key) ? `${prefix}"${REDACTED}"` : match,
     )
+    .replace(ESCAPED_SENSITIVE_JSON_FIELD_RE, (match, prefix: string, key: string, suffix: string) =>
+      isSensitiveKey(key) ? `${prefix}${REDACTED}${suffix}` : match,
+    )
     .replace(TOKEN_RE, REDACTED)
 }
 
@@ -122,9 +126,13 @@ function redactJsonValue(value: unknown): unknown {
   }
   if (value === null || typeof value !== 'object') return value
 
-  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+  const entries = Object.entries(value)
+  const headerName = entries.find(([key, child]) =>
+    (key === 'key' || key === 'name') && typeof child === 'string' && isSensitiveKey(child),
+  )
+  return Object.fromEntries(entries.map(([key, child]) => [
     redactPlainText(key),
-    isSensitiveKey(key) ? REDACTED : redactJsonValue(child),
+    isSensitiveKey(key) || (headerName !== undefined && key === 'value') ? REDACTED : redactJsonValue(child),
   ]))
 }
 
