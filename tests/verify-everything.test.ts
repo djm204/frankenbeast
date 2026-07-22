@@ -18,15 +18,28 @@ const ALL_PACKAGES = getWorkspacePackageDirNames();
 const REMOVED_WORKSPACES = [
   {
     dir: "frankenfirewall",
-    references: ["frankenfirewall", "@franken/firewall"],
+    references: [
+      "frankenfirewall",
+      "@franken/firewall",
+      "@frankenbeast/firewall",
+    ],
   },
   {
     dir: "franken-skills",
-    references: ["franken-skills", "@franken/skills"],
+    references: ["franken-skills", "@franken/skills", "@frankenbeast/skills"],
   },
-  { dir: "franken-heartbeat", references: ["franken-heartbeat"] },
-  { dir: "franken-mcp", references: ["franken-mcp", "@franken/mcp"] },
-  { dir: "franken-comms", references: ["franken-comms"] },
+  {
+    dir: "franken-heartbeat",
+    references: ["franken-heartbeat", "@frankenbeast/heartbeat"],
+  },
+  {
+    dir: "franken-mcp",
+    references: ["franken-mcp", "@franken/mcp", "@frankenbeast/mcp"],
+  },
+  {
+    dir: "franken-comms",
+    references: ["franken-comms", "@frankenbeast/comms"],
+  },
 ] as const;
 const REMOVED_WORKSPACE_REFERENCES = REMOVED_WORKSPACES.flatMap(
   ({ references }) => references,
@@ -39,7 +52,7 @@ const isWorkspaceWiringFile = (fileName: string): boolean =>
   fileName === "release-please-config.json" ||
   fileName === ".release-please-manifest.json" ||
   /^tsconfig(?:\.[^.]+)?\.json$/u.test(fileName) ||
-  /^vitest\.config(?:\.[^.]+)?\.ts$/u.test(fileName);
+  /^vitest(?:\.[^.]+)*\.config(?:\.[^.]+)*\.ts$/u.test(fileName);
 
 const getActiveWorkspaceWiringPaths = (): string[] => {
   const paths = readdirSync(ROOT, { withFileTypes: true })
@@ -232,7 +245,8 @@ describe("Chunk 10: full verification pass", () => {
 
   describe("removed workspace consolidation", () => {
     for (const { dir } of REMOVED_WORKSPACES) {
-      it(`packages/${dir}/ should not exist`, () => {
+      it(`${dir}/ should not exist at root or under packages/`, () => {
+        expect(existsSync(resolve(ROOT, dir))).toBe(false);
         expect(existsSync(resolve(ROOT, "packages", dir))).toBe(false);
       });
     }

@@ -6,6 +6,7 @@ const REMOVED_WORKSPACE_REFERENCES = [
   "@franken/skills",
   "franken-heartbeat",
   "@franken/mcp",
+  "@frankenbeast/mcp",
   "franken-comms",
 ] as const;
 
@@ -31,6 +32,10 @@ describe("removed workspace wiring", () => {
             },
           }),
         },
+        {
+          path: "vitest.integration.config.ts",
+          content: "alias: { '@frankenbeast/mcp': './removed-mcp.ts' }",
+        },
       ],
       REMOVED_WORKSPACE_REFERENCES,
     );
@@ -38,6 +43,10 @@ describe("removed workspace wiring", () => {
     expect(references).toEqual([
       { path: "package.json", reference: "@franken/mcp" },
       { path: "tsconfig.json", reference: "franken-heartbeat" },
+      {
+        path: "vitest.integration.config.ts",
+        reference: "@frankenbeast/mcp",
+      },
     ]);
   });
 
