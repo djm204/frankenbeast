@@ -1,0 +1,8 @@
+{
+  "maxCritiqueIterations": 2,
+  "maxTotalTokens": 20000,
+  "maxDurationMs": 120000,
+  "minCritiqueScore": 0.7,
+  "enableHeartbeat": false,
+  "enableTracing": false
+}

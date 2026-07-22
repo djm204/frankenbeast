@@ -38,6 +38,8 @@ If Corepack is not available yet, install it first with `npm install -g corepack
 
 Dependency locking is centralized at the workspace root: commit updates to the root `package-lock.json` only. Package workspaces under `packages/*` must not carry their own nested `package-lock.json` files; run installs from the repository root so npm records workspace dependency changes in the root lockfile. Standalone example projects under `examples/` may keep their own lockfiles because they are scaffolded outside the monorepo workspace.
 
+For focused, copyable starting points, browse the standalone [sample projects](../../examples/README.md): a dependency-free smoke test, a CLI planning project with a design document, project-scoped MCP setup, and a minimal orchestrator configuration. Scaffold one from the repository root with `npm run create:project -- <example-name> <target-directory>`.
+
 Run reproducible dependency audits through the guarded script so the live npm
 binary still matches the root `packageManager` pin before `npm audit` runs:
 

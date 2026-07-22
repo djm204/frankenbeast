@@ -7,8 +7,9 @@ import type { TranscriptMessage } from '../chat/types.js';
 import { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 import { ANSI } from '../logging/beast-logger.js';
 import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
-import { CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine } from './chat-style.js';
-import { isoNow } from '@franken/types';
+import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, chatStatusLine, statusRule } from './chat-style.js';
+import { CHAT_SLASH_COMMAND_NAMES, completeSlashCommand } from './slash-command-completion.js';
+import { isoNow, type ProviderContext, type TokenUsage } from '@franken/types';
 
 
 function printLine(...args: unknown[]): void {
@@ -16,15 +17,7 @@ function printLine(...args: unknown[]): void {
 }
 export { sanitizeChatOutput } from '../chat/output-sanitizer.js';
 
-const SLASH_COMMANDS = new Set([
-  '/plan',
-  '/run',
-  '/status',
-  '/diff',
-  '/approve',
-  '/session',
-  '/quit',
-]);
+const SLASH_COMMANDS = new Set<string>(CHAT_SLASH_COMMAND_NAMES);
 
 export interface ChatIO {
   prompt(): Promise<string>;
@@ -47,13 +40,23 @@ export interface ChatReplOptions {
   sessionStore?: ISessionStore;
   verbose?: boolean;
   io?: ChatIO;
+  /** Resolved provider's declared context window, for the status rule's usage bar. */
+  contextMaxTokens?: number;
+  /** Resolve the serving provider's context window after a fallback. */
+  contextMaxTokensForProvider?: (provider: string) => number | undefined;
+  /** Chat model label shown on the status rule. */
+  modelLabel?: string;
 }
 
 export function createReadlineIO(): ChatIO {
   let rl: Interface | undefined;
   let activeQuestion: AbortController | undefined;
   const getReadline = (): Interface => {
-    rl ??= createInterface({ input: process.stdin, output: process.stdout });
+    rl ??= createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      completer: completeSlashCommand,
+    });
     return rl;
   };
   const cancelQuestion = (): void => {
@@ -79,7 +82,7 @@ export function createReadlineIO(): ChatIO {
     });
   };
   return {
-    prompt: () => ask(`${ANSI.cyan}${CHAT_GLYPHS.user}${ANSI.reset} `),
+    prompt: () => ask(`${CHAT_COLOR.user}${CHAT_GLYPHS.user}${ANSI.reset} `),
     ask,
     cancelQuestion,
     print: (msg: string) => printLine(msg),
@@ -95,18 +98,47 @@ export class ChatRepl {
   private readonly verbose: boolean;
   private readonly io: ChatIO;
   private readonly runtime: ChatRuntime;
+  private readonly configuredContextMaxTokens: number | undefined;
+  private readonly contextMaxTokensForProvider: ((provider: string) => number | undefined) | undefined;
+  private readonly modelLabel: string;
   private transcript: TranscriptMessage[] = [];
   private pendingApproval = false;
+  private readonly sessionStartedAt = Date.now();
+  private latestUsage: TokenUsage | undefined;
+  private compactionCount = 0;
+  private lastProviderContext: ProviderContext | undefined;
 
   constructor(opts: ChatReplOptions) {
     this.projectId = opts.projectId;
     this.sessionStore = opts.sessionStore;
     this.verbose = opts.verbose ?? false;
     this.io = opts.io ?? createReadlineIO();
+    this.configuredContextMaxTokens = opts.contextMaxTokens;
+    this.contextMaxTokensForProvider = opts.contextMaxTokensForProvider;
+    this.modelLabel = opts.modelLabel ?? 'frankenbeast';
     this.runtime = new ChatRuntime({
       engine: opts.engine,
       turnRunner: opts.turnRunner,
     });
+  }
+
+  private printStatusRule(): void {
+    // Once a turn has actually completed, prefer the real serving
+    // provider/model over the static configured label — the configured
+    // provider can silently differ from what's actually answering (e.g.
+    // after a rate-limit fallback), and the status rule should never
+    // contradict what the model itself can now truthfully say about itself.
+    const label = this.lastProviderContext?.model ?? this.lastProviderContext?.provider ?? this.modelLabel;
+    const contextMaxTokens = this.lastProviderContext
+      ? this.contextMaxTokensForProvider?.(this.lastProviderContext.provider)
+      : this.configuredContextMaxTokens;
+    this.io.print(statusRule(process.stdout.columns ?? 80, {
+      ...(this.latestUsage ? { usage: this.latestUsage } : {}),
+      ...(contextMaxTokens !== undefined ? { contextMaxTokens } : {}),
+      compactions: this.compactionCount,
+      sessionDurationMs: Date.now() - this.sessionStartedAt,
+      modelLabel: label,
+    }));
   }
 
   async start(): Promise<void> {
@@ -114,7 +146,9 @@ export class ChatRepl {
     this.io.print(chatBanner('frankenbeast', `· project ${this.projectId} · /quit to exit`));
 
     for (;;) {
+      this.printStatusRule();
       const input = await this.io.prompt();
+      this.printStatusRule();
       const trimmed = input.trim();
 
       if (trimmed === '') continue;
@@ -147,6 +181,7 @@ export class ChatRepl {
           pendingApproval: this.pendingApproval,
           projectId: this.projectId,
           transcript: this.transcript,
+          ...(this.lastProviderContext ? { lastProviderContext: this.lastProviderContext } : {}),
         }),
         { silent: !process.stderr.isTTY },
       );
@@ -160,11 +195,20 @@ export class ChatRepl {
 
     this.pendingApproval = result.pendingApproval;
     this.transcript = result.transcript;
+    if (result.usage) {
+      this.latestUsage = result.usage;
+    }
+    if (result.truncated) {
+      this.compactionCount++;
+    }
+    if (result.providerContext) {
+      this.lastProviderContext = result.providerContext;
+    }
 
     for (const message of result.displayMessages) {
       switch (message.kind) {
         case 'reply':
-          this.io.print(chatBlock(CHAT_GLYPHS.beast, ANSI.magenta, sanitizeChatOutput(message.content)));
+          this.io.print(chatBlock(CHAT_GLYPHS.beast, CHAT_COLOR.beast, sanitizeChatOutput(message.content)));
           if (this.verbose && result.tier) {
             this.io.print(chatStatusLine(`[${result.tier}]`));
           }

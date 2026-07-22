@@ -1,0 +1,10 @@
+{
+  "name": "frankenbeast-cli-plan-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "help": "frankenbeast --help",
+    "plan": "frankenbeast plan --design-doc docs/sample-design.md"
+  }
+}

@@ -18,6 +18,19 @@ export interface ObserverLogResult {
   hash: string;
 }
 
+export class ObserverMetadataParseError extends Error {
+  readonly code = 'OBSERVER_METADATA_INVALID_JSON';
+
+  constructor(
+    readonly event: string,
+    readonly rejectionCount: number,
+    options?: ErrorOptions,
+  ) {
+    super('Observer metadata must be valid JSON', options);
+    this.name = 'ObserverMetadataParseError';
+  }
+}
+
 export interface ObserverCostSummary {
   totalPromptTokens: number;
   totalCompletionTokens: number;
@@ -91,6 +104,7 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
   const store = createSqliteStore(dbPath);
   let closed = false;
+  let metadataParseRejections = 0;
   const costCalculator = new CostCalculator(DEFAULT_PRICING, {
     onUnknownModel: (model) => {
       process.stderr.write(`[fbeast-observer] Unknown model "${model}" — cost will be recorded as $0.0000 until pricing is configured.\n`);
@@ -99,8 +113,23 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
 
   return {
     async log(input) {
-      const payload = parseMetadata(input.metadata);
-      const metadata = canonicalMetadata(input.metadata);
+      let payload: unknown;
+      try {
+        payload = JSON.parse(input.metadata);
+      } catch (cause) {
+        metadataParseRejections += 1;
+        const error = new ObserverMetadataParseError(input.event, metadataParseRejections, { cause });
+        process.stderr.write(`[fbeast-observer] ${JSON.stringify({
+          level: 'warn',
+          code: error.code,
+          event: input.event.slice(0, 128),
+          rejectionCount: error.rejectionCount,
+          metadataBytes: Buffer.byteLength(input.metadata),
+          metadataHash: hashContent(input.metadata),
+        })}\n`);
+        throw error;
+      }
+      const metadata = canonicalMetadata(payload);
       const auditEvent = createAuditEvent(input.event, payload, {
         phase: 'mcp',
         provider: 'fbeast-mcp',
@@ -238,7 +267,7 @@ function validateAuditTail(
   const previousHash = rows[1]?.hash;
   const actualParentHash = tail.parentHash ?? undefined;
   const metadata = tail.payload;
-  const payload = parseMetadata(metadata);
+  const payload = parseStoredMetadata(metadata);
   const auditEvent = createAuditEvent(tail.eventType, payload, {
     phase: 'mcp',
     provider: 'fbeast-mcp',
@@ -248,7 +277,7 @@ function validateAuditTail(
   const matchesCurrent = tail.hash === buildAuditHash(baseHash, previousHash);
   const legacyParentIsValid = previousHash === undefined || isLegacy16Hash(previousHash);
   const matchesLegacy16 = legacyParentIsValid
-    && buildMatchingLegacy16Hash(tail, previousHash) === tail.hash;
+    && buildMatchingLegacy16Hash(tail, previousHash, payload) === tail.hash;
 
   if (actualParentHash !== previousHash || (!matchesCurrent && !matchesLegacy16)) {
     throw new Error('Cannot append audit row to invalid trail tail');
@@ -281,7 +310,7 @@ function inspectAuditTrail(
 
   for (const [index, row] of rows.entries()) {
     const metadata = row.payload;
-    const payload = parseMetadata(metadata);
+    const payload = parseStoredMetadata(metadata);
     const auditEvent = createAuditEvent(row.eventType, payload, {
       phase: 'mcp',
       provider: 'fbeast-mcp',
@@ -290,7 +319,7 @@ function inspectAuditTrail(
     const baseHash = buildEventBaseHash(sessionId, row.eventType, metadata, auditEvent.inputHash);
     const expectedHash = buildAuditHash(baseHash, expectedParentHash);
     const expectedHashFromStoredParent = buildAuditHash(baseHash, previousStoredHash);
-    const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash);
+    const expectedLegacy16Hash = buildMatchingLegacy16Hash(row, expectedLegacy16ParentHash, payload);
     const actualParentHash = row.parentHash ?? undefined;
     const matchesCurrent = actualParentHash === expectedParentHash && row.hash === expectedHash;
     const matchesStoredParent = !matchesCurrent
@@ -365,20 +394,31 @@ function buildEventBaseHash(sessionId: string, eventType: string, metadata: stri
   return hashContent(`${sessionId}:${eventType}:${inputHash ?? ''}:${metadata}`);
 }
 
-function buildLegacy16AuditHash(inputHash?: string, parentHash?: string): string {
-  const baseHash = inputHash ?? hashContent('');
-  if (!parentHash) {
-    return baseHash.slice(0, 16);
-  }
+const SHA256_PREFIX = 'sha256:';
+const LEGACY_AUDIT_DIGEST_HEX_LENGTH = 16;
+// Older adapters truncated the entire prefixed hash to 16 characters, leaving nine digest characters.
+const HISTORICAL_LEGACY_AUDIT_DIGEST_HEX_LENGTH = 16 - SHA256_PREFIX.length;
 
-  return hashContent(`${parentHash}:${baseHash}`).slice(0, 16);
+function buildLegacy16AuditHash(
+  inputHash?: string,
+  parentHash?: string,
+  digestHexLength = LEGACY_AUDIT_DIGEST_HEX_LENGTH,
+): string {
+  const baseHash = inputHash ?? hashContent('');
+  const fullHash = parentHash ? hashContent(`${parentHash}:${baseHash}`) : baseHash;
+  return `${SHA256_PREFIX}${fullHash.slice(SHA256_PREFIX.length, SHA256_PREFIX.length + digestHexLength)}`;
 }
 
-function buildMatchingLegacy16Hash(row: AuditTrailRow, parentHash?: string): string | undefined {
-  if (!isLegacy16Hash(row.hash)) return undefined;
+function buildMatchingLegacy16Hash(
+  row: AuditTrailRow,
+  parentHash: string | undefined,
+  parsedMetadata: unknown,
+): string | undefined {
+  const digestHexLength = legacy16DigestHexLength(row.hash);
+  if (digestHexLength === undefined) return undefined;
 
-  for (const metadata of legacyMetadataCandidates(row.payload)) {
-    const expected = buildLegacy16AuditHash(hashContent(metadata), parentHash);
+  for (const metadata of legacyMetadataCandidates(row.payload, parsedMetadata)) {
+    const expected = buildLegacy16AuditHash(hashContent(metadata), parentHash, digestHexLength);
     if (row.hash === expected) return expected;
   }
 
@@ -386,19 +426,25 @@ function buildMatchingLegacy16Hash(row: AuditTrailRow, parentHash?: string): str
 }
 
 function isLegacy16Hash(hash: string | undefined): hash is string {
-  return /^sha256:[a-f0-9]{9}$/.test(hash ?? '');
+  return legacy16DigestHexLength(hash) !== undefined;
 }
 
-function legacyMetadataCandidates(storedMetadata: string): string[] {
+function legacy16DigestHexLength(hash: string | undefined): number | undefined {
+  if (!hash?.startsWith(SHA256_PREFIX)) return undefined;
+  const digest = hash.slice(SHA256_PREFIX.length);
+  if (!/^[a-f0-9]+$/.test(digest)) return undefined;
+  if (digest.length === LEGACY_AUDIT_DIGEST_HEX_LENGTH) return LEGACY_AUDIT_DIGEST_HEX_LENGTH;
+  if (digest.length === HISTORICAL_LEGACY_AUDIT_DIGEST_HEX_LENGTH) {
+    return HISTORICAL_LEGACY_AUDIT_DIGEST_HEX_LENGTH;
+  }
+  return undefined;
+}
+
+function legacyMetadataCandidates(storedMetadata: string, parsedMetadata: unknown): string[] {
   const candidates = [storedMetadata];
-  try {
-    const parsed = JSON.parse(storedMetadata) as unknown;
-    candidates.push(JSON.stringify(parsed, null, 2));
-    if (isPlainObject(parsed)) {
-      candidates.push(prettyOneLineJson(parsed));
-    }
-  } catch {
-    // Non-JSON legacy metadata has no alternate insignificant-whitespace form.
+  candidates.push(JSON.stringify(parsedMetadata, null, 2));
+  if (isPlainObject(parsedMetadata)) {
+    candidates.push(prettyOneLineJson(parsedMetadata));
   }
 
   return [...new Set(candidates)];
@@ -411,7 +457,7 @@ function prettyOneLineJson(value: Record<string, unknown>): string {
 }
 
 function legacy16RowIsBoundToTrail(row: AuditTrailRow, sessionId: string): boolean {
-  const payload = parseMetadata(row.payload);
+  const payload = parseStoredMetadata(row.payload);
   if (!isPlainObject(payload)) return false;
 
   const payloadSession = payload['sessionId'] ?? payload['session_id'];
@@ -432,18 +478,20 @@ function migrateAuditRow(store: ReturnType<typeof createSqliteStore>, id: number
   }
 }
 
-function parseMetadata(metadata: string): unknown {
+function parseStoredMetadata(metadata: string): unknown {
   try {
     return JSON.parse(metadata);
   } catch {
+    process.stderr.write(`[fbeast-observer] ${JSON.stringify({
+      level: 'warn',
+      code: 'OBSERVER_STORED_METADATA_INVALID_JSON',
+      metadataBytes: Buffer.byteLength(metadata),
+      metadataHash: hashContent(metadata),
+    })}\n`);
     return metadata;
   }
 }
 
-function canonicalMetadata(metadata: string): string {
-  try {
-    return JSON.stringify(JSON.parse(metadata));
-  } catch {
-    return metadata;
-  }
+function canonicalMetadata(metadata: unknown): string {
+  return JSON.stringify(metadata);
 }

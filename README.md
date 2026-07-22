@@ -397,6 +397,8 @@ npm run test:root
 
 For CI-style validation without mutating files or installing dependencies, run `./scripts/bootstrap.sh --dry-run`. If you intentionally need a manual dependency install instead of bootstrap, run it from the repository root with the Corepack-activated npm version from `packageManager`, copy or merge `.env.example` into `.env`, and note that you are skipping bootstrap's environment validation and optional Docker-service prompts.
 
+Browse the standalone [examples](examples/README.md) for copyable CLI planning, MCP registration, and minimal orchestrator configuration projects. Each example has its own locked dependencies and can be scaffolded with `npm run create:project -- <example-name> <target-directory>`.
+
 The root Vitest suite also checks local Markdown links in README/docs/package READMEs. Local link targets are treated as untrusted input: keep them simple repository-relative paths and do not add shell metacharacters such as backticks, `$`, `;`, `&`, `|`, `<`, or `>`. External `http(s)` links and same-page anchors are ignored by that local filesystem check.
 
 See [ONBOARDING.md](ONBOARDING.md) for the complete first-time setup checklist, including prerequisites, bootstrap, UI startup, troubleshooting, and secret backends. See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the shorter setup guide including Docker services.
@@ -770,6 +772,10 @@ With `local-encrypted` backend and `FRANKENBEAST_PASSPHRASE` set, the orchestrat
 Required HITL approvals fail closed when a run has no interactive TTY. In trusted CI/headless automation that intentionally allows required HITL-gated skills, set `FRANKENBEAST_ALLOW_NONINTERACTIVE_APPROVAL=1`; otherwise rerun in an interactive TTY and approve the prompt.
 
 ### References
+
+The ADRs are historical decision records: they capture original design rationale,
+not current implementation guidance. For current behavior, cross-check the relevant
+package READMEs, architecture docs, and source.
 
 - [ADR-018](docs/adr/018-secret-store-architecture.md) — secret store design and backend selection rationale
 - [ADR-017](docs/adr/017-network-operator-control-plane.md) — network operator control plane and token auth

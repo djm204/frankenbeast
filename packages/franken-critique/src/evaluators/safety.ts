@@ -1073,6 +1073,16 @@ export class SafetyEvaluator implements Evaluator {
       return String.fromCharCode(Number.parseInt(unicodeSingleton[1]!, 16));
     }
 
+    if (this.parsingUnicodeSets) {
+      const bracedUnicodeSingleton = characterClass.match(
+        /^\[\\u\{([0-9A-Fa-f]{1,6})\}\]$/,
+      );
+      if (bracedUnicodeSingleton) {
+        const codePoint = Number.parseInt(bracedUnicodeSingleton[1]!, 16);
+        if (codePoint <= 0x10ffff) return String.fromCodePoint(codePoint);
+      }
+    }
+
     const range = characterClass.match(/^\[([^\\\]])-([^\\\]])\]$/);
     if (range) return `RANGE:${range[1]!}-${range[2]!}`;
 

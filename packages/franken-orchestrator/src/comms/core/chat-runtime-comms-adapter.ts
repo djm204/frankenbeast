@@ -3,7 +3,7 @@ import type {
   CommsInboundInput,
   CommsInboundResult,
 } from './comms-runtime-port.js';
-import { isoNow } from '@franken/types';
+import { isoNow, type ProviderContext } from '@franken/types';
 import type { OutboundMessageStatus } from './types.js';
 import type { ChatRuntime, ChatRuntimeState } from '../../chat/runtime.js';
 import type { InMemoryRateLimiter } from '../../beasts/http/beast-rate-limit.js';
@@ -21,6 +21,7 @@ export interface CommsSession {
   transcript: Array<{ role: string; content: string; timestamp: string }>;
   state: string;
   beastContext?: unknown;
+  providerContext?: ProviderContext;
   routingMetadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -86,6 +87,7 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       projectId: session.projectId,
       transcript: session.transcript as ChatRuntimeState['transcript'],
       beastContext: session.beastContext as ChatRuntimeState['beastContext'],
+      ...(session.providerContext ? { lastProviderContext: session.providerContext } : {}),
     };
 
     // Run through ChatRuntime
@@ -108,6 +110,7 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       pendingApproval,
       ...(routingMetadata ? { routingMetadata } : {}),
       beastContext: result.beastContext !== undefined ? result.beastContext : session.beastContext,
+      providerContext: result.providerContext ?? session.providerContext ?? null,
     });
 
     // Map to comms outbound format

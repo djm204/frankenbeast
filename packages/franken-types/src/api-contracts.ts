@@ -51,6 +51,22 @@ export const ChatBeastContextSchema = z.object({
 });
 export type ChatBeastContext = z.infer<typeof ChatBeastContextSchema>;
 
+/**
+ * Which CLI provider/model actually served the most recent turn — ground
+ * truth for "what model are you running?" / "is this a fallback?" questions,
+ * as opposed to the model's own training-time self-description (which has no
+ * way to know it was invoked via a fallback). `switchedFrom`/`switchReason`
+ * are present only when this turn's provider differs from the originally
+ * configured one (e.g. the configured provider was rate-limited).
+ */
+export const ProviderContextSchema = z.object({
+  provider: z.string(),
+  model: z.string().optional(),
+  switchedFrom: z.string().optional(),
+  switchReason: z.string().optional(),
+});
+export type ProviderContext = z.infer<typeof ProviderContextSchema>;
+
 export const ChatSessionResponseSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -58,6 +74,7 @@ export const ChatSessionResponseSchema = z.object({
   state: z.string(),
   pendingApproval: PendingApprovalSchema.nullable().optional(),
   beastContext: ChatBeastContextSchema.nullable().optional(),
+  providerContext: ProviderContextSchema.nullable().optional(),
   routingMetadata: z.record(z.string(), z.unknown()).optional(),
   tokenTotals: TokenTotalsSchema,
   costUsd: z.number().nonnegative(),

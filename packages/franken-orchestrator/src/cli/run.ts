@@ -460,6 +460,12 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  /** Resolved provider's declared context window, for the status line's usage bar. */
+  contextMaxTokens: number;
+  /** Resolve a fallback provider's declared context window. */
+  contextMaxTokensForProvider: (provider: string) => number | undefined;
+  /** Chat model label for the status line (e.g. `claude-sonnet-4-6`). */
+  modelLabel: string;
 }
 
 function resolveSelectedProvider(args: CliArgs, config: OrchestratorConfig): string {
@@ -1201,6 +1207,11 @@ export async function createChatSurfaceDeps(
     sessionStoreDir,
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
+    contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
+    contextMaxTokensForProvider: (providerName) => registry.has(providerName)
+      ? registry.get(providerName).defaultContextWindowTokens()
+      : undefined,
+    modelLabel: chatDepOpts.adapterModel ?? provider,
   };
 }
 
@@ -1359,7 +1370,18 @@ async function runChatCommandIfRequested(
     chatIo?.close();
     throw error;
   }
-  const { chatLlm, execLlm, finalize, projectId, sessionStoreDir, skillManager, providerRegistry } = chatDeps;
+  const {
+    chatLlm,
+    execLlm,
+    finalize,
+    projectId,
+    sessionStoreDir,
+    skillManager,
+    providerRegistry,
+    contextMaxTokens,
+    contextMaxTokensForProvider,
+    modelLabel,
+  } = chatDeps;
 
   if (args.subcommand === 'chat-server') {
     let mutableConfig = config;
@@ -1492,6 +1514,9 @@ async function runChatCommandIfRequested(
     sessionStore,
     verbose: args.verbose,
     ...(chatIo ? { io: chatIo } : {}),
+    contextMaxTokens,
+    contextMaxTokensForProvider,
+    modelLabel,
   });
   try {
     await repl.start();
@@ -1647,6 +1672,8 @@ export async function main(): Promise<void> {
   // Create IO for non-chat interactive prompts (chat owns its own readline)
   const io = createStdinIO();
 
+  try {
+
   // Resolve base branch. Resume usually starts from the interrupted run's
   // feature branch, so infer the original base from git reflog unless the
   // user supplied an explicit --base-branch override.
@@ -1735,6 +1762,9 @@ export async function main(): Promise<void> {
   // invoking frankenbeast for no-change tasks would see a spurious nonzero exit.
   if (result && result.status !== 'completed' && result.status !== 'no-op') {
     process.exit(1);
+  }
+  } finally {
+    io.close();
   }
 }
 
@@ -2295,7 +2325,7 @@ export function runDirectCli(
       }
     })
     .catch((error) => {
-      console.error('Fatal:', error instanceof Error ? error.message : error);
+      console.error('Fatal:', error);
       exit(1);
     });
 }

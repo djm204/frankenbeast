@@ -23,6 +23,14 @@ function legacy16AuditHash(metadata: string, parentHash?: string): string {
   return parentHash ? legacy16(`${parentHash}:${inputHash}`) : inputHash.slice(0, 16);
 }
 
+function legacy16HexAuditHash(metadata: string, parentHash?: string): string {
+  const inputHash = `sha256:${createHash('sha256').update(metadata).digest('hex')}`;
+  const chainedHash = parentHash
+    ? `sha256:${createHash('sha256').update(`${parentHash}:${inputHash}`).digest('hex')}`
+    : inputHash;
+  return `sha256:${chainedHash.slice('sha256:'.length, 'sha256:'.length + 16)}`;
+}
+
 function mutateAuditTrailDirectly(dbPath: string, mutation: (db: ReturnType<typeof createSqliteStore>['db']) => void): void {
   const store = createSqliteStore(dbPath);
   store.setAuditTrailMutationEnabled(true);
@@ -67,6 +75,78 @@ describe('ObserverAdapter', () => {
     expect(() => observer.close?.()).not.toThrow();
 
     await expect(observer.trail('close-test')).rejects.toThrow(/database connection is not open/i);
+  });
+
+  it('rejects malformed metadata with a counted structured warning', async () => {
+    const observer = createObserverAdapter(tracked(tmpDbPath()));
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await expect(observer.log({
+        event: 'tool_call',
+        metadata: '{"token":"must-not-leak"',
+        sessionId: 'malformed-metadata',
+      })).rejects.toMatchObject({
+        name: 'ObserverMetadataParseError',
+        code: 'OBSERVER_METADATA_INVALID_JSON',
+        rejectionCount: 1,
+      });
+      await expect(observer.log({
+        event: 'tool_result',
+        metadata: '{not-json',
+        sessionId: 'malformed-metadata',
+      })).rejects.toMatchObject({
+        code: 'OBSERVER_METADATA_INVALID_JSON',
+        rejectionCount: 2,
+      });
+
+      expect(await observer.trail('malformed-metadata')).toEqual([]);
+      expect(stderr).toHaveBeenCalledTimes(2);
+      const warnings = stderr.mock.calls.map(([message]) => String(message));
+      expect(warnings[0]).toContain('"code":"OBSERVER_METADATA_INVALID_JSON"');
+      expect(warnings[0]).toContain('"rejectionCount":1');
+      expect(warnings[1]).toContain('"rejectionCount":2');
+      expect(warnings.join('\n')).not.toContain('must-not-leak');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('preserves and surfaces malformed metadata already stored by older adapters', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const metadata = '{"token":"must-not-leak"';
+    const auditEvent = createAuditEvent('tool_call', metadata, {
+      phase: 'mcp',
+      provider: 'fbeast-mcp',
+      input: metadata,
+    });
+    const hash = hashContent(`${sessionId}:tool_call:${auditEvent.inputHash ?? ''}:${metadata}`);
+    mutateAuditTrailDirectly(dbPath, (db) => {
+      db.prepare(`
+        INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(sessionId, 'tool_call', metadata, hash, null);
+    });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      await expect(observer.verify(sessionId)).resolves.toEqual({ ok: true, checked: 1 });
+      await expect(observer.log({
+        event: 'tool_result',
+        metadata: JSON.stringify({ ok: true }),
+        sessionId,
+      })).resolves.toEqual(expect.objectContaining({ hash: expect.stringMatching(/^sha256:[a-f0-9]{64}$/) }));
+
+      expect(await observer.trail(sessionId)).toHaveLength(2);
+      const warnings = stderr.mock.calls.map(([message]) => String(message));
+      expect(warnings).toHaveLength(2);
+      expect(warnings.every((warning) => warning.includes('"code":"OBSERVER_STORED_METADATA_INVALID_JSON"'))).toBe(true);
+      expect(warnings.join('\n')).not.toContain('must-not-leak');
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it('chains later audit hashes through the previous entry hash', async () => {
@@ -279,6 +359,34 @@ describe('ObserverAdapter', () => {
     expect(verification).toEqual({ ok: true, checked: 2 });
     expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[0]!.parentHash).toBeNull();
+    expect(trail[1]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
+  });
+
+  it('verifies and migrates legacy audit hashes with 16 hexadecimal digest characters', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const observer = createObserverAdapter(dbPath);
+    const sessionId = randomUUID();
+    const firstMetadata = JSON.stringify({ sessionId, eventType: 'tool_call', tool: 'memory', step: 1 });
+    const secondMetadata = JSON.stringify({ sessionId, eventType: 'tool_result', tool: 'memory', ok: true });
+    const firstLegacyHash = legacy16HexAuditHash(firstMetadata);
+    const secondLegacyHash = legacy16HexAuditHash(secondMetadata, firstLegacyHash);
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_call', firstMetadata, firstLegacyHash, null);
+    db.prepare(`
+      INSERT INTO audit_trail (session_id, event_type, payload, hash, parent_hash)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(sessionId, 'tool_result', secondMetadata, secondLegacyHash, firstLegacyHash);
+    db.close();
+
+    expect(firstLegacyHash).toMatch(/^sha256:[a-f0-9]{16}$/);
+    expect(secondLegacyHash).toMatch(/^sha256:[a-f0-9]{16}$/);
+    await expect(observer.verify(sessionId)).resolves.toEqual({ ok: true, checked: 2 });
+    const trail = await observer.trail(sessionId);
+    expect(trail[0]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[1]!.hash).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(trail[1]!.parentHash).toBe(trail[0]!.hash);
   });

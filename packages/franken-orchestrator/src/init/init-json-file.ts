@@ -45,6 +45,38 @@ async function resolveExistingOrSymlinkTarget(filePath: string): Promise<string>
   }
 }
 
+export async function quarantineJsonFile(
+  filePath: string,
+  options: {
+    description: string;
+    error: unknown;
+    onCorrupt?: (recovery: JsonCorruptionRecovery) => void;
+  },
+): Promise<boolean> {
+  const targetPath = await resolveExistingOrSymlinkTarget(filePath);
+  const quarantinePath = quarantinePathFor(targetPath);
+  const targetMode = await stat(targetPath).then((info) => info.mode & 0o777).catch(() => undefined);
+  try {
+    await rename(targetPath, quarantinePath);
+  } catch (renameError) {
+    if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false;
+    }
+    throw renameError;
+  }
+  if (targetMode !== undefined) {
+    recoveredFileModes.set(filePath, targetMode);
+    recoveredFileModes.set(targetPath, targetMode);
+  }
+  options.onCorrupt?.({
+    description: options.description,
+    filePath,
+    quarantinePath,
+    error: options.error,
+  });
+  return true;
+}
+
 export async function readJsonFileOrDefault<T>(
   filePath: string,
   fallback: () => T,
@@ -69,22 +101,11 @@ export async function readJsonFileOrDefault<T>(
     if (!isJsonSyntaxError(error)) {
       throw error;
     }
-    const targetPath = await resolveExistingOrSymlinkTarget(filePath);
-    const quarantinePath = quarantinePathFor(targetPath);
-    const targetMode = await stat(targetPath).then((info) => info.mode & 0o777).catch(() => undefined);
-    try {
-      await rename(targetPath, quarantinePath);
-    } catch (renameError) {
-      if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') {
-        return fallback();
-      }
-      throw renameError;
-    }
-    if (targetMode !== undefined) {
-      recoveredFileModes.set(filePath, targetMode);
-      recoveredFileModes.set(targetPath, targetMode);
-    }
-    options.onCorrupt?.({ description: options.description, filePath, quarantinePath, error });
+    await quarantineJsonFile(filePath, {
+      description: options.description,
+      error,
+      ...(options.onCorrupt === undefined ? {} : { onCorrupt: options.onCorrupt }),
+    });
     return fallback();
   }
 }

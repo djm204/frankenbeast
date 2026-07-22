@@ -1,6 +1,13 @@
-import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
-import { readJsonFileOrDefault, warnJsonQuarantined, writeJsonFileAtomic } from '../init/init-json-file.js';
+import { join } from 'node:path';
+import { z } from 'zod';
+import {
+  quarantineJsonFile,
+  readJsonFileOrDefault,
+  warnJsonQuarantined,
+  writeJsonFileAtomic,
+  type JsonCorruptionRecovery,
+} from '../init/init-json-file.js';
 import type {
   CacheStoreOptions,
   ProviderSessionLookup,
@@ -8,6 +15,24 @@ import type {
   StoredProviderSessionRecord,
 } from './llm-cache-types.js';
 import { encodeCachePathSegment } from './llm-cache-types.js';
+
+const StoredProviderSessionRecordSchema = z.object({
+  projectId: z.string(),
+  workId: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  sessionId: z.string(),
+  promptFingerprint: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  schemaVersion: z.number(),
+}) satisfies z.ZodType<StoredProviderSessionRecord>;
+
+function warnInvalidProviderSession({ filePath, quarantinePath, error }: JsonCorruptionRecovery): void {
+  console.warn(
+    `Invalid provider session record in ${filePath}; quarantined original at ${quarantinePath} and continuing with a cache miss. ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
 
 export class ProviderSessionStore {
   constructor(
@@ -64,9 +89,33 @@ export class ProviderSessionStore {
   }
 
   private async read(filePath: string): Promise<StoredProviderSessionRecord | undefined> {
-    return readJsonFileOrDefault<StoredProviderSessionRecord | undefined>(filePath, () => undefined, {
+    const stored = await readJsonFileOrDefault<unknown>(filePath, () => undefined, {
       description: 'provider session',
       onCorrupt: warnJsonQuarantined,
     });
+    if (
+      stored !== null &&
+      typeof stored === 'object' &&
+      'schemaVersion' in stored &&
+      typeof stored.schemaVersion === 'number' &&
+      stored.schemaVersion !== this.options.schemaVersion
+    ) {
+      return undefined;
+    }
+
+    const parsed = StoredProviderSessionRecordSchema.safeParse(stored);
+    if (parsed.success) {
+      return parsed.data;
+    }
+    if (stored === undefined) {
+      return undefined;
+    }
+
+    await quarantineJsonFile(filePath, {
+      description: 'provider session record',
+      error: parsed.error,
+      onCorrupt: warnInvalidProviderSession,
+    });
+    return undefined;
   }
 }

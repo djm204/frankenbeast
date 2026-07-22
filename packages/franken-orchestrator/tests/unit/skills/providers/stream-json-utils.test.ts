@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS } from '../../../../src/skills/providers/stream-json-utils.js';
+import { tryExtractTextFromNode, stripHookJson, cleanLlmJson, BASE_RATE_LIMIT_PATTERNS, extractNdjsonTokenUsage, extractNdjsonModel } from '../../../../src/skills/providers/stream-json-utils.js';
 
 describe('tryExtractTextFromNode', () => {
   it('extracts direct string values', () => {
@@ -221,5 +221,101 @@ describe('BASE_RATE_LIMIT_PATTERNS', () => {
   it('does not match normal errors', () => {
     expect(BASE_RATE_LIMIT_PATTERNS.test('file not found')).toBe(false);
     expect(BASE_RATE_LIMIT_PATTERNS.test('syntax error')).toBe(false);
+  });
+});
+
+describe('extractNdjsonTokenUsage', () => {
+  it('returns undefined when no line carries usage', () => {
+    const raw = [
+      '{"type":"message_start"}',
+      '{"type":"content_block_delta","delta":{"text":"hi"}}',
+    ].join('\n');
+    expect(extractNdjsonTokenUsage(raw)).toBeUndefined();
+  });
+
+  it('extracts input/output tokens from a top-level usage object', () => {
+    const raw = '{"type":"result","result":"done","usage":{"input_tokens":100,"output_tokens":25}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 100, outputTokens: 25, totalTokens: 125 });
+  });
+
+  it('extracts Claude result totals reported directly on the top-level frame', () => {
+    const raw = '{"type":"result","result":"done","total_input_tokens":100,"total_output_tokens":25}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 100, outputTokens: 25, totalTokens: 125 });
+  });
+
+  it('extracts usage nested under a message field (Claude message_delta shape)', () => {
+    const raw = '{"type":"message_delta","message":{"usage":{"input_tokens":40,"output_tokens":10}}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 40, outputTokens: 10, totalTokens: 50 });
+  });
+
+  it('accepts camelCase and provider-specific field aliases', () => {
+    const raw = '{"type":"usage","usage":{"promptTokenCount":7,"candidatesTokenCount":3}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 7, outputTokens: 3, totalTokens: 10 });
+  });
+
+  it('keeps the last reported reading across multiple usage-bearing lines', () => {
+    const raw = [
+      '{"type":"usage","usage":{"input_tokens":10,"output_tokens":2}}',
+      '{"type":"usage","usage":{"input_tokens":10,"output_tokens":5}}',
+    ].join('\n');
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+  });
+
+  it('ignores non-JSON and malformed lines without throwing', () => {
+    const raw = [
+      'plain text line',
+      '{not valid json',
+      '{"type":"result","usage":{"input_tokens":5,"output_tokens":1}}',
+    ].join('\n');
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 5, outputTokens: 1, totalTokens: 6 });
+  });
+
+  it('treats a partial reading (only one of input/output) as zero for the missing side', () => {
+    const raw = '{"type":"usage","usage":{"output_tokens":9}}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 0, outputTokens: 9, totalTokens: 9 });
+  });
+});
+
+describe('extractNdjsonModel', () => {
+  it('returns undefined when no line reports a model', () => {
+    const raw = [
+      '{"type":"turn.started"}',
+      '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":1}}',
+    ].join('\n');
+    expect(extractNdjsonModel(raw)).toBeUndefined();
+  });
+
+  it('extracts the model from an assistant message event', () => {
+    const raw = '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}';
+    expect(extractNdjsonModel(raw)).toBe('claude-sonnet-5');
+  });
+
+  it('falls back to the modelUsage key on the terminal result event', () => {
+    const raw = '{"type":"result","subtype":"success","modelUsage":{"claude-opus-4-8":{"inputTokens":1,"outputTokens":1}}}';
+    expect(extractNdjsonModel(raw)).toBe('claude-opus-4-8');
+  });
+
+  it('prefers the assistant message model over a later modelUsage key mismatch', () => {
+    const raw = [
+      '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}',
+      '{"type":"result","modelUsage":{"claude-opus-4-8":{}}}',
+    ].join('\n');
+    // Last-seen-wins, matching extractNdjsonTokenUsage's semantics — the
+    // terminal result event is genuinely the most recent line.
+    expect(extractNdjsonModel(raw)).toBe('claude-opus-4-8');
+  });
+
+  it('ignores non-JSON and malformed lines without throwing', () => {
+    const raw = [
+      'plain text line',
+      '{not valid json',
+      '{"type":"assistant","message":{"model":"claude-sonnet-5"}}',
+    ].join('\n');
+    expect(extractNdjsonModel(raw)).toBe('claude-sonnet-5');
+  });
+
+  it('ignores a non-string model field', () => {
+    const raw = '{"type":"assistant","message":{"model":123}}';
+    expect(extractNdjsonModel(raw)).toBeUndefined();
   });
 });

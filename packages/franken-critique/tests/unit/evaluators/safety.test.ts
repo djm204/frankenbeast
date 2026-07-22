@@ -883,6 +883,23 @@ describe('SafetyEvaluator', () => {
     expect(evaluator.hasUnsafeRegexShape('^(?s:(.|\\n\\n))+!$')).toBe(true);
   });
 
+  it('decodes braced Unicode singleton character classes in v mode', () => {
+    const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
+      parsingUnicodeSets: boolean;
+      characterClassToken(characterClass: string): string;
+    };
+
+    evaluator.parsingUnicodeSets = true;
+
+    expect(evaluator.characterClassToken('[\\u{1F600}]')).toBe('😀');
+    expect(evaluator.characterClassToken('[\\u{10FFFF}]')).toBe(
+      String.fromCodePoint(0x10ffff),
+    );
+    expect(evaluator.characterClassToken('[\\u{110000}]')).toBe(
+      'CLASS:[\\u{110000}]',
+    );
+  });
+
   it('skips complete unicodeSets character classes only in v mode', () => {
     const evaluator = new SafetyEvaluator(createMockGuardrailsPort()) as unknown as {
       skipCharacterClass(pattern: string, start: number, unicodeSets?: boolean): number;

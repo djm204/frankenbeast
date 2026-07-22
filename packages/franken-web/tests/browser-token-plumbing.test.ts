@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 const CLIENT_SOURCES = [
   'src/lib/network-api.ts',
+  'src/lib/api.ts',
   'src/lib/beast-api.ts',
   'src/lib/dashboard-api.ts',
   'src/lib/analytics-api.ts',

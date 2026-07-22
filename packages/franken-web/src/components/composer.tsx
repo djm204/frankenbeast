@@ -153,6 +153,7 @@ export function Composer({ connectionStatus, clearedFailedDraft, disabled, disab
           aria-describedby="composer-help composer-live-status"
           aria-disabled={disabled ? 'true' : undefined}
           className="field-control composer__textarea"
+          disabled={disabled}
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

@@ -200,7 +200,11 @@ vi.mock('../../../src/http/beast-daemon-server.js', () => ({
 
 vi.mock('../../../src/skills/providers/cli-provider.js', () => ({
   createDefaultRegistry: vi.fn(() => ({
-    get: vi.fn(() => ({ chatModel: 'chat-model', command: 'claude' })),
+    get: vi.fn(() => ({
+      chatModel: 'chat-model',
+      command: 'claude',
+      defaultContextWindowTokens: () => 200_000,
+    })),
   })),
 }));
 
@@ -1159,10 +1163,11 @@ describe('runDirectCli', () => {
     expect(shouldForceDirectCliExit(['node', 'run.ts', 'beasts', 'catalog'])).toBe(false);
   });
 
-  it('exits nonzero when the direct CLI entrypoint rejects', async () => {
+  it('preserves the error stack and exits nonzero when the direct CLI entrypoint rejects', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fatalError = new Error('boom');
     const entrypoint = vi.fn(async () => {
-      throw new Error('boom');
+      throw fatalError;
     });
     const exit = vi.fn() as unknown as (code?: number) => never;
 
@@ -1171,7 +1176,7 @@ describe('runDirectCli', () => {
     await Promise.resolve();
 
     expect(exit).toHaveBeenCalledWith(1);
-    expect(errorSpy).toHaveBeenCalledWith('Fatal:', 'boom');
+    expect(errorSpy).toHaveBeenCalledWith('Fatal:', fatalError);
     errorSpy.mockRestore();
   });
 });
@@ -1363,6 +1368,22 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('closes the session readline interface after successful execution', async () => {
+    await main();
+
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline?.close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the session readline interface when execution throws', async () => {
+    mockSessionStart.mockRejectedValueOnce(new Error('execution failed'));
+
+    await expect(main()).rejects.toThrow('execution failed');
+
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline?.close).toHaveBeenCalledOnce();
   });
 
   it('prints network credentials as parseable JSON without a banner', async () => {

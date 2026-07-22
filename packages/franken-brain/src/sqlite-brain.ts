@@ -132,7 +132,7 @@ export interface MemoryRetentionPolicy {
 export interface MemoryRetentionEntryReport {
   store: 'working' | 'episodic';
   key: string;
-  agentId?: string;
+  agentId?: string | null;
   class: MemoryRetentionClass;
   action: MemoryRetentionAction;
   policy: MemoryRetentionPolicy;
@@ -2584,6 +2584,7 @@ const MAX_RECALL_KEYWORDS_PER_QUERY = Math.floor(
   (SQLITE_VARIABLE_LIMIT - RECALL_LIMIT_VARIABLES) /
     RECALL_VARIABLES_PER_KEYWORD,
 );
+const MAX_CROSS_CHUNK_RECALL_CANDIDATES = 10_000;
 
 interface EpisodicRow {
   id: number;
@@ -2593,6 +2594,8 @@ interface EpisodicRow {
   details: string | null;
   created_at: string;
 }
+
+type CorruptEpisodicDetailsReporter = (eventId: number) => void;
 
 class SqliteEpisodicMemory implements IEpisodicMemory {
   constructor(
@@ -2813,9 +2816,16 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
   recall(query: string, limit = 10): EpisodicEvent[] {
     try {
+      if (!Number.isSafeInteger(limit)) {
+        throw new RangeError('Episodic recall limit must be a safe integer');
+      }
+      const quarantinedEventIds = new Set<number>();
+      const reportCorruptDetails: CorruptEpisodicDetailsReporter = (eventId) => {
+        quarantinedEventIds.add(eventId);
+      };
       let result: EpisodicEvent[];
       if (this.encryption) {
-        result = this.recallEncrypted(query, limit);
+        result = this.recallEncrypted(query, limit, reportCorruptDetails);
       } else {
         const keywords = query
           .toLowerCase()
@@ -2824,38 +2834,38 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           .filter((w) => !STOPWORDS.has(w));
 
         if (keywords.length === 0) {
-          result = this.recent(limit);
-        } else if (keywords.length <= MAX_RECALL_KEYWORDS_PER_QUERY) {
-          result = collectRowsToEvents(
-            (batchLimit, offset) =>
-              this.recallKeywordChunk(keywords, batchLimit, offset),
-            limit,
-            this.encryption,
-          );
+          result = this.recent(limit, reportCorruptDetails);
         } else {
-          const rowsById = new Map<
-            number,
-            EpisodicRow & { relevance_score: number }
-          >();
-          for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
-            for (const row of this.recallKeywordChunk(chunk)) {
-              const existing = rowsById.get(row.id);
-              if (existing) {
-                existing.relevance_score += row.relevance_score;
-              } else {
-                rowsById.set(row.id, { ...row });
-              }
+          const eventsById = new Map<number, EpisodicEvent>();
+          const keywordChunks = chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY);
+          const candidateLimit = limit < 0
+            ? -1
+            : keywordChunks.length === 1
+              ? limit
+              : MAX_CROSS_CHUNK_RECALL_CANDIDATES;
+          for (const chunk of keywordChunks) {
+            const events = collectRowsToEvents(
+              (batchLimit, offset) => this.recallKeywordChunk(chunk, batchLimit, offset),
+              candidateLimit,
+              this.encryption,
+              reportCorruptDetails,
+              (event) => recallEventScore(event, keywords) > 0,
+            );
+            for (const event of events) {
+              eventsById.set(event.id!, event);
             }
           }
 
-          const sortedRows = [...rowsById.values()].sort(
-            (a, b) =>
-              b.relevance_score - a.relevance_score ||
-              b.created_at.localeCompare(a.created_at) ||
-              b.id - a.id,
-          );
-
-          result = rowsToEvents(sortedRows, limit, this.encryption);
+          const scoredEvents = [...eventsById.values()]
+            .map((event) => ({ event, score: recallEventScore(event, keywords) }))
+            .sort(
+              (a, b) =>
+                b.score - a.score ||
+                b.event.createdAt.localeCompare(a.event.createdAt) ||
+                Number(b.event.id ?? 0) - Number(a.event.id ?? 0),
+            )
+            .map(({ event }) => event);
+          result = limit < 0 ? scoredEvents : scoredEvents.slice(0, limit);
         }
       }
       this.audit?.({
@@ -2863,7 +2873,13 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         store: 'episodic',
         query,
         outcome: 'success',
-        details: { limit, count: result.length },
+        details: {
+          limit,
+          count: result.length,
+          ...(quarantinedEventIds.size > 0
+            ? { quarantinedEventIds: [...quarantinedEventIds] }
+            : {}),
+        },
       });
       return result;
     } catch (error) {
@@ -2881,7 +2897,11 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
-  private recallEncrypted(query: string, limit = 10): EpisodicEvent[] {
+  private recallEncrypted(
+    query: string,
+    limit = 10,
+    reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+  ): EpisodicEvent[] {
     if (limit === 0) return [];
     const keywords = query
       .toLowerCase()
@@ -2889,17 +2909,23 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       .filter((w) => w.length > 2)
       .filter((w) => !STOPWORDS.has(w));
     if (keywords.length === 0) {
-      return this.recent(limit);
+      return this.recent(limit, reportCorruptDetails);
     }
     const rows = this.db
       .prepare(`SELECT * FROM episodic_events ORDER BY created_at DESC`)
       .all() as EpisodicRow[];
-    const scored = rowsToEvents(rows, -1, this.encryption)
+    const scored = rowsToEvents(
+      rows,
+      -1,
+      this.encryption,
+      reportCorruptDetails,
+    )
       .map((event) => {
         const summary = event.summary.toLowerCase();
-        const details = event.details
-          ? JSON.stringify(event.details).toLowerCase()
-          : '';
+        const details =
+          event.details && !isQuarantinedEpisodicDetails(event)
+            ? JSON.stringify(event.details).toLowerCase()
+            : '';
         const score = keywords.reduce(
           (sum, keyword) =>
             sum +
@@ -2929,18 +2955,32 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     limit?: number,
     offset = 0,
   ): Array<EpisodicRow & { relevance_score: number }> {
+    const searchableDetails = `CASE
+      WHEN json_valid(details)
+        AND NOT COALESCE((
+          json_type(details) = 'object'
+          AND (SELECT COUNT(*) FROM json_each(details)) = 1
+          AND json_type(details, '$.quarantine') = 'object'
+          AND (SELECT COUNT(*) FROM json_each(details, '$.quarantine')) = 3
+          AND json_extract(details, '$.quarantine.field') = 'details'
+          AND json_extract(details, '$.quarantine.reason') = 'invalid JSON'
+          AND json_extract(details, '$.quarantine.eventId') = id
+        ), 0)
+      THEN details
+      ELSE ''
+    END`;
     // Build scoring SQL: count keyword matches across summary + details
     const scoringCases = keywords
       .map(
         () =>
-          `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
+          `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(${searchableDetails}) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
       )
       .join(' + ');
 
     const whereClauses = keywords
       .map(
         () =>
-          `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\')`,
+          `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(${searchableDetails}) LIKE ? ESCAPE '\\')`,
       )
       .join(' OR ');
 
@@ -2966,8 +3006,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     >;
   }
 
-  recentFailures(n = 10): EpisodicEvent[] {
+  recentFailures(n = 10, includeQuarantined = true): EpisodicEvent[] {
     try {
+      const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
         `SELECT * FROM episodic_events WHERE type = 'failure'
          ORDER BY created_at DESC LIMIT ? OFFSET ?`,
@@ -2976,12 +3017,22 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
         n,
         this.encryption,
+        (eventId) => quarantinedEventIds.add(eventId),
+        includeQuarantined
+          ? undefined
+          : (event) => !isQuarantinedEpisodicDetails(event),
       );
       this.audit?.({
         operation: 'episodic.recentFailures',
         store: 'episodic',
         outcome: 'success',
-        details: { limit: n, count: result.length },
+        details: {
+          limit: n,
+          count: result.length,
+          ...(quarantinedEventIds.size > 0
+            ? { quarantinedEventIds: [...quarantinedEventIds] }
+            : {}),
+        },
       });
       return result;
     } catch (error) {
@@ -2998,8 +3049,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
-  recent(n = 10): EpisodicEvent[] {
+  recent(
+    n = 10,
+    reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+  ): EpisodicEvent[] {
     try {
+      const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
         `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       );
@@ -3007,12 +3062,22 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
         n,
         this.encryption,
+        (eventId) => {
+          quarantinedEventIds.add(eventId);
+          reportCorruptDetails?.(eventId);
+        },
       );
       this.audit?.({
         operation: 'episodic.recent',
         store: 'episodic',
         outcome: 'success',
-        details: { limit: n, count: result.length },
+        details: {
+          limit: n,
+          count: result.length,
+          ...(quarantinedEventIds.size > 0
+            ? { quarantinedEventIds: [...quarantinedEventIds] }
+            : {}),
+        },
       });
       return result;
     } catch (error) {
@@ -5517,7 +5582,7 @@ export class SqliteBrain implements IBrain {
         evidencePointers: Set<string>;
       }>();
 
-      for (const event of this.episodic.recentFailures(lookback)) {
+      for (const event of this.episodic.recentFailures(lookback, false)) {
         const signal = skillEvolutionSignalFromEvent(event);
         if (!signal) continue;
         const groupKey = `${normalizeLearningKey(signal.skillName)}:${signal.failureSignatureHash}`;
@@ -5879,7 +5944,10 @@ export class SqliteBrain implements IBrain {
 
     for (const event of this.episodic.recent(-1)) {
       const key = String(event.id ?? event.summary);
-      const className = isRightToForgetAuditEvent(event)
+      const className = (
+        isRightToForgetAuditEvent(event)
+        || isQuarantinedRightToForgetAuditEvent(event)
+      )
         ? 'audit_record'
         : classifyMemoryEntry({
           store: 'episodic',
@@ -5897,7 +5965,9 @@ export class SqliteBrain implements IBrain {
         nowMs,
         expiryHorizonMs,
       });
-      const agentId = parseAgentScopedEpisodicDetails(event.details);
+      const agentId = isQuarantinedEpisodicDetails(event)
+        ? null
+        : parseAgentScopedEpisodicDetails(event.details);
       entries.push({
         store: 'episodic',
         key,
@@ -6149,8 +6219,9 @@ export class SqliteBrain implements IBrain {
   }
 
   private matchingEpisodicIds(selector: NormalizedRightToForgetSelector): number[] {
-    const rows = this.db.prepare(`SELECT id, step, summary, details FROM episodic_events`).all() as Array<{
+    const rows = this.db.prepare(`SELECT id, type, step, summary, details FROM episodic_events`).all() as Array<{
       id: number;
+      type: EpisodicEventType;
       step: string | null;
       summary: string;
       details: string | null;
@@ -6160,19 +6231,50 @@ export class SqliteBrain implements IBrain {
         const step = row.step ?? '';
         const summary = this.encryption?.decrypt(row.summary) ?? row.summary;
         const details = row.details ? (this.encryption?.decrypt(row.details) ?? row.details) : null;
-        const parsedDetails = details === null ? null : safeJsonParse(details);
-        const eventDetails = parsedDetails !== null && typeof parsedDetails === 'object' && !Array.isArray(parsedDetails)
-          ? parsedDetails as Record<string, unknown>
-          : undefined;
+        let eventDetails: Record<string, unknown> | undefined;
+        let detailsWereMalformed = false;
+        if (details !== null) {
+          try {
+            const parsedDetails = JSON.parse(details) as unknown;
+            if (parsedDetails !== null && typeof parsedDetails === 'object' && !Array.isArray(parsedDetails)) {
+              eventDetails = parsedDetails as Record<string, unknown>;
+            }
+          } catch {
+            detailsWereMalformed = true;
+            eventDetails = {
+              quarantine: {
+                field: 'details',
+                eventId: row.id,
+                reason: 'invalid JSON',
+              },
+            };
+          }
+        }
         const candidateEvent: EpisodicEvent = {
           id: row.id,
-          type: 'observation',
+          type: row.type,
           step,
           summary,
           createdAt: '',
           ...(eventDetails === undefined ? {} : { details: eventDetails }),
         };
         if (isRightToForgetAuditEvent(candidateEvent)) return false;
+        if (isQuarantinedEpisodicDetails(candidateEvent)) {
+          // Persisted quarantine envelopes contain synthetic diagnostics, not
+          // the original corrupt payload. Keep audit-envelope summary/step
+          // protected, but preserve matching on readable domain fields for
+          // ordinary corrupt events.
+          if (isQuarantinedRightToForgetAuditEvent(candidateEvent)) {
+            return detailsWereMalformed
+              && episodicRowMatchesSelector('', '', details, selector);
+          }
+          return episodicRowMatchesSelector(
+            step,
+            summary,
+            detailsWereMalformed ? details : null,
+            selector,
+          );
+        }
         return episodicRowMatchesSelector(step, summary, details, selector);
       })
       .map(row => row.id);
@@ -6393,7 +6495,10 @@ export class SqliteBrain implements IBrain {
           brain.working.flushToDb() ?? undefined;
 
         for (const event of snapshot.episodic) {
-          if (!isRightToForgetAuditEvent(event)) {
+          if (
+            !isRightToForgetAuditEvent(event)
+            && !isQuarantinedRightToForgetAuditEvent(event)
+          ) {
             assertEpisodicNotDeletionGuarded(brain.db, event, brain.encryption);
           }
           insertEvent.run(
@@ -7568,6 +7673,27 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
   return false;
 }
 
+function isQuarantinedEpisodicDetails(event: EpisodicEvent): boolean {
+  const details = event.details;
+  if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
+  const detailsRecord = details as Record<string, unknown>;
+  if (Object.keys(detailsRecord).join(',') !== 'quarantine') return false;
+  const quarantine = detailsRecord.quarantine;
+  if (quarantine === null || typeof quarantine !== 'object' || Array.isArray(quarantine)) return false;
+  const record = quarantine as Record<string, unknown>;
+  return Object.keys(record).sort().join(',') === 'eventId,field,reason'
+    && record.field === 'details'
+    && record.eventId === event.id
+    && record.reason === 'invalid JSON';
+}
+
+function isQuarantinedRightToForgetAuditEvent(event: EpisodicEvent): boolean {
+  return event.type === 'observation'
+    && event.step === 'right-to-forget'
+    && event.summary === 'Right-to-forget deletion completed'
+    && isQuarantinedEpisodicDetails(event);
+}
+
 function isRightToForgetAuditEvent(event: EpisodicEvent): boolean {
   if (event.type !== 'observation' || event.step !== 'right-to-forget') return false;
   if (event.summary !== 'Right-to-forget deletion completed') return false;
@@ -8133,10 +8259,25 @@ function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
   }
 }
 
+function recallEventScore(
+  event: EpisodicEvent,
+  keywords: string[],
+): number {
+  const summary = event.summary.toLowerCase();
+  const details = event.details === undefined || isQuarantinedEpisodicDetails(event)
+    ? ''
+    : JSON.stringify(event.details).toLowerCase();
+  return keywords.reduce(
+    (score, keyword) => score + Number(summary.includes(keyword)) + Number(details.includes(keyword)),
+    0,
+  );
+}
+
 function rowsToEvents(
   rows: EpisodicRow[],
   limit: number,
   encryption?: MemoryCipher,
+  reportCorruptDetails?: CorruptEpisodicDetailsReporter,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -8144,7 +8285,7 @@ function rowsToEvents(
 
   const events: EpisodicEvent[] = [];
   for (const row of rows) {
-    const event = rowToEvent(row, encryption);
+    const event = rowToEvent(row, encryption, reportCorruptDetails);
     if (event) {
       events.push(event);
       if (limit >= 0 && events.length >= limit) {
@@ -8159,6 +8300,8 @@ function collectRowsToEvents(
   fetchRows: (limit: number, offset: number) => EpisodicRow[],
   limit: number,
   encryption?: MemoryCipher,
+  reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+  includeEvent?: (event: EpisodicEvent) => boolean,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -8174,8 +8317,8 @@ function collectRowsToEvents(
   for (let offset = 0; events.length < target; offset += batchSize) {
     const rows = fetchRows(batchSize, offset);
     for (const row of rows) {
-      const event = rowToEvent(row, encryption);
-      if (event) {
+      const event = rowToEvent(row, encryption, reportCorruptDetails);
+      if (includeEvent?.(event) ?? true) {
         events.push(event);
         if (events.length >= target) {
           break;
@@ -8206,7 +8349,8 @@ function parseCheckpointState(
 function rowToEvent(
   row: EpisodicRow,
   encryption?: MemoryCipher,
-): EpisodicEvent | null {
+  reportCorruptDetails?: CorruptEpisodicDetailsReporter,
+): EpisodicEvent {
   const event: EpisodicEvent = {
     id: row.id,
     type: row.type as EpisodicEventType,
@@ -8214,13 +8358,23 @@ function rowToEvent(
     createdAt: row.created_at,
   };
   if (row.step) event.step = row.step;
-  if (row.details) {
+  if (row.details !== null) {
     try {
       event.details = JSON.parse(
         encryption?.decrypt(row.details) ?? row.details,
       ) as Record<string, unknown>;
+      if (isQuarantinedEpisodicDetails(event)) {
+        reportCorruptDetails?.(row.id);
+      }
     } catch {
-      return null;
+      reportCorruptDetails?.(row.id);
+      event.details = {
+        quarantine: {
+          field: 'details',
+          eventId: row.id,
+          reason: 'invalid JSON',
+        },
+      };
     }
   }
   return event;

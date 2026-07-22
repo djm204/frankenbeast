@@ -184,4 +184,39 @@ describe('ClaudeProvider', () => {
 
     expect(result).toBe('');
   });
+
+  it('extractUsage reports real token counts from the result event', () => {
+    const raw = [
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}',
+      '{"type":"result","result":"hi","usage":{"input_tokens":50,"output_tokens":12}}',
+    ].join('\n');
+
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 50, outputTokens: 12, totalTokens: 62 });
+  });
+
+  it('extracts usage and model when hook JSON leaks onto the result line', () => {
+    const raw = '{"hookSpecificOutput":{"hookEventName":"SessionStart"}}'
+      + '{"type":"result","result":"hi","modelUsage":{"claude-opus-4-8":{}},"usage":{"input_tokens":50,"output_tokens":12}}';
+
+    expect(provider.extractUsage?.(raw)).toEqual({ inputTokens: 50, outputTokens: 12, totalTokens: 62 });
+    expect(provider.extractModel?.(raw)).toBe('claude-opus-4-8');
+  });
+
+  it('extractUsage returns undefined when the CLI output has no usage', () => {
+    expect(provider.extractUsage?.('plain text output')).toBeUndefined();
+  });
+
+  it('defaults chatModel to the flagship tier, not a cheap/fast one', () => {
+    expect(provider.chatModel).toBe('claude-opus-4-8');
+    expect(provider.defaultContextWindowTokens()).toBe(1_000_000);
+  });
+
+  it('extractModel reports the model the CLI actually reported', () => {
+    const raw = '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}';
+    expect(provider.extractModel?.(raw)).toBe('claude-sonnet-5');
+  });
+
+  it('extractModel returns undefined when the CLI output reports no model', () => {
+    expect(provider.extractModel?.('plain text output')).toBeUndefined();
+  });
 });

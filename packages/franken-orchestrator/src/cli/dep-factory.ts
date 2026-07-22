@@ -149,7 +149,10 @@ const stubSkills: ISkillsModule = {
   getAvailableSkills: () => [],
   execute: async (skillId: string) => { throw new Error(`Skills module is disabled; cannot execute ${skillId}`); },
 };
-const stubHeartbeat: IHeartbeatModule = {
+// Module toggles are independent from the runtime enableHeartbeat flag. Keep an
+// explicit disabled implementation for --no-heartbeat; enabled CLI sessions
+// use the functional ReflectionHeartbeatAdapter created by createBeastDeps.
+const disabledHeartbeat: IHeartbeatModule = {
   pulse: async () => ({ summary: 'Heartbeat module disabled.', improvements: [], techDebt: [] }),
 };
 
@@ -1171,7 +1174,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       firewall: config.modules.firewall ? consolidated.firewall : stubFirewall,
       skills: config.modules.skills ? createSkillDeps(consolidated, config.skills) : stubSkills,
       memory: config.modules.memory ? consolidated.memory : stubMemory,
-      heartbeat: config.modules.heartbeat ? consolidated.heartbeat : stubHeartbeat,
+      heartbeat: config.modules.heartbeat ? consolidated.heartbeat : disabledHeartbeat,
     };
     const issueDeps = createIssueDeps(options, options.paths, stack, executor, llm);
     finalize = appendAuditFinalize(finalize, observer, consolidated);

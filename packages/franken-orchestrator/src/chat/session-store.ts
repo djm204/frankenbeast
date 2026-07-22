@@ -1,8 +1,9 @@
-import { chmodSync, readFileSync, writeFileSync, readdirSync, unlinkSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, unlinkSync, mkdirSync, renameSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
 import { isoNow, now as deterministicNow } from '@franken/types';
+import { atomicWriteFileSync } from '../session/atomic-file.js';
 
 const MAX_CHAT_SESSION_ID_LENGTH = 128;
 
@@ -168,23 +169,11 @@ export class FileSessionStore implements ISessionStore {
     if (destination === undefined) {
       throw new Error(`Invalid chat session id: ${JSON.stringify(session.id)}`);
     }
-    const tmpPath = `${destination}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-    try {
-      const existingMode = this.existingFileMode(destination);
-      writeFileSync(tmpPath, JSON.stringify(session, null, 2), { encoding: 'utf-8', mode: existingMode ?? 0o600 });
-      if (existingMode !== undefined) {
-        chmodSync(tmpPath, existingMode);
-      }
-      renameSync(tmpPath, destination);
-      this.corruptions.delete(session.id);
-    } catch (error) {
-      try {
-        unlinkSync(tmpPath);
-      } catch {
-        // Best-effort cleanup only; preserve the original write failure.
-      }
-      throw error;
-    }
+    const existingMode = this.existingFileMode(destination);
+    atomicWriteFileSync(destination, JSON.stringify(session, null, 2), {
+      mode: existingMode ?? 0o600,
+    });
+    this.corruptions.delete(session.id);
   }
 
   private existingFileMode(path: string): number | undefined {

@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.7.1...franken-web-v0.8.0) (2026-07-22)
+
+
+### Features
+
+* **availability:** add read-only degraded mode ([#2402](https://github.com/djm204/frankenbeast/issues/2402)) ([4dcd49b](https://github.com/djm204/frankenbeast/commit/4dcd49b14a856330c6ae287124c04eb2928b4c05))
+* **availability:** add service health aggregator ([#2582](https://github.com/djm204/frankenbeast/issues/2582)) ([3e6f9f9](https://github.com/djm204/frankenbeast/commit/3e6f9f93699d3565727465f5f2172db18ff9b17a))
+* **availability:** expose SLO dashboard ([#2580](https://github.com/djm204/frankenbeast/issues/2580)) ([6e1918c](https://github.com/djm204/frankenbeast/commit/6e1918cffe5ffb10a0acfc72f08d118836172864))
+* **beasts:** add maintenance dispatch guardrails ([#2400](https://github.com/djm204/frankenbeast/issues/2400)) ([f50e966](https://github.com/djm204/frankenbeast/commit/f50e966246a1a05902fd0054ffa79bb59ffe35e7))
+* **dashboard:** surface dependency availability ([#2347](https://github.com/djm204/frankenbeast/issues/2347)) ([0298dd5](https://github.com/djm204/frankenbeast/commit/0298dd58133a30015f3487893d64ef0d3d02dbb7))
+* **web:** terminal-style chat transcript and conversational interview ([#3413](https://github.com/djm204/frankenbeast/issues/3413)) ([ebdd27a](https://github.com/djm204/frankenbeast/commit/ebdd27acaad24aeb4b1eef1e7360849afd6c2584))
+
+
+### Bug Fixes
+
+* **beasts:** bound run log responses ([#3415](https://github.com/djm204/frankenbeast/issues/3415)) ([01cdb22](https://github.com/djm204/frankenbeast/commit/01cdb22dfa21d791df05f4b46f1f076892c4e819))
+* **beasts:** describe design document file prompt ([#3469](https://github.com/djm204/frankenbeast/issues/3469)) ([697151c](https://github.com/djm204/frankenbeast/commit/697151cd5fc6e7601f9dbb9e6eaf207832278720))
+* **beasts:** paginate run event API ([#3419](https://github.com/djm204/frankenbeast/issues/3419)) ([396a863](https://github.com/djm204/frankenbeast/commit/396a863b55ecf308968dd82fee3dae105bf1787a))
+* **config:** default chat to Codex provider ([#3424](https://github.com/djm204/frankenbeast/issues/3424)) ([462b7df](https://github.com/djm204/frankenbeast/commit/462b7dfa4bc47d701875d4d0fd8cfcc07f790063))
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* expose skill selection state and test keyboard flow ([#3315](https://github.com/djm204/frankenbeast/issues/3315)) ([8706c6d](https://github.com/djm204/frankenbeast/commit/8706c6ded0c9455b628a9ea27a179073925e2dd0))
+* import shared ServerSocketEvent type ([#3321](https://github.com/djm204/frankenbeast/issues/3321)) ([ed900f2](https://github.com/djm204/frankenbeast/commit/ed900f243dea5775250482008cc2f0963c1ad7e4))
+* improve wizard step indicator accessibility ([#3325](https://github.com/djm204/frankenbeast/issues/3325)) ([6587733](https://github.com/djm204/frankenbeast/commit/6587733f06ce00868ac274d5b7bbfdef7a2b182e))
+* **learning:** resolve privacy lesson closeout conflicts ([c39ec0f](https://github.com/djm204/frankenbeast/commit/c39ec0fc1e3ebb18074e57409ab4077c93714afc))
+* **orchestrator:** paginate Beast run listings ([#3445](https://github.com/djm204/frankenbeast/issues/3445)) ([319806a](https://github.com/djm204/frankenbeast/commit/319806a035380cbce53e04c8e7051e3422bf621f))
+* **orchestrator:** paginate tracked agent listings ([#3418](https://github.com/djm204/frankenbeast/issues/3418)) ([98cf74b](https://github.com/djm204/frankenbeast/commit/98cf74b1dcea83424df14a4a6e21e74ec21e64db))
+* **orchestrator:** protect unauthenticated dashboard streams ([#3389](https://github.com/djm204/frankenbeast/issues/3389)) ([23e4579](https://github.com/djm204/frankenbeast/commit/23e4579ae0064186e8db6490b9b20a46d497fa3f))
+* **security:** isolate concurrent SSE ticket cookies ([#3387](https://github.com/djm204/frankenbeast/issues/3387)) ([d826141](https://github.com/djm204/frankenbeast/commit/d82614172c45f3da9b8a6353fc198b5e55c18419))
+* **security:** keep SSE tickets out of request URLs ([#3385](https://github.com/djm204/frankenbeast/issues/3385)) ([819a0f8](https://github.com/djm204/frankenbeast/commit/819a0f8d3726049a517d0eb02985ff89e74116e9))
+* **security:** protect local web controls ([#2295](https://github.com/djm204/frankenbeast/issues/2295)) ([9a8a914](https://github.com/djm204/frankenbeast/commit/9a8a9148854858be7062b2330f4b9cc168bb9aa8))
+* **web:** adopt accessible non-modal detail drawer ([#3259](https://github.com/djm204/frankenbeast/issues/3259)) ([1dca742](https://github.com/djm204/frankenbeast/commit/1dca742fccbb2eb3d8f0028453f9841b37dfed69))
+* **web:** announce analytics detail errors ([#3301](https://github.com/djm204/frankenbeast/issues/3301)) ([9598a96](https://github.com/djm204/frankenbeast/commit/9598a96de7d1e5d5af8f6a330d39d32c67d04279))
+* **web:** announce approval queue changes ([#3390](https://github.com/djm204/frankenbeast/issues/3390)) ([cbdb7b5](https://github.com/djm204/frankenbeast/commit/cbdb7b505c3d45c44677420ca972434a00016da9))
+* **web:** announce beast load errors to screen readers ([#3312](https://github.com/djm204/frankenbeast/issues/3312)) ([bda894b](https://github.com/djm204/frankenbeast/commit/bda894b4edca2c2ca41b642b26c5d47aa1c3f48c))
+* **web:** announce module toggle state ([#3276](https://github.com/djm204/frankenbeast/issues/3276)) ([dd86f02](https://github.com/djm204/frankenbeast/commit/dd86f021526be81cd324e7a2e05e8321419397cd))
+* **web:** confirm destructive network service actions ([#3403](https://github.com/djm204/frankenbeast/issues/3403)) ([0d60e65](https://github.com/djm204/frankenbeast/commit/0d60e65d45f43ee0bd0e8cd5f5732292bad709bf))
+* **web:** describe agent creation wizard ([#3298](https://github.com/djm204/frankenbeast/issues/3298)) ([308ea05](https://github.com/djm204/frankenbeast/commit/308ea053a220193bfb818181c266eb086d59a087))
+* **web:** explain disabled model selector ([#3280](https://github.com/djm204/frankenbeast/issues/3280)) ([583b5c8](https://github.com/djm204/frankenbeast/commit/583b5c84374026d35e99fe3fdae0e4f5ac468020))
+* **web:** explain locked wizard steps ([#3375](https://github.com/djm204/frankenbeast/issues/3375)) ([658c3c4](https://github.com/djm204/frankenbeast/commit/658c3c4ff063ffb2126a56eace466291c8faf3d6))
+* **web:** expose module toggle state via aria-pressed ([#3322](https://github.com/djm204/frankenbeast/issues/3322)) ([8423fa0](https://github.com/djm204/frankenbeast/commit/8423fa093396f65fed22408e077762dbf26c8880))
+* **web:** expose preset card selection state ([#3275](https://github.com/djm204/frankenbeast/issues/3275)) ([7ebc720](https://github.com/djm204/frankenbeast/commit/7ebc720b85ff9a5c3d683fbd7e0c9819ce00bbae))
+* **web:** expose selected agent row state ([#3292](https://github.com/djm204/frankenbeast/issues/3292)) ([2a94a47](https://github.com/djm204/frankenbeast/commit/2a94a47274a1d4315840e5557473120d4d651556))
+* **web:** prevent skill switches from submitting forms ([#3272](https://github.com/djm204/frankenbeast/issues/3272)) ([7bea34a](https://github.com/djm204/frankenbeast/commit/7bea34a49363135f840301d464307a97c84514ab))
+* **web:** render untrusted markdown as escaped text ([1aece97](https://github.com/djm204/frankenbeast/commit/1aece97056c131d318b1d6e944f560149bfcb4c6))
+* **web:** reset force restart state per tracked agent ([3704b38](https://github.com/djm204/frankenbeast/commit/3704b38f4a973906698b9a072535f0f7987b5e2b)), closes [#2643](https://github.com/djm204/frankenbeast/issues/2643)
+* **web:** surface initial network config load failures ([#3255](https://github.com/djm204/frankenbeast/issues/3255)) ([c097daa](https://github.com/djm204/frankenbeast/commit/c097daaf9f9c4ad2b04a463232074087da44e945))
+* **web:** use live skills in agent wizard ([#3384](https://github.com/djm204/frankenbeast/issues/3384)) ([2c631c4](https://github.com/djm204/frankenbeast/commit/2c631c46aeb4b118a63bf791652d4b7ab99330ae))
+* **web:** validate package metadata parsing ([#3320](https://github.com/djm204/frankenbeast/issues/3320)) ([92012d3](https://github.com/djm204/frankenbeast/commit/92012d3a122b3a3ef22ba3de1e8a128d128621c6))
+
+
+### Performance
+
+* **web:** code-split route pages to fix chunk-size warning ([#3304](https://github.com/djm204/frankenbeast/issues/3304)) ([b0c9309](https://github.com/djm204/frankenbeast/commit/b0c9309eeaa582fc2c4a02f961acb52229a4a175))
+
+
+### Refactoring
+
+* **web:** scope wizard Zustand selectors ([#3477](https://github.com/djm204/frankenbeast/issues/3477)) ([a762240](https://github.com/djm204/frankenbeast/commit/a7622408f9a345b9c3e20702b264b42834205945))
+
+
+### Miscellaneous
+
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2572](https://github.com/djm204/frankenbeast/issues/2572)) ([1db889b](https://github.com/djm204/frankenbeast/commit/1db889b3f71d3cf81af579394ecd58c7fe481e43))
+* release main ([#2630](https://github.com/djm204/frankenbeast/issues/2630)) ([c5306fd](https://github.com/djm204/frankenbeast/commit/c5306fd4ca17ef03cbd7b2e91f731707dac5148e))
+* release main ([#3400](https://github.com/djm204/frankenbeast/issues/3400)) ([02fd894](https://github.com/djm204/frankenbeast/commit/02fd894bf6e7453e56d3446a73be277431ae6e12))
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+* **web:** upgrade jest-dom to version 7 ([#3476](https://github.com/djm204/frankenbeast/issues/3476)) ([2158876](https://github.com/djm204/frankenbeast/commit/2158876397237fbb1480f55008303cbcc067f9be))
+
+
+### Tests
+
+* **stability:** add stream replay coverage ([#2578](https://github.com/djm204/frankenbeast/issues/2578)) ([92bacf0](https://github.com/djm204/frankenbeast/commit/92bacf068b14e2e6e25d97eca0f543afcad56a41))
+* **web:** cover approval fallback during socket reconnect ([#2293](https://github.com/djm204/frankenbeast/issues/2293)) ([eaaf24f](https://github.com/djm204/frankenbeast/commit/eaaf24f3d654ee339d7bc895714c2497ad2edb58))
+* **web:** cover Beast edit persistence flow ([#3286](https://github.com/djm204/frankenbeast/issues/3286)) ([c8728ab](https://github.com/djm204/frankenbeast/commit/c8728ab6d9797216f24358f6a52b127d68067d05))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.1 to 0.15.0
+
 ## [0.7.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.7.0...franken-web-v0.7.1) (2026-07-19)
 
 

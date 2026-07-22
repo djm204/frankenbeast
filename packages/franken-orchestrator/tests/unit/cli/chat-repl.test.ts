@@ -343,6 +343,136 @@ describe('ChatRepl', () => {
     expect(secondCall).toBeDefined();
     expect(secondCall[1].length).toBeGreaterThan(0);
   });
+
+  it('surrounds each prompt with a status rule and accumulates real usage across turns', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('first');
+    pushInput('second');
+    pushInput('/quit');
+
+    const usageProcessTurn = vi.fn()
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'One', modelTier: 'cheap' },
+        tier: 'cheap',
+        usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+        truncated: true,
+        newMessages: [
+          { role: 'user', content: 'first', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'One', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'Two', modelTier: 'cheap' },
+        tier: 'cheap',
+        usage: { inputTokens: 50, outputTokens: 10, totalTokens: 60 },
+        newMessages: [
+          { role: 'user', content: 'second', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Two', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      });
+
+    const repl = new ChatRepl({
+      engine: { processTurn: usageProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+      contextMaxTokens: 1000,
+      modelLabel: 'test-model',
+    });
+    await repl.start();
+
+    // A status rule is printed before every prompt and again right after
+    // the input is read, so the exchange is visually boxed top and bottom.
+    const ruleOutputs = outputs.filter((o) => o.includes('test-model'));
+    expect(ruleOutputs.length).toBeGreaterThanOrEqual(6); // 3 prompts (incl. /quit) × 2 rules each
+
+    // First turn's usage (120 tokens) is visible on the rule printed for the
+    // second prompt; the third prompt uses only the latest turn's usage.
+    expect(ruleOutputs.some((o) => /120\/1000|12%/.test(o))).toBe(true);
+    const finalRule = ruleOutputs[ruleOutputs.length - 1]!;
+    expect(finalRule).toContain('6%'); // latest turn: 60/1000
+    expect(finalRule).toContain('compactions 1');
+  });
+
+  it('keeps usage unknown until a provider reports real tokens', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('hello');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: mockProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+      contextMaxTokens: 1000,
+      modelLabel: 'test-model',
+    });
+    await repl.start();
+
+    const statusRules = outputs.filter((output) => output.includes('test-model'));
+    expect(statusRules.length).toBeGreaterThan(0);
+    expect(statusRules.every((output) => !output.includes('0/1000') && !output.includes('0%'))).toBe(true);
+  });
+
+  it('reflects the real serving provider on the status rule after a fallback, and feeds it to the next turn', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('first');
+    pushInput('second');
+    pushInput('/quit');
+
+    const fallbackProcessTurn = vi.fn()
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'Running on claude now.', modelTier: 'cheap' },
+        tier: 'cheap',
+        usage: { inputTokens: 80_000, outputTokens: 20_000, totalTokens: 100_000 },
+        providerContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+        newMessages: [
+          { role: 'user', content: 'first', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Running on claude now.', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        outcome: { kind: 'reply', content: 'Still on claude.', modelTier: 'cheap' },
+        tier: 'cheap',
+        newMessages: [
+          { role: 'user', content: 'second', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Still on claude.', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      });
+
+    const repl = new ChatRepl({
+      engine: { processTurn: fallbackProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+      modelLabel: 'codex',
+      contextMaxTokens: 128_000,
+      contextMaxTokensForProvider: (provider) => provider === 'claude' ? 200_000 : undefined,
+    });
+    await repl.start();
+
+    const statusRules = outputs.filter((o) => o.includes('session'));
+
+    // Before any turn completes, the static configured label is shown.
+    expect(statusRules[0]).toContain('codex');
+    expect(statusRules[0]).not.toContain('claude');
+
+    // Once the fallback is known, the model-specific label replaces it.
+    const claudeRules = statusRules.filter((o) => o.includes('claude-sonnet-4-6'));
+    expect(claudeRules.length).toBeGreaterThan(0);
+    expect(claudeRules.every((o) => !/codex/.test(o))).toBe(true);
+    expect(claudeRules.some((o) => o.includes('50%'))).toBe(true);
+
+    // The second turn is told about the fallback that happened on the first.
+    expect(fallbackProcessTurn).toHaveBeenNthCalledWith(
+      2,
+      'second',
+      expect.any(Array),
+      expect.objectContaining({
+        priorProviderContext: { provider: 'claude', model: 'claude-sonnet-4-6', switchedFrom: 'codex', switchReason: 'rate_limited' },
+      }),
+    );
+  });
 });
 
 describe('sanitizeChatOutput', () => {

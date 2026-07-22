@@ -1,0 +1,11 @@
+{
+  "name": "frankenbeast-mcp-suite-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "mcp:init": "fbeast mcp init",
+    "mcp:proxy": "fbeast mcp init --mode=proxy",
+    "mcp:uninstall": "fbeast mcp uninstall"
+  }
+}

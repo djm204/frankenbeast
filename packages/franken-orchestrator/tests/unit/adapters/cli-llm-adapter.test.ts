@@ -874,6 +874,84 @@ describe('CliLlmAdapter', () => {
         ]);
       });
 
+      it('keeps the configured provider in provenance across multiple fallback hops', async () => {
+        const { spawnFn } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'gemini success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          { ...baseOpts, providers: ['codex', 'claude', 'gemini'] } as never,
+          spawnFn,
+        );
+
+        const requestId = 'multi-hop-fallback';
+        const raw = await adapter.execute({ prompt: 'test', maxTurns: 1, requestId });
+        const response = adapter.transformResponse(raw, requestId);
+
+        expect(response.providerContext).toEqual(expect.objectContaining({
+          provider: 'gemini',
+          switchedFrom: 'codex',
+          switchReason: 'rate_limited',
+        }));
+      });
+
+      it('keeps the first fallback reason across mixed fallback hops', async () => {
+        const unavailable = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+        const { spawnFn } = createQueuedSpawn([
+          { error: unavailable },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'gemini success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          { ...baseOpts, providers: ['codex', 'claude', 'gemini'] } as never,
+          spawnFn,
+        );
+
+        const requestId = 'mixed-multi-hop-fallback';
+        const raw = await adapter.execute({ prompt: 'test', maxTurns: 1, requestId });
+        const response = adapter.transformResponse(raw, requestId);
+
+        expect(response.providerContext).toEqual(expect.objectContaining({
+          provider: 'gemini',
+          switchedFrom: 'codex',
+          switchReason: 'unavailable',
+        }));
+      });
+
+      it('resets fallback provenance when a new retry cycle begins', async () => {
+        const sleepFn = vi.fn(async () => {});
+        const unavailable = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+        const { spawnFn } = createQueuedSpawn([
+          { error: unavailable },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'claude success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          {
+            ...baseOpts,
+            providers: ['codex', 'claude'],
+            maxRateLimitRetries: 1,
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        const requestId = 'retry-cycle-fallback';
+        const raw = await adapter.execute({ prompt: 'test', maxTurns: 1, requestId });
+        const response = adapter.transformResponse(raw, requestId);
+
+        expect(response.providerContext).toEqual(expect.objectContaining({
+          provider: 'claude',
+          switchedFrom: 'codex',
+          switchReason: 'rate_limited',
+        }));
+      });
+
       it('switches to the next provider when the selected provider is rate limited via stdout only', async () => {
         const { spawnFn, calls } = createQueuedSpawn([
           { stdout: 'rate limit exceeded\nretry-after: 4', stderr: '', exitCode: 1 },
@@ -1138,6 +1216,76 @@ describe('CliLlmAdapter', () => {
 
         expect(response.content).toBe('fallback output');
       });
+
+      it('reports providerContext with switchedFrom/switchReason after a rate-limit fallback', async () => {
+        const { spawnFn } = createQueuedSpawn([
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'claude fallback success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          { ...baseOpts, providers: ['codex', 'claude'] },
+          spawnFn,
+        );
+
+        const request = adapter.transformRequest({
+          id: 'req-fallback-2',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-fallback-2');
+
+        expect(response.providerContext).toEqual({
+          provider: 'claude',
+          switchedFrom: 'codex',
+          switchReason: 'rate_limited',
+        });
+      });
+
+      it('reports providerContext without a fallback marker when the initial provider succeeds', async () => {
+        const { spawnFn } = createQueuedSpawn([{ stdout: 'ok', exitCode: 0 }]);
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+        const request = adapter.transformRequest({
+          id: 'req-no-fallback',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-no-fallback');
+
+        expect(response.providerContext).toEqual({ provider: 'claude' });
+        expect(response.providerContext?.switchedFrom).toBeUndefined();
+      });
+
+      it('prefers the CLI-reported model over the configured one in providerContext', async () => {
+        const streamJson = '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}';
+        const { spawnFn } = createQueuedSpawn([{ stdout: streamJson, exitCode: 0 }]);
+        const adapter = new CliLlmAdapter(
+          claudeProvider,
+          { ...baseOpts, model: 'claude-opus-4-8' },
+          spawnFn,
+        );
+
+        const request = adapter.transformRequest({
+          id: 'req-model-override',
+          provider: 'adapter',
+          model: 'adapter',
+          messages: [{ role: 'user', content: 'hello' }],
+        });
+
+        const raw = await adapter.execute(request);
+        const response = adapter.transformResponse(raw, 'req-model-override');
+
+        // Configured model was 'claude-opus-4-8', but the CLI actually
+        // reported 'claude-sonnet-5' for this turn — the real one wins.
+        expect(response.providerContext?.model).toBe('claude-sonnet-5');
+      });
     });
   });
 
@@ -1167,6 +1315,23 @@ describe('CliLlmAdapter', () => {
         const result = adapter.transformResponse(streamJson, 'req-1');
         // Provider joins per-line extracted text with \n
         expect(result.content).toBe('Hello \nworld');
+      });
+
+      it('extracts real token usage from a result event alongside the text', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const streamJson = [
+          '{"type":"message_start","message":{"id":"msg_01","type":"message","role":"assistant","content":[]}}',
+          '{"type":"result","result":"Hello world","usage":{"input_tokens":80,"output_tokens":20}}',
+        ].join('\n');
+
+        const result = adapter.transformResponse(streamJson, 'req-1');
+        expect(result.usage).toEqual({ inputTokens: 80, outputTokens: 20, totalTokens: 100 });
+      });
+
+      it('omits usage when the stream carries none', () => {
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+        const result = adapter.transformResponse('just plain text', 'req-1');
+        expect(result.usage).toBeUndefined();
       });
 
       it('returns plain text as-is when not JSON', () => {
