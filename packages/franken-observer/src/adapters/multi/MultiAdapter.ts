@@ -6,12 +6,51 @@ export interface MultiAdapterOptions {
   /** Adapters to fan-out to. Order matters for queryByTraceId (first-wins). */
   adapters: ExportAdapter[]
   /**
+   * Maximum number of concurrent adapter calls made by `listTraceIds()`.
+   * Default: `4`.
+   */
+  listTraceIdsConcurrency?: number
+  /**
    * When true (default), `flush()` throws an AggregateError if any adapter
    * rejects. All adapters are still called regardless (allSettled semantics).
    * Set to false for best-effort delivery where a failing adapter is silently
    * ignored.
    */
   throwOnError?: boolean
+}
+
+const DEFAULT_LIST_TRACE_IDS_CONCURRENCY = 4
+
+function validatePositiveSafeInteger(value: number, optionName: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${optionName} must be a positive safe integer`)
+  }
+  return value
+}
+
+async function allSettledWithConcurrency<Item, Result>(
+  items: readonly Item[],
+  concurrency: number,
+  operation: (item: Item) => Promise<Result>,
+): Promise<PromiseSettledResult<Result>[]> {
+  const results = new Array<PromiseSettledResult<Result>>(items.length)
+  let nextIndex = 0
+
+  const worker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++
+      try {
+        results[index] = { status: 'fulfilled', value: await operation(items[index]!) }
+      } catch (reason) {
+        results[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  )
+  return results
 }
 
 /**
@@ -33,10 +72,15 @@ export interface MultiAdapterOptions {
 export class MultiAdapter implements ExportAdapter {
   private readonly adapters: ExportAdapter[]
   private readonly throwOnError: boolean
+  private readonly listTraceIdsConcurrency: number
 
   constructor(options: MultiAdapterOptions) {
     this.adapters = options.adapters
     this.throwOnError = options.throwOnError ?? true
+    this.listTraceIdsConcurrency = validatePositiveSafeInteger(
+      options.listTraceIdsConcurrency ?? DEFAULT_LIST_TRACE_IDS_CONCURRENCY,
+      'listTraceIdsConcurrency',
+    )
   }
 
   async flush(trace: Trace): Promise<void> {
@@ -75,7 +119,11 @@ export class MultiAdapter implements ExportAdapter {
   }
 
   async listTraceIds(): Promise<string[]> {
-    const results = await Promise.allSettled(this.adapters.map(a => a.listTraceIds()))
+    const results = await allSettledWithConcurrency(
+      this.adapters,
+      this.listTraceIdsConcurrency,
+      adapter => adapter.listTraceIds(),
+    )
     const sets = results.filter((r): r is PromiseFulfilledResult<string[]> => r.status === 'fulfilled').map(r => r.value)
     const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
 
