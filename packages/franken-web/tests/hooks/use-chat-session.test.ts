@@ -1104,6 +1104,8 @@ describe('useChatSession', () => {
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
     expect(result.current.status).toBe('idle');
+    expect(mockCreateSocketTicket).toHaveBeenCalledTimes(1);
+    expect(MockWebSocket.instances).toHaveLength(1);
   });
 
   it('makes an unconfirmed websocket approval retryable after REST reconciliation', async () => {
@@ -1153,7 +1155,66 @@ describe('useChatSession', () => {
     await act(async () => {
       await result.current.approve(false);
     });
-    expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
+    expect(socket.sent).toHaveLength(2);
+  });
+
+  it('ignores a stale reconciliation snapshot after a late websocket resolution', async () => {
+    let resolveSnapshot!: (session: Awaited<ReturnType<typeof mockGetSession>>) => void;
+    mockGetSession.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSnapshot = resolve;
+    }));
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    act(() => {
+      socket.message({
+        type: 'turn.approval.resolved',
+        approved: true,
+        timestamp: '2026-03-09T00:00:22Z',
+      });
+    });
+    await act(async () => {
+      resolveSnapshot({
+        id: 'chat-1',
+        projectId: 'test-proj',
+        transcript: [],
+        state: 'pending_approval',
+        pendingApproval: {
+          description: 'Deploy the generated fix',
+          requestedAt: '2026-03-09T00:00:06Z',
+        },
+        socketToken: 'signed-token',
+        tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        costUsd: 0,
+        createdAt: '2026-03-09T00:00:00Z',
+        updatedAt: '2026-03-09T00:00:21Z',
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toBeNull();
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
+    expect(result.current.status).toBe('idle');
   });
 
   it.each([

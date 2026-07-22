@@ -140,6 +140,31 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setApprovalResolving(value);
   }
 
+  function reconcileApprovalResponse(capturedSessionId: string): void {
+    void clientRef.current.getSession(capturedSessionId)
+      .then((refreshed) => {
+        if (!sessionStillCurrent(capturedSessionId)
+          || refreshed.id !== capturedSessionId
+          || !approvalResolvingRef.current) {
+          return;
+        }
+        const approvalPending = Boolean(refreshed.pendingApproval) || refreshed.state === 'pending_approval';
+        setPendingApproval(refreshed.pendingApproval ?? null);
+        setSessionState(refreshed.state);
+        updateApprovalResolving(false);
+        setApprovalError(approvalPending ? 'The server did not confirm the approval response. Try again.' : null);
+        setStatus(approvalPending ? 'error' : 'idle');
+      })
+      .catch((error) => {
+        if (!sessionStillCurrent(capturedSessionId) || !approvalResolvingRef.current) {
+          return;
+        }
+        updateApprovalResolving(false);
+        setApprovalError(errorMessage(error, 'The approval response timed out and the session could not be refreshed. Try again.'));
+        setStatus('error');
+      });
+  }
+
   function refreshSession() {
     if (!sessionId) {
       setSessionRetrySeed((current) => current + 1);
@@ -160,28 +185,17 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setSessionState(refreshed.state);
-        const approvalWasResolving = approvalResolvingRef.current;
-        if (approvalWasResolving) {
-          updateApprovalResolving(false);
-          setApprovalError(refreshed.pendingApproval || refreshed.state === 'pending_approval'
-            ? 'The server did not confirm the approval response. Try again.'
-            : null);
-        }
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
         setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
-        setStatus(approvalWasResolving && (refreshed.pendingApproval || refreshed.state === 'pending_approval') ? 'error' : 'idle');
+        setStatus('idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
       })
       .catch((error) => {
         if (!sessionStillCurrent(capturedSessionId)) {
           return;
-        }
-        if (approvalResolvingRef.current) {
-          updateApprovalResolving(false);
-          setApprovalError(errorMessage(error, 'The approval response timed out and the session could not be refreshed. Try again.'));
         }
         setStatus('error');
         setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
@@ -493,6 +507,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setPendingApproval(null);
           setApprovalError(null);
           updateApprovalResolving(false);
+          setStatus('idle');
           setActivity((current) => [
             ...current,
             {
@@ -830,7 +845,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }));
     approvalTimeoutRef.current = setTimeout(() => {
       approvalTimeoutRef.current = null;
-      refreshSession();
+      reconcileApprovalResponse(sessionId);
     }, APPROVAL_RESPONSE_TIMEOUT_MS);
   }
 
