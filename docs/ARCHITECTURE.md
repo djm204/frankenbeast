@@ -828,7 +828,7 @@ fbeast mcp init / client config
 
 ## Examples
 
-There is no current top-level `examples/` directory in this repo. For runnable usage examples, prefer the package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, and tests next to the implementation. Older examples that mention Claude/OpenAI/Ollama adapters or a Docker firewall proxy describe pre-consolidation surfaces.
+The top-level [`examples/`](../examples/README.md) directory contains standalone, scaffoldable sample projects for CLI planning, MCP registration, and orchestrator configuration. Package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, and tests next to the implementation provide deeper usage details. Older examples that mention Claude/OpenAI/Ollama adapters or a Docker firewall proxy describe pre-consolidation surfaces.
 
 ## Chat System Architecture
 

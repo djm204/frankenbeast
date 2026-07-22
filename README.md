@@ -397,6 +397,8 @@ npm run test:root
 
 For CI-style validation without mutating files or installing dependencies, run `./scripts/bootstrap.sh --dry-run`. If you intentionally need a manual dependency install instead of bootstrap, run it from the repository root with the Corepack-activated npm version from `packageManager`, copy or merge `.env.example` into `.env`, and note that you are skipping bootstrap's environment validation and optional Docker-service prompts.
 
+Browse the standalone [examples](examples/README.md) for copyable CLI planning, MCP registration, and minimal orchestrator configuration projects. Each example has its own locked dependencies and can be scaffolded with `npm run create:project -- <example-name> <target-directory>`.
+
 The root Vitest suite also checks local Markdown links in README/docs/package READMEs. Local link targets are treated as untrusted input: keep them simple repository-relative paths and do not add shell metacharacters such as backticks, `$`, `;`, `&`, `|`, `<`, or `>`. External `http(s)` links and same-page anchors are ignored by that local filesystem check.
 
 See [ONBOARDING.md](ONBOARDING.md) for the complete first-time setup checklist, including prerequisites, bootstrap, UI startup, troubleshooting, and secret backends. See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the shorter setup guide including Docker services.

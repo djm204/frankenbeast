@@ -103,5 +103,5 @@ Created Frankenbeast example project
 
 Next steps:
   cd "$target_dir"
-  npm start
+  See README.md for this example's commands
 EOF
