@@ -1,8 +1,10 @@
+import { seededRandom } from '@franken/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BeastApiClient, BeastApiError } from '../../src/lib/beast-api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
+const seededRandomSpy = vi.spyOn(seededRandom, 'random').mockReturnValue(0);
 
 describe('BeastApiClient', () => {
   const client = new BeastApiClient('http://localhost:3000');
@@ -538,6 +540,155 @@ describe('BeastApiClient', () => {
     }
   });
 
+  it('backs off consecutive Beast event stream reconnects and reports the retry attempt', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-2' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-3' }) })
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket-4' }) });
+
+    try {
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ error: onError });
+
+      listeners[0]?.error?.({ data: '' });
+      expect(onError).toHaveBeenLastCalledWith(expect.objectContaining({
+        message: expect.stringContaining('attempt 1'),
+      }));
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      listeners[1]?.error?.({ data: '' });
+      expect(onError).toHaveBeenLastCalledWith(expect.objectContaining({
+        message: expect.stringContaining('attempt 2'),
+      }));
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(mockFetch).toHaveBeenCalledTimes(3);
+
+      listeners[2]?.snapshot?.({ data: JSON.stringify({ agents: [] }) });
+      listeners[2]?.error?.({ data: '' });
+      expect(onError).toHaveBeenLastCalledWith(expect.objectContaining({
+        message: expect.stringContaining('attempt 1'),
+      }));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('jitters Beast event stream reconnect delays', async () => {
+    vi.useFakeTimers();
+    seededRandomSpy.mockReturnValueOnce(0.5);
+    const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket' }) });
+
+    try {
+      const unsubscribe = await client.subscribeToEvents({ error: vi.fn() });
+      listeners[0]?.error?.({ data: '' });
+
+      await vi.advanceTimersByTimeAsync(1_499);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
+  it('caps Beast event stream reconnect delays at thirty seconds', async () => {
+    vi.useFakeTimers();
+    const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
+    const MockEventSource = vi.fn(function (this: { addEventListener?: unknown; close?: unknown }) {
+      const instanceListeners: Record<string, (event: { data: string }) => void> = {};
+      listeners.push(instanceListeners);
+      Object.assign(this, {
+        addEventListener: vi.fn((type: string, handler: (event: { data: string }) => void) => {
+          instanceListeners[type] = handler;
+        }),
+        close: vi.fn(),
+      });
+    });
+    const originalEventSource = globalThis.EventSource;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).EventSource = MockEventSource;
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ connectionId: 'ticket' }) });
+
+    try {
+      const onError = vi.fn();
+      const unsubscribe = await client.subscribeToEvents({ error: onError });
+      const uncappedDelays = [1_000, 2_000, 4_000, 8_000, 16_000];
+      for (const [index, delay] of uncappedDelays.entries()) {
+        listeners[index]?.error?.({ data: '' });
+        await vi.advanceTimersByTimeAsync(delay);
+      }
+
+      listeners[5]?.error?.({ data: '' });
+      expect(onError).toHaveBeenLastCalledWith(expect.objectContaining({
+        message: expect.stringContaining('reconnecting in 30s (attempt 6)'),
+      }));
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(mockFetch).toHaveBeenCalledTimes(6);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mockFetch).toHaveBeenCalledTimes(7);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+      if (originalEventSource) {
+        globalThis.EventSource = originalEventSource;
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        delete (globalThis as any).EventSource;
+      }
+    }
+  });
+
   it('notifies handlers when the Beast event stream reconnects successfully', async () => {
     vi.useFakeTimers();
     const listeners: Array<Record<string, (event: { data: string }) => void>> = [];
@@ -845,8 +996,10 @@ describe('BeastApiClient', () => {
 
       listeners[0]?.error?.({ data: '' });
       await vi.advanceTimersByTimeAsync(1_000);
-      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'HTTP 500' }));
-      await vi.advanceTimersByTimeAsync(1_000);
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'HTTP 500; reconnecting in 2s (attempt 2)',
+      }));
+      await vi.advanceTimersByTimeAsync(2_000);
 
       expect(mockFetch).toHaveBeenCalledTimes(3);
       expect(MockEventSource).toHaveBeenNthCalledWith(
@@ -887,7 +1040,9 @@ describe('BeastApiClient', () => {
       const onError = vi.fn();
       const unsubscribe = await client.subscribeToEvents({ error: onError });
 
-      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'HTTP 503' }));
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({
+        message: 'HTTP 503; reconnecting in 1s (attempt 1)',
+      }));
       expect(MockEventSource).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1_000);
