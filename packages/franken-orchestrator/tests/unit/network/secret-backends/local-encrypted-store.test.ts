@@ -42,6 +42,21 @@ describe('LocalEncryptedStore', () => {
       expect(value).toBeUndefined();
     });
 
+    it.each(['__proto__', 'prototype', 'constructor'])(
+      'does not resolve the prototype key %s as a secret',
+      async (key) => {
+        expect(await store.resolve(key)).toBeUndefined();
+      },
+    );
+
+    it.each(['__proto__', 'prototype', 'constructor'])(
+      'rejects the unsafe key %s before storing it',
+      async (key) => {
+        await expect(store.store(key, 'value')).rejects.toThrow(/unsafe local secret key/i);
+        expect(await store.keys()).toEqual([]);
+      },
+    );
+
     it('upserts existing key', async () => {
       await store.store('key', 'value1');
       await store.store('key', 'value2');
@@ -101,6 +116,23 @@ describe('LocalEncryptedStore', () => {
         passphrase: 'wrong-passphrase',
       });
       await expect(wrongStore.resolve('key')).rejects.toThrow();
+    });
+
+    it.each([
+      ['a null value', null],
+      ['a string', 'value'],
+      ['an array', ['value']],
+      ['a non-string value', { key: 42 }],
+      ['the dangerous __proto__ key', JSON.parse('{"__proto__":"value"}') as unknown],
+      ['the dangerous prototype key', { prototype: 'value' }],
+      ['the dangerous constructor key', { constructor: 'value' }],
+    ])('rejects a decrypted payload containing %s', async (_description, payload) => {
+      const unsafeStore = store as unknown as {
+        saveSecrets(secrets: Record<string, string>): Promise<void>;
+      };
+      await unsafeStore.saveSecrets(payload as Record<string, string>);
+
+      await expect(store.resolve('key')).rejects.toThrow(/corrupt or incompatible local secrets/i);
     });
   });
 });
