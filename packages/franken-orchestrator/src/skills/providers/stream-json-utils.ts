@@ -348,53 +348,107 @@ function extractJsonStructure(text: string): string | null {
   return null;
 }
 
-/** Recursively extract text from a stream-json node. */
-export function tryExtractTextFromNode(node: unknown, out: string[]): void {
-  if (typeof node === 'string') {
-    if (node.trim().length > 0) out.push(node);
-    return;
-  }
-  if (!node || typeof node !== 'object') return;
+/** Default stream frame traversal limits keep malformed provider output bounded. */
+export const DEFAULT_TEXT_EXTRACTION_MAX_DEPTH = 64;
+export const DEFAULT_TEXT_EXTRACTION_MAX_NODES = 10_000;
 
-  if (Array.isArray(node)) {
-    for (const item of node) tryExtractTextFromNode(item, out);
-    return;
-  }
+export interface TextExtractionBudget {
+  /** Maximum nesting depth, with the root node at depth zero. */
+  readonly maxDepth?: number;
+  /** Maximum number of values inspected per frame. */
+  readonly maxNodes?: number;
+}
 
-  const obj = node as Record<string, unknown>;
-  const directKeys = ['text', 'output_text', 'output'];
-  for (const key of directKeys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      out.push(value);
+export interface TextExtractionResult {
+  /** True when extraction stopped before the complete frame was inspected. */
+  readonly truncated: boolean;
+  readonly visitedNodes: number;
+}
+
+function validateExtractionLimit(name: string, value: number, minimum: number): void {
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new RangeError(`${name} must be a safe integer greater than or equal to ${minimum}`);
+  }
+}
+
+/**
+ * Extract text from a stream-json node within documented depth and node caps.
+ * The returned truncation marker lets callers reject or annotate frames whose
+ * complete text could not be inspected. Existing callers may ignore the result.
+ */
+export function tryExtractTextFromNode(
+  node: unknown,
+  out: string[],
+  budget: TextExtractionBudget = {},
+): TextExtractionResult {
+  const maxDepth = budget.maxDepth ?? DEFAULT_TEXT_EXTRACTION_MAX_DEPTH;
+  const maxNodes = budget.maxNodes ?? DEFAULT_TEXT_EXTRACTION_MAX_NODES;
+  validateExtractionLimit('maxDepth', maxDepth, 0);
+  validateExtractionLimit('maxNodes', maxNodes, 1);
+
+  const state = { truncated: false, visitedNodes: 0 };
+
+  const visit = (current: unknown, depth: number): void => {
+    if (state.truncated) return;
+    if (depth > maxDepth || state.visitedNodes >= maxNodes) {
+      state.truncated = true;
+      return;
     }
-  }
+    state.visitedNodes++;
 
-  // Codex JSON events often wrap assistant text inside item/part payloads.
-  // Claude/Gemini stream-json frames use content/message/content_block shapes.
-  const nestedKeys = [
-    'delta',
-    'content',
-    'parts',
-    'part',
-    'data',
-    'result',
-    'response',
-    'message',
-    'content_block',
-    'item',
-    'items',
-  ];
-  for (const key of nestedKeys) {
-    if (obj[key] !== undefined) {
-      tryExtractTextFromNode(obj[key], out);
+    if (typeof current === 'string') {
+      if (current.trim().length > 0) out.push(current);
+      return;
     }
-  }
+    if (!current || typeof current !== 'object') return;
 
-  // Some providers place structured content under `output` as an array/object
-  // instead of a direct string. Recurse only for non-strings to avoid duplicates.
-  const output = obj['output'];
-  if (output !== undefined && typeof output !== 'string') {
-    tryExtractTextFromNode(output, out);
-  }
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        visit(item, depth + 1);
+        if (state.truncated) break;
+      }
+      return;
+    }
+
+    const obj = current as Record<string, unknown>;
+    const directKeys = ['text', 'output_text', 'output'];
+    for (const key of directKeys) {
+      const value = obj[key];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        out.push(value);
+      }
+    }
+
+    // Codex JSON events often wrap assistant text inside item/part payloads.
+    // Claude/Gemini stream-json frames use content/message/content_block shapes.
+    const nestedKeys = [
+      'delta',
+      'content',
+      'parts',
+      'part',
+      'data',
+      'result',
+      'response',
+      'message',
+      'content_block',
+      'item',
+      'items',
+    ];
+    for (const key of nestedKeys) {
+      if (obj[key] !== undefined) {
+        visit(obj[key], depth + 1);
+        if (state.truncated) break;
+      }
+    }
+
+    // Some providers place structured content under `output` as an array/object
+    // instead of a direct string. Recurse only for non-strings to avoid duplicates.
+    const output = obj['output'];
+    if (!state.truncated && output !== undefined && typeof output !== 'string') {
+      visit(output, depth + 1);
+    }
+  };
+
+  visit(node, 0);
+  return state;
 }

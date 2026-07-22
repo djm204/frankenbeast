@@ -74,6 +74,40 @@ describe('tryExtractTextFromNode', () => {
     tryExtractTextFromNode({ output: [{ type: 'output_text', text: 'from output array' }] }, out);
     expect(out).toEqual(['from output array']);
   });
+
+  it('reports complete extraction for normal provider frames', () => {
+    const out: string[] = [];
+
+    const result = tryExtractTextFromNode({ content: [{ text: 'normal frame' }] }, out);
+
+    expect(out).toEqual(['normal frame']);
+    expect(result.truncated).toBe(false);
+    expect(result.visitedNodes).toBe(3);
+  });
+
+  it('stops and reports truncation for deeply nested arrays and objects', () => {
+    let frame: unknown = { text: 'too deep' };
+    for (let depth = 0; depth < 2_000; depth++) {
+      frame = depth % 2 === 0 ? { content: frame } : [frame];
+    }
+    const out: string[] = [];
+
+    const result = tryExtractTextFromNode(frame, out, { maxDepth: 16 });
+
+    expect(out).toEqual([]);
+    expect(result.truncated).toBe(true);
+    expect(result.visitedNodes).toBeLessThanOrEqual(18);
+  });
+
+  it('stops and reports truncation when the node budget is exceeded', () => {
+    const out: string[] = [];
+    const frame = Array.from({ length: 100 }, (_, index) => `part-${index}`);
+
+    const result = tryExtractTextFromNode(frame, out, { maxNodes: 5 });
+
+    expect(out).toEqual(['part-0', 'part-1', 'part-2', 'part-3']);
+    expect(result).toEqual({ truncated: true, visitedNodes: 5 });
+  });
 });
 
 describe('stripHookJson', () => {
