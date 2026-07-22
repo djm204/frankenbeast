@@ -1370,6 +1370,22 @@ describe('main() execution', () => {
     expect(mockSessionStart).toHaveBeenCalled();
   });
 
+  it('closes the session readline interface after successful execution', async () => {
+    await main();
+
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline?.close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the session readline interface when execution throws', async () => {
+    mockSessionStart.mockRejectedValueOnce(new Error('execution failed'));
+
+    await expect(main()).rejects.toThrow('execution failed');
+
+    const readline = vi.mocked(createInterface).mock.results.at(-1)?.value;
+    expect(readline?.close).toHaveBeenCalledOnce();
+  });
+
   it('prints network credentials as parseable JSON without a banner', async () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     mockParseArgs.mockReturnValue({
