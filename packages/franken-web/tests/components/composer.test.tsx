@@ -35,10 +35,11 @@ describe('Composer', () => {
     expect(button).toHaveProperty('disabled', true);
   });
 
-  it('explains why dispatch is disabled and marks the textarea for assistive tech', () => {
+  it('disables the textarea and explains why dispatch is unavailable', () => {
     render(<Composer onSend={vi.fn()} disabled={true} connectionStatus="connected" status="streaming" />);
 
-    const input = screen.getByRole('textbox');
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
     expect(input.getAttribute('aria-disabled')).toBe('true');
     expect(input.getAttribute('aria-describedby')).toContain('composer-help');
     expect(screen.getByText('Dispatch is disabled while Frankenbeast is responding.')).toBeTruthy();
