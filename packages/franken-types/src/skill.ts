@@ -15,8 +15,9 @@ const StdioMcpServerSchema = z.object({
 }).passthrough();
 
 const RemoteMcpServerSchema = z.object({
-  type: z.enum(['http', 'sse', 'streamable-http']),
-  url: z.string().url(),
+  type: z.enum(['http', 'sse', 'streamable-http', 'ws']),
+  // Claude Code preserves an empty URL as an intentionally unconfigured placeholder.
+  url: z.union([z.literal(''), z.string().url()]),
   headers: z.record(z.string(), z.string()).optional(),
 }).passthrough();
 

@@ -54,6 +54,8 @@ describe('McpConfigSchema', () => {
           alwaysLoad: true,
         },
         events: { type: 'sse', url: 'https://example.com/events' },
+        socket: { type: 'ws', url: 'wss://example.com/mcp' },
+        pending: { type: 'http', url: '' },
       },
     };
 
