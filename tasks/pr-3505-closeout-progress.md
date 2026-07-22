@@ -12,6 +12,8 @@
 - [x] Route repair commit `d657cf99` through approval-cop and verify the remote PR head matches.
 - [x] Merge current `origin/main` into the repair head and resolve the sole conflict by preserving both provider usage/context extraction and plain-output ANSI stripping.
 - [x] Verify the reconciled tree: 316 focused unit tests pass, focused REST provider-context regression passes, orchestrator typecheck/lint pass, root build passes, and `git diff --check` passes; the full REST integration file retains its two documented unrelated concurrency timeouts.
+- [x] Reconcile remote epoch drift at `18ac390e` with the prior local repair and current `origin/main`, preserving both live model extraction and plain-output sanitization.
+- [x] Re-verify the reconciled tree: 315 focused unit tests and the focused REST provider-context regression pass; orchestrator typecheck/lint, root build, and `git diff --check` pass.
 - [ ] Route the exact reconciled branch head push through approval-cop.
 - [ ] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
 - [ ] Obtain a fresh exact-head Codex clean and verify zero unresolved Codex threads.
