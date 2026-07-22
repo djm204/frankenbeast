@@ -2,6 +2,14 @@ import type { Trace } from '../../core/types.js'
 import type { ExportAdapter } from '../../export/ExportAdapter.js'
 import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 
+/** Bounded, payload-free context for a background drain notification. */
+export interface BatchDrainContext {
+  /** Number of traces included in the background drain attempt. */
+  batchSize: number
+  /** Unix timestamp in milliseconds when the background drain was attempted. */
+  attemptedAt: number
+}
+
 export interface BatchAdapterOptions {
   /** Underlying adapter that receives traces when the batch is drained. */
   adapter: ExportAdapter
@@ -21,6 +29,17 @@ export interface BatchAdapterOptions {
   setInterval?: (fn: () => void, ms: number) => ReturnType<typeof globalThis.setInterval>
   /** Injectable for testing. Defaults to `globalThis.clearInterval`. */
   clearInterval?: (id: ReturnType<typeof globalThis.setInterval>) => void
+  /**
+   * Best-effort observer for failed timer-triggered drains. The context is
+   * bounded and intentionally excludes trace payloads and exporter errors.
+   * Observer failures are ignored so they cannot interrupt future drains.
+   */
+  onDrainError?: (context: Readonly<BatchDrainContext>) => void | PromiseLike<void>
+  /**
+   * Best-effort observer invoked when a timer drain succeeds after one or more
+   * failed timer drains. It receives the same bounded, payload-free context.
+   */
+  onDrainRecovery?: (context: Readonly<BatchDrainContext>) => void | PromiseLike<void>
 }
 
 function validatePositiveSafeInteger(value: number, optionName: string): number {
@@ -68,18 +87,53 @@ export class BatchAdapter implements ExportAdapter {
   private readonly buffer: Trace[] = []
   private timer: ReturnType<typeof globalThis.setInterval> | null = null
   private readonly clearIntervalFn: (id: ReturnType<typeof globalThis.setInterval>) => void
+  private readonly onDrainError:
+    ((context: Readonly<BatchDrainContext>) => void | PromiseLike<void>) | undefined
+  private readonly onDrainRecovery:
+    ((context: Readonly<BatchDrainContext>) => void | PromiseLike<void>) | undefined
+  private backgroundDrainFailed = false
   private drainPromise: Promise<void> | null = null
 
   constructor(options: BatchAdapterOptions) {
     this.inner = options.adapter
     this.maxBatchSize = validatePositiveSafeInteger(options.maxBatchSize ?? 10, 'maxBatchSize')
     this.clearIntervalFn = options.clearInterval ?? globalThis.clearInterval
+    this.onDrainError = options.onDrainError
+    this.onDrainRecovery = options.onDrainRecovery
 
     if (options.flushIntervalMs !== undefined) {
       const flushIntervalMs = validatePositiveSafeInteger(options.flushIntervalMs, 'flushIntervalMs')
       const si = options.setInterval ?? globalThis.setInterval
-      this.timer = si(() => { void this.drain().catch(() => undefined) }, flushIntervalMs)
+      this.timer = si(() => {
+        const context: BatchDrainContext = {
+          batchSize: this.buffer.length,
+          attemptedAt: Date.now(),
+        }
+        void this.drain().then(
+          () => { this.reportDrainRecovery(context) },
+          () => { this.reportDrainError(context) },
+        )
+      }, flushIntervalMs)
       setTimerRefState(this.timer, false)
+    }
+  }
+
+  private reportDrainError(context: Readonly<BatchDrainContext>): void {
+    this.backgroundDrainFailed = true
+    try {
+      void Promise.resolve(this.onDrainError?.(context)).catch(() => undefined)
+    } catch {
+      // Background observers are best-effort and must not break future drains.
+    }
+  }
+
+  private reportDrainRecovery(context: Readonly<BatchDrainContext>): void {
+    if (!this.backgroundDrainFailed) return
+    this.backgroundDrainFailed = false
+    try {
+      void Promise.resolve(this.onDrainRecovery?.(context)).catch(() => undefined)
+    } catch {
+      // Recovery observers are also best-effort.
     }
   }
 
