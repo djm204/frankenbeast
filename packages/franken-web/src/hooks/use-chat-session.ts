@@ -149,11 +149,19 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           return;
         }
         const approvalPending = Boolean(refreshed.pendingApproval) || refreshed.state === 'pending_approval';
+        const approvalFailed = refreshed.state === 'failed';
+        setMessages((current) => mergeSessionSnapshot(current, refreshed));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setSessionState(refreshed.state);
+        setTokenTotals(refreshed.tokenTotals);
+        setCostUsd(refreshed.costUsd);
+        setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
+        setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
         updateApprovalResolving(false);
-        setApprovalError(approvalPending ? 'The server did not confirm the approval response. Try again.' : null);
-        setStatus(approvalPending ? 'error' : 'idle');
+        setApprovalError(approvalPending
+          ? 'The server did not confirm the approval response. Try again.'
+          : approvalFailed ? 'The approved action failed. Review the transcript and try again.' : null);
+        setStatus(approvalPending || approvalFailed ? 'error' : refreshed.state === 'approved' ? 'streaming' : 'idle');
       })
       .catch((error) => {
         if (!sessionStillCurrent(capturedSessionId) || !approvalResolvingRef.current) {
@@ -507,7 +515,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
           setPendingApproval(null);
           setApprovalError(null);
           updateApprovalResolving(false);
-          setStatus('idle');
+          setStatus(payload.approved ? 'streaming' : 'idle');
           setActivity((current) => [
             ...current,
             {

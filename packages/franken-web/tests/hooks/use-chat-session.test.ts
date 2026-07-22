@@ -1055,6 +1055,7 @@ describe('useChatSession', () => {
 
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
+    expect(result.current.status).toBe('streaming');
   });
 
   it('reconciles approval state when the websocket response event is dropped', async () => {
@@ -1077,12 +1078,16 @@ describe('useChatSession', () => {
     mockGetSession.mockResolvedValueOnce({
       id: 'chat-1',
       projectId: 'test-proj',
-      transcript: [],
+      transcript: [{
+        role: 'assistant',
+        content: 'Approved command output',
+        timestamp: '2026-03-09T00:00:20Z',
+      }],
       state: 'approved',
       pendingApproval: null,
       socketToken: 'signed-token',
-      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
-      costUsd: 0,
+      tokenTotals: { cheap: 123, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.42,
       createdAt: '2026-03-09T00:00:00Z',
       updatedAt: '2026-03-09T00:00:21Z',
     });
@@ -1103,9 +1108,65 @@ describe('useChatSession', () => {
     expect(result.current.approvalError).toBeNull();
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
-    expect(result.current.status).toBe('idle');
+    expect(result.current.status).toBe('streaming');
+    expect(result.current.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', content: 'Approved command output' }),
+    ]));
+    expect(result.current.tokenTotals.cheap).toBe(123);
+    expect(result.current.costUsd).toBe(0.42);
     expect(mockCreateSocketTicket).toHaveBeenCalledTimes(1);
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('surfaces a failed approved action from REST reconciliation', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [{
+        role: 'assistant',
+        content: 'Approved action exited with status 1',
+        timestamp: '2026-03-09T00:00:20Z',
+      }],
+      state: 'failed',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 12, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0.03,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:21Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toContain('approved action failed');
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('failed');
+    expect(result.current.status).toBe('error');
+    expect(result.current.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: 'Approved action exited with status 1' }),
+    ]));
+    expect(result.current.tokenTotals.cheap).toBe(12);
+    expect(result.current.costUsd).toBe(0.03);
   });
 
   it('makes an unconfirmed websocket approval retryable after REST reconciliation', async () => {
@@ -1214,7 +1275,7 @@ describe('useChatSession', () => {
     expect(result.current.approvalError).toBeNull();
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
-    expect(result.current.status).toBe('idle');
+    expect(result.current.status).toBe('streaming');
   });
 
   it.each([
