@@ -62,40 +62,153 @@ export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps 
  * log. This is a proportionate, best-effort scrub — exhaustive secret detection
  * is intentionally out of scope.
  */
-const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))$/i;
+const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:authorization|password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:authorization|password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))$/i;
+const RAW_SECRET_HINTS = [
+  'authorization',
+  'bearer',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'token',
+  'api_key',
+  'api-key',
+  'apikey',
+  'access_key',
+  'access-key',
+  'accesskey',
+  'cookie',
+  'credential',
+  'passphrase',
+  '_key',
+  '-key',
+] as const;
+const CREDENTIAL_URL_HINT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:[^\s@/]+@/i;
+const CAMEL_CASE_SECRET_KEY_HINT = /[A-Za-z0-9](?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b/;
+const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
 
-function redactRawSecrets(text: string): string {
-  return text
-    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
-    .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
-    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
-    .replace(/(--(?:password|passwd|pwd|secret|token|api-?key|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
+function containsRawSecretHint(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  return RAW_SECRET_HINTS.some((hint) => lowerText.includes(hint))
+    || CAMEL_CASE_SECRET_KEY_HINT.test(text)
+    || CREDENTIAL_URL_HINT.test(text);
 }
 
-function redactJsonSecrets(value: unknown, key?: string): unknown {
-  if (key && SENSITIVE_ASSIGNMENT_KEY.test(key)) return '[REDACTED]';
-  if (typeof value === 'string') return redactRawSecrets(value);
-  if (Array.isArray(value)) return value.map((item) => redactJsonSecrets(item));
+function containsOversizedSecretIndicator(text: string): boolean {
+  if (/\bauthorization\b\s*[:=]/i.test(text)
+    || /\\*["']authorization\\*["']\s*,/i.test(text)
+    || /\bbearer\s+\S+/i.test(text)
+    || /--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+\S+/i.test(text)
+    || CREDENTIAL_URL_HINT.test(text)) {
+    return true;
+  }
+
+  const assignmentPattern = /\\*["']?\b([A-Za-z][A-Za-z0-9_-]{0,127})\b\\*["']?\s*[=:]/g;
+  for (const match of text.matchAll(assignmentPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  const tupleKeyPattern = /\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,/g;
+  for (const match of text.matchAll(tupleKeyPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+
+  const pairLabelPattern = /\\*["'](?:name|key)\\*["']\s*:\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']/gi;
+  for (const match of text.matchAll(pairLabelPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  return false;
+}
+
+function redactRawSecrets(text: string, preserveShellCommands = false): string {
+  if (!containsRawSecretHint(text)) return text;
+  let redacted = text
+    .replace(/(authorization\s*:\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'(?:\\.|[^'\\$`]|\$(?!\())*')/gi, '$1[REDACTED]')
+    .replace(/(\bauthorization\b\s*=\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*')/gi, '$1[REDACTED]');
+
+  redacted = preserveShellCommands
+    ? redacted
+      .replace(/(authorization\s*:\s*)(?:\$(?!\()|[^$\r\n;&|<>`"'])+/gi, '$1[REDACTED]')
+      .replace(/(\bauthorization\b\s*=\s*)[^\s\r\n;&|<>`$"']+/gi, '$1[REDACTED]')
+    : redacted
+      .replace(/(authorization\s*:\s*)[\s\S]*?(?=(?<!\\)"\s*[,}]|\r?\n|$)/gi, '$1[REDACTED]')
+      .replace(/(\bcookie\s*:\s*)[\s\S]*?(?=(?<!\\)"\s*[,}]|\r?\n|$)/gi, '$1[REDACTED]')
+      .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}Authorization\s*=\s*)(?:Basic|Bearer|Token)\s+\S+/gi, '$1[REDACTED]')
+      .replace(/(\bauthorization\b\s*=\s*)AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+/gi, '$1[REDACTED]')
+      .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*(?:\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*)+|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]');
+
+  return redacted
+    .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
+    .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
+    .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
+    .replace(
+      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
+      (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
+        ? `${prefix}[REDACTED]`
+        : match,
+    )
+    .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
+}
+
+function isSensitiveAssignmentKey(key: string): boolean {
+  const separatorNormalized = key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  return SENSITIVE_ASSIGNMENT_KEY.test(separatorNormalized);
+}
+
+function redactJsonSecrets(value: unknown, state: { changed: boolean }, key?: string, preserveShellCommands = false): unknown {
+  if (key && isSensitiveAssignmentKey(key)) {
+    if (value !== '[REDACTED]') state.changed = true;
+    return '[REDACTED]';
+  }
+  if (typeof value === 'string') {
+    const redacted = redactSecrets(value, preserveShellCommands);
+    if (redacted !== value) state.changed = true;
+    return redacted;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 2 && typeof value[0] === 'string' && isSensitiveAssignmentKey(value[0])) {
+      return [value[0], redactJsonSecrets(value[1], state, value[0], preserveShellCommands)];
+    }
+    return value.map((item) => redactJsonSecrets(item, state, undefined, preserveShellCommands));
+  }
   if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const pairName = [record.name, record.key]
+      .find((candidate): candidate is string => typeof candidate === 'string' && isSensitiveAssignmentKey(candidate));
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .map(([entryKey, entryValue]) => [entryKey, redactJsonSecrets(entryValue, entryKey)]),
+      Object.entries(record)
+        .map(([entryKey, entryValue]) => [
+          entryKey,
+          redactJsonSecrets(
+            entryValue,
+            state,
+            entryKey === 'value' && pairName ? pairName : entryKey,
+            preserveShellCommands,
+          ),
+        ]),
     );
   }
   return value;
 }
 
-export function redactSecrets(text: string): string {
+export function redactSecrets(text: string, preserveShellCommands = false): string {
   try {
     const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed === 'string') {
+      const redacted = redactSecrets(parsed, preserveShellCommands);
+      if (redacted !== parsed) return JSON.stringify(redacted);
+    }
     if (parsed !== null && typeof parsed === 'object') {
-      return JSON.stringify(redactJsonSecrets(parsed));
+      const state = { changed: false };
+      const redacted = redactJsonSecrets(parsed, state, undefined, preserveShellCommands);
+      if (state.changed) return JSON.stringify(redacted);
+      return redactRawSecrets(text, preserveShellCommands);
     }
   } catch {
     // Legacy command contexts are plain text, not JSON.
   }
-  return redactRawSecrets(text);
+  return redactRawSecrets(text, preserveShellCommands);
 }
 
 async function readStdinPayload(): Promise<string> {
@@ -256,8 +369,13 @@ function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: 
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
-  if (!MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
-  return '[memory-review-result-redacted]';
+  if (MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) {
+    return '[memory-review-result-redacted]';
+  }
+  if (payload.length > MAX_POST_TOOL_SECRET_SCAN_CHARS) {
+    return containsOversizedSecretIndicator(payload) ? '[post-tool-payload-redacted]' : payload;
+  }
+  return redactSecrets(payload);
 }
 
 export async function runHook(
@@ -303,7 +421,7 @@ export async function runHook(
     // (`fbeast-hook pre-tool <tool> <payload>`) so they keep governance coverage
     // when the env var is unset.
     // Redact inline credentials before the governor sees/logs the context.
-    const context = markHookGovernanceContext(redactSecrets(resolvedDeps.readContext() || payload));
+    const context = markHookGovernanceContext(redactSecrets(resolvedDeps.readContext() || payload, true));
     const decision = await resolvedDeps.governor.check({ action: toolName, context });
     if (decision.decision !== 'approved') {
       process.stderr.write(`${decision.reason}\n`);
