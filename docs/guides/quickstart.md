@@ -99,6 +99,17 @@ newer, these development services are not reachable from other machines. On olde
 Docker Engine releases, hosts on the same layer-2 network may still reach ports
 published to loopback; upgrade the engine or enforce equivalent host-firewall rules.
 
+Grafana anonymous dashboard access is disabled by default. If a short-lived local
+demo specifically needs anonymous access, opt in for that invocation only:
+
+```bash
+GRAFANA_ANONYMOUS_ENABLED=true docker compose up -d grafana
+```
+
+This opt-in still requires the explicit admin credentials described above, and
+Grafana remains bound to `127.0.0.1`. Do not combine this opt-in with
+`docker-compose.remote.yml` or otherwise expose the service to another machine.
+
 To intentionally expose ChromaDB, Grafana, and Tempo to a trusted network, use
 the explicit override with Docker Compose 2.24.4 or newer:
 
