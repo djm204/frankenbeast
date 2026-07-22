@@ -112,7 +112,12 @@ export {
 export type { CritiqueErrorOptions } from './errors/index.js';
 
 // Core components
-export { CritiquePipeline } from './pipeline/critique-pipeline.js';
+export {
+  CritiquePipeline,
+  RequiredEvaluatorSelectionError,
+  UnknownEvaluatorError,
+} from './pipeline/critique-pipeline.js';
+export type { CritiquePipelineRunOptions } from './pipeline/critique-pipeline.js';
 export { CritiqueLoop } from './loop/critique-loop.js';
 export {
   LessonRecorder,

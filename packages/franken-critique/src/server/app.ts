@@ -1,6 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import type { CritiquePipeline } from '../pipeline/critique-pipeline.js';
+import {
+  RequiredEvaluatorSelectionError,
+  UnknownEvaluatorError,
+  type CritiquePipeline,
+} from '../pipeline/critique-pipeline.js';
+import type { CritiquePipelineResult } from '../types/evaluation.js';
 import { wallClockNow } from '@franken/types';
 import { timingSafeBearerTokenMatches } from './token-auth.js';
 
@@ -177,10 +182,42 @@ export function createCritiqueApp(options: CritiqueAppOptions = {}): Hono {
       );
     }
 
-    const result = await options.pipeline.run({
-      content: parsed.data.code,
-      metadata: parsed.data.context ?? {},
-    });
+    let result: CritiquePipelineResult;
+    try {
+      result = await options.pipeline.run(
+        {
+          content: parsed.data.code,
+          metadata: parsed.data.context ?? {},
+        },
+        { evaluatorNames: parsed.data.evaluators },
+      );
+    } catch (error) {
+      if (error instanceof RequiredEvaluatorSelectionError) {
+        return c.json(
+          {
+            error: {
+              message: 'Evaluator selection must include required evaluators',
+              type: 'invalid_evaluators',
+              missingRequiredEvaluators: error.requiredEvaluatorNames,
+            },
+          },
+          400,
+        );
+      }
+      if (error instanceof UnknownEvaluatorError) {
+        return c.json(
+          {
+            error: {
+              message: 'Unknown evaluator selection',
+              type: 'invalid_evaluators',
+              unknownEvaluators: error.evaluatorNames,
+            },
+          },
+          400,
+        );
+      }
+      throw error;
+    }
 
     return c.json({
       verdict: result.verdict,

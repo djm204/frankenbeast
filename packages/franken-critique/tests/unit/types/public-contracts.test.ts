@@ -1,8 +1,17 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createSessionId } from '@franken/types';
-import type { ProviderCritiqueFinding, Score as SharedScore } from '@franken/types';
-import { createScore } from '@franken/critique';
 import type {
+  ProviderCritiqueFinding,
+  Score as SharedScore,
+} from '@franken/types';
+import {
+  ConfigurationError,
+  createScore,
+  RequiredEvaluatorSelectionError,
+  UnknownEvaluatorError,
+} from '@franken/critique';
+import type {
+  CritiquePipelineRunOptions,
   CritiquePipelineResult,
   CritiqueResult,
   LessonRollbackWorkflow,
@@ -13,6 +22,22 @@ import type {
 } from '@franken/critique';
 
 describe('public critique type contracts', () => {
+  it('exports evaluator selection options and errors', () => {
+    const options: CritiquePipelineRunOptions = {
+      evaluatorNames: ['safety'],
+    };
+    const error = new UnknownEvaluatorError(['missing']);
+
+    expect(options.evaluatorNames).toEqual(['safety']);
+    expect(error.evaluatorNames).toEqual(['missing']);
+    expect(error).toBeInstanceOf(ConfigurationError);
+    expect(error.code).toBe('CONFIGURATION_INVALID');
+
+    const requiredError = new RequiredEvaluatorSelectionError(['safety']);
+    expect(requiredError).toBeInstanceOf(ConfigurationError);
+    expect(requiredError.requiredEvaluatorNames).toEqual(['safety']);
+  });
+
   it('imports provider findings and critique pipeline results without alias confusion', () => {
     const providerFinding: ProviderCritiqueFinding = {
       evaluator: 'reflection',
@@ -104,7 +129,9 @@ describe('public critique type contracts', () => {
         info: 0,
         total: 1,
       },
-      improvementSignals: ['Recovered from 1 failing critique iteration before pass.'],
+      improvementSignals: [
+        'Recovered from 1 failing critique iteration before pass.',
+      ],
       guidance: 'copy into PM handoff',
     };
 
