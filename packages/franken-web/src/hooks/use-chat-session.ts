@@ -469,7 +469,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         case 'assistant.message.complete':
           setShowTypingIndicator(false);
           setStatus('idle');
-          if (approvalResolvingRef.current) {
+          if (approvalResolvingRef.current && payload.kind === 'approval') {
             const approved = approvalDecisionRef.current !== false;
             readyRef.current = true;
             setPendingApproval(null);

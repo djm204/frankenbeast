@@ -1058,7 +1058,7 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('streaming');
   });
 
-  it('clears approval timeout state when completion arrives without a resolution event', async () => {
+  it('does not resolve an approval from an unrelated assistant completion', async () => {
     const { result } = renderHook(() => useChatSession(opts));
 
     await waitFor(() => {
@@ -1075,17 +1075,34 @@ describe('useChatSession', () => {
         timestamp: '2026-03-09T00:00:06Z',
       });
     });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:20Z',
+    });
     await act(async () => {
       await result.current.approve(true);
     });
     act(() => {
       socket.message({
         type: 'assistant.message.complete',
-        messageId: 'assistant-approved',
-        content: 'Approved action complete',
-        timestamp: '2026-03-09T00:00:20Z',
+        messageId: 'assistant-before-approval-result',
+        content: 'Approval request display complete',
+        timestamp: '2026-03-09T00:00:07Z',
       });
     });
+
+    expect(result.current.approvalResolving).toBe(true);
+    expect(result.current.pendingApproval).not.toBeNull();
+    expect(result.current.sessionState).toBe('pending_approval');
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
@@ -1094,7 +1111,7 @@ describe('useChatSession', () => {
     expect(result.current.status).toBe('idle');
     expect(result.current.pendingApproval).toBeNull();
     expect(result.current.sessionState).toBe('approved');
-    expect(mockGetSession).not.toHaveBeenCalled();
+    expect(mockGetSession).toHaveBeenCalledTimes(1);
   });
 
   it('keeps a dropped rejection resolution rejected when its completion arrives', async () => {
