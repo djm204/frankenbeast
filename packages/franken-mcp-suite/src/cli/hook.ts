@@ -468,8 +468,10 @@ export async function runHook(
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
-  runHook().catch((error) => {
-    console.error('fbeast-hook failed:', error);
+  runHook().catch(() => {
+    // Hook failures can wrap arbitrary tool/provider payloads. Keep the
+    // entrypoint diagnostic stable without serializing the rejected value.
+    console.error('fbeast-hook failed');
     process.exit(1);
   });
 }
