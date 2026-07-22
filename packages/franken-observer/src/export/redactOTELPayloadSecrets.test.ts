@@ -50,6 +50,10 @@ describe('redactOTELPayloadSecrets', () => {
     const dottedSecret = ['dotted', 'api', 'credential'].join('-')
     const claudeSessionSecret = ['claude', 'session', 'credential'].join('-')
     const stringMetricTokenSecret = ['input', 'token', 'credential'].join('-')
+    const capitalizedHeaderSecret = ['capitalized', 'header', 'credential'].join('-')
+    const acronymApiKeySecret = ['acronym', 'api', 'credential'].join('-')
+    const sigV4Secret = ['sigv4', 'signature', 'credential'].join('-')
+    const truncatedHeaderSecret = ['truncated', 'header', 'credential'].join('-')
     const aliasSecrets = ['sshKey', 'signing_key', 'gpg_key', 'PAT', 'webhookUrl']
       .map(key => [key, `${key}-credential`] as const)
     const geminiSecret = `AIza${'e'.repeat(35)}`
@@ -97,6 +101,9 @@ describe('redactOTELPayloadSecrets', () => {
       jwtSecret,
       `https://discord.com/api/webhooks/123/${webhookSecret}`,
       ...tokenSecrets,
+      JSON.stringify({ Name: 'Authorization', Value: `Basic ${capitalizedHeaderSecret}` }),
+      `--auth AWS4-HMAC-SHA256 Credential=scope, SignedHeaders=host, Signature=${sigV4Secret}`,
+      `{"name":"x-api-key","value":"${truncatedHeaderSecret}"`,
       'safe diagnostic value',
     )
     input.resourceSpans[0]!.resource.attributes.push({
@@ -105,6 +112,9 @@ describe('redactOTELPayloadSecrets', () => {
     }, {
       key: 'credentials',
       value: { stringValue: pluralKeySecret },
+    }, {
+      key: 'OpenAIAPIKey',
+      value: { stringValue: acronymApiKeySecret },
     })
 
     const redacted = redactOTELPayloadSecrets(input)
@@ -145,6 +155,10 @@ describe('redactOTELPayloadSecrets', () => {
       jwtSecret,
       webhookSecret,
       ...tokenSecrets,
+      capitalizedHeaderSecret,
+      acronymApiKeySecret,
+      sigV4Secret,
+      truncatedHeaderSecret,
     ]) {
       expect(output).not.toContain(secret)
     }

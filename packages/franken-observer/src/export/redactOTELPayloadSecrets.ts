@@ -1,7 +1,7 @@
 import type { OTELAttribute, OTELAttributeValue, OTELPayload } from './OTELSerializer.js'
 
 const REDACTED = '[REDACTED]'
-const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passphrases?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|api_?keys?|private_?keys?|access_?keys?|ssh_?keys?|signing_?keys?|gpg_?keys?|pats?|personal_?access_?tokens?|webhook_?urls?|claude_?sessions?)(?:$|_)/iu
+const SENSITIVE_KEY_RE = /(?:^|_)(?:secrets?|tokens?|passwords?|passphrases?|passwd|pwd|credentials?|cookies?|bearers?|auth|authorization|signatures?|api_?keys?|private_?keys?|access_?keys?|ssh_?keys?|signing_?keys?|gpg_?keys?|pats?|personal_?access_?tokens?|webhook_?urls?|claude_?sessions?)(?:$|_)/iu
 const TOKEN_METRIC_KEY_RE = /(?:^|_)(?:prompt|completion|total|input|output|cached|reasoning)_tokens?(?:$|_)/iu
 const AUTH_SCHEME_VALUE = String.raw`(?:Basic|Bearer|Token|ApiKey|Digest|Negotiate|NTLM|AWS4-HMAC-SHA256)\s+[^\s,;]+`
 const SENSITIVE_ASSIGNMENT_RE = new RegExp(
@@ -18,6 +18,7 @@ const SENSITIVE_JSON_COLLECTION_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)(
 const ESCAPED_SENSITIVE_JSON_COLLECTION_FIELD_RE = /(\\+"([^"\\]*(?:\\.[^"\\]*)*)\\+"\s*:\s*)(\[[^\]\r\n]*(?:\]|$)|\{[^}\r\n]*(?:\}|$))/gu
 const SENSITIVE_LINE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_.-]*)(\s*[=:]\s*)[^\r\n]*?(?=\s+[A-Za-z_][A-Za-z0-9_.-]*\s*[=:]|$)/gu
 const SENSITIVE_HEADER_TUPLE_RE = /(\[\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*")[^"\r\n]*("\s*\])/gu
+const SENSITIVE_HEADER_OBJECT_RE = /("(?:key|name)"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"\s*,\s*"(?:value|values)"\s*:\s*)("(?:\\.|[^"\\])*"|"(?:\\.|[^"\\])*(?=$|[\r\n])|[^,}\]\r\n]+)/giu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
 const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)[^\r\n]+/giu
@@ -30,6 +31,7 @@ const TOKEN_RE = /\b(?:(?:sk|gh[oprsu]|glpat|glc|xox[baprs])[-_][A-Za-z0-9_-]{12
 
 function normalizeSensitiveKey(key: string): string {
   return key
+    .replace(/api_?key/giu, '_api_key')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/[^a-z0-9]+/giu, '_')
@@ -119,6 +121,9 @@ function redactPlainText(value: string): string {
     .replace(SENSITIVE_HEADER_TUPLE_RE, (match, prefix: string, key: string, suffix: string) =>
       isSensitiveKey(key) ? `${prefix}${REDACTED}${suffix}` : match,
     )
+    .replace(SENSITIVE_HEADER_OBJECT_RE, (match, prefix: string, key: string) =>
+      isSensitiveKey(key) ? `${prefix}"${REDACTED}"` : match,
+    )
     .replace(SENSITIVE_JSON_COLLECTION_FIELD_RE, (match, prefix: string, key: string) =>
       isSensitiveKey(key) ? `${prefix}"${REDACTED}"` : match,
     )
@@ -158,11 +163,13 @@ function redactJsonValue(value: unknown): unknown {
 
   const entries = Object.entries(value)
   const headerName = entries.find(([key, child]) =>
-    (key === 'key' || key === 'name') && typeof child === 'string' && isSensitiveKey(child),
+    (key.toLowerCase() === 'key' || key.toLowerCase() === 'name')
+      && typeof child === 'string' && isSensitiveKey(child),
   )
   return Object.fromEntries(entries.map(([key, child]) => [
     redactPlainText(key),
-    isSensitiveKey(key) || (headerName !== undefined && (key === 'value' || key === 'values'))
+    isSensitiveKey(key)
+      || (headerName !== undefined && (key.toLowerCase() === 'value' || key.toLowerCase() === 'values'))
       ? REDACTED
       : redactJsonValue(child),
   ]))
