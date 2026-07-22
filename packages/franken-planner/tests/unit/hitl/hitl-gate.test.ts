@@ -75,6 +75,16 @@ describe('applyModifications', () => {
     expect(g2.getTask(createTaskId('a'))?.objective).toBe('New objective');
   });
 
+  it('increments the existing version when a task is modified', () => {
+    const graph = PlanGraph.fromTasks([makeTask('a')], { version: 7, reason: 'approved plan' });
+    const change: TaskModification = {
+      taskId: createTaskId('a'),
+      objective: 'New objective',
+    };
+
+    expect(applyModifications(graph, [change]).version).toBe(8);
+  });
+
   it('updates requiredSkills from TaskModification', () => {
     const graph = PlanGraph.empty().addTask(makeTask('a'));
     const change: TaskModification = {
@@ -104,14 +114,16 @@ describe('applyModifications', () => {
     expect(g2.getDependencies(createTaskId('b'))).toContain(createTaskId('a'));
   });
 
-  it('ignores modifications for unknown task ids', () => {
+  it('ignores modifications for unknown task ids without advancing the version', () => {
     const graph = PlanGraph.empty().addTask(makeTask('a'));
     const change: TaskModification = {
       taskId: createTaskId('does-not-exist'),
       objective: 'Ghost',
     };
     const g2 = applyModifications(graph, [change]);
+    expect(g2).toBe(graph);
     expect(g2.size()).toBe(1);
+    expect(g2.version).toBe(graph.version);
   });
 
   it('original graph is unchanged (immutable)', () => {

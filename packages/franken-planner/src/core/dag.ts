@@ -270,7 +270,7 @@ export class PlanGraph {
     newNodes.set(task.id, { ...task, dependsOn: [...dependsOn] });
     const newEdges = new Map(this._edges);
     newEdges.set(task.id, new Set(dependsOn));
-    return new PlanGraph(newNodes, newEdges, this.version, this.reason);
+    return new PlanGraph(newNodes, newEdges, this.version + 1, `task added: '${task.id}'`);
   }
 
   removeTask(taskId: TaskId): PlanGraph {
@@ -290,7 +290,7 @@ export class PlanGraph {
         newNodes.set(id, { ...task, dependsOn: [...cleaned] });
       }
     }
-    return new PlanGraph(newNodes, newEdges, this.version, this.reason);
+    return new PlanGraph(newNodes, newEdges, this.version + 1, `task removed: '${taskId}'`);
   }
 
   /**
