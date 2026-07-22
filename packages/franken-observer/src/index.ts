@@ -55,7 +55,7 @@ export { generateGrafanaDashboard } from './grafana/GrafanaDashboard.js'
 
 export type { ExportAdapter, TraceSummary } from './export/ExportAdapter.js'
 export type { MultiAdapterOptions } from './adapters/multi/MultiAdapter.js'
-export type { BatchAdapterOptions } from './adapters/batch/BatchAdapter.js'
+export type { BatchAdapterOptions, BatchDrainContext } from './adapters/batch/BatchAdapter.js'
 export type { SamplerStrategy, SamplingAdapterOptions, RateLimitedSamplerOptions } from './sampling/TraceSampler.js'
 export type { TraceparentFields, ExtractedTraceContext } from './propagation/W3CTraceContext.js'
 export type { RedactionAction, RedactionRule, SpanRedactorOptions } from './redaction/SpanRedactor.js'

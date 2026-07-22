@@ -137,6 +137,71 @@ describe('BatchAdapter — options', () => {
     expect(await inner.listTraceIds()).toEqual(['timer-drained'])
     expect(timer.unref).toHaveBeenCalledTimes(2)
   })
+
+  it('reports timer-triggered drain failures with bounded context and retains traces', async () => {
+    let intervalCallback!: () => void
+    const onDrainError = vi.fn()
+    const trace = makeTrace('private-trace-id')
+    const batch = new BatchAdapter({
+      adapter: new FailingFlushAdapter(),
+      maxBatchSize: 100,
+      flushIntervalMs: 1000,
+      setInterval(callback) {
+        intervalCallback = callback
+        return 42 as unknown as ReturnType<typeof globalThis.setInterval>
+      },
+      onDrainError,
+    })
+
+    await batch.flush(trace)
+    intervalCallback()
+
+    await vi.waitFor(() => expect(onDrainError).toHaveBeenCalledOnce())
+    const context = onDrainError.mock.calls[0]![0]
+    expect(context).toEqual({ batchSize: 1, attemptedAt: expect.any(Number) })
+    expect(JSON.stringify(context)).not.toContain(trace.id)
+    expect(JSON.stringify(context)).not.toContain('database temporarily locked')
+    expect(await batch.queryByTraceId(trace.id)).toEqual(trace)
+  })
+
+  it('continues timer drains after an error observer throws and reports recovery', async () => {
+    let intervalCallback!: () => void
+    let attempts = 0
+    const inner = new InMemoryAdapter()
+    vi.spyOn(inner, 'flush').mockImplementation(async trace => {
+      attempts += 1
+      if (attempts === 1) throw new Error('transient exporter failure')
+      await InMemoryAdapter.prototype.flush.call(inner, trace)
+    })
+    const onDrainError = vi.fn(() => { throw new Error('observer failed') })
+    const onDrainRecovery = vi.fn()
+    const batch = new BatchAdapter({
+      adapter: inner,
+      maxBatchSize: 100,
+      flushIntervalMs: 1000,
+      setInterval(callback) {
+        intervalCallback = callback
+        return 42 as unknown as ReturnType<typeof globalThis.setInterval>
+      },
+      onDrainError,
+      onDrainRecovery,
+    })
+
+    await batch.flush(makeTrace('retry-on-next-tick'))
+    intervalCallback()
+    await vi.waitFor(() => expect(onDrainError).toHaveBeenCalledOnce())
+
+    intervalCallback()
+    await vi.waitFor(() => expect(onDrainRecovery).toHaveBeenCalledOnce())
+
+    expect(attempts).toBe(2)
+    expect(onDrainRecovery).toHaveBeenCalledWith({
+      batchSize: 1,
+      attemptedAt: expect.any(Number),
+    })
+    expect(await batch.listTraceIds()).toEqual(['retry-on-next-tick'])
+    expect(await inner.listTraceIds()).toEqual(['retry-on-next-tick'])
+  })
 })
 
 // ── buffering ─────────────────────────────────────────────────────────────────
@@ -562,6 +627,32 @@ describe('BatchAdapter — stop()', () => {
 
     expect(await batch.queryByTraceId('shutdown-retry')).toEqual(trace)
     expect(await batch.listTraceIds()).toEqual(['shutdown-retry'])
+  })
+
+  it('cancels the timer and surfaces shutdown failure after a failed periodic drain', async () => {
+    let intervalCallback!: () => void
+    const clearIntervalFn = vi.fn()
+    const onDrainError = vi.fn()
+    const trace = makeTrace('periodic-then-shutdown')
+    const batch = new BatchAdapter({
+      adapter: new FailingFlushAdapter(),
+      maxBatchSize: 100,
+      flushIntervalMs: 1000,
+      setInterval(callback) {
+        intervalCallback = callback
+        return 42 as unknown as ReturnType<typeof globalThis.setInterval>
+      },
+      clearInterval: clearIntervalFn,
+      onDrainError,
+    })
+
+    await batch.flush(trace)
+    intervalCallback()
+    await vi.waitFor(() => expect(onDrainError).toHaveBeenCalledOnce())
+
+    await expect(batch.stop()).rejects.toThrow('database temporarily locked')
+    expect(clearIntervalFn).toHaveBeenCalledWith(42)
+    expect(await batch.queryByTraceId(trace.id)).toEqual(trace)
   })
 
   it('does not call clearInterval when no timer was started', async () => {
