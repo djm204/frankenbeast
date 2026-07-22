@@ -121,7 +121,11 @@ export type {
 } from './core/types.js'
 export type { TokenUsage } from './core/SpanLifecycle.js'
 export type { TokenRecord, TokenTotals, TokenCounterOptions } from './cost/TokenCounter.js'
-export type { CostCalculatorOptions } from './cost/CostCalculator.js'
+export type {
+  CostCalculation,
+  CostCalculatorOptions,
+  TotalCostCalculation,
+} from './cost/CostCalculator.js'
 export type { CircuitBreakerOptions, CircuitBreakerResult } from './cost/CircuitBreaker.js'
 export type {
   AttributionEntry,

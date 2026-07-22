@@ -43,16 +43,33 @@ describe('CostCalculator', () => {
       expect(cost).toBe((1 * 15) / 1_000_000)
     })
 
-    it('returns 0 for an unknown model', () => {
-      const quietCalc = new CostCalculator(DEFAULT_PRICING, {
-        onUnknownModel: () => {},
-      })
-      const cost = quietCalc.calculate({
+    it('distinguishes an unknown model from a legitimately free model', () => {
+      const quietCalc = new CostCalculator(
+        { free: { promptPerMillion: 0, completionPerMillion: 0 } },
+        { onUnknownModel: () => {} },
+      )
+
+      expect(quietCalc.calculateWithAttribution({
+        model: 'free',
+        promptTokens: 1000,
+        completionTokens: 500,
+      })).toEqual({ costUsd: 0, unknownModel: false })
+      expect(quietCalc.calculateWithAttribution({
         model: 'unknown-model-xyz',
         promptTokens: 1000,
         completionTokens: 500,
+      })).toEqual({ costUsd: 0, unknownModel: true })
+    })
+
+    it('preserves the legacy numeric result for an unknown model', () => {
+      const quietCalc = new CostCalculator(DEFAULT_PRICING, {
+        onUnknownModel: () => {},
       })
-      expect(cost).toBe(0)
+      expect(quietCalc.calculate({
+        model: 'unknown-model-xyz',
+        promptTokens: 1000,
+        completionTokens: 500,
+      })).toBe(0)
     })
 
     it.each([
@@ -156,6 +173,24 @@ describe('CostCalculator', () => {
       ]
 
       expect(calc.totalCost(entries)).toBe(10_000_000_000_000_002)
+    })
+
+    it('reports distinct unknown models without conflating them with a zero-cost total', () => {
+      const calc = new CostCalculator(
+        { free: { promptPerMillion: 0, completionPerMillion: 0 } },
+        { onUnknownModel: () => {} },
+      )
+
+      expect(calc.totalCostWithAttribution([
+        { model: 'free', promptTokens: 100, completionTokens: 50 },
+        { model: 'unknown-a', promptTokens: 100, completionTokens: 50 },
+        { model: 'unknown-a', promptTokens: 200, completionTokens: 100 },
+        { model: 'unknown-b', promptTokens: 100, completionTokens: 50 },
+      ])).toEqual({
+        costUsd: 0,
+        unknownModelCount: 2,
+        unknownModels: ['unknown-a', 'unknown-b'],
+      })
     })
 
     it('returns 0 for an empty list', () => {
