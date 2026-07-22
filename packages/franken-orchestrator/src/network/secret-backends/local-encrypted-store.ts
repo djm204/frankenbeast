@@ -10,6 +10,50 @@ const KEY_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
+const DANGEROUS_SECRET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+function createSecretsRecord(): Record<string, string> {
+  return Object.create(null) as Record<string, string>;
+}
+
+function assertSafeSecretKey(key: string): void {
+  if (DANGEROUS_SECRET_KEYS.has(key)) {
+    throw new Error(`Unsafe local secret key: ${JSON.stringify(key)}`);
+  }
+}
+
+function parseSecretsPayload(plaintext: string): Record<string, string> {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(plaintext) as unknown;
+  } catch (error) {
+    throw new Error('Corrupt or incompatible local secrets: decrypted payload is not valid JSON', {
+      cause: error,
+    });
+  }
+
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Corrupt or incompatible local secrets: expected a plain string-to-string object');
+  }
+
+  const prototype = Object.getPrototypeOf(payload) as unknown;
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error('Corrupt or incompatible local secrets: expected a plain string-to-string object');
+  }
+
+  const secrets = createSecretsRecord();
+  for (const [key, value] of Object.entries(payload)) {
+    if (DANGEROUS_SECRET_KEYS.has(key)) {
+      throw new Error(`Corrupt or incompatible local secrets: unsafe key ${JSON.stringify(key)}`);
+    }
+    if (typeof value !== 'string') {
+      throw new Error(`Corrupt or incompatible local secrets: value for ${JSON.stringify(key)} must be a string`);
+    }
+    secrets[key] = value;
+  }
+
+  return secrets;
+}
 
 interface SecretsMeta {
   salt: string; // hex
@@ -32,6 +76,7 @@ export class LocalEncryptedStore implements ISecretStore {
   }
 
   async store(key: string, value: string): Promise<void> {
+    assertSafeSecretKey(key);
     const secrets = await this.loadSecrets();
     secrets[key] = value;
     await this.saveSecrets(secrets);
@@ -105,7 +150,7 @@ export class LocalEncryptedStore implements ISecretStore {
       ciphertext = await readFile(this.encPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return {};
+        return createSecretsRecord();
       }
       throw error;
     }
@@ -118,7 +163,7 @@ export class LocalEncryptedStore implements ISecretStore {
     const decipher = createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
     const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-    return JSON.parse(decrypted.toString('utf-8')) as Record<string, string>;
+    return parseSecretsPayload(decrypted.toString('utf-8'));
   }
 
   private async saveSecrets(secrets: Record<string, string>): Promise<void> {
