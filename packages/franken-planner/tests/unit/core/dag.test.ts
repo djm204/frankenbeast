@@ -239,6 +239,26 @@ describe('PlanGraph — topoSort', () => {
     expect(sorted).toContainEqual(a);
     expect(sorted).toContainEqual(b);
   });
+
+  it('does not dequeue ready tasks with linear-time front removal', () => {
+    const tasks = Array.from({ length: 1_024 }, (_, index) => makeTask(`task-${index}`));
+    const originalShift = Array.prototype.shift;
+    let taskQueueShiftCalls = 0;
+    Array.prototype.shift = function <T>(this: T[]): T | undefined {
+      if (typeof this[0] === 'string' && this[0].startsWith('task-')) {
+        taskQueueShiftCalls += 1;
+      }
+      return originalShift.call(this) as T | undefined;
+    };
+
+    try {
+      PlanGraph.fromTasks(tasks).topoSort();
+    } finally {
+      Array.prototype.shift = originalShift;
+    }
+
+    expect(taskQueueShiftCalls).toBe(0);
+  });
 });
 
 // ─── Cycle Detection ─────────────────────────────────────────────────────────
