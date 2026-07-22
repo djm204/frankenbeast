@@ -27,9 +27,15 @@ interface SelectFieldProps {
   describedBy?: string | undefined;
 }
 
+const UNSET_OPTION_VALUE = '__frankenbeast_unset__';
+
 function SelectField({ label, value, placeholder, options, onValueChange, disabled, describedBy }: SelectFieldProps) {
   return (
-    <Select.Root value={value} onValueChange={onValueChange} disabled={disabled ?? false}>
+    <Select.Root
+      value={value}
+      onValueChange={(nextValue) => onValueChange(nextValue === UNSET_OPTION_VALUE ? '' : nextValue)}
+      disabled={disabled ?? false}
+    >
       <Select.Trigger
         aria-label={label}
         aria-describedby={describedBy}
@@ -45,6 +51,12 @@ function SelectField({ label, value, placeholder, options, onValueChange, disabl
           className="z-[90] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-beast-border bg-beast-panel text-beast-text shadow-xl"
         >
           <Select.Viewport className="p-1">
+            <Select.Item
+              value={UNSET_OPTION_VALUE}
+              className="relative flex cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none data-[highlighted]:bg-beast-accent-soft data-[highlighted]:text-beast-accent"
+            >
+              <Select.ItemText>{placeholder}</Select.ItemText>
+            </Select.Item>
             {options.map((option) => (
               <Select.Item
                 key={option.id}

@@ -55,6 +55,19 @@ describe('ProviderModelSelect', () => {
     expect(onChange).toHaveBeenCalledWith({ provider: 'anthropic', model: '' });
   });
 
+  it('allows selected provider and model overrides to be cleared', () => {
+    const onChange = vi.fn();
+    render(<ProviderModelSelect providers={providers} value={{ provider: 'anthropic', model: 'claude-sonnet-4-6' }} onChange={onChange} />);
+
+    fireEvent.click(screen.getByLabelText(/provider/i));
+    fireEvent.click(screen.getByRole('option', { name: 'Select provider...' }));
+    expect(onChange).toHaveBeenCalledWith({ provider: '', model: '' });
+
+    fireEvent.click(screen.getByLabelText(/model/i));
+    fireEvent.click(screen.getByRole('option', { name: 'Select model...' }));
+    expect(onChange).toHaveBeenCalledWith({ provider: 'anthropic', model: '' });
+  });
+
   it('shows "Use default" checkbox when showUseDefault is true', () => {
     const onUseDefaultChange = vi.fn();
     render(<ProviderModelSelect providers={providers} value={{ provider: '', model: '' }} onChange={vi.fn()} showUseDefault useDefault={true} onUseDefaultChange={onUseDefaultChange} />);
