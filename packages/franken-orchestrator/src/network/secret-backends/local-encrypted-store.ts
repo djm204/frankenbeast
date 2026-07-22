@@ -1,6 +1,6 @@
 import { randomBytes, createCipheriv, createDecipheriv, pbkdf2Sync } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, mkdir, open, readFile, readlink, realpath, rename, rm, stat } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { ISecretStore, SecretStoreDetection, SecretStoreOptions } from '../secret-store.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -11,9 +11,78 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const SALT_LENGTH = 32;
 const DANGEROUS_SECRET_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const UNSUPPORTED_DIRECTORY_SYNC_CODES = new Set(['EBADF', 'EISDIR', 'EINVAL', 'ENOSYS', 'ENOTSUP']);
 
 function createSecretsRecord(): Record<string, string> {
   return Object.create(null) as Record<string, string>;
+}
+
+async function resolveAtomicTarget(filePath: string): Promise<string> {
+  try {
+    return await realpath(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  try {
+    if (!(await lstat(filePath)).isSymbolicLink()) {
+      return filePath;
+    }
+    const linkTarget = await readlink(filePath);
+    return resolveAtomicTarget(resolve(dirname(filePath), linkTarget));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return filePath;
+    }
+    throw error;
+  }
+}
+
+async function writeFileAtomic(filePath: string, data: string | Buffer): Promise<void> {
+  const targetPath = await resolveAtomicTarget(filePath);
+  let mode = 0o600;
+  try {
+    mode = (await stat(targetPath)).mode & 0o777;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  const tempPath = join(
+    dirname(targetPath),
+    `.${basename(targetPath)}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`,
+  );
+  let tempFile: Awaited<ReturnType<typeof open>> | undefined;
+
+  try {
+    tempFile = await open(tempPath, 'wx', mode);
+    await tempFile.chmod(mode);
+    await tempFile.writeFile(data);
+    await tempFile.sync();
+    await tempFile.close();
+    tempFile = undefined;
+    await rename(tempPath, targetPath);
+
+    let parentDir: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      parentDir = await open(dirname(targetPath), 'r');
+      await parentDir.sync();
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!code || !UNSUPPORTED_DIRECTORY_SYNC_CODES.has(code)) {
+        throw error;
+      }
+    } finally {
+      await parentDir?.close().catch(() => undefined);
+    }
+  } catch (error) {
+    await tempFile?.close().catch(() => undefined);
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 function assertSafeSecretKey(key: string): void {
@@ -128,7 +197,7 @@ export class LocalEncryptedStore implements ISecretStore {
         const salt = randomBytes(SALT_LENGTH).toString('hex');
         meta = { salt, version: 1 };
         await this.ensureDir();
-        await writeFile(this.metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf-8');
+        await writeFileAtomic(this.metaPath, JSON.stringify(meta, null, 2) + '\n');
       } else {
         throw error;
       }
@@ -175,6 +244,6 @@ export class LocalEncryptedStore implements ISecretStore {
     const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
     const authTag = cipher.getAuthTag();
     const combined = Buffer.concat([iv, authTag, encrypted]);
-    await writeFile(this.encPath, combined);
+    await writeFileAtomic(this.encPath, combined);
   }
 }
