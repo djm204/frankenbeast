@@ -124,6 +124,11 @@ describe('Skill API routes', () => {
             provider: 'claude-cli',
             installConfig: { command: 'npx', args: ['-y', '@mcp/linear'] },
             authFields: [],
+            toolDefinitions: [{
+              name: 'linear.search',
+              description: 'Search Linear issues',
+              inputSchema: { type: 'object' },
+            }],
           },
         }),
       });
