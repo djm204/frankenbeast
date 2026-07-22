@@ -56,6 +56,10 @@ describe('redactOTELPayloadSecrets', () => {
     const truncatedHeaderSecret = ['truncated', 'header', 'credential'].join('-')
     const singleTupleSecret = ['single', 'tuple', 'credential'].join('-')
     const singleFieldSecret = ['single', 'field', 'credential'].join('-')
+    const queryApiKeySecret = ['query', 'api', 'credential'].join('-')
+    const queryTokenSecret = ['query', 'token', 'credential'].join('-')
+    const pgPasswordSecret = ['pg', 'password', 'credential'].join('-')
+    const clientSecret = ['client', 'secret', 'credential'].join('-')
     const aliasSecrets = ['sshKey', 'signing_key', 'gpg_key', 'PAT', 'webhookUrl']
       .map(key => [key, `${key}-credential`] as const)
     const geminiSecret = `AIza${'e'.repeat(35)}`
@@ -109,6 +113,11 @@ describe('redactOTELPayloadSecrets', () => {
       `[['x-api-key','${singleTupleSecret}']]`,
       `{'password': '${singleFieldSecret}'}`,
       'tool:execute tokens=504',
+      'usage={"input_tokens":30,"output_tokens":8}',
+      `url=https://example.test/cb?api_key=${queryApiKeySecret}&safe=value`,
+      `https://example.test/cb?safe=value&token=${queryTokenSecret}`,
+      `PGPASSWORD=${pgPasswordSecret}`,
+      `clientsecret=${clientSecret}`,
       'safe diagnostic value',
     )
     input.resourceSpans[0]!.resource.attributes.push({
@@ -166,12 +175,18 @@ describe('redactOTELPayloadSecrets', () => {
       truncatedHeaderSecret,
       singleTupleSecret,
       singleFieldSecret,
+      queryApiKeySecret,
+      queryTokenSecret,
+      pgPasswordSecret,
+      clientSecret,
     ]) {
       expect(output).not.toContain(secret)
     }
     expect(output).toContain('[REDACTED]')
     expect(output).toContain('safe diagnostic value')
     expect(output).toContain('tool:execute tokens=504')
+    expect(output).toContain('\\"input_tokens\\":30')
+    expect(output).toContain('\\"output_tokens\\":8')
 
     for (const key of ['promptTokens', 'inputTokens', 'outputTokens', 'cached_tokens']) {
       input.resourceSpans[0]!.resource.attributes.push({ key, value: { intValue: 42 } })
