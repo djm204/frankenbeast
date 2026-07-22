@@ -6,6 +6,12 @@
 ## 2026-07-21 — Dashboard chat model precedence
 - For conversational dashboard replies, the selected provider's `providers.overrides.<provider>.model` wins over `chat.model`; `chat.model` only replaces the provider's built-in chat model when no selected-provider model override exists. Dashboard `/run` uses a separate execution adapter that ignores both model settings and provider `extraArgs`, although it does apply trusted command overrides. Trace both adapter construction paths and runtime provider override resolution before documenting dashboard behavior.
 
+## 2026-07-20 — Episodic JSON quarantine reads
+- When an optional persisted JSON payload is corrupt, preserve the valid row envelope and replace only that payload with explicit quarantine metadata; thread the row id into read-audit diagnostics across every query path, including nested empty-query and encrypted scans, so operators can repair the exact record without losing timeline evidence.
+- Treat quarantine metadata as diagnostics, not domain content: exclude it from encrypted recall scoring, let consumers that count meaningful failure windows backfill past quarantined rows, and preserve protected retention classification only in the retention path rather than weakening strict audit validation globally.
+- Any consumer whose authorization scope lives inside the quarantined payload must fail closed for every read scope, including privileged `all`; otherwise corrupt private rows are silently reclassified as shared. Plaintext SQL recall must also re-check quarantined rows against their surviving summary so a keyword that exists only in corrupt details cannot produce a false match.
+- Snapshot replay should recognize quarantined right-to-forget audit envelopes from their fixed summary plus strict quarantine shape before applying deletion-guard assertions; keep that exception narrow so ordinary quarantined events cannot bypass replay guards.
+
 ## 2026-07-20 — Outbound request deadlines must include response consumption
 - JavaScript `fetch()` resolves when response headers arrive, not when the body has been consumed. A hard outbound-delivery deadline must wrap both the fetch and all body/error parsing under the same abort signal and timer; otherwise a provider can send headers and stall forever during `json()` or `text()`.
 - In fresh monorepo worktrees, run the root build before package-local TypeScript checks so internal workspace declaration outputs exist and unrelated module-resolution errors do not mask the feature result.
@@ -480,3 +486,6 @@
 
 ## 2026-07-20 — Terminal input ownership
 - Interactive CLI processes must have one long-lived stdin/readline owner. Inject that owner's question and cancellation functions into approval/governance channels rather than creating a second readline interface; create the owner lazily so startup work cannot consume early keystrokes, and abort expired questions without closing the shared interface. Preserve the existing non-TTY fail-closed path and verify chat-to-approval input routing with a real scripted PTY.
+
+## 2026-07-21 — Quarantine-envelope import hardening
+- Treat synthetic quarantine metadata as a strict, exact envelope at trust boundaries: validate the outer and inner key sets plus field, reason, and matching event ID before granting audit exemptions. Report both newly detected malformed rows and already-serialized quarantine envelopes through read audit diagnostics so handoff/import does not erase repair visibility.
