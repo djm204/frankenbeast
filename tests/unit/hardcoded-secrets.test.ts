@@ -3071,6 +3071,147 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/env-prebound-spawn.mjs:5');
   });
 
+  it('does not mistake nested mock aliases, handles, or documentation for child_process calls', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const cases: Record<string, string[]> = {
+      'destructured-parameter.mjs': [
+        "import * as cp from 'node:child_process';",
+        'function useMock({ cp }) {',
+        "  const child = cp.spawn('crontab', ['-']);",
+        '  const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        '  child.stdin.end(entry);',
+        '}',
+      ],
+      'local-spawn-alias.mjs': [
+        "import { spawn as launch } from 'node:child_process';",
+        'function useMock() {',
+        '  const mock = { spawn: () => ({ stdin: { end() {} } }) };',
+        '  const launch = mock.spawn;',
+        "  const child = launch('crontab', ['-']);",
+        '  const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        '  child.stdin.end(entry);',
+        '}',
+      ],
+      'shadowed-handle.mjs': [
+        "import * as cp from 'node:child_process';",
+        "const child = cp.spawn('crontab', ['-']);",
+        'function useMock(child) {',
+        '  const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        '  child.stdin.end(entry);',
+        '}',
+        'void child;',
+      ],
+      'documented-spawn.mjs': [
+        "import * as cp from 'node:child_process';",
+        "/* const child = cp.spawn('crontab', ['-']); */",
+        'const child = { stdin: { end() {} } };',
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'function-shadow.mjs': [
+        "import * as cp from 'node:child_process';",
+        'function useMock() {',
+        '  function cp() {}',
+        '  cp.spawn = () => ({ stdin: { end() {} } });',
+        "  const child = cp.spawn('crontab', ['-']);",
+        '  const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        '  child.stdin.end(entry);',
+        '}',
+      ],
+    };
+    for (const [name, source] of Object.entries(cases)) {
+      writeFileSync(join(scriptDir, name), source.join('\n'), 'utf8');
+    }
+
+    const result = runScanner(root);
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it('rejects multiline, wrapped, parenthesized, and indirect child_process spawn variants', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    const cases: Record<string, string[]> = {
+      'env-options.mjs': [
+        "import * as cp from 'node:child_process';",
+        "const launch = cp.spawn.bind(cp, 'env', ['FOO=bar', 'crontab', '-']);",
+        'const child = launch();',
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'multiline-bind.mjs': [
+        "import * as cp from 'node:child_process';",
+        'const launch = cp.spawn.bind(',
+        '  cp,',
+        "  'crontab',",
+        "  ['-'],",
+        ');',
+        'const child = launch();',
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'multiline-destructure.mjs': [
+        'const {',
+        '  spawn: launch,',
+        "} = await import('node:child_process');",
+        "const child = launch('crontab', ['-']);",
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'parenthesized-spawn.mjs': [
+        "import * as cp from 'node:child_process';",
+        "const child = (cp).spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'parenthesized-method-alias.mjs': [
+        "import * as cp from 'node:child_process';",
+        'const launch = (cp.spawn);',
+        "const child = launch('crontab', ['-']);",
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'call-spawn.mjs': [
+        "import * as cp from 'node:child_process';",
+        "const child = cp.spawn.call(cp, 'crontab', ['-']);",
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+      'apply-spawn.mjs': [
+        "import * as cp from 'node:child_process';",
+        "const child = cp.spawn.apply(cp, ['crontab', ['-']]);",
+        'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+        'child.stdin.end(entry);',
+      ],
+    };
+    for (const [name, source] of Object.entries(cases)) {
+      writeFileSync(join(scriptDir, name), source.join('\n'), 'utf8');
+    }
+
+    const result = runScanner(root);
+    expect(result.status).toBe(1);
+    for (const name of Object.keys(cases)) expect(result.stderr).toContain(`scripts/${name}`);
+  });
+
+  it('keeps loop-header spawn shadows inside their loop body', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, 'loop-shadow.mjs'), [
+      "import { spawn as launch } from 'node:child_process';",
+      'for (const launch of []) { void launch; }',
+      "const child = launch('crontab', ['-']);",
+      'const entry = `${process.argv[2]} ${process.env.GITHUB_TOKEN}`;',
+      'child.stdin.end(entry);',
+    ].join('\n'), 'utf8');
+
+    const result = runScanner(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/loop-shadow.mjs:5');
+  });
+
   it('rejects Codex round 28 cron scanner bypasses', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
