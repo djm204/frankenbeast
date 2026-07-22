@@ -57,8 +57,8 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
     }
 
     try {
-      const body = await c.req.text();
-      const message = Buffer.from(timestamp + body);
+      const body = Buffer.from(await c.req.arrayBuffer());
+      const message = Buffer.concat([Buffer.from(timestamp), body]);
       const signatureBuffer = Buffer.from(signature, 'hex');
 
       const isValid = verify(null, message, keyObject, signatureBuffer);

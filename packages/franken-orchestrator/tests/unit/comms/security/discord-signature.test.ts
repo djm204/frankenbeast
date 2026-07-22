@@ -40,6 +40,34 @@ describe('discordSignatureMiddleware', () => {
     expect(res.status).toBe(200);
   });
 
+  it('verifies signatures against the exact UTF-8 request bytes', async () => {
+    const keys = generateKeyPairSync('ed25519');
+    const rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
+
+    const localApp = new Hono();
+    localApp.use('/discord/*', discordSignatureMiddleware({ publicKey: rawPublicKey }));
+    localApp.post('/discord/interactions', (c) => c.json({ ok: true }));
+
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const body = Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(JSON.stringify({ content: 'Hello, 世界 👋' }), 'utf8'),
+    ]);
+    const signature = sign(null, Buffer.concat([Buffer.from(timestamp), body]), keys.privateKey).toString('hex');
+
+    const res = await localApp.request('/discord/interactions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Signature-Ed25519': signature,
+        'X-Signature-Timestamp': timestamp,
+      },
+      body,
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it('rejects requests with a stale (expired) timestamp', async () => {
     const keys = generateKeyPairSync('ed25519');
     const rawPublicKey = keys.publicKey.export({ type: 'spki', format: 'der' }).slice(-32).toString('hex');
