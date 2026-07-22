@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { getWorkspacePackageDirNames } from "./helpers/workspaces.js";
+import {
+  getWorkspacePackageDirNames,
+  getWorkspacePackageManifestPaths,
+} from "./helpers/workspaces.js";
+import { findRemovedWorkspaceReferences } from "./helpers/removed-workspace-wiring.js";
 import { validateVerificationTaskWiring } from "./helpers/verification-task-wiring.js";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -11,6 +15,63 @@ const exec = (command: string, args: string[]) =>
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 const ALL_PACKAGES = getWorkspacePackageDirNames();
+const REMOVED_WORKSPACES = [
+  {
+    dir: "frankenfirewall",
+    references: [
+      "frankenfirewall",
+      "@franken/firewall",
+      "@frankenbeast/firewall",
+    ],
+  },
+  {
+    dir: "franken-skills",
+    references: ["franken-skills", "@franken/skills", "@frankenbeast/skills"],
+  },
+  {
+    dir: "franken-heartbeat",
+    references: ["franken-heartbeat", "@frankenbeast/heartbeat"],
+  },
+  {
+    dir: "franken-mcp",
+    references: ["franken-mcp", "@franken/mcp", "@frankenbeast/mcp"],
+  },
+  {
+    dir: "franken-comms",
+    references: ["franken-comms", "@frankenbeast/comms"],
+  },
+] as const;
+const REMOVED_WORKSPACE_REFERENCES = REMOVED_WORKSPACES.flatMap(
+  ({ references }) => references,
+);
+
+const isWorkspaceWiringFile = (fileName: string): boolean =>
+  fileName === "package.json" ||
+  fileName === "package-lock.json" ||
+  fileName === "turbo.json" ||
+  fileName === "release-please-config.json" ||
+  fileName === ".release-please-manifest.json" ||
+  /^tsconfig(?:\.[^.]+)?\.json$/u.test(fileName) ||
+  /^vitest(?:\.[^.]+)*\.config(?:\.[^.]+)*\.ts$/u.test(fileName);
+
+const getActiveWorkspaceWiringPaths = (): string[] => {
+  const paths = readdirSync(ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && isWorkspaceWiringFile(entry.name))
+    .map((entry) => entry.name);
+
+  for (const manifestPath of getWorkspacePackageManifestPaths()) {
+    const packageDir = manifestPath.slice(0, -"/package.json".length);
+    for (const entry of readdirSync(resolve(ROOT, packageDir), {
+      withFileTypes: true,
+    })) {
+      if (entry.isFile() && isWorkspaceWiringFile(entry.name)) {
+        paths.push(`${packageDir}/${entry.name}`);
+      }
+    }
+  }
+
+  return [...new Set(paths)].sort();
+};
 
 type NpmLsResult = {
   status: number | null;
@@ -180,6 +241,29 @@ describe("Chunk 10: full verification pass", () => {
         expect(existsSync(resolve(ROOT, dir))).toBe(false);
       });
     }
+  });
+
+  describe("removed workspace consolidation", () => {
+    for (const { dir } of REMOVED_WORKSPACES) {
+      it(`${dir}/ should not exist at root or under packages/`, () => {
+        expect(existsSync(resolve(ROOT, dir))).toBe(false);
+        expect(existsSync(resolve(ROOT, "packages", dir))).toBe(false);
+      });
+    }
+
+    it("has no removed package names in active workspace wiring", () => {
+      const wiringFiles = getActiveWorkspaceWiringPaths().map((path) => ({
+        path,
+        content: readFileSync(resolve(ROOT, path), "utf8"),
+      }));
+
+      expect(
+        findRemovedWorkspaceReferences(
+          wiringFiles,
+          REMOVED_WORKSPACE_REFERENCES,
+        ),
+      ).toEqual([]);
+    });
   });
 
   describe("no .git dirs inside packages", () => {
