@@ -15,7 +15,11 @@
 - [x] Commit and publish the round-16 remediation through approval-cop.
 - [x] Fix the four fresh round-17 Codex findings and the deterministic zombie-test newline bug from exact-head CI.
 - [x] Verify and commit round-17 remediation.
-- [ ] Publish the round-17 commit through approval-cop.
-- [ ] Route all addressed Codex replies/resolutions and a fresh review trigger through approval-cop.
+- [x] Publish the round-17 commit through approval-cop.
+- [x] Route all addressed Codex replies/resolutions and a fresh review trigger through approval-cop.
+- [x] Add regressions and fix all nine fresh round-18 Codex findings.
+- [x] Verify and commit the round-18 remediation.
+- [ ] Publish the round-18 remediation through approval-cop.
+- [ ] Route round-18 Codex replies/resolutions and a fresh review trigger through approval-cop.
 - [ ] Confirm exact-head CI green, current-head Codex clean, zero unresolved Codex threads, and clean mergeability.
 - [ ] Route the head-bound merge through approval-cop and verify the PR is live `MERGED`.
