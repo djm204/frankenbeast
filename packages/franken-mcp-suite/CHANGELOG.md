@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.9.0...franken-mcp-suite-v0.9.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **brain:** quarantine corrupt episodic details ([#3471](https://github.com/djm204/frankenbeast/issues/3471)) ([0ce3a2a](https://github.com/djm204/frankenbeast/commit/0ce3a2a6830f826efb6b08fbe6eaaadd771bf25a))
+* **deps:** override vulnerable Hono server ([#3515](https://github.com/djm204/frankenbeast/issues/3515)) ([302f6b2](https://github.com/djm204/frankenbeast/commit/302f6b2863feb2d85b0132d5538104cae1111698))
+* **mcp-suite:** accept 16-hex legacy audit hashes ([#3560](https://github.com/djm204/frankenbeast/issues/3560)) ([d0fbd25](https://github.com/djm204/frankenbeast/commit/d0fbd25d610273d32ef5dcf678a7f1843d2e016f))
+* **mcp-suite:** reject malformed observer metadata ([#3556](https://github.com/djm204/frankenbeast/issues/3556)) ([6ca1c0c](https://github.com/djm204/frankenbeast/commit/6ca1c0cd0fc27bfef182eab952cb2f80c2092287))
+* **mcp:** redact prefixed env credential keys ([#3564](https://github.com/djm204/frankenbeast/issues/3564)) ([1f2b38c](https://github.com/djm204/frankenbeast/commit/1f2b38c84fa917a8346c045ba5efcfbb19504746))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+    * @franken/brain bumped from 0.16.0 to 0.16.1
+    * @franken/critique bumped from 0.10.1 to 0.10.2
+    * @franken/governor bumped from 0.8.1 to 0.8.2
+    * @franken/observer bumped from 0.11.2 to 0.11.3
+    * @franken/orchestrator bumped from 0.56.0 to 0.57.0
+    * @franken/planner bumped from 0.4.23 to 0.4.24
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.8.1...franken-mcp-suite-v0.9.0) (2026-07-22)
 
 

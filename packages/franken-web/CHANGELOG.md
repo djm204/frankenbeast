@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.8.0...franken-web-v0.9.0) (2026-07-22)
+
+
+### Features
+
+* **web:** adopt Radix provider selectors ([#3520](https://github.com/djm204/frankenbeast/issues/3520)) ([217a031](https://github.com/djm204/frankenbeast/commit/217a031ae09d36cd7968d3b7853a10d9e03855aa))
+* **web:** centralize wizard dirty tracking ([#3527](https://github.com/djm204/frankenbeast/issues/3527)) ([cbacaae](https://github.com/djm204/frankenbeast/commit/cbacaae091e4cd68b0b21ec3201c472aa33ba8d4))
+
+
+### Bug Fixes
+
+* **web:** align dashboard approval requirement type ([#3538](https://github.com/djm204/frankenbeast/issues/3538)) ([e29d93b](https://github.com/djm204/frankenbeast/commit/e29d93b8a55d8f56a850261f0a40c777fdf27464))
+* **web:** announce runtime activity updates ([#3553](https://github.com/djm204/frankenbeast/issues/3553)) ([c5224b3](https://github.com/djm204/frankenbeast/commit/c5224b398844537220bad53cdcc688fa6d1806cb))
+* **web:** disable composer input with dispatch ([#3561](https://github.com/djm204/frankenbeast/issues/3561)) ([a844c8f](https://github.com/djm204/frankenbeast/commit/a844c8f2c7ae74fc2c4d0f27bca10d5281fc6ac2))
+* **web:** preserve shared agent DTO exports ([#3539](https://github.com/djm204/frankenbeast/issues/3539)) ([a9f8604](https://github.com/djm204/frankenbeast/commit/a9f860452626566f8671274ea485c2418444e4c3))
+
+
+### Tests
+
+* **web:** cover chat client auth plumbing ([#3530](https://github.com/djm204/frankenbeast/issues/3530)) ([88fa3df](https://github.com/djm204/frankenbeast/commit/88fa3dfc1543d772cb004c13303606f8820cf625))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.7.1...franken-web-v0.8.0) (2026-07-22)
 
 

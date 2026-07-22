@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.3](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.2...live-bench-v0.4.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **live-bench:** bound run timestamp years ([#3572](https://github.com/djm204/frankenbeast/issues/3572)) ([134de09](https://github.com/djm204/frankenbeast/commit/134de09389221d1475289b5e42d776e16dfc9e19))
+* **live-bench:** reject extra list arguments ([#3557](https://github.com/djm204/frankenbeast/issues/3557)) ([fb9955a](https://github.com/djm204/frankenbeast/commit/fb9955a9ce33e901169e4347647a82f2bcf4902c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.11.2 to 0.11.3
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.4.2](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.1...live-bench-v0.4.2) (2026-07-22)
 
 

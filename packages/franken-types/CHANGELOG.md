@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.15.0...franken-types-v0.16.0) (2026-07-22)
+
+
+### Features
+
+* **cli:** box the chat input, purple/green theme, real usage stats + provider self-awareness ([#3505](https://github.com/djm204/frankenbeast/issues/3505)) ([32d11ff](https://github.com/djm204/frankenbeast/commit/32d11ff9bc8a263c4083e75d0961c35a8c691bd0))
+
+
+### Bug Fixes
+
+* **brain:** bound checkpoint listings ([#3592](https://github.com/djm204/frankenbeast/issues/3592)) ([5d60114](https://github.com/djm204/frankenbeast/commit/5d60114f652ecf380f0ba61d47467475e2624ef2))
+* **brain:** expose episodic snapshot truncation ([#3575](https://github.com/djm204/frankenbeast/issues/3575)) ([97bcc6c](https://github.com/djm204/frankenbeast/commit/97bcc6c0f3ecfdc586efbe06ad1a0360461227b0))
+
 ## [0.15.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.14.1...franken-types-v0.15.0) (2026-07-22)
 
 

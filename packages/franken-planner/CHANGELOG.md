@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.24](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.23...@franken/planner-v0.4.24) (2026-07-22)
+
+
+### Bug Fixes
+
+* **planner:** advance versions on graph mutations ([#3544](https://github.com/djm204/frankenbeast/issues/3544)) ([bacaf2a](https://github.com/djm204/frankenbeast/commit/bacaf2aabf7b17d849a7d7353d7a2700de962366))
+* **planner:** preserve task dependencies in addTask ([#3545](https://github.com/djm204/frankenbeast/issues/3545)) ([5a83c9f](https://github.com/djm204/frankenbeast/commit/5a83c9f22edac21bd533ff25a33d3db9094a2cd5))
+
+
+### Performance
+
+* **planner:** make topo sort queue linear ([#3585](https://github.com/djm204/frankenbeast/issues/3585)) ([b297496](https://github.com/djm204/frankenbeast/commit/b297496da62a204bc479eedc6faf7b167d01f14a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.15.0 to 0.16.0
+
 ## [0.4.23](https://github.com/djm204/frankenbeast/compare/@franken/planner-v0.4.22...@franken/planner-v0.4.23) (2026-07-22)
 
 

@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.57.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.56.0...@franken/orchestrator-v0.57.0) (2026-07-22)
+
+
+### Features
+
+* **cli:** add slash command tab completion ([#3542](https://github.com/djm204/frankenbeast/issues/3542)) ([04b77fa](https://github.com/djm204/frankenbeast/commit/04b77fafe02e82f0d1167f2ea9b4f2b92d4a37c1))
+* **cli:** box the chat input, purple/green theme, real usage stats + provider self-awareness ([#3505](https://github.com/djm204/frankenbeast/issues/3505)) ([32d11ff](https://github.com/djm204/frankenbeast/commit/32d11ff9bc8a263c4083e75d0961c35a8c691bd0))
+* **orchestrator:** bound tracked-agent creation payloads ([#3214](https://github.com/djm204/frankenbeast/issues/3214)) ([#3462](https://github.com/djm204/frankenbeast/issues/3462)) ([1bb0115](https://github.com/djm204/frankenbeast/commit/1bb0115de77fd7b4173a61ea9bd96e0edc2aef58))
+
+
+### Bug Fixes
+
+* **brain:** expose episodic snapshot truncation ([#3575](https://github.com/djm204/frankenbeast/issues/3575)) ([97bcc6c](https://github.com/djm204/frankenbeast/commit/97bcc6c0f3ecfdc586efbe06ad1a0360461227b0))
+* **cli:** preserve fatal error stack traces ([#3535](https://github.com/djm204/frankenbeast/issues/3535)) ([4e398b5](https://github.com/djm204/frankenbeast/commit/4e398b5db316827e8609a6bd9cdfdfcac046ad49))
+* **orchestrator:** bound stream JSON text extraction ([#3574](https://github.com/djm204/frankenbeast/issues/3574)) ([e952b65](https://github.com/djm204/frankenbeast/commit/e952b65aac34461468352bd2e477fbf3c261618b))
+* **orchestrator:** clarify functional heartbeat wiring ([#3526](https://github.com/djm204/frankenbeast/issues/3526)) ([5a096ac](https://github.com/djm204/frankenbeast/commit/5a096ac3ac291c9c99ae8efc15fc5e226a6325df))
+* **orchestrator:** close session readline interface ([#3547](https://github.com/djm204/frankenbeast/issues/3547)) ([abae4d6](https://github.com/djm204/frankenbeast/commit/abae4d640d5bcaa77e339319e4175f70f06a04f9))
+* **orchestrator:** guard Gemini prompt file writes ([#3567](https://github.com/djm204/frankenbeast/issues/3567)) ([b1ba811](https://github.com/djm204/frankenbeast/commit/b1ba811771702d81f0d28fdf233230305f64a51d))
+* **orchestrator:** make chat session writes durable ([#3550](https://github.com/djm204/frankenbeast/issues/3550)) ([59bdf54](https://github.com/djm204/frankenbeast/commit/59bdf5483bfcd84d53cdcc31659a84925223adda))
+* **orchestrator:** propagate governor approval tokens ([#3555](https://github.com/djm204/frankenbeast/issues/3555)) ([c293778](https://github.com/djm204/frankenbeast/commit/c293778138a820432cd0d81e5c153f5b033afa18))
+* **orchestrator:** validate provider session records ([#3554](https://github.com/djm204/frankenbeast/issues/3554)) ([7a3c7b8](https://github.com/djm204/frankenbeast/commit/7a3c7b8460a850d50dc43d41519a9e778a21093d))
+* **orchestrator:** verify webhook signatures over raw bytes ([#3548](https://github.com/djm204/frankenbeast/issues/3548)) ([e87c03b](https://github.com/djm204/frankenbeast/commit/e87c03b61eaba5ffb2a618862432ccc2dcf2cc3a))
+
+
+### Tests
+
+* **orchestrator:** make process stop assertions deterministic ([#3581](https://github.com/djm204/frankenbeast/issues/3581)) ([6c0cb93](https://github.com/djm204/frankenbeast/commit/6c0cb93fcb2faaa41ab4e106cf52b5f4ee77de62)), closes [#3576](https://github.com/djm204/frankenbeast/issues/3576)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.10.1 to 0.10.2
+    * @franken/governor bumped from 0.8.1 to 0.8.2
+    * @franken/types bumped from 0.15.0 to 0.16.0
+    * @franken/observer bumped from 0.11.2 to 0.11.3
+    * @franken/planner bumped from 0.4.23 to 0.4.24
+    * @franken/brain bumped from 0.16.0 to 0.16.1
+
 ## [0.56.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.55.1...@franken/orchestrator-v0.56.0) (2026-07-22)
 
 
