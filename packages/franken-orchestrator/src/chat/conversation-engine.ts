@@ -50,9 +50,9 @@ const SWITCH_REASON_TEXT: Record<string, string> = {
 };
 
 /**
- * Builds a short runtime-status note describing which provider/model is
- * actually serving this turn, for injection into the prompt. Exported for
- * direct unit testing of the wording.
+ * Builds a short runtime-status note describing which provider/model served
+ * the most recently completed turn, for injection into the next prompt.
+ * Exported for direct unit testing of the wording.
  */
 export function formatProviderTransparencyNote(ctx: ProviderContext): string {
   // The CLI provider frequently doesn't expose an underlying model/version
@@ -62,12 +62,12 @@ export function formatProviderTransparencyNote(ctx: ProviderContext): string {
   const modelFact = ctx.model
     ? `The specific underlying model is "${ctx.model}".`
     : 'The specific underlying model/version is not exposed to this session — do not name one.';
-  const base = `Runtime status: this turn is being served by the "${ctx.provider}" CLI provider. ${modelFact}`;
+  const base = `Runtime status from the most recently completed turn: it was served by the "${ctx.provider}" CLI provider. ${modelFact}`;
   if (!ctx.switchedFrom) {
-    return `${base} If asked what model/provider you're running on, answer using only these facts — never state a specific model name or version beyond what's given here, and never answer from your own training-time self-description.`;
+    return `${base} If asked what model/provider served the prior turn, answer using only these facts — do not present this historical status as the provider for the current request, never state a specific model name or version beyond what's given here, and never answer from your own training-time self-description.`;
   }
   const reasonText = (ctx.switchReason && SWITCH_REASON_TEXT[ctx.switchReason]) ?? 'was unavailable';
-  return `${base} This is an automatic fallback: the configured provider "${ctx.switchedFrom}" ${reasonText}, so the request was retried against "${ctx.provider}". If asked what model/provider you're running on, or whether this is a fallback, answer truthfully using these facts — do not deny the fallback, and never state a specific model name or version beyond what's given here or from your own training-time self-description.`;
+  return `${base} That completed turn used an automatic fallback: the configured provider "${ctx.switchedFrom}" ${reasonText}, so that request was retried against "${ctx.provider}". If asked what model/provider served the prior turn, or whether it used a fallback, answer truthfully using these facts — do not present this historical status as the provider for the current request, and never state a specific model name or version beyond what's given here or from your own training-time self-description.`;
 }
 
 type ContinuationAwareLlmClient = ILlmClient & {

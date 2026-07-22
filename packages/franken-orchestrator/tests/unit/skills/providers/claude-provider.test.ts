@@ -200,6 +200,7 @@ describe('ClaudeProvider', () => {
 
   it('defaults chatModel to the flagship tier, not a cheap/fast one', () => {
     expect(provider.chatModel).toBe('claude-opus-4-8');
+    expect(provider.defaultContextWindowTokens()).toBe(1_000_000);
   });
 
   it('extractModel reports the model the CLI actually reported', () => {

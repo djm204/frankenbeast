@@ -238,6 +238,11 @@ describe('extractNdjsonTokenUsage', () => {
     expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 100, outputTokens: 25, totalTokens: 125 });
   });
 
+  it('extracts Claude result totals reported directly on the top-level frame', () => {
+    const raw = '{"type":"result","result":"done","total_input_tokens":100,"total_output_tokens":25}';
+    expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 100, outputTokens: 25, totalTokens: 125 });
+  });
+
   it('extracts usage nested under a message field (Claude message_delta shape)', () => {
     const raw = '{"type":"message_delta","message":{"usage":{"input_tokens":40,"output_tokens":10}}}';
     expect(extractNdjsonTokenUsage(raw)).toEqual({ inputTokens: 40, outputTokens: 10, totalTokens: 50 });

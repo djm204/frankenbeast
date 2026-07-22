@@ -119,7 +119,7 @@ describe('ConversationEngine', () => {
     });
 
     expect(llm.complete).toHaveBeenCalledWith(
-      expect.stringContaining('Runtime status: this turn is being served by the "codex" CLI provider.'),
+      expect.stringContaining('Runtime status from the most recently completed turn: it was served by the "codex" CLI provider.'),
       expect.anything(),
     );
     expect(llm.complete).toHaveBeenCalledWith(
@@ -164,10 +164,11 @@ describe('ConversationEngine', () => {
     });
 
     const [prompt] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(prompt).toContain('This is an automatic fallback');
+    expect(prompt).toContain('That completed turn used an automatic fallback');
     expect(prompt).toContain('the configured provider "codex" was rate-limited');
     expect(prompt).toContain('retried against "claude"');
     expect(prompt).toContain('answer truthfully using these facts');
+    expect(prompt).toContain('do not present this historical status as the provider for the current request');
   });
 });
 

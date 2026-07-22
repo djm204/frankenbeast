@@ -14,8 +14,8 @@ export const BASE_RATE_LIMIT_PATTERNS =
 // Alias lists mirror what the streaming provider adapters (providers/*.ts)
 // already accept from Claude Code CLI / Codex CLI / Gemini CLI stream-json
 // output, so a single parser covers all three without per-provider drift.
-const INPUT_TOKEN_KEYS = ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokenCount', 'totalInputTokens'];
-const OUTPUT_TOKEN_KEYS = ['output_tokens', 'outputTokens', 'completion_tokens', 'candidatesTokenCount', 'totalOutputTokens'];
+const INPUT_TOKEN_KEYS = ['input_tokens', 'inputTokens', 'prompt_tokens', 'promptTokenCount', 'total_input_tokens', 'totalInputTokens'];
+const OUTPUT_TOKEN_KEYS = ['output_tokens', 'outputTokens', 'completion_tokens', 'candidatesTokenCount', 'total_output_tokens', 'totalOutputTokens'];
 
 function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
   for (const key of keys) {
@@ -55,6 +55,7 @@ export function extractNdjsonTokenUsage(raw: string): TokenUsage | undefined {
 
     const message = obj['message'] as Record<string, unknown> | undefined;
     const candidates: unknown[] = [
+      obj,
       obj['usage'],
       obj['stats'],
       obj['usageMetadata'],

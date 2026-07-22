@@ -921,6 +921,37 @@ describe('CliLlmAdapter', () => {
         }));
       });
 
+      it('resets fallback provenance when a new retry cycle begins', async () => {
+        const sleepFn = vi.fn(async () => {});
+        const unavailable = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
+        const { spawnFn } = createQueuedSpawn([
+          { error: unavailable },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stderr: 'rate limit exceeded', exitCode: 1 },
+          { stdout: 'claude success', exitCode: 0 },
+        ]);
+        const adapter = new CliLlmAdapter(
+          codexProvider,
+          {
+            ...baseOpts,
+            providers: ['codex', 'claude'],
+            maxRateLimitRetries: 1,
+            _sleepFn: sleepFn,
+          } as never,
+          spawnFn,
+        );
+
+        const requestId = 'retry-cycle-fallback';
+        const raw = await adapter.execute({ prompt: 'test', maxTurns: 1, requestId });
+        const response = adapter.transformResponse(raw, requestId);
+
+        expect(response.providerContext).toEqual(expect.objectContaining({
+          provider: 'claude',
+          switchedFrom: 'codex',
+          switchReason: 'rate_limited',
+        }));
+      });
+
       it('switches to the next provider when the selected provider is rate limited via stdout only', async () => {
         const { spawnFn, calls } = createQueuedSpawn([
           { stdout: 'rate limit exceeded\nretry-after: 4', stderr: '', exitCode: 1 },

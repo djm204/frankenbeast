@@ -323,6 +323,8 @@ export class CliLlmAdapter implements IAdapter {
             rateLimitRetryCycles++;
             exhaustedProviders.clear();
             activeProvider = initialProvider;
+            fallbackFrom = undefined;
+            fallbackReason = undefined;
             continue;
           }
           throw new Error(buildNoCliProvidersAvailableSummary(exhaustedProviders), { cause: failure });
@@ -425,6 +427,8 @@ export class CliLlmAdapter implements IAdapter {
       rateLimitRetryCycles++;
       exhaustedProviders.clear();
       activeProvider = initialProvider;
+      fallbackFrom = undefined;
+      fallbackReason = undefined;
       }
     } finally {
       clearTimeout(logicalTimeout);

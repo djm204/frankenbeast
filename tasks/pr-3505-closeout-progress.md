@@ -14,7 +14,8 @@
 - [x] Verify the reconciled tree: 316 focused unit tests pass, focused REST provider-context regression passes, orchestrator typecheck/lint pass, root build passes, and `git diff --check` passes; the full REST integration file retains its two documented unrelated concurrency timeouts.
 - [x] Reconcile remote epoch drift at `18ac390e` with the prior local repair and current `origin/main`, preserving both live model extraction and plain-output sanitization.
 - [x] Re-verify the reconciled tree: 315 focused unit tests and the focused REST provider-context regression pass; orchestrator typecheck/lint, root build, and `git diff --check` pass.
-- [ ] Route the exact reconciled branch head push through approval-cop.
-- [ ] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
+- [x] Route the exact reconciled branch head push through approval-cop.
+- [x] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
+- [x] Address the five fresh Codex invocation-4 findings and add focused regressions; 367 targeted tests, orchestrator typecheck/lint, root build, and `git diff --check` pass.
 - [ ] Obtain a fresh exact-head Codex clean and verify zero unresolved Codex threads.
 - [ ] Route a head-pinned squash merge through approval-cop and verify PR terminal state.

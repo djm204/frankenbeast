@@ -19,19 +19,17 @@ export const CHAT_GLYPHS = {
 } as const;
 
 /**
- * Role colors: purple for the user, green for frankenbeast. Hardcoded rather
- * than referencing ANSI.green so these constants don't force-evaluate the
- * shared beast-logger.ts module at import time (some tests fully mock that
- * module without an ANSI export); every other status/event color still uses
- * the base 16-color ANSI palette lazily, inside function bodies below.
+ * Role colors: purple for the user, green for frankenbeast. Accessors use the
+ * shared ANSI proxy's reset value as the plain-output signal. This avoids a
+ * separate eager color-mode snapshot and remains compatible with partial
+ * logger mocks used by CLI tests.
  */
 export const CHAT_COLOR = {
-  user: '\x1b[38;5;141m',
-  beast: '\x1b[32m',
+  get user(): string { return ANSI.reset ? '\x1b[38;5;141m' : ''; },
+  get beast(): string { return ANSI.reset ? '\x1b[32m' : ''; },
 } as const;
 
 function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 

@@ -1,14 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import { CHAT_COLOR, CHAT_GLYPHS, chatBanner, chatBlock, statusRule } from '../../../src/cli/chat-style.js';
+import { setPlainOutput } from '../../../src/logging/beast-logger.js';
+
+afterEach(() => setPlainOutput(false));
 
 function stripAnsi(text: string): string {
-  // eslint-disable-next-line no-control-regex
   return text.replace(/\x1b\[[0-9;]*m/g, '');
 }
 
 describe('CHAT_COLOR', () => {
   it('assigns distinct colors to the user and beast roles', () => {
     expect(CHAT_COLOR.user).not.toBe(CHAT_COLOR.beast);
+  });
+
+  it('suppresses custom role colors in plain-output mode', () => {
+    setPlainOutput(true);
+    expect(CHAT_COLOR.user).toBe('');
+    expect(CHAT_COLOR.beast).toBe('');
+    expect(chatBanner('frankenbeast', '· hello')).not.toContain('\x1b[');
   });
 });
 

@@ -165,7 +165,7 @@ export class ClaudeProvider implements ICliProvider {
   }
 
   defaultContextWindowTokens(): number {
-    return 200_000;
+    return 1_000_000;
   }
 
   getCacheCapabilities() {
