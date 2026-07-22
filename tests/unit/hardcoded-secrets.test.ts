@@ -1673,6 +1673,69 @@ describe('hard-coded example secret scanner', () => {
       ].join('\n'),
       'utf8',
     );
+    writeFileSync(
+      join(scriptDir, 'bare-destructured-spawn-cron.cjs'),
+      [
+        "const { spawn: run } = require('child_process');",
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'parenthesized-typed-alias-cron.ts'),
+      [
+        "const cp = (require('node:child_process') as typeof import('node:child_process'));",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'split-module-specifier-cron.mjs'),
+      [
+        'import * as cp from',
+        "  'node:child_process';",
+        "const installer = cp.spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'destructured-namespace-spawn-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const { spawn: run } = cp;',
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'split-after-dot-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const installer = cp.',
+        "  spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'optional-chain-spawn-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        "const installer = cp?.spawn?.('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
 
     const result = runScanner(root);
 
@@ -1702,6 +1765,12 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/typed-spawn-alias-cron.ts:5');
     expect(result.stderr).toContain('scripts/angle-asserted-require-cron.ts:3');
     expect(result.stderr).toContain('scripts/wrapped-commonjs-alias-cron.cjs:4');
+    expect(result.stderr).toContain('scripts/bare-destructured-spawn-cron.cjs:4');
+    expect(result.stderr).toContain('scripts/parenthesized-typed-alias-cron.ts:4');
+    expect(result.stderr).toContain('scripts/split-module-specifier-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/destructured-namespace-spawn-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/split-after-dot-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/optional-chain-spawn-cron.mjs:4');
   });
 
   it('rejects Codex round 28 cron scanner bypasses', () => {
