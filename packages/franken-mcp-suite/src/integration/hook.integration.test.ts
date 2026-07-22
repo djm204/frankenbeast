@@ -136,6 +136,38 @@ describe('fbeast-hook runtime', () => {
     expect(governedContext).not.toContain(secondSecret);
   });
 
+  it('redacts labelled shadowed objects that contain nested metadata', async () => {
+    const secret = ['nested', 'pair', 'fixture'].join('-');
+    const context = String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"${secret}\",\"meta\":{}},\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain(secret);
+  });
+
+  it('redacts bracket characters in shadowed tuple values', async () => {
+    const secret = ['abc', ']', 'def'].join('');
+    const context = String.raw`{\"output\":[[\"password\",\"${secret}\"]],\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain('abc');
+    expect(governedContext).not.toContain('def');
+  });
+
+  it('preserves shell substitutions while redacting surrounding tuple secrets', async () => {
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const context = String.raw`run [[\"Authorization\",\"prefix-${substitution}-suffix\"]]`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain(substitution);
+    expect(governedContext).not.toContain('prefix');
+    expect(governedContext).not.toContain('suffix');
+  });
+
   it('stops SigV4 option redaction at shell command separators for governance', async () => {
     const context = '--aws-authorization AWS4-HMAC-SHA256 Credential=scope;rm -rf /tmp/nope';
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });

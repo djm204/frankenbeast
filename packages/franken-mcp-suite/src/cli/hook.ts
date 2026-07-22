@@ -107,54 +107,92 @@ function containsStructuredSecretIndicator(text: string): boolean {
   return false;
 }
 
-function redactLabelledObjectValues(objectText: string): string {
-  const valuePattern = /((?:\\*["'])value(?:\\*["'])\s*:\s*)((?:\\*)["'])/gi;
+function findClosingMarker(text: string, valueStart: number, openingMarker: string): { start: number; end: number } {
+  const quote = openingMarker.at(-1)!;
+  const structuralSlashCount = openingMarker.length - 1;
+  for (let index = valueStart; index < text.length; index += 1) {
+    if (text[index] !== quote) continue;
+    let slashCount = 0;
+    for (let slashIndex = index - 1; slashIndex >= valueStart && text[slashIndex] === '\\'; slashIndex -= 1) {
+      slashCount += 1;
+    }
+    if (slashCount === structuralSlashCount) return { start: index - slashCount, end: index + 1 };
+  }
+  return { start: text.length, end: text.length };
+}
+
+function redactValuePreservingSubstitutions(value: string): string {
   const pieces: string[] = [];
   let cursor = 0;
-  let match = valuePattern.exec(objectText);
-
-  while (match) {
-    const matchIndex = match.index;
-    const openingMarker = match[2]!;
-    const quote = openingMarker.at(-1)!;
-    const structuralSlashCount = openingMarker.length - 1;
-    const valueStart = matchIndex + match[0].length;
-    let closingMarkerStart = objectText.length;
-    let closingMarkerEnd = objectText.length;
-
-    for (let index = valueStart; index < objectText.length; index += 1) {
-      if (objectText[index] !== quote) continue;
-      let slashCount = 0;
-      for (let slashIndex = index - 1; slashIndex >= valueStart && objectText[slashIndex] === '\\'; slashIndex -= 1) {
-        slashCount += 1;
-      }
-      if (slashCount !== structuralSlashCount) continue;
-      closingMarkerStart = index - slashCount;
-      closingMarkerEnd = index + 1;
-      break;
+  let substitutionStart = value.indexOf('$(');
+  while (substitutionStart >= 0) {
+    let depth = 1;
+    let index = substitutionStart + 2;
+    while (index < value.length && depth > 0) {
+      if (value[index] === '(') depth += 1;
+      else if (value[index] === ')') depth -= 1;
+      index += 1;
     }
-
-    pieces.push(objectText.slice(cursor, valueStart), '[REDACTED]');
-    cursor = closingMarkerStart;
-    valuePattern.lastIndex = closingMarkerEnd;
-    match = valuePattern.exec(objectText);
+    if (depth > 0) break;
+    if (substitutionStart > cursor) pieces.push('[REDACTED]');
+    pieces.push(value.slice(substitutionStart, index));
+    cursor = index;
+    substitutionStart = value.indexOf('$(', cursor);
   }
+  if (cursor < value.length || pieces.length === 0) pieces.push('[REDACTED]');
+  return pieces.join('');
+}
 
-  return pieces.length === 0 ? objectText : pieces.join('') + objectText.slice(cursor);
+function redactQuotedValues(text: string, valuePattern: RegExp, keyIndex?: number): string {
+  const pieces: string[] = [];
+  let cursor = 0;
+  let match = valuePattern.exec(text);
+  while (match) {
+    const openingMarker = match.at(-1)!;
+    const valueStart = match.index + match[0].length;
+    const closingMarker = findClosingMarker(text, valueStart, openingMarker);
+    if (keyIndex === undefined || isSensitiveAssignmentKey(match[keyIndex]!)) {
+      pieces.push(text.slice(cursor, valueStart), redactValuePreservingSubstitutions(text.slice(valueStart, closingMarker.start)));
+      cursor = closingMarker.start;
+    }
+    valuePattern.lastIndex = closingMarker.end;
+    match = valuePattern.exec(text);
+  }
+  return pieces.length === 0 ? text : pieces.join('') + text.slice(cursor);
+}
+
+function redactLabelledObjectValues(objectText: string): string {
+  return redactQuotedValues(objectText, /(?:\\*["'])value(?:\\*["'])\s*:\s*((?:\\*)["'])/gi);
+}
+
+function redactLabelledObjects(text: string): string {
+  const stack: number[] = [];
+  const candidates: Array<{ start: number; end: number }> = [];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === '{') stack.push(index);
+    else if (text[index] === '}' && stack.length > 0) {
+      const start = stack.pop()!;
+      const candidate = text.slice(start, index + 1);
+      if (candidate.length <= 8192 && containsStructuredSecretIndicator(candidate)) candidates.push({ start, end: index + 1 });
+    }
+  }
+  const innermost = candidates.filter((candidate) =>
+    !candidates.some((other) => other.start > candidate.start && other.end < candidate.end));
+  return innermost.sort((left, right) => right.start - left.start).reduce(
+    (result, candidate) => result.slice(0, candidate.start)
+      + redactLabelledObjectValues(result.slice(candidate.start, candidate.end))
+      + result.slice(candidate.end),
+    text,
+  );
 }
 
 function redactStructuredSecretsRaw(text: string): string {
-  const tuplePattern = /(\[\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,\s*)(\\*["'])([^\]\r\n]*?)\3(\s*\])/g;
-  const tupleRedacted = text.replace(
-    tuplePattern,
-    (match, prefix: string, key: string, quote: string, _value: string, suffix: string) =>
-      isSensitiveAssignmentKey(key) ? `${prefix}${quote}[REDACTED]${quote}${suffix}` : match,
+  const tupleRedacted = redactQuotedValues(
+    text,
+    /\[\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,\s*((?:\\*)["'])/g,
+    1,
   );
-
-  return tupleRedacted.replace(/\{[^{}\r\n]{0,8192}\}/g, (objectText) => {
-    if (!containsStructuredSecretIndicator(objectText)) return objectText;
-    return redactLabelledObjectValues(objectText);
-  });
+  return redactLabelledObjects(tupleRedacted);
 }
 
 function containsOversizedSecretIndicator(text: string): boolean {
