@@ -54,6 +54,12 @@ describe('PlanGraph — construction', () => {
     ).toThrow();
   });
 
+  it('validates task dependencies when the separate dependsOn argument is omitted', () => {
+    expect(() =>
+      PlanGraph.empty().addTask(makeTask('t-1', { dependsOn: [createTaskId('missing')] }))
+    ).toThrow("Dependency 'missing' not found in graph");
+  });
+
   it('getDependencies returns the declared deps', () => {
     const g = PlanGraph.empty()
       .addTask(makeTask('a'))
@@ -70,6 +76,15 @@ describe('PlanGraph — construction', () => {
       createTaskId('a'),
     ]);
     expect(b.dependsOn).toEqual([]);
+  });
+
+  it('uses the task dependencies when the separate dependsOn argument is omitted', () => {
+    const g = PlanGraph.empty()
+      .addTask(makeTask('a'))
+      .addTask(makeTask('b', { dependsOn: [createTaskId('a')] }));
+
+    expect(g.getDependencies(createTaskId('b'))).toEqual([createTaskId('a')]);
+    expect(g.topoSort().map((task) => task.id)).toEqual([createTaskId('a'), createTaskId('b')]);
   });
 
   it('getTasks returns all tasks in insertion order', () => {
