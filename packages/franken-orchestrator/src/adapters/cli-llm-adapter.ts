@@ -588,9 +588,6 @@ export class CliLlmAdapter implements IAdapter {
         env: input.env,
       });
 
-      child.stdin!.write(input.prompt);
-      child.stdin!.end();
-
       let stdout = '';
       let stderr = '';
       let settled = false;
@@ -620,7 +617,7 @@ export class CliLlmAdapter implements IAdapter {
         hardKillTimer.unref();
       };
 
-      const terminate = (label: 'timed-out' | 'aborted'): void => {
+      const terminate = (label: 'timed-out' | 'aborted' | 'stdin-failed'): void => {
         terminated = true;
         try {
           child.kill('SIGTERM');
@@ -706,6 +703,24 @@ export class CliLlmAdapter implements IAdapter {
         clearTimers();
         settle(() => reject(err));
       });
+
+      child.stdin!.on('error', (err) => {
+        if (settled) return;
+        clearTimeout(timer);
+        input.signal?.removeEventListener('abort', abortRequest);
+        terminate('stdin-failed');
+        settle(() => reject(err));
+      });
+
+      if (!settled) {
+        try {
+          child.stdin!.write(input.prompt);
+          child.stdin!.end();
+        } catch (error) {
+          terminate('stdin-failed');
+          settle(() => reject(error));
+        }
+      }
     });
   }
 }

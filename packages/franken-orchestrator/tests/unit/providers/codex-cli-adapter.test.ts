@@ -62,6 +62,35 @@ function mockSpawnError(errorMessage = 'spawn command not found') {
   return proc;
 }
 
+function mockStdinError(errorMessage = 'write EPIPE') {
+  const stdout = new PassThrough();
+  const stdin = new PassThrough();
+  let hadErrorListener = false;
+  const proc = Object.assign(new EventEmitter(), {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    pid: 1,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
+    kill: vi.fn(() => true),
+  });
+  vi.spyOn(stdin, 'write').mockImplementation(() => {
+    hadErrorListener = stdin.listenerCount('error') > 0;
+    setImmediate(() => {
+      if (hadErrorListener) stdin.emit('error', new Error(errorMessage));
+      stdout.end();
+      setImmediate(() => {
+        proc.exitCode = 1;
+        proc.emit('close', 1);
+      });
+    });
+    return true;
+  });
+  (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
+  return { hadErrorListener: () => hadErrorListener };
+}
+
 async function collectEvents(iterable: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
   const events: LlmStreamEvent[] = [];
   for await (const e of iterable) events.push(e);
@@ -249,6 +278,21 @@ describe('CodexCliAdapter', () => {
         retryable: false,
       });
       expect(proc.kill).not.toHaveBeenCalled();
+    });
+
+    it('handles child stdin errors through the provider error path', async () => {
+      const { hadErrorListener } = mockStdinError();
+      const events = await collectEvents(adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'x'.repeat(128 * 1024) }],
+      }));
+
+      expect(hadErrorListener()).toBe(true);
+      expect(events).toEqual([{
+        type: 'error',
+        error: expect.stringContaining('write EPIPE'),
+        retryable: false,
+      }]);
     });
 
     it('parses tool call events', async () => {

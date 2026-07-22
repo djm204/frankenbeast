@@ -56,9 +56,19 @@ export class CodexCliAdapter implements ILlmProvider {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    const spawnState: { message: string | undefined } = { message: undefined };
+    const spawnState: { message: string | undefined; source: 'spawn' | 'stdin' | undefined } = {
+      message: undefined,
+      source: undefined,
+    };
     proc.once('error', (error) => {
       spawnState.message = error.message;
+      spawnState.source = 'spawn';
+    });
+    proc.stdin!.on('error', (error) => {
+      if (spawnState.source !== 'spawn') {
+        spawnState.message = error.message;
+        spawnState.source = 'stdin';
+      }
     });
 
     const userContent = request.messages
@@ -150,7 +160,7 @@ export class CodexCliAdapter implements ILlmProvider {
 
   private async *parseStream(
     proc: ChildProcess,
-    spawnState: { message: string | undefined },
+    spawnState: { message: string | undefined; source: 'spawn' | 'stdin' | undefined },
   ): AsyncGenerator<LlmStreamEvent> {
     const rl = createInterface({ input: proc.stdout! });
     proc.once('error', () => {
@@ -220,7 +230,9 @@ export class CodexCliAdapter implements ILlmProvider {
         streamCompleted = true;
         yield {
           type: 'error',
-          error: `codex process failed to start: ${spawnState.message}`,
+          error: spawnState.source === 'stdin'
+            ? `codex process stdin failed: ${spawnState.message}`
+            : `codex process failed to start: ${spawnState.message}`,
           retryable: false,
         };
         return;

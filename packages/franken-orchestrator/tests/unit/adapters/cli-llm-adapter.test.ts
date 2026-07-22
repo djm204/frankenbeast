@@ -493,6 +493,35 @@ describe('CliLlmAdapter', () => {
           .rejects.toThrow('something went wrong');
       });
 
+      it('rejects child stdin errors instead of emitting an unhandled stream error', async () => {
+        let hadErrorListener = false;
+        const spawnFn = (): ChildProcess => {
+          const proc = new EventEmitter() as ChildProcess;
+          const stdin = new PassThrough();
+          const stdout = new PassThrough();
+          const stderr = new PassThrough();
+          Object.defineProperty(proc, 'stdin', { value: stdin });
+          Object.defineProperty(proc, 'stdout', { value: stdout });
+          Object.defineProperty(proc, 'stderr', { value: stderr });
+          Object.defineProperty(proc, 'pid', { value: 12345 });
+          Object.defineProperty(proc, 'kill', { value: vi.fn(() => true) });
+          vi.spyOn(stdin, 'write').mockImplementation(() => {
+            hadErrorListener = stdin.listenerCount('error') > 0;
+            setImmediate(() => {
+              if (hadErrorListener) stdin.emit('error', new Error('write EPIPE'));
+              proc.emit('close', 1);
+            });
+            return true;
+          });
+          return proc;
+        };
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+
+        await expect(adapter.execute({ prompt: 'x'.repeat(128 * 1024), maxTurns: 1 }))
+          .rejects.toThrow('write EPIPE');
+        expect(hadErrorListener).toBe(true);
+      });
+
       it('strips ANSI from non-zero failure summaries in plain mode', async () => {
         setPlainOutput(true);
         try {
