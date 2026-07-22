@@ -16,6 +16,7 @@ describe('slash command completion', () => {
   it('narrows prefix matches case-insensitively', () => {
     expect(completeSlashCommand('/P')).toEqual([['/plan'], '/P']);
     expect(completeSlashCommand('/s')).toEqual([['/status', '/session'], '/s']);
+    expect(completeSlashCommand('/rej')).toEqual([['/reject'], '/rej']);
   });
 
   it('falls back to ordered fuzzy matches for mistyped prefixes', () => {

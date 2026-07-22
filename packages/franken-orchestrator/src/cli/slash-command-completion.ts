@@ -6,6 +6,7 @@ export const CHAT_SLASH_COMMANDS = [
   { name: '/status', description: 'Show the current session status' },
   { name: '/diff', description: 'Show changes from the current session' },
   { name: '/approve', description: 'Approve the pending action' },
+  { name: '/reject', description: 'Reject the pending action' },
   { name: '/session', description: 'Show the current session' },
   { name: '/quit', description: 'Exit chat' },
 ] as const;
