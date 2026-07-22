@@ -37,7 +37,7 @@ export async function setupTraceViewer(
         if (stopped) return;
         stopped = true;
         await traceServer.stop();
-        sqliteAdapter.close();
+        await sqliteAdapter.close();
       },
     };
   } catch (err) {

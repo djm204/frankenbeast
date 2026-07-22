@@ -199,14 +199,19 @@ function execute(operation, payload) {
 
 parentPort.on('message', ({ id, operation, payload }) => {
   if (operation === 'close') {
-    const closeSignal = new Int32Array(payload.closeSignal)
     try {
       db.close()
-      parentPort.close()
-    } finally {
-      Atomics.store(closeSignal, 0, 1)
-      Atomics.notify(closeSignal, 0)
+      parentPort.postMessage({ id })
+    } catch (error) {
+      parentPort.postMessage({
+        id,
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          ...(typeof error?.code === 'string' ? { code: error.code } : {}),
+        },
+      })
     }
+    parentPort.close()
     return
   }
   try {
@@ -234,6 +239,11 @@ class SQLiteWorkerClient {
   private closed = false
   private failure: Error | undefined
   private readonly closeTimeoutMs: number
+  private closePromise: Promise<void> | undefined
+  private closeRequestId: number | undefined
+  private closeTimer: ReturnType<typeof setTimeout> | undefined
+  private resolveClose: (() => void) | undefined
+  private rejectClose: ((error: Error) => void) | undefined
 
   constructor(filePath: string, busyTimeoutMs: number) {
     const require = createRequire(import.meta.url)
@@ -259,14 +269,10 @@ class SQLiteWorkerClient {
       },
     )
     this.worker.on('message', (response: SQLiteWorkerResponse) => this.handleResponse(response))
-    this.worker.on('error', error => this.rejectPending(
+    this.worker.on('error', error => this.handleWorkerFailure(
       error instanceof Error ? error : new Error(String(error)),
     ))
-    this.worker.on('exit', code => {
-      if (!this.closed) {
-        this.rejectPending(new Error(`SQLite worker exited with code ${code}`))
-      }
-    })
+    this.worker.on('exit', code => this.handleWorkerExit(code))
     this.worker.unref()
   }
 
@@ -290,28 +296,55 @@ class SQLiteWorkerClient {
     })
   }
 
-  close(): void {
-    if (this.closed) return
+  close(): Promise<void> {
+    if (this.closePromise !== undefined) return this.closePromise
     this.closed = true
     if (this.failure !== undefined) {
-      void this.worker.terminate()
-      return
+      this.closePromise = this.worker.terminate()
+        .then(() => undefined)
+        .finally(() => this.worker.unref())
+      return this.closePromise
     }
-    const closeSignal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT))
-    this.worker.postMessage({
-      id: 0,
-      operation: 'close',
-      payload: { closeSignal: closeSignal.buffer },
+    this.worker.ref()
+    this.closeRequestId = this.nextId++
+    this.closePromise = new Promise<void>((resolve, reject) => {
+      this.resolveClose = resolve
+      this.rejectClose = reject
     })
-    const result = Atomics.wait(closeSignal, 0, 0, this.closeTimeoutMs)
-    if (result === 'timed-out') {
+    this.closeTimer = setTimeout(() => {
+      const error = new Error(`Timed out closing SQLite worker after ${this.closeTimeoutMs}ms`)
+      this.rejectPending(error)
+      this.settleClose(error)
+      this.worker.unref()
       void this.worker.terminate()
-      throw new Error(`Timed out closing SQLite worker after ${this.closeTimeoutMs}ms`)
+    }, this.closeTimeoutMs)
+    try {
+      this.worker.postMessage({
+        id: this.closeRequestId,
+        operation: 'close',
+        payload: {},
+      })
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause))
+      this.rejectPending(error)
+      this.settleClose(error)
+      this.worker.unref()
+      void this.worker.terminate()
     }
-    this.worker.unref()
+    return this.closePromise
   }
 
   private handleResponse(response: SQLiteWorkerResponse): void {
+    if (response.id === this.closeRequestId) {
+      if (response.error === undefined) {
+        this.settleClose()
+      } else {
+        const error = this.workerResponseError(response.error)
+        this.rejectPending(error)
+        this.settleClose(error)
+      }
+      return
+    }
     const pending = this.pending.get(response.id)
     if (pending === undefined) return
     this.pending.delete(response.id)
@@ -320,9 +353,44 @@ class SQLiteWorkerClient {
       pending.resolve(response.result)
       return
     }
-    const error = new Error(response.error.message) as Error & { code?: string }
-    if (response.error.code !== undefined) error.code = response.error.code
-    pending.reject(error)
+    pending.reject(this.workerResponseError(response.error))
+  }
+
+  private workerResponseError(response: NonNullable<SQLiteWorkerResponse['error']>): Error {
+    const error = new Error(response.message) as Error & { code?: string }
+    if (response.code !== undefined) error.code = response.code
+    return error
+  }
+
+  private handleWorkerFailure(error: Error): void {
+    this.rejectPending(error)
+    this.settleClose(error)
+  }
+
+  private handleWorkerExit(code: number): void {
+    if (this.resolveClose === undefined && this.rejectClose === undefined) {
+      if (!this.closed) this.rejectPending(new Error(`SQLite worker exited with code ${code}`))
+      return
+    }
+    const error = new Error(`SQLite worker exited with code ${code} before acknowledging close`)
+    this.rejectPending(error)
+    this.settleClose(error)
+  }
+
+  private settleClose(error?: Error): void {
+    const resolve = this.resolveClose
+    const reject = this.rejectClose
+    if (resolve === undefined || reject === undefined) return
+    this.resolveClose = undefined
+    this.rejectClose = undefined
+    this.closeRequestId = undefined
+    if (this.closeTimer !== undefined) {
+      clearTimeout(this.closeTimer)
+      this.closeTimer = undefined
+    }
+    this.worker.unref()
+    if (error === undefined) resolve()
+    else reject(error)
   }
 
   private rejectPending(error: Error): void {
@@ -505,6 +573,7 @@ export class SQLiteAdapter implements ExportAdapter {
   private operationTail: Promise<unknown> | undefined
   private closeAfterOperations = false
   private closed = false
+  private closePromise: Promise<void> | undefined
 
   constructor(filePath: string, options: SQLiteAdapterOptions = {}) {
     const lockRetry = normalizeLockRetryOptions(options)
@@ -826,22 +895,19 @@ export class SQLiteAdapter implements ExportAdapter {
     const settled = queued.catch(() => undefined).finally(() => {
       if (this.operationTail !== settled) return
       this.operationTail = undefined
-      if (this.closeAfterOperations) {
-        this.closeNow()
-      }
     })
     this.operationTail = settled
     return queued
   }
 
-  private closeNow(): void {
-    if (this.closed) return
+  private closeNow(): Promise<void> {
+    if (this.closed) return Promise.resolve()
     this.closed = true
-    try {
-      this.workerClient?.close()
-    } finally {
+    if (this.workerClient === undefined) {
       this.db.close()
+      return Promise.resolve()
     }
+    return this.workerClient.close().finally(() => this.db.close())
   }
 
   private emitLockRetryDiagnostic(diagnostic: SQLiteLockRetryDiagnostic): void {
@@ -939,12 +1005,14 @@ export class SQLiteAdapter implements ExportAdapter {
     return Math.min(base + Math.random() * this.lockRetry.baseDelayMs, this.lockRetry.maxDelayMs)
   }
 
-  /** Release the DB connection. Call when shutting down. */
-  close(): void {
+  /** Release both DB connections. Await completion before reopening the database or exiting. */
+  close(): Promise<void> {
+    if (this.closePromise !== undefined) return this.closePromise
     this.closeAfterOperations = true
-    if (this.operationTail === undefined) {
-      this.closeNow()
-    }
+    this.closePromise = this.operationTail === undefined
+      ? this.closeNow()
+      : this.operationTail.then(() => this.closeNow())
+    return this.closePromise
   }
 }
 

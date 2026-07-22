@@ -415,11 +415,11 @@ describe('SQLiteAdapter', () => {
     TraceContext.endSpan(span)
 
     const flush = adapter.flush(trace)
-    adapter.close()
+    const close = adapter.close()
 
     expect(closeMock).not.toHaveBeenCalled()
     await flush
-    await Promise.resolve()
+    await close
 
     expect(upsertTraceRun).toHaveBeenCalledWith(expect.objectContaining({ id: trace.id }))
     expect(closeMock).toHaveBeenCalledTimes(1)

@@ -343,11 +343,12 @@ import { SQLiteAdapter } from '@franken/observer'
 const adapter = new SQLiteAdapter('./traces.db')
 await adapter.flush(trace)
 
+await adapter.close() // await worker cleanup before reopening
+
 // Reconstruct after restart
 const adapter2  = new SQLiteAdapter('./traces.db')
 const recovered = await adapter2.queryByTraceId(trace.id)
-
-adapter.close() // release the SQLite handle
+await adapter2.close()
 ```
 
 ### `TranscriptRetentionAdapter`
