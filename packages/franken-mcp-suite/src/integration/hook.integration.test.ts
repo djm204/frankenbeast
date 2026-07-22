@@ -165,6 +165,75 @@ describe('fbeast-hook runtime', () => {
     expect(result.stdout).toContain('"logged":true');
   });
 
+  it('redacts credentials from general post-tool payloads before observer logging', async () => {
+    const secret = ['observer', 'fixture', 'secret'].join('-');
+    const basicCredential = ['Basic', Buffer.from(`fixture:${secret}`).toString('base64')].join(' ');
+    const payload = JSON.stringify({
+      ok: true,
+      output: {
+        status: 'created',
+        apiKey: secret,
+        clientSecret: secret,
+        accessToken: secret,
+        headers: { Authorization: basicCredential },
+        diagnostic: `Authorization: Bearer ${secret}`,
+      },
+    });
+
+    const result = await runHookForTest(['post-tool', 'write_file', payload]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as {
+      payload: string;
+    };
+    expect(JSON.parse(metadata.payload)).toEqual({
+      ok: true,
+      output: {
+        status: 'created',
+        apiKey: '[REDACTED]',
+        clientSecret: '[REDACTED]',
+        accessToken: '[REDACTED]',
+        headers: { Authorization: '[REDACTED]' },
+        diagnostic: 'Authorization: Bearer [REDACTED]',
+      },
+    });
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata).not.toContain(basicCredential);
+  });
+
+  it('preserves oversized post-tool payloads that contain only benign URLs', async () => {
+    const payload = JSON.stringify({
+      output: `${'x'.repeat(70_000)} https://example.com/docs`,
+    });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+
+    expect(result.exitCode).toBe(0);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as {
+      payload: string;
+    };
+    expect(metadata.payload).toBe(payload);
+  });
+
+  it('redacts oversized post-tool payloads with credential indicators without scanning them', async () => {
+    const secret = ['oversized', 'fixture', 'secret'].join('-');
+    const payload = JSON.stringify({
+      output: 'x'.repeat(70_000),
+      apiKey: secret,
+    });
+
+    const result = await runHookForTest(['post-tool', 'write_file', payload]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.observerLogs).toHaveLength(1);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as {
+      payload: string;
+    };
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
   it('preserves raw non-JSON pre-tool whitespace for governor policy matching', async () => {
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
       context: 'rm\t-rf /tmp/nope',

@@ -62,15 +62,39 @@ export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps 
  * log. This is a proportionate, best-effort scrub — exhaustive secret detection
  * is intentionally out of scope.
  */
-const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))$/i;
+const SENSITIVE_ASSIGNMENT_KEY = /^(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:authorization|password|passwd|pwd|secret|token|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))$/i;
+const RAW_SECRET_HINTS = [
+  'authorization',
+  'bearer',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'token',
+  'api_key',
+  'api-key',
+  'apikey',
+  'access_key',
+  'access-key',
+  'accesskey',
+] as const;
+const CREDENTIAL_URL_HINT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]{1,256}:[^\s@/]{1,256}@/i;
+const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
+
+function containsRawSecretHint(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  return RAW_SECRET_HINTS.some((hint) => lowerText.includes(hint))
+    || CREDENTIAL_URL_HINT.test(text);
+}
 
 function redactRawSecrets(text: string): string {
+  if (!containsRawSecretHint(text)) return text;
   return text
     .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)\S+/gi, '$1[REDACTED]')
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key(?:[_-]?id)?))\b\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(/(--(?:password|passwd|pwd|secret|token|api-?key|access-?key)\s+)("[^"]*"|'[^']*'|\S+)/gi, '$1[REDACTED]')
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@]+(@)/gi, '$1[REDACTED]$2');
+    .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]{1,256}:)[^\s@/]{1,256}(@)/gi, '$1[REDACTED]$2');
 }
 
 function redactJsonSecrets(value: unknown, key?: string): unknown {
@@ -256,8 +280,13 @@ function hookAuditOutcomeFromPayload(toolName: string, payload: string): { ok?: 
 }
 
 function redactPostToolPayload(toolName: string, payload: string): string {
-  if (!MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) return payload;
-  return '[memory-review-result-redacted]';
+  if (MEMORY_RESULT_PAYLOAD_REDACTION_TOOLS.has(unqualifyMcpToolName(toolName))) {
+    return '[memory-review-result-redacted]';
+  }
+  if (payload.length > MAX_POST_TOOL_SECRET_SCAN_CHARS && containsRawSecretHint(payload)) {
+    return '[post-tool-payload-redacted]';
+  }
+  return redactSecrets(payload);
 }
 
 export async function runHook(
