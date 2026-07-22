@@ -94,6 +94,31 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('rm -rf /tmp/nope');
   });
 
+  it('preserves governed commands while redacting shadowed structured secrets', async () => {
+    const tupleSecret = ['governed', 'tuple', 'fixture'].join('-');
+    const pairSecret = ['governed', 'pair', 'fixture'].join('-');
+    const contexts = [
+      `{"output":[["Authorization","Basic ${tupleSecret}"]],"output":"rm -rf /tmp/nope"}`,
+      `{"output":{"value":"${pairSecret}","name":"OPENAI_API_KEY"},"output":"rm -rf /tmp/nope"}`,
+    ];
+
+    for (const context of contexts) {
+      const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+      const governedContext = result.checkCalls[0]!.context;
+
+      expect(governedContext).toContain('rm -rf /tmp/nope');
+      expect(governedContext).not.toContain(tupleSecret);
+      expect(governedContext).not.toContain(pairSecret);
+    }
+  });
+
+  it('stops SigV4 option redaction at shell command separators for governance', async () => {
+    const context = '--aws-authorization AWS4-HMAC-SHA256 Credential=scope;rm -rf /tmp/nope';
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+
+    expect(result.checkCalls[0]!.context).toBe('--aws-authorization [REDACTED];rm -rf /tmp/nope');
+  });
+
   it('redacts prefixed env-style credential assignments before governor persistence', async () => {
     const values = [
       ['openai', 'fixture', 'value'].join('-'),

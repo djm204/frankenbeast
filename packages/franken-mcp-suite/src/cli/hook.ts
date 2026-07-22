@@ -107,6 +107,23 @@ function containsStructuredSecretIndicator(text: string): boolean {
   return false;
 }
 
+function redactStructuredSecretsRaw(text: string): string {
+  const tuplePattern = /(\[\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,\s*)(\\*["'])([^\]\r\n]*?)\3(\s*\])/g;
+  const tupleRedacted = text.replace(
+    tuplePattern,
+    (match, prefix: string, key: string, quote: string, _value: string, suffix: string) =>
+      isSensitiveAssignmentKey(key) ? `${prefix}${quote}[REDACTED]${quote}${suffix}` : match,
+  );
+
+  return tupleRedacted.replace(/\{[^{}\r\n]{0,8192}\}/g, (objectText) => {
+    if (!containsStructuredSecretIndicator(objectText)) return objectText;
+    return objectText.replace(
+      /((?:\\*["'])value(?:\\*["'])\s*:\s*)(\\*["'])(.*?)\2/i,
+      '$1$2[REDACTED]$2',
+    );
+  });
+}
+
 function containsOversizedSecretIndicator(text: string): boolean {
   if (/\bauthorization\b\s*[:=]/i.test(text)
     || /\\*["']authorization\\*["']\s*,/i.test(text)
@@ -148,7 +165,7 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
     .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(
-      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
+      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
       (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
         ? `${prefix}[REDACTED]`
         : match,
@@ -212,7 +229,8 @@ export function redactSecrets(text: string, preserveShellCommands = false): stri
       if (state.changed) return JSON.stringify(redacted);
       const rawRedacted = redactRawSecrets(text, preserveShellCommands);
       if (rawRedacted !== text) return rawRedacted;
-      return containsStructuredSecretIndicator(text) ? '[REDACTED]' : text;
+      if (!containsStructuredSecretIndicator(text)) return text;
+      return preserveShellCommands ? redactStructuredSecretsRaw(text) : '[REDACTED]';
     }
   } catch {
     // Legacy command contexts are plain text, not JSON.
