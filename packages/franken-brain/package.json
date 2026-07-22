@@ -36,12 +36,12 @@
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
     "tsx": "^4.23.1",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.9"
   },
   "dependencies": {
     "@franken/types": "0.16.0",
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^13.0.1"
   },
   "engines": {
     "node": ">=22.13.0 <23 || >=24.0.0 <26"
