@@ -1,7 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import {
   atomicWriteFileSync,
   quarantineFile,
@@ -15,6 +17,7 @@ describe('atomic-file', () => {
   const tmpDirs: string[] = [];
 
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dir of tmpDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -95,6 +98,135 @@ describe('atomic-file', () => {
       expect(existsSync(tempPath)).toBe(false);
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
       expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
+    });
+
+    it('immediately recovers a fresh journal left by a dead writer', () => {
+      const dir = makeTmpDir('atomic-write-dead-writer-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000011`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+          writerPid: 424_242,
+        }),
+        'utf8',
+      );
+      vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('process not found'), { code: 'ESRCH' });
+      });
+
+      atomicWriteFileSync(filePath, '{"new":true}');
+
+      expect(process.kill).toHaveBeenCalledWith(424_242, 0);
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+      expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
+    });
+
+    it('recovers when a restarted process reuses the crashed writer PID', () => {
+      const dir = makeTmpDir('atomic-write-reused-pid-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000012`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+          writerPid: process.pid,
+          writerInstanceId: 'crashed-process-instance',
+        }),
+        'utf8',
+      );
+
+      atomicWriteFileSync(filePath, '{"new":true}');
+
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+      expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
+    });
+
+    it('retains a fresh journal owned by another worker thread in the same process', () => {
+      const dir = makeTmpDir('atomic-write-other-thread-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000013`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+          writerPid: process.pid,
+          writerInstanceId: performance.timeOrigin.toString(),
+        }),
+        'utf8',
+      );
+
+      expect(() => atomicWriteFileSync(filePath, '{"replacement":true}')).toThrow(/still active/);
+
+      expect(existsSync(tempPath)).toBe(true);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(true);
+      expect(readFileSync(filePath, 'utf-8')).toBe('{"old":true}');
+    });
+
+    it.runIf(process.platform === 'linux')('recovers when an unrelated live process reused the writer PID', () => {
+      const dir = makeTmpDir('atomic-write-reused-pid-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000014`;
+      const journalPath = stateWriteJournalPath(filePath);
+      const unrelatedProcess = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1_000)'], {
+        stdio: 'ignore',
+      });
+      const writerPid = unrelatedProcess.pid;
+      if (writerPid === undefined) {
+        unrelatedProcess.kill();
+        throw new Error('Expected the unrelated test process to have a PID');
+      }
+
+      try {
+        writeFileSync(tempPath, '{"new":');
+        writeFileSync(
+          journalPath,
+          JSON.stringify({
+            schemaVersion: 1,
+            targetPath: filePath,
+            tempPath,
+            phase: 'writing-temp',
+            startedAt: '2999-01-01T00:00:00.000Z',
+            updatedAt: '2999-01-01T00:00:01.000Z',
+            writerPid,
+            writerProcessStartTimeTicks: 'reused-process-start',
+            writerInstanceId: 'crashed-process-instance',
+          }),
+          'utf8',
+        );
+
+        atomicWriteFileSync(filePath, '{"replacement":true}');
+
+        expect(existsSync(tempPath)).toBe(false);
+        expect(existsSync(journalPath)).toBe(false);
+        expect(readFileSync(filePath, 'utf8')).toBe('{"replacement":true}');
+      } finally {
+        unrelatedProcess.kill();
+      }
     });
   });
 

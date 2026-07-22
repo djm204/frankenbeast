@@ -2,6 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { chmodSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FileSessionStore } from '../../../src/chat/session-store.js';
+import { atomicWriteFileSync } from '../../../src/session/atomic-file.js';
+
+vi.mock('../../../src/session/atomic-file.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/session/atomic-file.js')>();
+  return {
+    ...actual,
+    atomicWriteFileSync: vi.fn(actual.atomicWriteFileSync),
+  };
+});
 
 const TMP = join(__dirname, '__fixtures__/chat-store');
 
@@ -220,10 +229,17 @@ describe('FileSessionStore', () => {
     const session = store.create('proj');
     session.transcript.push({ role: 'user', content: 'Hello', timestamp: new Date().toISOString() });
 
+    vi.mocked(atomicWriteFileSync).mockClear();
+
     store.save(session);
 
     expect(store.get(session.id)!.transcript).toHaveLength(1);
     expect(readdirSync(TMP).filter((entry) => entry.includes('.tmp'))).toEqual([]);
+    expect(atomicWriteFileSync).toHaveBeenCalledWith(
+      join(TMP, `${session.id}.json`),
+      JSON.stringify(session, null, 2),
+      { mode: 0o600 },
+    );
   });
 
   it('preserves existing session file permissions during atomic saves', () => {
