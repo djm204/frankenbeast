@@ -2879,11 +2879,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       if (this.encryption) {
         result = this.recallEncrypted(query, limit, reportCorruptDetails);
       } else {
-        const keywords = query
-          .toLowerCase()
-          .split(/\s+/)
-          .filter((w) => w.length > 2)
-          .filter((w) => !STOPWORDS.has(w));
+        const keywords = normalizeRecallKeywords(query);
 
         if (keywords.length === 0) {
           result = this.recent(limit, reportCorruptDetails);
@@ -2955,11 +2951,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     reportCorruptDetails?: CorruptEpisodicDetailsReporter,
   ): EpisodicEvent[] {
     if (limit === 0) return [];
-    const keywords = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .filter((w) => !STOPWORDS.has(w));
+    const keywords = normalizeRecallKeywords(query);
     if (keywords.length === 0) {
       return this.recent(limit, reportCorruptDetails);
     }
@@ -8189,6 +8181,37 @@ const STOPWORDS = new Set([
 ]);
 
 // --- Helpers ---
+
+const RECALL_LITERAL_LIKE_CHARACTERS = new Set(['%', '_', '\\']);
+const RECALL_BOUNDARY_PUNCTUATION = /[\p{P}\p{S}]/u;
+
+function normalizeRecallKeywords(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => {
+      const characters = Array.from(word);
+      let start = 0;
+      let end = characters.length;
+      while (
+        start < end
+        && RECALL_BOUNDARY_PUNCTUATION.test(characters[start]!)
+        && !RECALL_LITERAL_LIKE_CHARACTERS.has(characters[start]!)
+      ) {
+        start += 1;
+      }
+      while (
+        end > start
+        && RECALL_BOUNDARY_PUNCTUATION.test(characters[end - 1]!)
+        && !RECALL_LITERAL_LIKE_CHARACTERS.has(characters[end - 1]!)
+      ) {
+        end -= 1;
+      }
+      return characters.slice(start, end).join('');
+    })
+    .filter((word) => word.length > 2)
+    .filter((word) => !STOPWORDS.has(word));
+}
 
 const MAX_SKILL_EVOLUTION_TEXT_LENGTH = 240;
 
