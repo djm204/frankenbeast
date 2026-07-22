@@ -30,75 +30,21 @@ import {
   updateReceipt,
   type PendingSend,
 } from './chat-session-state';
+import type {
+  ActivityEvent,
+  ChatErrorAction,
+  ChatErrorBanner,
+  ChatMessage,
+  ConnectionStatus,
+  CostTelemetryStatus,
+  SessionStatus,
+  TokenTelemetryStatus,
+  UseChatSessionOptions,
+  UseChatSessionResult,
+} from './chat-session-types';
+export type * from './chat-session-types';
 
-export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
-export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'offline' | 'error';
-export type MessageReceipt = 'sending' | 'accepted' | 'delivered' | 'read' | 'failed';
-export type CostTelemetryStatus = 'available' | 'unavailable';
-export type TokenTelemetryStatus = 'available' | 'unavailable';
-
-export type ChatErrorAction = 'retry-session' | 'reconnect' | 'retry-message' | 'dismiss';
-
-export interface ChatErrorBanner {
-  id: string;
-  title: string;
-  message: string;
-  code?: string;
-  action: ChatErrorAction;
-  actionLabel: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: string;
-  modelTier?: string | undefined;
-  receipt?: MessageReceipt;
-  error?: string | undefined;
-  canRetry?: boolean | undefined;
-  streaming?: boolean | undefined;
-}
-
-export interface ActivityEvent {
-  type: string;
-  data?: Record<string, unknown> | undefined;
-  timestamp: string;
-}
-
-export interface UseChatSessionOptions {
-  baseUrl: string;
-  projectId: string;
-  sessionId?: string | undefined;
-  sessionSeed?: number;
-}
-
-export interface UseChatSessionResult {
-  activity: ActivityEvent[];
-  approve: (approved: boolean) => Promise<void>;
-  approvalError: string | null;
-  approvalResolving: boolean;
-  connectionStatus: ConnectionStatus;
-  costUsd: number;
-  costTelemetryStatus: CostTelemetryStatus;
-  tokenTelemetryStatus: TokenTelemetryStatus;
-  clearedFailedDraft?: { content: string; nonce: number } | undefined;
-  dismissError: (id: string) => void;
-  errorBanners: ChatErrorBanner[];
-  messages: ChatMessage[];
-  pendingApproval: PendingApproval | null;
-  projectId: string;
-  retryError: (id: string) => Promise<string | undefined>;
-  retryMessage: (messageId: string) => Promise<void>;
-  reconnect: () => void;
-  send: (content: string) => Promise<void>;
-  sessionId: string | null;
-  sessionState: string | null;
-  showTypingIndicator: boolean;
-  status: SessionStatus;
-  tier: string | null;
-  tokenTotals: TokenTotals;
-}
+const APPROVAL_RESPONSE_TIMEOUT_MS = 15_000;
 
 export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResult {
   const [activity, setActivity] = useState<ActivityEvent[]>([]);
@@ -136,6 +82,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   const lastMessageRef = useRef<{ clientMessageId: string; content: string } | null>(null);
   const errorActionRef = useRef(new Map<string, ChatErrorAction>());
   const approvalResolvingRef = useRef(false);
+  const approvalTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processedSocketEventIdsRef = useRef<Set<string>>(new Set());
   const replayCursorsRef = useRef<Map<string, number>>(new Map());
 
@@ -185,6 +132,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
   }
 
   function updateApprovalResolving(value: boolean): void {
+    if (!value && approvalTimeoutRef.current) {
+      clearTimeout(approvalTimeoutRef.current);
+      approvalTimeoutRef.current = null;
+    }
     approvalResolvingRef.current = value;
     setApprovalResolving(value);
   }
@@ -209,17 +160,28 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setMessages((current) => reconcileRecoveryMessages(current, refreshed.transcript));
         setPendingApproval(refreshed.pendingApproval ?? null);
         setSessionState(refreshed.state);
+        const approvalWasResolving = approvalResolvingRef.current;
+        if (approvalWasResolving) {
+          updateApprovalResolving(false);
+          setApprovalError(refreshed.pendingApproval || refreshed.state === 'pending_approval'
+            ? 'The server did not confirm the approval response. Try again.'
+            : null);
+        }
         setTokenTotals(refreshed.tokenTotals);
         setCostUsd(refreshed.costUsd);
         setCostTelemetryStatus(sessionHasCostTelemetry(refreshed) ? 'available' : 'unavailable');
         setTokenTelemetryStatus(sessionHasTokenTelemetry(refreshed) ? 'available' : 'unavailable');
-        setStatus('idle');
+        setStatus(approvalWasResolving && (refreshed.pendingApproval || refreshed.state === 'pending_approval') ? 'error' : 'idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
       })
       .catch((error) => {
         if (!sessionStillCurrent(capturedSessionId)) {
           return;
+        }
+        if (approvalResolvingRef.current) {
+          updateApprovalResolving(false);
+          setApprovalError(errorMessage(error, 'The approval response timed out and the session could not be refreshed. Try again.'));
         }
         setStatus('error');
         setConnectionStatus(typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'error');
@@ -635,6 +597,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     return () => {
       shouldReconnect = false;
       failAllPendingSends(new Error('Chat session changed before the server acknowledged the message. Your draft was kept.'));
+      updateApprovalResolving(false);
       socket.close();
       socketRef.current = null;
     };
@@ -865,6 +828,10 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       type: 'approval.respond',
       approved,
     }));
+    approvalTimeoutRef.current = setTimeout(() => {
+      approvalTimeoutRef.current = null;
+      refreshSession();
+    }, APPROVAL_RESPONSE_TIMEOUT_MS);
   }
 
   return {

@@ -492,3 +492,6 @@
 
 ## 2026-07-21 — Quarantine-envelope import hardening
 - Treat synthetic quarantine metadata as a strict, exact envelope at trust boundaries: validate the outer and inner key sets plus field, reason, and matching event ID before granting audit exemptions. Report both newly detected malformed rows and already-serialized quarantine envelopes through read audit diagnostics so handoff/import does not erase repair visibility.
+
+## 2026-07-22 — Chat session hook source hygiene
+- `franken-web` enforces a sub-900-line limit on `use-chat-session.ts`; when asynchronous recovery behavior grows the hook, move its public type contracts into a dedicated type-only module and re-export them from the hook so callers remain compatible without weakening the source-hygiene test.

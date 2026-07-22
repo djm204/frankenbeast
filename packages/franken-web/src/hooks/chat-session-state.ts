@@ -10,7 +10,7 @@ import {
   seededRandom,
   type ServerSocketEvent,
 } from '@franken/types';
-import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt } from './use-chat-session';
+import type { ActivityEvent, ChatErrorAction, ChatErrorBanner, ChatMessage, MessageReceipt } from './chat-session-types';
 
 export const EMPTY_TOKEN_TOTALS: TokenTotals = {
   cheap: 0,

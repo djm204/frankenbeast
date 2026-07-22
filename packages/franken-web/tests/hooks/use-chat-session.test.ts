@@ -1057,6 +1057,105 @@ describe('useChatSession', () => {
     expect(result.current.sessionState).toBe('approved');
   });
 
+  it('reconciles approval state when the websocket response event is dropped', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'approved',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:21Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+    });
+
+    expect(result.current.approvalResolving).toBe(true);
+    expect(socket.sent).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(mockGetSession).toHaveBeenCalledWith('chat-1');
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toBeNull();
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('approved');
+    expect(result.current.status).toBe('idle');
+  });
+
+  it('makes an unconfirmed websocket approval retryable after REST reconciliation', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+
+    await waitFor(() => {
+      expect(result.current.sessionId).toBe('chat-1');
+    });
+
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'pending_approval',
+      pendingApproval: {
+        description: 'Deploy the generated fix',
+        requestedAt: '2026-03-09T00:00:06Z',
+      },
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:21Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toContain('did not confirm');
+    expect(result.current.pendingApproval?.description).toBe('Deploy the generated fix');
+    expect(result.current.sessionState).toBe('pending_approval');
+    expect(result.current.status).toBe('error');
+
+    await act(async () => {
+      await result.current.approve(false);
+    });
+    expect(mockApprove).toHaveBeenCalledWith('chat-1', false);
+  });
+
   it.each([
     ['connecting', 0],
     ['closing', 2],
