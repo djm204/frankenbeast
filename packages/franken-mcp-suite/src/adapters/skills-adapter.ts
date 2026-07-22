@@ -1,5 +1,16 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { McpConfigSchema, SkillToolManifestSchema, type McpConfig, type SkillToolManifest } from '@franken/types';
+
+export class SkillManifestValidationError extends Error {
+  readonly path: string;
+
+  constructor(path: string, reason: string) {
+    super(`Invalid skill manifest at ${path}: ${reason}. Repair or reinstall the skill so the file matches the expected schema.`);
+    this.name = 'SkillManifestValidationError';
+    this.path = path;
+  }
+}
 
 export interface SkillsListEntry {
   name: string;
@@ -55,8 +66,8 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
         ...summary,
         hasContext: existsSync(contextPath),
         context,
-        mcpConfig: readJsonFile(mcpPath),
-        tools: readJsonFile(toolsPath) ?? [],
+        mcpConfig: readMcpManifest(mcpPath),
+        tools: readToolManifest(toolsPath) ?? [],
       };
     },
   };
@@ -122,10 +133,8 @@ function inferDescription(skillDir: string, name: string): string {
     }
   }
 
-  const mcpConfig = readJsonFile(join(skillDir, 'mcp.json')) as
-    | { mcpServers?: Record<string, unknown> }
-    | undefined;
-  const serverNames = mcpConfig?.mcpServers ? Object.keys(mcpConfig.mcpServers) : [];
+  const mcpConfig = readMcpManifest(join(skillDir, 'mcp.json'));
+  const serverNames = mcpConfig ? Object.keys(mcpConfig.mcpServers) : [];
 
   return serverNames.length > 0
     ? `Provides MCP server${serverNames.length === 1 ? '' : 's'}: ${serverNames.join(', ')}`
@@ -153,6 +162,58 @@ function readJsonFile(path: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function readManifestJsonFile(path: string): unknown {
+  if (!existsSync(path)) {
+    return undefined;
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw new SkillManifestValidationError(path, 'the file could not be read');
+  }
+
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new SkillManifestValidationError(path, 'invalid JSON');
+  }
+}
+
+function readMcpManifest(path: string): McpConfig | undefined {
+  const raw = readManifestJsonFile(path);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const parsed = McpConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new SkillManifestValidationError(path, 'expected mcpServers to be a record of server definitions');
+  }
+  return parsed.data;
+}
+
+function readToolManifest(path: string): SkillToolManifest | undefined {
+  const raw = readManifestJsonFile(path);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const parsed = SkillToolManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new SkillManifestValidationError(path, 'expected an array of tool definitions');
+  }
+  return parsed.data;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
 }
 
 function readOptionalTextFile(path: string): string | undefined {

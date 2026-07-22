@@ -88,6 +88,35 @@ describe('SkillsAdapter filesystem race handling', () => {
     });
   });
 
+  it('rejects malformed mcp.json with actionable file context', async () => {
+    await createSkill('broken');
+    const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
+    await writeFile(manifestPath, '{ malformed');
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).list({})).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: invalid JSON. Repair or reinstall the skill`,
+    );
+  });
+
+  it('rejects mcp.json that does not match the MCP manifest schema', async () => {
+    const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
+    await createSkill('broken', { mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('broken')).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: expected mcpServers to be a record`,
+    );
+  });
+
+  it('rejects tools.json that does not match the tool manifest schema', async () => {
+    await createSkill('broken');
+    const manifestPath = join(root, 'skills', 'broken', 'tools.json');
+    await writeFile(manifestPath, JSON.stringify({ not: 'an array' }));
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('broken')).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: expected an array of tool definitions`,
+    );
+  });
+
   async function createSkill(name: string, options: { context?: string; mcp?: unknown } = {}): Promise<string> {
     const skillDir = join(root, 'skills', name);
     const contextPath = join(skillDir, 'context.md');
