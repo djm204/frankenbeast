@@ -407,6 +407,198 @@ describe('agent routes integration', () => {
     });
   });
 
+  it('rejects an over-long init command', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'x'.repeat(8 * 1024 + 1),
+          config: {},
+        },
+        initConfig: { provider: 'claude', objective: 'Bounded command', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('rejects an over-deep init action config', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+    let deeplyNested: Record<string, unknown> = { leaf: true };
+    for (let i = 0; i < 20; i += 1) {
+      deeplyNested = { child: deeplyNested };
+    }
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: { payload: deeplyNested },
+        },
+        initConfig: { provider: 'claude', objective: 'Bounded config depth', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('rejects an over-large init action config', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+    const wideConfig = Object.fromEntries(
+      Array.from({ length: 600 }, (_, i) => [`key${i}`, i]),
+    );
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: wideConfig,
+        },
+        initConfig: { provider: 'claude', objective: 'Bounded config size', chunkDirectory: 'docs/chunks' },
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('rejects an over-deep initConfig', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+    let deeplyNested: Record<string, unknown> = { leaf: true };
+    for (let i = 0; i < 20; i += 1) {
+      deeplyNested = { child: deeplyNested };
+    }
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {},
+        },
+        initConfig: { payload: deeplyNested },
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'VALIDATION_ERROR',
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('rejects oversized agent-creation request bodies', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+    const oversizedBody = JSON.stringify({
+      definitionId: 'martin-loop',
+      autoDispatch: false,
+      initAction: {
+        kind: 'martin-loop',
+        command: 'martin-loop',
+        config: { padding: 'x'.repeat(260 * 1024) },
+      },
+      initConfig: { provider: 'claude', objective: 'Bounded body', chunkDirectory: 'docs/chunks' },
+    });
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+        'content-length': String(oversizedBody.length),
+      },
+      body: oversizedBody,
+    });
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+      },
+    });
+    expect(agents.listAgents()).toEqual([]);
+  });
+
+  it('accepts a valid baseline creation payload within the bounds', async () => {
+    const { app, operatorToken, agents } = createIntegratedBeastApp();
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {},
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Launch from the dashboard without explicit policy fields',
+          chunkDirectory: 'docs/chunks',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(agents.listAgents()).toHaveLength(1);
+  });
+
   it('returns a policy-denied 403 for forbidden role tool manifests', async () => {
     const { app, operatorToken, agents } = createIntegratedBeastApp();
 
@@ -800,7 +992,7 @@ describe('agent routes integration', () => {
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
             ...CODING_POLICY,
-            promptConfig: { text: 'x'.repeat(20 * 1024) },
+            promptConfig: { text: 'x'.repeat(120 * 1024) },
           },
         },
         initConfig: {
@@ -808,9 +1000,46 @@ describe('agent routes integration', () => {
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
           ...CODING_POLICY,
-          promptConfig: { text: 'x'.repeat(20 * 1024) },
+          promptConfig: { text: 'x'.repeat(120 * 1024) },
         },
         autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('allows duplicated wizard config with a large prompt attachment', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const attachment = 'x'.repeat(32 * 1024);
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Launch with duplicated attachment',
+            chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
+            promptConfig: { text: attachment },
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Launch with duplicated attachment',
+          chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
+          promptConfig: { text: attachment },
+        },
       }),
     });
 
