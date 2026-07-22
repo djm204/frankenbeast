@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { ActivityEvent } from '../hooks/use-chat-session';
 import { SafeMarkdownText } from './safe-markdown-text';
 import { usePinnedScroll } from './use-pinned-scroll';
@@ -170,6 +171,11 @@ function viewModelForActivity(event: ActivityEvent): ActivityViewModel {
   };
 }
 
+function announcementForActivity(event: ActivityEvent, activityNumber: number): string {
+  const viewModel = viewModelForActivity(event);
+  return `${viewModel.title} at ${formatActivityTime(event.timestamp)} — ${viewModel.status}: ${viewModel.summary} (activity ${activityNumber})`;
+}
+
 const UNABLE_TO_STRINGIFY_EVENT_DATA = '[unserializable event data]';
 
 function formatEventData(data: Record<string, unknown>): string {
@@ -207,10 +213,29 @@ function safeEventDataSummary(data: Record<string, unknown>): string {
 }
 
 export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
+  const latestEvent = events[events.length - 1];
+  const latestAnnouncement = latestEvent ? announcementForActivity(latestEvent, events.length) : '';
+  const [announcement, setAnnouncement] = useState('');
+  const previousEventCountRef = useRef(events.length);
+  const previousResetKeyRef = useRef(resetKey);
   const { containerRef, endRef, hasNewItems, handleScroll, scrollToLatest } = usePinnedScroll<HTMLOListElement, HTMLLIElement>(
     events.length,
     resetKey,
   );
+
+  useEffect(() => {
+    const previousEventCount = previousEventCountRef.current;
+    const resetChanged = !Object.is(previousResetKeyRef.current, resetKey);
+    previousEventCountRef.current = events.length;
+    previousResetKeyRef.current = resetKey;
+
+    if (resetChanged || events.length <= previousEventCount) {
+      setAnnouncement('');
+      return;
+    }
+
+    setAnnouncement(latestAnnouncement);
+  }, [events.length, latestAnnouncement, resetKey]);
 
   return (
     <section className="rail-card terminal-activity" aria-label="Activity">
@@ -218,6 +243,9 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
         <p className="eyebrow">Activity</p>
         <h2>Runtime Events</h2>
       </div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
       {events.length === 0 && <p className="rail-card__empty">Waiting for execution events.</p>}
       <ol ref={containerRef} className="activity-list" aria-label="Runtime activity timeline" onScroll={handleScroll}>
         {events.map((event, index) => {
