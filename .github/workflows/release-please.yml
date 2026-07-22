@@ -72,7 +72,9 @@ jobs:
           # Component releases are prefixed (franken-brain-v0.3.0).
           # GitHub auto-marks the most recently created release as "latest",
           # which could be any sub-package. Fix that.
-          release_json=$(gh release list --limit 1000 --json tagName,isLatest)
+          # Bound the API response, then sort valid root tags ourselves rather
+          # than relying on GitHub's creation-date ordering.
+          release_json=$(gh release list --limit 100 --json tagName,isLatest)
           latest_tag=$(jq -r '([.[] | select(.isLatest)][0].tagName // empty)' <<<"$release_json")
           if [ -z "$latest_tag" ]; then
             echo "No latest release found; nothing to repair"
@@ -80,18 +82,25 @@ jobs:
           fi
 
           # If the current "latest" is already a root release, nothing to do
-          if [[ "$latest_tag" =~ ^v[0-9] ]]; then
+          if [[ "$latest_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Latest is already root release: $latest_tag"
             exit 0
           fi
 
-          # Promote the most recent root release back to latest. If no root
-          # release exists yet, keep the current latest marker in place rather
-          # than demoting the component release and leaving no latest release.
-          root_tag=$(jq -r '([.[] | select(.tagName | test("^v[0-9]"))][0].tagName // empty)' <<<"$release_json")
+          # Select the greatest stable semantic version deterministically.
+          root_tag=$(jq -r '
+            [
+              .[]
+              | .tagName
+              | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+              | { tag: ., version: (ltrimstr("v") | split(".") | map(tonumber)) }
+            ]
+            | sort_by(.version) | reverse
+            | .[0].tag // empty
+          ' <<<"$release_json")
           if [ -z "$root_tag" ]; then
-            echo "No root release found; leaving component latest unchanged: $latest_tag"
-            exit 0
+            echo "No unambiguous root release found in bounded release list; refusing to change latest: $latest_tag" >&2
+            exit 1
           fi
 
           # Demote the component release, then promote the root release.
