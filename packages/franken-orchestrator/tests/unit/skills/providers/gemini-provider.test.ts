@@ -172,4 +172,8 @@ describe('GeminiProvider', () => {
   it('extractUsage returns undefined when the CLI output has no usage', () => {
     expect(provider.extractUsage?.('plain output')).toBeUndefined();
   });
+
+  it('defaults chatModel to the flagship (Pro) tier, not the cheaper Flash line', () => {
+    expect(provider.chatModel).toBe('gemini-2.5-pro');
+  });
 });

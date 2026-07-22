@@ -197,4 +197,17 @@ describe('ClaudeProvider', () => {
   it('extractUsage returns undefined when the CLI output has no usage', () => {
     expect(provider.extractUsage?.('plain text output')).toBeUndefined();
   });
+
+  it('defaults chatModel to the flagship tier, not a cheap/fast one', () => {
+    expect(provider.chatModel).toBe('claude-opus-4-8');
+  });
+
+  it('extractModel reports the model the CLI actually reported', () => {
+    const raw = '{"type":"assistant","message":{"model":"claude-sonnet-5","content":[]}}';
+    expect(provider.extractModel?.(raw)).toBe('claude-sonnet-5');
+  });
+
+  it('extractModel returns undefined when the CLI output reports no model', () => {
+    expect(provider.extractModel?.('plain text output')).toBeUndefined();
+  });
 });
