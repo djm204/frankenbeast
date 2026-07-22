@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { load } from 'js-yaml';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');
@@ -577,7 +577,7 @@ jobs:
     expect(releaseLatestRun).toContain('exit 1');
   });
 
-  it('does not demote component-only latest releases unless a root release exists to promote', () => {
+  it('selects a root release deterministically from a bounded semantic-version sort', () => {
     const releaseLatestStep = expectSteps(releasePlease).find(
       (step) => step.name === 'Ensure only root release is marked latest',
     );
@@ -585,21 +585,46 @@ jobs:
     const releaseLatestRun = String(releaseLatestStep?.run ?? '');
 
     const rootLookupIndex = releaseLatestRun.indexOf('root_tag=$(jq -r');
-    const emptyRootNormalizationIndex = releaseLatestRun.indexOf('.tagName // empty', rootLookupIndex);
-    const noRootGuardIndex = releaseLatestRun.indexOf(
-      'No root release found; leaving component latest unchanged',
-    );
+    const noRootGuardIndex = releaseLatestRun.indexOf('No unambiguous root release found in bounded release list');
     const demoteIndex = releaseLatestRun.indexOf('gh release edit "$latest_tag" --latest=false');
     const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(releaseLatestRun).toContain('gh release list --limit 1000 --json tagName,isLatest');
-    expect(emptyRootNormalizationIndex).toBeGreaterThan(rootLookupIndex);
-    expect(noRootGuardIndex).toBeGreaterThan(emptyRootNormalizationIndex);
+    expect(releaseLatestRun).toContain(
+      'gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName,isLatest',
+    );
+    expect(releaseLatestRun).toContain('[[ "$latest_tag" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]');
+    expect(releaseLatestRun).toContain('test("^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+$")');
+    expect(releaseLatestRun).toContain('split(".") | map(tonumber)');
+    expect(releaseLatestRun).toContain('sort_by(.version) | reverse');
+    expect(noRootGuardIndex).toBeGreaterThan(rootLookupIndex);
     expect(demoteIndex).toBeGreaterThan(noRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
     expect(releaseLatestRun).toContain('if [ -z "$root_tag" ]; then');
-    expect(releaseLatestRun).toContain('exit 0');
+    expect(releaseLatestRun.slice(noRootGuardIndex, demoteIndex)).toContain('exit 1');
+  });
+
+  it('orders root tags by semantic version instead of release-list position', () => {
+    const releaseLatestStep = expectSteps(releasePlease).find(
+      (step) => step.name === 'Ensure only root release is marked latest',
+    );
+    const releaseLatestRun = String(releaseLatestStep?.run ?? '');
+    const rootSelector = releaseLatestRun.match(/root_tag=\$\(jq -r '([\s\S]*?)' <<<"\$release_json"\)/)?.[1];
+    expect(rootSelector).toBeTruthy();
+
+    const releases = [
+      { tagName: 'component-v99.0.0', isLatest: true },
+      { tagName: 'v2.10.0', isLatest: false },
+      { tagName: 'v10.0.0', isLatest: false },
+      { tagName: 'v2.9.0', isLatest: false },
+      { tagName: 'v11.0.0-rc.1', isLatest: false },
+    ];
+    const selected = execFileSync('jq', ['-r', rootSelector as string], {
+      input: JSON.stringify(releases),
+      encoding: 'utf8',
+    }).trim();
+
+    expect(selected).toBe('v10.0.0');
   });
 
   it('defers npm token enforcement until a public package needs publishing', () => {
@@ -611,22 +636,24 @@ jobs:
     expect(publishRun).toContain('npm publish "$package_path" --access public --provenance');
   });
 
-  it('does not demote a component latest release unless a root release can be promoted', () => {
+  it('fails before demotion when the bounded release list has no valid root semantic version', () => {
     const latestStep = expectSteps(releasePlease).find((step) => step.name === 'Ensure only root release is marked latest');
     expect(latestStep).toBeTruthy();
 
     const latestRun = String(latestStep?.run ?? '');
     const rootLookupIndex = latestRun.indexOf('root_tag=$(jq -r');
-    const missingRootGuardIndex = latestRun.indexOf('No root release found; leaving component latest unchanged');
+    const missingRootGuardIndex = latestRun.indexOf('No unambiguous root release found in bounded release list');
     const demoteIndex = latestRun.indexOf('gh release edit "$latest_tag" --latest=false');
     const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(latestRun).toContain('gh release list --limit 1000 --json tagName,isLatest');
+    expect(latestRun).toContain(
+      'gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName,isLatest',
+    );
     expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
-    expect(latestRun).toContain('[0].tagName // empty');
+    expect(latestRun.slice(missingRootGuardIndex, demoteIndex)).toContain('exit 1');
   });
 });
 
