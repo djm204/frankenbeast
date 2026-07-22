@@ -143,6 +143,112 @@ describe('Skill API routes', () => {
       expect(manager.exists('my-tool')).toBe(true);
     });
 
+    it.each([
+      {
+        label: 'malformed catalog entry',
+        payload: {
+          catalogEntry: {
+            name: 'unsafe-catalog',
+            description: 'Catalog entry',
+            provider: { unexpected: true },
+            installConfig: { command: 'node' },
+            authFields: [],
+          },
+        },
+      },
+      {
+        label: 'malformed custom entry',
+        payload: {
+          custom: {
+            name: 'unsafe-custom',
+            config: { command: 'node' },
+            unexpected: true,
+          },
+        },
+      },
+      {
+        label: 'oversized custom command',
+        payload: {
+          custom: {
+            name: 'oversized-custom',
+            config: { command: 'x'.repeat(4_097) },
+          },
+        },
+      },
+      {
+        label: 'unsafe custom skill name',
+        payload: {
+          custom: {
+            name: '../unsafe-custom',
+            config: { command: 'node' },
+          },
+        },
+      },
+      {
+        label: 'unbounded custom arguments',
+        payload: {
+          custom: {
+            name: 'too-many-args',
+            config: { command: 'node', args: Array.from({ length: 129 }, () => 'arg') },
+          },
+        },
+      },
+      {
+        label: 'oversized tool input schema',
+        payload: {
+          catalogEntry: {
+            name: 'oversized-schema',
+            description: 'Catalog entry',
+            provider: 'test',
+            installConfig: { command: 'node' },
+            authFields: [],
+            toolDefinitions: [{
+              name: 'large-tool',
+              description: 'Large schema',
+              inputSchema: { description: 'x'.repeat(8_193) },
+            }],
+          },
+        },
+      },
+      {
+        label: 'both install variants',
+        payload: {
+          catalogEntry: {
+            name: 'catalog-tool',
+            description: 'Catalog entry',
+            provider: 'test',
+            installConfig: { command: 'node' },
+            authFields: [],
+          },
+          custom: {
+            name: 'custom-tool',
+            config: { command: 'node' },
+          },
+        },
+      },
+    ])('rejects $label before calling SkillManager', async ({ payload }) => {
+      const skillManager = {
+        install: vi.fn().mockResolvedValue(undefined),
+        installCustom: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SkillManager;
+      const validationApp = new Hono();
+      validationApp.route('/api/skills', createSkillRoutes({
+        skillManager,
+        providerRegistry: mockProviderRegistry(),
+      }));
+
+      const res = await validationApp.request('/api/skills', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ error: expect.any(String) });
+      expect(skillManager.install).not.toHaveBeenCalled();
+      expect(skillManager.installCustom).not.toHaveBeenCalled();
+    });
+
     it('rejects invalid custom MCP configs without poisoning the skills list', async () => {
       const res = await app.request('/api/skills', {
         method: 'POST',
@@ -153,7 +259,7 @@ describe('Skill API routes', () => {
       });
       expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error).toContain('mcpServers.broken-tool.args.0');
+      expect(body.error).toContain('custom.config.args.0');
       expect(existsSync(join(skillsDir, 'broken-tool', 'mcp.json'))).toBe(false);
 
       const listRes = await app.request('/api/skills');
