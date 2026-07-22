@@ -67,8 +67,9 @@ tool calls are checked regardless of whether client hooks are installed. We
   Scanning that payload only yields false-positive denials, so:
   - **Non-executing tools** (`NON_EXECUTING_TOOLS`) — every read/analyze/store/
     log tool across the registry (`search_tools`, the firewall scanners,
-    `fbeast_governor_check`/`_budget`, `fbeast_memory_store`/`_query`/
-    `_frontload`, the planner tools, `fbeast_critique_evaluate`/`_compare`, the
+    `fbeast_governor_check`/`fbeast_governor_budget`,
+    `fbeast_memory_store`/`fbeast_memory_query`/`fbeast_memory_frontload`, the
+    planner tools, `fbeast_critique_evaluate`/`fbeast_critique_compare`, the
     observer tools, the skills tools) — are **exempt** and approved. Their
     payload is data, not an operation to authorize; governing it would break
     legitimate critique/audit/store workflows on risky content (e.g. critiquing
@@ -152,8 +153,9 @@ absent. The two are complementary and share the same governor policy.
 ### Out of scope
 - Firewall (prompt-injection) scanning is **not** added to the dispatch gate.
   The hook path does not firewall-scan either (`cli/hook.ts pre-tool` only runs
-  the governor); the firewall is an agent-invoked tool (`fbeast_firewall_scan` /
-  `_scan_file`) for vetting untrusted input before acting. Making it a blocking
+  the governor); the firewall is an agent-invoked tool
+  (`fbeast_firewall_scan` / `fbeast_firewall_scan_file`) for vetting untrusted
+  input before acting. Making it a blocking
   per-dispatch gate would self-block those scan tools (it would refuse to scan
   the very content meant to be scanned) and cause false-positive denials on
   legitimate stores. Defense-in-depth firewall integration, if desired, belongs
