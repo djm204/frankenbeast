@@ -315,6 +315,45 @@ describe('fbeast-hook runtime', () => {
     expect(result.observerLogs[0]!.metadata.match(/\[REDACTED\]/g)).toHaveLength(9);
   });
 
+  it('redacts complete multi-token authorization assignments from raw post-tool payloads', async () => {
+    const credential = ['fixture', 'signed', 'credential'].join('-');
+    const signature = ['fixture', 'signature'].join('-');
+    const token = ['opaque', 'credential', 'value'].join(' ');
+    const payload = [
+      `authorization=AWS4-HMAC-SHA256 Credential=${credential} SignedHeaders=host;x-date Signature=${signature}`,
+      `authorization=Token ${token}`,
+    ].join('\n');
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(credential);
+    expect(result.observerLogs[0]!.metadata).not.toContain(signature);
+    expect(result.observerLogs[0]!.metadata).not.toContain(token);
+    expect(result.observerLogs[0]!.metadata.match(/authorization=\[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it('redacts quoted authorization header values from raw post-tool payloads', async () => {
+    const secret = ['quoted', 'authorization', 'fixture'].join('-');
+    const payload = [`Authorization: "Basic ${secret}"`, `Authorization: 'Token ${secret}'`].join('\n');
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(result.observerLogs[0]!.metadata.match(/Authorization: \[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it('recurses into top-level JSON string payloads before observer logging', async () => {
+    const secret = ['top', 'level', 'string', 'fixture'].join('-');
+    const payload = JSON.stringify(JSON.stringify({ apiKey: secret, status: 'ok' }));
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+    const nested = JSON.parse(JSON.parse(metadata.payload) as string) as Record<string, string>;
+
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+    expect(nested).toEqual({ apiKey: '[REDACTED]', status: 'ok' });
+  });
+
   it('redacts acronym-prefixed credentials from raw post-tool payloads', async () => {
     const secret = ['acronym', 'raw', 'fixture'].join('-');
     const payload = `DBPassword=${secret} JWTToken=${secret}`;
