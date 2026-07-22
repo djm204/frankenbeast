@@ -743,7 +743,7 @@ export class ChatSocketController {
     session.pendingApproval = null;
     // Persist an in-flight state before running so REST reconciliation can
     // distinguish an accepted approval from completed approved execution.
-    session.state = 'active';
+    session.state = 'executing';
     session.updatedAt = nowIso();
     this.sessionStore.save(session);
 

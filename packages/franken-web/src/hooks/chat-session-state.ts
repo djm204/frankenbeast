@@ -88,6 +88,7 @@ export function makeBanner(
 
 export function approvalReconciliationResult(
   session: ChatSession,
+  approved: boolean,
 ): { error: string | null; banner: ChatErrorBanner | null; status: SessionStatus } {
   if (session.pendingApproval || session.state === 'pending_approval') {
     return { error: 'The server did not confirm the approval response. Try again.', banner: null, status: 'error' };
@@ -100,7 +101,15 @@ export function approvalReconciliationResult(
       status: 'error',
     };
   }
-  return { error: null, banner: null, status: session.state === 'active' ? 'streaming' : 'idle' };
+  if (approved && session.state === 'rejected') {
+    const message = 'The server rejected the approved action before it could run. Recreate the action and try again.';
+    return {
+      error: message,
+      banner: makeBanner('Approved action was rejected', message, 'dismiss', 'Dismiss', 'APPROVAL_EXECUTION_REJECTED'),
+      status: 'error',
+    };
+  }
+  return { error: null, banner: null, status: session.state === 'executing' ? 'streaming' : 'idle' };
 }
 
 function hasDeterministicSeed(): boolean {

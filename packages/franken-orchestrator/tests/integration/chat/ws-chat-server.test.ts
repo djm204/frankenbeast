@@ -1288,7 +1288,7 @@ describe('ws chat server', () => {
       approved: true,
     }));
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    expect(store.get(session.id)?.state).toBe('active');
+    expect(store.get(session.id)?.state).toBe('executing');
     finishExecution();
     await Promise.all([first, second]);
 

@@ -1218,7 +1218,7 @@ describe('useChatSession', () => {
     expect(result.current.sessionState).toBe('approved');
   });
 
-  it('keeps an active approved action streaming while execution is still in progress', async () => {
+  it('keeps an executing approved action streaming while execution is still in progress', async () => {
     const { result } = renderHook(() => useChatSession(opts));
     await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
     vi.useFakeTimers();
@@ -1235,7 +1235,7 @@ describe('useChatSession', () => {
       id: 'chat-1',
       projectId: 'test-proj',
       transcript: [],
-      state: 'active',
+      state: 'executing',
       pendingApproval: null,
       socketToken: 'signed-token',
       tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
@@ -1251,7 +1251,7 @@ describe('useChatSession', () => {
 
     expect(result.current.approvalResolving).toBe(false);
     expect(result.current.pendingApproval).toBeNull();
-    expect(result.current.sessionState).toBe('active');
+    expect(result.current.sessionState).toBe('executing');
     expect(result.current.status).toBe('streaming');
   });
 
@@ -1374,6 +1374,48 @@ describe('useChatSession', () => {
     ]));
     expect(result.current.tokenTotals.cheap).toBe(12);
     expect(result.current.costUsd).toBe(0.03);
+  });
+
+  it('surfaces a rejected approved action from REST reconciliation', async () => {
+    const { result } = renderHook(() => useChatSession(opts));
+    await waitFor(() => expect(result.current.sessionId).toBe('chat-1'));
+    vi.useFakeTimers();
+    const socket = MockWebSocket.instances[0]!;
+    act(() => {
+      socket.open();
+      socket.message({
+        type: 'turn.approval.requested',
+        description: 'Deploy the generated fix',
+        timestamp: '2026-03-09T00:00:06Z',
+      });
+    });
+    mockGetSession.mockResolvedValueOnce({
+      id: 'chat-1',
+      projectId: 'test-proj',
+      transcript: [],
+      state: 'rejected',
+      pendingApproval: null,
+      socketToken: 'signed-token',
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: '2026-03-09T00:00:00Z',
+      updatedAt: '2026-03-09T00:00:21Z',
+    });
+
+    await act(async () => {
+      await result.current.approve(true);
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(result.current.approvalResolving).toBe(false);
+    expect(result.current.approvalError).toContain('rejected the approved action');
+    expect(result.current.pendingApproval).toBeNull();
+    expect(result.current.sessionState).toBe('rejected');
+    expect(result.current.status).toBe('error');
+    expect(result.current.errorBanners[0]).toMatchObject({
+      title: 'Approved action was rejected',
+      code: 'APPROVAL_EXECUTION_REJECTED',
+    });
   });
 
   it('makes an unconfirmed websocket approval retryable after REST reconciliation', async () => {
@@ -1851,12 +1893,12 @@ describe('useChatSession', () => {
     expect(result.current.pendingApproval).toBeNull();
   });
 
-  it('resumes an existing session and reconnects when the socket closes', async () => {
+  it('resumes an in-flight execution and keeps it streaming when the socket reconnects', async () => {
     mockGetSession.mockResolvedValue({
       id: 'existing-sess',
       projectId: 'test-proj',
       transcript: [{ id: 'u1', role: 'user', content: 'old message', timestamp: '2026-03-09T00:00:00Z' }],
-      state: 'active',
+      state: 'executing',
       pendingApproval: null,
       socketToken: 'resume-token',
       tokenTotals: { cheap: 5, premiumReasoning: 0, premiumExecution: 0 },
@@ -1890,6 +1932,8 @@ describe('useChatSession', () => {
       expect(MockWebSocket.instances).toHaveLength(2);
     });
     expect(result.current.connectionStatus).toBe('connecting');
+    expect(result.current.sessionState).toBe('executing');
+    expect(result.current.status).toBe('streaming');
   });
 
   it('deduplicates replayed websocket events by event id and monotonic cursor', async () => {
