@@ -884,7 +884,7 @@ describe('ProcessBeastExecutor', () => {
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const logs = new BeastLogStore(join(workDir, 'logs'));
     const supervisor = {
-      spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: 777 })),
+      spawn: vi.fn(async (_spec: unknown, _callbacks: unknown) => ({ pid: process.pid })),
       stop: vi.fn(async () => {}),
       kill: vi.fn(async () => {}),
     };
@@ -906,7 +906,11 @@ describe('ProcessBeastExecutor', () => {
     const attempt = await executor.start(run, martinLoopDefinition);
     await executor.stop(run.id, attempt.id);
 
-    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: attempt.executorMetadata?.processGroupOwned === true });
+    const processStartTimeTicks = attempt.executorMetadata?.processStartTimeTicks;
+    expect(supervisor.stop).toHaveBeenCalledWith(process.pid, {
+      processGroupOwned: attempt.executorMetadata?.processGroupOwned === true,
+      ...(typeof processStartTimeTicks === 'string' ? { expectedStartTimeTicks: processStartTimeTicks } : {}),
+    });
     expect(repo.getRun(run.id)).toMatchObject({
       status: 'stopped',
       currentAttemptId: attempt.id,
@@ -936,7 +940,7 @@ describe('ProcessBeastExecutor', () => {
     const supervisor = {
       spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
         capturedCallbacks = callbacks as ProcessCallbacks;
-        return { pid: 777 };
+        return { pid: process.pid };
       }),
       stop: vi.fn(async () => {
         capturedCallbacks?.onExit(null, 'SIGTERM');
@@ -961,7 +965,11 @@ describe('ProcessBeastExecutor', () => {
     const attempt = await executor.start(run, martinLoopDefinition);
     const stoppedAttempt = await executor.stop(run.id, attempt.id);
 
-    expect(supervisor.stop).toHaveBeenCalledWith(777, { processGroupOwned: attempt.executorMetadata?.processGroupOwned === true });
+    const processStartTimeTicks = attempt.executorMetadata?.processStartTimeTicks;
+    expect(supervisor.stop).toHaveBeenCalledWith(process.pid, {
+      processGroupOwned: attempt.executorMetadata?.processGroupOwned === true,
+      ...(typeof processStartTimeTicks === 'string' ? { expectedStartTimeTicks: processStartTimeTicks } : {}),
+    });
     expect(supervisor.kill).not.toHaveBeenCalled();
     expect(stoppedAttempt).toMatchObject({
       id: attempt.id,
