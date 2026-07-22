@@ -98,6 +98,29 @@ describe('LangfuseAdapter', () => {
       const [, init] = mockFetch.mock.calls[0]
       expect(init.method).toBe('POST')
     })
+
+    it('aborts and rejects a stalled export within the configured attempt deadline', async () => {
+      vi.useFakeTimers()
+      try {
+        mockFetch.mockImplementation(() => new Promise(() => undefined))
+        const adapter = new LangfuseAdapter({
+          publicKey: LANGFUSE_PUBLIC_KEY,
+          secretKey: LANGFUSE_SECRET_KEY,
+          fetch: mockFetch,
+          retry: { attemptTimeoutMs: 25 },
+        })
+
+        const flush = adapter.flush(makeTrace())
+        const rejection = expect(flush).rejects.toThrow('HTTP attempt timed out after 25ms')
+        await vi.advanceTimersByTimeAsync(25)
+
+        await rejection
+        expect(mockFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
+        expect(mockFetch.mock.calls[0][1].signal.aborted).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 
   describe('retry on transient failures (issue #68)', () => {

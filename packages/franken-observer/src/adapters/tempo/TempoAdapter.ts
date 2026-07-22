@@ -72,11 +72,12 @@ export class TempoAdapter implements ExportAdapter {
     if (this.authHeader) headers['Authorization'] = this.authHeader
 
     const response = await fetchWithRetry(
-      () =>
+      signal =>
         this.fetchFn(this.tracesUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(payload),
+          signal,
         }),
       this.retry,
     )
