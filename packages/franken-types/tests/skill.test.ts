@@ -42,13 +42,16 @@ describe('McpConfigSchema', () => {
     expect(McpConfigSchema.parse(config)).toEqual(config);
   });
 
-  it('validates commandless remote HTTP and SSE MCP servers', () => {
+  it('validates commandless remote MCP servers and preserves client options', () => {
     const config: McpConfig = {
       mcpServers: {
         remote: {
-          type: 'http',
+          type: 'streamable-http',
           url: 'https://example.com/mcp',
           headers: { Authorization: 'Bearer token' },
+          timeout: 30_000,
+          headersHelper: 'auth-helper',
+          alwaysLoad: true,
         },
         events: { type: 'sse', url: 'https://example.com/events' },
       },
@@ -144,6 +147,20 @@ describe('SkillToolManifestSchema', () => {
 
   it('accepts empty array', () => {
     expect(SkillToolManifestSchema.parse([])).toEqual([]);
+  });
+
+  it('preserves valid MCP tool metadata beyond the required core fields', () => {
+    const manifest = [{
+      name: 'search',
+      description: 'Search records',
+      inputSchema: { type: 'object' },
+      title: 'Record Search',
+      outputSchema: { type: 'object' },
+      annotations: { readOnlyHint: true },
+      execution: { taskSupport: 'optional' },
+    }];
+
+    expect(SkillToolManifestSchema.parse(manifest)).toEqual(manifest);
   });
 
   it('rejects tool with empty name', () => {

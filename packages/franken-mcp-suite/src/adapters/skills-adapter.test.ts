@@ -117,6 +117,15 @@ describe('SkillsAdapter filesystem race handling', () => {
     });
   });
 
+  it('applies the enabled filter before validating excluded skill manifests', async () => {
+    await createSkill('stable', { context: '# Stable skill' });
+    await createSkill('disabled-broken', { mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).list({ enabled: true })).resolves.toEqual([
+      expect.objectContaining({ name: 'stable', enabled: true }),
+    ]);
+  });
+
   it('rejects skill IDs that traverse outside the installed skills directory', async () => {
     const outsideDir = join(root, 'outside');
     await mkdir(outsideDir, { recursive: true });
@@ -140,9 +149,11 @@ describe('SkillsAdapter filesystem race handling', () => {
       mcp: {
         mcpServers: {
           remote: {
-            type: 'http',
+            type: 'streamable-http',
             url: 'https://example.com/mcp',
             headers: { Authorization: 'Bearer token' },
+            timeout: 30_000,
+            alwaysLoad: true,
           },
         },
       },
@@ -150,7 +161,16 @@ describe('SkillsAdapter filesystem race handling', () => {
 
     await expect(createSkillsAdapter(join(root, 'beast.db')).info('remote')).resolves.toMatchObject({
       name: 'remote',
-      mcpConfig: { mcpServers: { remote: { type: 'http', url: 'https://example.com/mcp' } } },
+      mcpConfig: {
+        mcpServers: {
+          remote: {
+            type: 'streamable-http',
+            url: 'https://example.com/mcp',
+            timeout: 30_000,
+            alwaysLoad: true,
+          },
+        },
+      },
     });
   });
 
@@ -162,6 +182,22 @@ describe('SkillsAdapter filesystem race handling', () => {
     await expect(createSkillsAdapter(join(root, 'beast.db')).info('broken')).rejects.toThrow(
       `Invalid skill manifest at ${manifestPath}: expected an array of tool definitions`,
     );
+  });
+
+  it('preserves optional MCP tool metadata in tools.json', async () => {
+    await createSkill('tool-metadata');
+    const tools = [{
+      name: 'search',
+      description: 'Search records',
+      inputSchema: { type: 'object' },
+      title: 'Record Search',
+      outputSchema: { type: 'object' },
+      annotations: { readOnlyHint: true },
+      execution: { taskSupport: 'optional' },
+    }];
+    await writeFile(join(root, 'skills', 'tool-metadata', 'tools.json'), JSON.stringify(tools));
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('tool-metadata')).resolves.toMatchObject({ tools });
   });
 
   async function createSkill(name: string, options: { context?: string; mcp?: unknown } = {}): Promise<string> {

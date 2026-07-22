@@ -12,13 +12,13 @@ const StdioMcpServerSchema = z.object({
   env: z.record(z.string(), z.string()).optional(),
   // Retain compatibility with existing command-based entries that also carry a URL.
   url: z.string().url().optional(),
-});
+}).passthrough();
 
 const RemoteMcpServerSchema = z.object({
-  type: z.enum(['http', 'sse']),
+  type: z.enum(['http', 'sse', 'streamable-http']),
   url: z.string().url(),
   headers: z.record(z.string(), z.string()).optional(),
-});
+}).passthrough();
 
 export const McpConfigSchema = z.object({
   mcpServers: z.record(
@@ -40,7 +40,7 @@ export const SkillInfoSchema = z.object({
 export type SkillInfo = z.infer<typeof SkillInfoSchema>;
 
 /** Optional API-provider tool manifest (tools.json) */
-export const SkillToolManifestSchema = z.array(ToolDefinitionSchema);
+export const SkillToolManifestSchema = z.array(ToolDefinitionSchema.passthrough());
 export type SkillToolManifest = z.infer<typeof SkillToolManifestSchema>;
 
 /** Run config skills array */

@@ -40,11 +40,7 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
 
   return {
     async list(input) {
-      const entries = listInstalledSkills(skillsDir, readEnabledSkills(configPath));
-      if (input.enabled === undefined) {
-        return entries;
-      }
-      return entries.filter((entry) => entry.enabled === input.enabled);
+      return listInstalledSkills(skillsDir, readEnabledSkills(configPath), input.enabled);
     },
 
     async info(skillId) {
@@ -88,7 +84,11 @@ function isInstalledSkill(skillsDir: string, skillId: string): boolean {
   }
 }
 
-function listInstalledSkills(skillsDir: string, enabledSkills: Set<string>): SkillsListEntry[] {
+function listInstalledSkills(
+  skillsDir: string,
+  enabledSkills: Set<string>,
+  enabledFilter?: boolean,
+): SkillsListEntry[] {
   if (!existsSync(skillsDir)) {
     return [];
   }
@@ -102,6 +102,7 @@ function listInstalledSkills(skillsDir: string, enabledSkills: Set<string>): Ski
 
   return entries
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => enabledFilter === undefined || enabledSkills.has(entry.name) === enabledFilter)
     .map((entry) => readSkillSummary(skillsDir, entry.name, enabledSkills))
     .filter((entry): entry is SkillsListEntry => entry !== undefined)
     .sort((a, b) => a.name.localeCompare(b.name));
