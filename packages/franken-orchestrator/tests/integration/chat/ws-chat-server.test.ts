@@ -624,7 +624,7 @@ describe('ws chat server', () => {
     }));
 
     const secondPrompt = completeWithUsage.mock.calls[1]![0] as string;
-    expect(secondPrompt).toContain('This is an automatic fallback');
+    expect(secondPrompt).toContain('That completed turn used an automatic fallback');
     expect(secondPrompt).toContain('"codex" was rate-limited');
 
     rmSync(TMP, { recursive: true, force: true });

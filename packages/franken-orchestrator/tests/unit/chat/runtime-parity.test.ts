@@ -310,7 +310,7 @@ describe('chat runtime parity', () => {
     });
 
     const [secondPrompt] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
-    expect(secondPrompt).toContain('This is an automatic fallback');
+    expect(secondPrompt).toContain('That completed turn used an automatic fallback');
     expect(secondPrompt).toContain('"codex" was rate-limited');
     // Still reported forward even though this turn's own response carried no new providerContext.
     expect(second.providerContext).toEqual(first.providerContext);

@@ -17,5 +17,7 @@
 - [x] Route the exact reconciled branch head push through approval-cop.
 - [x] Verify exact-head GitHub CI is green; repair only exact-head failures if needed.
 - [x] Address the five fresh Codex invocation-4 findings and add focused regressions; 367 targeted tests, orchestrator typecheck/lint, root build, and `git diff --check` pass.
+- [x] Repair the two stale provider-transparency assertions exposed by exact-head CI and re-run both focused suites (49 tests pass).
+- [ ] Publish the CI assertion repair through approval-cop and verify exact-head CI.
 - [ ] Obtain a fresh exact-head Codex clean and verify zero unresolved Codex threads.
 - [ ] Route a head-pinned squash merge through approval-cop and verify PR terminal state.
