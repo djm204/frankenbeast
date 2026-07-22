@@ -1816,6 +1816,28 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/split-assignment-require-cron.cjs:4');
   });
 
+  it('rejects split assignments followed by split child_process spawn chains', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'split-assignment-chain-cron.cjs'),
+      [
+        'const installer =',
+        "  require('node:child_process')",
+        "    .spawn('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/split-assignment-chain-cron.cjs:5');
+  });
+
   it('rejects multiline dynamic-import namespace crontab stdin writes', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
@@ -1837,6 +1859,27 @@ describe('hard-coded example secret scanner', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('scripts/multiline-dynamic-import-cron.mjs:6');
+  });
+
+  it('rejects destructured dynamic-import spawn aliases used for crontab stdin writes', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'destructured-dynamic-import-cron.mjs'),
+      [
+        "const { spawn: launch } = await import('node:child_process');",
+        "const installer = launch('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/destructured-dynamic-import-cron.mjs:4');
   });
 
   it('rejects bound namespace spawn aliases used for crontab stdin writes', () => {
@@ -1861,6 +1904,40 @@ describe('hard-coded example secret scanner', () => {
     expect(result.stderr).toContain('scripts/bound-spawn-alias-cron.mjs:5');
   });
 
+  it('rejects spawn aliases bound with null or pre-bound crontab arguments', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'null-bound-spawn-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const run = cp.spawn.bind(null);',
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(scriptDir, 'prebound-command-spawn-cron.mjs'),
+      [
+        "import * as cp from 'node:child_process';",
+        "const run = cp.spawn.bind(cp, 'crontab');",
+        "const installer = run(['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/null-bound-spawn-cron.mjs:5');
+    expect(result.stderr).toContain('scripts/prebound-command-spawn-cron.mjs:5');
+  });
+
   it('rejects typed destructured require spawn aliases used for crontab stdin writes', () => {
     const root = makeFixtureRoot();
     const scriptDir = join(root, 'scripts');
@@ -1880,6 +1957,60 @@ describe('hard-coded example secret scanner', () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('scripts/typed-destructured-require-cron.ts:4');
+  });
+
+  it('rejects TypeScript-asserted namespace spawn aliases used for crontab stdin writes', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'asserted-namespace-spawn-cron.ts'),
+      [
+        "import * as cp from 'node:child_process';",
+        'const run = cp.spawn as typeof cp.spawn;',
+        "const installer = run('crontab', ['-']);",
+        'const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        'installer.stdin.end(entry);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('scripts/asserted-namespace-spawn-cron.ts:5');
+  });
+
+  it('does not treat scoped runtime child_process aliases as file-wide', () => {
+    const root = makeFixtureRoot();
+    const scriptDir = join(root, 'scripts');
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(
+      join(scriptDir, 'scoped-child-process-alias.mjs'),
+      [
+        'function earlierMock(mockSpawn) {',
+        '  const cp = { spawn: mockSpawn };',
+        "  const installer = cp.spawn('crontab', ['-']);",
+        '  const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        '  installer.stdin.end(entry);',
+        '}',
+        'function loadChildProcess() {',
+        "  const cp = require('node:child_process');",
+        '  return cp;',
+        '}',
+        'function laterMock(mockSpawn) {',
+        '  const cp = { spawn: mockSpawn };',
+        "  const installer = cp.spawn('crontab', ['-']);",
+        '  const entry = `${process.argv[2]} agy pr --token ${process.env.GITHUB_TOKEN}`;',
+        '  installer.stdin.end(entry);',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
   });
 
   it('rejects Codex round 28 cron scanner bypasses', () => {
