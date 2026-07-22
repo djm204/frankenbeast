@@ -443,15 +443,18 @@ describe('fbeast-hook runtime', () => {
   it('redacts prefixed option-style credential flags', async () => {
     const authSecret = ['proxy', 'flag', 'fixture'].join('-');
     const keySecret = ['openai', 'flag', 'fixture'].join('-');
-    const payload = `--proxy-authorization Basic ${authSecret} --openai-api-key ${keySecret} --format json`;
+    const sigSecret = ['sigv4', 'flag', 'fixture'].join('-');
+    const payload = `--proxy-authorization Basic ${authSecret} --openai-api-key ${keySecret} --aws-authorization AWS4-HMAC-SHA256 Credential=scope SignedHeaders=host Signature=${sigSecret} --format json`;
 
     const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
     const metadata = result.observerLogs[0]!.metadata;
 
     expect(metadata).not.toContain(authSecret);
     expect(metadata).not.toContain(keySecret);
+    expect(metadata).not.toContain(sigSecret);
     expect(metadata).toContain('--proxy-authorization [REDACTED]');
     expect(metadata).toContain('--openai-api-key [REDACTED]');
+    expect(metadata).toContain('--aws-authorization [REDACTED]');
     expect(metadata).toContain('--format json');
   });
 
@@ -488,6 +491,24 @@ describe('fbeast-hook runtime', () => {
 
     expect(metadata.payload).toContain('Authorization: [REDACTED]');
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('whole-redacts structured secrets hidden by duplicate JSON keys', async () => {
+    const tupleSecret = ['shadowed', 'tuple', 'fixture'].join('-');
+    const pairSecret = ['shadowed', 'pair', 'fixture'].join('-');
+    const payloads = [
+      `{"output":[["Authorization","Basic ${tupleSecret}"]],"output":"ok"}`,
+      `{"output":{"value":"${pairSecret}","name":"OPENAI_API_KEY"},"output":"ok"}`,
+    ];
+
+    for (const payload of payloads) {
+      const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+      const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+      expect(metadata.payload).toBe('[REDACTED]');
+      expect(result.observerLogs[0]!.metadata).not.toContain(tupleSecret);
+      expect(result.observerLogs[0]!.metadata).not.toContain(pairSecret);
+    }
   });
 
   it('redacts long URL userinfo credentials from raw post-tool payloads', async () => {
@@ -581,6 +602,17 @@ describe('fbeast-hook runtime', () => {
       output: 'x'.repeat(70_000),
       env: [{ value: secret, name: 'OPENAI_API_KEY' }],
     });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('redacts oversized payloads containing prefixed credential flags', async () => {
+    const secret = ['oversized', 'prefixed', 'flag'].join('-');
+    const payload = `${'x'.repeat(70_000)} --openai-api-key ${secret}`;
 
     const result = await runHookForTest(['post-tool', 'read_file', payload]);
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
