@@ -77,6 +77,22 @@ describe('useChatReconnect', () => {
     expect(refreshSession).toHaveBeenCalledTimes(2);
   });
 
+  it('backs off when an immediate reconnect refresh is transiently unavailable', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const refreshSession = vi.fn()
+      .mockResolvedValueOnce('retry')
+      .mockResolvedValue('complete');
+    const { result } = renderHook(() => useChatReconnect(refreshSession));
+
+    act(() => result.current.manualReconnect());
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(499));
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(refreshSession).toHaveBeenCalledTimes(2);
+  });
+
   it('does not start a manual refresh while an automatic refresh is in flight', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
@@ -91,6 +107,18 @@ describe('useChatReconnect', () => {
     act(() => result.current.manualReconnect());
     expect(refreshSession).toHaveBeenCalledTimes(1);
     await act(async () => finishRefresh('complete'));
+  });
+
+  it('cancels manual retry cycles when the hook unmounts', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const refreshSession = vi.fn().mockResolvedValue('retry');
+    const { result, unmount } = renderHook(() => useChatReconnect(refreshSession));
+
+    act(() => result.current.manualReconnect());
+    unmount();
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(refreshSession).toHaveBeenCalledTimes(1);
   });
 
   it('requires sustained ambiguous setup failures before stopping retries', () => {

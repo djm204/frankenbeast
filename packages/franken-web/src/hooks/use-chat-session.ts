@@ -200,6 +200,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
         setStatus(refreshed.state === 'executing' ? 'streaming' : 'idle');
         setConnectionStatus('reconnecting');
         setSocketGeneration((current) => current + 1);
+        setErrorBanners((current) => current.filter((item) => item.action !== 'retry-session'));
         return 'complete' as const;
       })
       .catch((error) => {
@@ -227,7 +228,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return undefined;
     }
     if (action === 'retry-session') {
-      void refreshSession();
+      reconnectControl.manualReconnect();
       return undefined;
     }
     if (action === 'retry-message' && lastMessageRef.current) {
@@ -238,7 +239,6 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     }
     return undefined;
   }
-
   useEffect(() => {
     let cancelled = false;
     const client = clientRef.current;

@@ -7,6 +7,6 @@
 - [x] Cancelled delayed reconnects on socket lifecycle cleanup.
 - [x] Stopped after two explicit authentication failures or eight browser-ambiguous setup failures while preserving capped retries through transient outages.
 - [x] Added focused coverage for delayed retries, exponential/capped jitter, transient and sustained pre-open failures, repeated explicit authentication failures, successful-ready reset, manual reconnect races, and unmount cancellation.
-- [x] Passed `@franken/web` tests (722), typecheck, lint (0 errors; existing warnings), and production build.
-- [x] Opened PR #3640 and passed CI plus current-head GitHub Codex review.
-- [ ] Merge PR #3640 and verify issue closure.
+- [x] Passed `@franken/web` tests (724), typecheck, lint (0 errors; existing warnings), and production build.
+- [x] Opened PR #3640 and addressed local plus GitHub Codex review feedback.
+- [ ] Pass latest-head CI/Codex, merge PR #3640, and verify issue closure.

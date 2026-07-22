@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 const BASE_DELAY_MS = 500;
 const MAX_DELAY_MS = 10_000;
@@ -17,6 +17,7 @@ interface ReconnectCycle {
   isRefreshInFlight(): boolean;
   onClose(event?: CloseEvent): boolean;
   onReady(): void;
+  refreshNow(): void;
   schedule(): void;
 }
 
@@ -49,7 +50,7 @@ export function useChatReconnect(
   function manualReconnect() {
     if (activeCycleRef.current?.isRefreshInFlight()) return;
     reset();
-    void refreshSession();
+    beginCycle().refreshNow();
   }
 
   function beginCycle(): ReconnectCycle {
@@ -101,6 +102,19 @@ export function useChatReconnect(
         }
         resetCounters();
       },
+      refreshNow() {
+        if (disposed || refreshInFlight) return;
+        refreshInFlight = true;
+        void Promise.resolve(refreshSession())
+          .then((result) => {
+            refreshInFlight = false;
+            if (!disposed && result === 'retry') cycle.schedule();
+          })
+          .catch(() => {
+            refreshInFlight = false;
+            if (!disposed) cycle.schedule();
+          });
+      },
       schedule() {
         if (disposed || refreshInFlight || timer) return;
         const baseDelay = Math.min(BASE_DELAY_MS * (2 ** attemptRef.current), MAX_DELAY_MS);
@@ -109,17 +123,7 @@ export function useChatReconnect(
         const delay = Math.min(baseDelay + jitter, MAX_DELAY_MS);
         timer = setTimeout(() => {
           timer = null;
-          if (disposed || refreshInFlight) return;
-          refreshInFlight = true;
-          void Promise.resolve(refreshSession())
-            .then((result) => {
-              refreshInFlight = false;
-              if (!disposed && result === 'retry') cycle.schedule();
-            })
-            .catch(() => {
-              refreshInFlight = false;
-              if (!disposed) cycle.schedule();
-            });
+          cycle.refreshNow();
         }, delay);
       },
     };
@@ -127,6 +131,11 @@ export function useChatReconnect(
     activeCycleRef.current = cycle;
     return cycle;
   }
+
+  useEffect(() => () => {
+    activeCycleRef.current?.dispose();
+    activeCycleRef.current = null;
+  }, []);
 
   return { beginCycle, manualReconnect, reset };
 }
