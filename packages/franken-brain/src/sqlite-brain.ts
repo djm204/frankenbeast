@@ -2838,9 +2838,11 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         } else {
           const eventsById = new Map<number, EpisodicEvent>();
           const keywordChunks = chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY);
-          const candidateLimit = keywordChunks.length === 1
-            ? limit
-            : MAX_CROSS_CHUNK_RECALL_CANDIDATES;
+          const candidateLimit = limit < 0
+            ? -1
+            : keywordChunks.length === 1
+              ? limit
+              : MAX_CROSS_CHUNK_RECALL_CANDIDATES;
           for (const chunk of keywordChunks) {
             const events = collectRowsToEvents(
               (batchLimit, offset) => this.recallKeywordChunk(chunk, batchLimit, offset),
@@ -2955,7 +2957,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   ): Array<EpisodicRow & { relevance_score: number }> {
     const searchableDetails = `CASE
       WHEN json_valid(details)
-        AND NOT (
+        AND NOT COALESCE((
           json_type(details) = 'object'
           AND (SELECT COUNT(*) FROM json_each(details)) = 1
           AND json_type(details, '$.quarantine') = 'object'
@@ -2963,7 +2965,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           AND json_extract(details, '$.quarantine.field') = 'details'
           AND json_extract(details, '$.quarantine.reason') = 'invalid JSON'
           AND json_extract(details, '$.quarantine.eventId') = id
-        )
+        ), 0)
       THEN details
       ELSE ''
     END`;

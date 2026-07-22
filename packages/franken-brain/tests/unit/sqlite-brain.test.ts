@@ -6188,6 +6188,41 @@ describe('SqliteBrain', () => {
       ]);
     });
 
+    it('preserves unbounded recall across keyword chunks', () => {
+      const episodic = brain.episodic as unknown as {
+        recall: (query: string, limit: number) => EpisodicEvent[];
+        recallKeywordChunk: (
+          keywords: string[],
+          limit?: number,
+          offset?: number,
+        ) => Array<Record<string, unknown>>;
+      };
+      const recallKeywordChunk = vi
+        .spyOn(episodic, 'recallKeywordChunk')
+        .mockImplementation((keywords, batchLimit = 100, offset = 0) => {
+          if (offset >= 10_001) return [];
+          return Array.from(
+            { length: Math.min(batchLimit, 10_001 - offset) },
+            (_, index) => ({
+              id: offset + index + 1,
+              type: 'observation',
+              step: null,
+              summary: `${keywords[0]} cross-chunk match`,
+              details: null,
+              created_at: '2026-07-10T00:00:00.000Z',
+              relevance_score: 1,
+            }),
+          );
+        });
+      const query = Array.from(
+        { length: 1200 },
+        (_, i) => `kw${String(i).padStart(4, '0')}`,
+      ).join(' ');
+
+      expect(episodic.recall(query, -1)).toHaveLength(10_001);
+      expect(recallKeywordChunk.mock.calls.some(([, , offset]) => offset === 10_000)).toBe(true);
+    });
+
     it('quarantines corrupt persisted details while keeping recent and failure rows available', () => {
       brain.episodic.record(
         makeEvent({
@@ -6361,6 +6396,27 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recall('alpha invalid json', 1).map((event) => event.summary)).toEqual([
         'alpha invalid healthy candidate',
       ]);
+    });
+
+    it('keeps nonmatching quarantine metadata with null fields searchable', () => {
+      brain.episodic.record(makeEvent({
+        summary: 'ordinary metadata candidate',
+        details: { marker: 'before-update' },
+      }));
+      const eventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        JSON.stringify({
+          quarantine: {
+            field: null,
+            eventId,
+            reason: 'invalid JSON',
+          },
+        }),
+        eventId,
+      );
+
+      expect(brain.episodic.recall('invalid JSON', 1).map((event) => event.id)).toEqual([eventId]);
     });
 
     it('uses finite batches for bounded plaintext recall', () => {
