@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.8.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.8.0...franken-governor-v0.8.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **docs:** remove stale package references ([#3473](https://github.com/djm204/frankenbeast/issues/3473)) ([8e6e431](https://github.com/djm204/frankenbeast/commit/8e6e431cbc05b337f7a56b5000b65e1f5dfd1ef1))
+* **governor:** preserve out-of-order approval responses ([#3456](https://github.com/djm204/frankenbeast/issues/3456)) ([f89fcef](https://github.com/djm204/frankenbeast/commit/f89fcef6291fd564944626dc260bebdead750e97))
+* **orchestrator:** prevent duplicate terminal input ([#3436](https://github.com/djm204/frankenbeast/issues/3436)) ([fd4517b](https://github.com/djm204/frankenbeast/commit/fd4517b0bd1e365942b6e1dd55cf31397fb004e7)), closes [#3364](https://github.com/djm204/frankenbeast/issues/3364)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.14.1 to 0.15.0
+
 ## [0.8.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.7.3...franken-governor-v0.8.0) (2026-07-19)
 
 
