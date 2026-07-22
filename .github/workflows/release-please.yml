@@ -74,7 +74,7 @@ jobs:
           # which could be any sub-package. Fix that.
           # Bound the API response, then sort valid root tags ourselves rather
           # than relying on GitHub's creation-date ordering.
-          release_json=$(gh release list --limit 100 --json tagName,isLatest)
+          release_json=$(gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName,isLatest)
           latest_tag=$(jq -r '([.[] | select(.isLatest)][0].tagName // empty)' <<<"$release_json")
           if [ -z "$latest_tag" ]; then
             echo "No latest release found; nothing to repair"

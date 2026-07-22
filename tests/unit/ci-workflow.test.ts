@@ -590,7 +590,9 @@ jobs:
     const promoteIndex = releaseLatestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(releaseLatestRun).toContain('gh release list --limit 100 --json tagName,isLatest');
+    expect(releaseLatestRun).toContain(
+      'gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName,isLatest',
+    );
     expect(releaseLatestRun).toContain('[[ "$latest_tag" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]');
     expect(releaseLatestRun).toContain('test("^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+$")');
     expect(releaseLatestRun).toContain('split(".") | map(tonumber)');
@@ -645,7 +647,9 @@ jobs:
     const promoteIndex = latestRun.indexOf('gh release edit "$root_tag" --latest');
 
     expect(rootLookupIndex).toBeGreaterThan(-1);
-    expect(latestRun).toContain('gh release list --limit 100 --json tagName,isLatest');
+    expect(latestRun).toContain(
+      'gh release list --limit 1000 --exclude-drafts --exclude-pre-releases --json tagName,isLatest',
+    );
     expect(missingRootGuardIndex).toBeGreaterThan(rootLookupIndex);
     expect(demoteIndex).toBeGreaterThan(missingRootGuardIndex);
     expect(promoteIndex).toBeGreaterThan(demoteIndex);
