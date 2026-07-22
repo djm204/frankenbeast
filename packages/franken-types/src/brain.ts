@@ -7,7 +7,12 @@ export interface IBrain {
   readonly episodic: IEpisodicMemory;
   readonly recovery: IRecoveryMemory;
   rightToForget(selector: RightToForgetSelector): RightToForgetReport;
-  serialize(): BrainSnapshot;
+  serialize(options?: BrainSerializeOptions): BrainSnapshot;
+}
+
+export interface BrainSerializeOptions {
+  /** Number of recent episodic events to include. Defaults to 100. */
+  episodicLimit?: number;
 }
 
 export type RightToForgetMemoryType = 'working' | 'episodic' | 'all';
@@ -143,6 +148,13 @@ export interface BrainSnapshot {
     lastProvider: string;
     switchReason: string;
     totalTokensUsed: number;
+    /** Describes the bounded episodic export. Missing on legacy snapshots. */
+    episodicExport?: {
+      limit: number;
+      totalEvents: number;
+      exportedEvents: number;
+      truncated: boolean;
+    };
   };
 }
 
@@ -190,5 +202,11 @@ export const BrainSnapshotSchema = z.object({
     lastProvider: z.string(),
     switchReason: z.string(),
     totalTokensUsed: z.number().nonnegative(),
+    episodicExport: z.object({
+      limit: z.number().int().positive(),
+      totalEvents: z.number().int().nonnegative(),
+      exportedEvents: z.number().int().nonnegative(),
+      truncated: z.boolean(),
+    }).optional(),
   }),
 });

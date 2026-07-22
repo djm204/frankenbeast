@@ -206,11 +206,20 @@ const checkpoint = brain.recovery.checkpoint({
 const last = brain.recovery.lastCheckpoint();
 
 // serialize/hydrate is useful for process handoff and tests.
+// The default snapshot includes the 100 most recent episodic events and reports
+// whether that bounded export is partial in metadata.episodicExport.
 const snapshot = brain.serialize();
+if (snapshot.metadata.episodicExport?.truncated) {
+  console.warn(`Snapshot contains ${snapshot.metadata.episodicExport.exportedEvents} of ${snapshot.metadata.episodicExport.totalEvents} episodic events`);
+}
+// Callers that need more history can raise the bound explicitly.
+const largerSnapshot = brain.serialize({ episodicLimit: 1_000 });
 brain.close();
 const restored = SqliteBrain.hydrate(snapshot);
 restored.close();
 ```
+
+`hydrate()` restores exactly the events present in `snapshot.episodic`; it cannot recover events omitted from a partial snapshot. Inspect `metadata.episodicExport.truncated` before hydrating when a complete episodic history is required. Legacy snapshots without `episodicExport` metadata remain accepted.
 
 ## Persistence atomicity
 

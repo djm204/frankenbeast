@@ -76,6 +76,23 @@ describe('BrainSnapshot schema', () => {
     };
     expect(() => BrainSnapshotSchema.parse(bad)).toThrow();
   });
+
+  it('accepts explicit episodic export metadata', () => {
+    const snapshot: BrainSnapshot = {
+      ...validSnapshot,
+      metadata: {
+        ...validSnapshot.metadata,
+        episodicExport: {
+          limit: 100,
+          totalEvents: 125,
+          exportedEvents: 100,
+          truncated: true,
+        },
+      },
+    };
+
+    expect(BrainSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+  });
 });
 
 describe('EpisodicEvent schema', () => {

@@ -76,6 +76,7 @@ export type {
   SkillFailureSignature,
   ExecutionState,
   BrainSnapshot,
+  BrainSerializeOptions,
   MemoryDeletionGuardSnapshot,
   RightToForgetMemoryType,
   RightToForgetSelector,

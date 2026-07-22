@@ -90,4 +90,42 @@ describe('Brain serialize/hydrate integration', () => {
     brain1.close();
     brain2.close();
   });
+
+  it('reports default episodic truncation and allows callers to request a larger export', () => {
+    const brain = new SqliteBrain();
+    for (let index = 0; index < 105; index += 1) {
+      brain.episodic.record({
+        type: 'observation',
+        summary: `Event ${index}`,
+        createdAt: new Date(1_700_000_000_000 + index).toISOString(),
+      });
+    }
+
+    const partial = brain.serialize();
+    expect(partial.episodic).toHaveLength(100);
+    expect(partial.metadata.episodicExport).toEqual({
+      limit: 100,
+      totalEvents: 105,
+      exportedEvents: 100,
+      truncated: true,
+    });
+
+    const complete = brain.serialize({ episodicLimit: 105 });
+    expect(complete.episodic).toHaveLength(105);
+    expect(complete.metadata.episodicExport).toEqual({
+      limit: 105,
+      totalEvents: 105,
+      exportedEvents: 105,
+      truncated: false,
+    });
+    expect(() => brain.serialize({ episodicLimit: 0 })).toThrow(
+      'episodicLimit must be a positive safe integer',
+    );
+
+    const restored = SqliteBrain.hydrate(partial);
+    expect(restored.episodic.count()).toBe(100);
+
+    brain.close();
+    restored.close();
+  });
 });
