@@ -1,4 +1,4 @@
-import { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
+import { MODULE_CONFIG_KEYS, seededRandom, TRACKED_AGENT_STATUSES } from '@franken/types';
 import type {
   ApiDataEnvelope,
   BeastCatalogEntry,
@@ -23,6 +23,9 @@ import type {
   TrackedAgentSummary,
 } from '@franken/types';
 import { toError } from './http-error';
+
+const BEAST_EVENT_RECONNECT_BASE_DELAY_MS = 1_000;
+const BEAST_EVENT_RECONNECT_MAX_DELAY_MS = 30_000;
 
 export { MODULE_CONFIG_KEYS, TRACKED_AGENT_STATUSES } from '@franken/types';
 export type {
@@ -244,6 +247,7 @@ export class BeastApiClient {
     let closed = false;
     let eventSource: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectAttempt = 0;
     let lastEventId: string | undefined;
     let failedEventId: string | undefined;
     class MalformedSsePayloadError extends Error {
@@ -272,6 +276,7 @@ export class BeastApiClient {
       handler: ((payload: T) => void) | undefined,
     ): void => {
       if (!handler) {
+        reconnectAttempt = 0;
         rememberProcessedEventId(event);
         return;
       }
@@ -283,26 +288,39 @@ export class BeastApiClient {
         rememberFailedEventId(event);
         throw new MalformedSsePayloadError(error);
       }
+      reconnectAttempt = 0;
       rememberProcessedEventId(event);
       handler(payload);
     };
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (reason: Error) => {
       if (closed || reconnectTimer) return;
+      reconnectAttempt += 1;
+      const exponentialDelay = Math.min(
+        BEAST_EVENT_RECONNECT_BASE_DELAY_MS * 2 ** (reconnectAttempt - 1),
+        BEAST_EVENT_RECONNECT_MAX_DELAY_MS,
+      );
+      const reconnectDelay = Math.min(
+        exponentialDelay + seededRandom.random() * BEAST_EVENT_RECONNECT_BASE_DELAY_MS,
+        BEAST_EVENT_RECONNECT_MAX_DELAY_MS,
+      );
+      const retrySeconds = Math.ceil(reconnectDelay / 1_000);
+      handlers.error?.(new Error(
+        `${reason.message}; reconnecting in ${retrySeconds}s (attempt ${reconnectAttempt})`,
+      ));
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined;
         void connect().catch((error: unknown) => {
           if (!closed) {
-            handlers.error?.(toError(error));
-            scheduleReconnect();
+            scheduleReconnect(toError(error));
           }
         });
-      }, 1_000);
+      }, reconnectDelay);
     };
     const reconnectAfterMalformedPayload = (source: EventSource): void => {
       if (closed || eventSource !== source) return;
       eventSource = undefined;
       source.close();
-      scheduleReconnect();
+      scheduleReconnect(new Error('Beast event stream received malformed data'));
     };
     const reportEventError = (error: unknown, source: EventSource): void => {
       if (error instanceof MalformedSsePayloadError) {
@@ -380,16 +398,15 @@ export class BeastApiClient {
       });
       nextSource.addEventListener('error', () => {
         if (closed || eventSource !== nextSource) return;
+        eventSource = undefined;
         nextSource.close();
-        handlers.error?.(new Error('Beast event stream disconnected; reconnecting'));
-        scheduleReconnect();
+        scheduleReconnect(new Error('Beast event stream disconnected'));
       });
     };
 
     await connect().catch((error: unknown) => {
       if (!closed) {
-        handlers.error?.(toError(error));
-        scheduleReconnect();
+        scheduleReconnect(toError(error));
       }
     });
 
