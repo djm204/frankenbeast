@@ -672,6 +672,12 @@ See the repository copy of [`packages/franken-observer/docs/adapters.md`](https:
 
 Posts OTEL payloads to [Grafana Tempo](https://grafana.com/oss/tempo/) over OTLP/HTTP.
 
+Exports retry transient HTTP 429/5xx and network failures twice by default. Retry
+waits use jittered exponential backoff (200 ms base, capped at 2 seconds), and
+every request attempt has a 10 second deadline. Override individual values with
+`retry`; set `retry.maxRetries` to `0` when a single attempt is required. Final
+failures reject `flush()` without including the trace payload or credentials.
+
 `GRAFANA_INSTANCE_ID` and `GRAFANA_API_KEY` are only needed when exporting traces
 to Grafana Cloud Tempo. `GRAFANA_INSTANCE_ID` is the numeric Grafana Cloud stack
 or Tempo instance ID used as the Basic auth username, and `GRAFANA_API_KEY` is a

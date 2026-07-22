@@ -61,7 +61,7 @@ describe('TempoAdapter', () => {
         const adapter = new TempoAdapter({
           endpoint: 'http://localhost:4318',
           fetch: mockFetch,
-          retry: { attemptTimeoutMs: 25 },
+          retry: { attemptTimeoutMs: 25, maxRetries: 0 },
         })
 
         const flush = adapter.flush(makeTrace())
@@ -162,6 +162,48 @@ describe('TempoAdapter', () => {
 
   describe('retry on transient failures (issue #68)', () => {
     const sleep = () => vi.fn().mockResolvedValue(undefined)
+
+    it('uses bounded retry defaults when retry options are omitted', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Service Unavailable' })
+        .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK' })
+      const adapter = new TempoAdapter({ endpoint: 'http://localhost:4318', fetch: mockFetch })
+
+      await expect(adapter.flush(makeTrace())).resolves.toBeUndefined()
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
+
+    it('bounds the default exponential backoff and final failure', async () => {
+      const retrySleep = sleep()
+      mockFetch.mockResolvedValue({ ok: false, status: 503, statusText: 'Service Unavailable' })
+      const adapter = new TempoAdapter({
+        endpoint: 'http://localhost:4318',
+        fetch: mockFetch,
+        retry: { jitter: false, sleep: retrySleep },
+      })
+
+      await expect(adapter.flush(makeTrace())).rejects.toThrow('Tempo export failed: 503 Service Unavailable')
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+      expect(retrySleep.mock.calls.map(call => call[0])).toEqual([200, 400])
+    })
+
+    it('applies the default request deadline to every bounded attempt', async () => {
+      vi.useFakeTimers()
+      try {
+        mockFetch.mockImplementation(() => new Promise(() => undefined))
+        const adapter = new TempoAdapter({ endpoint: 'http://localhost:4318', fetch: mockFetch })
+
+        const flush = adapter.flush(makeTrace())
+        const rejection = expect(flush).rejects.toThrow('HTTP attempt timed out after 10000ms')
+        await vi.advanceTimersByTimeAsync(31_000)
+
+        await rejection
+        expect(mockFetch).toHaveBeenCalledTimes(3)
+        for (const [, init] of mockFetch.mock.calls) expect(init.signal.aborted).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
 
     it('retries a 5xx then succeeds', async () => {
       mockFetch
