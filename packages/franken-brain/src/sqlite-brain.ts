@@ -2839,7 +2839,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           for (const chunk of chunkArray(keywords, MAX_RECALL_KEYWORDS_PER_QUERY)) {
             const events = collectRowsToEvents(
               (batchLimit, offset) => this.recallKeywordChunk(chunk, batchLimit, offset),
-              -1,
+              limit,
               this.encryption,
               reportCorruptDetails,
               (event) => recallEventScore(event, keywords) > 0,
@@ -2948,18 +2948,32 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     limit?: number,
     offset = 0,
   ): Array<EpisodicRow & { relevance_score: number }> {
+    const searchableDetails = `CASE
+      WHEN json_valid(details)
+        AND NOT (
+          json_type(details) = 'object'
+          AND (SELECT COUNT(*) FROM json_each(details)) = 1
+          AND json_type(details, '$.quarantine') = 'object'
+          AND (SELECT COUNT(*) FROM json_each(details, '$.quarantine')) = 3
+          AND json_extract(details, '$.quarantine.field') = 'details'
+          AND json_extract(details, '$.quarantine.reason') = 'invalid JSON'
+          AND json_extract(details, '$.quarantine.eventId') = id
+        )
+      THEN details
+      ELSE ''
+    END`;
     // Build scoring SQL: count keyword matches across summary + details
     const scoringCases = keywords
       .map(
         () =>
-          `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
+          `(CASE WHEN LOWER(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END + CASE WHEN LOWER(${searchableDetails}) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
       )
       .join(' + ');
 
     const whereClauses = keywords
       .map(
         () =>
-          `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(details, '')) LIKE ? ESCAPE '\\')`,
+          `(LOWER(summary) LIKE ? ESCAPE '\\' OR LOWER(${searchableDetails}) LIKE ? ESCAPE '\\')`,
       )
       .join(' OR ');
 
@@ -6238,14 +6252,13 @@ export class SqliteBrain implements IBrain {
           ...(eventDetails === undefined ? {} : { details: eventDetails }),
         };
         if (isRightToForgetAuditEvent(candidateEvent)) return false;
-        if (isQuarantinedRightToForgetAuditEvent(candidateEvent)) {
+        if (isQuarantinedEpisodicDetails(candidateEvent)) {
           // Persisted quarantine envelopes contain synthetic diagnostics, not
           // the original corrupt payload, and must never become deletion input.
           // Fresh malformed rows may still be removed when their raw payload
-          // itself matches the selector.
-          if (!detailsWereMalformed || !episodicRowMatchesSelector('', '', details, selector)) {
-            return false;
-          }
+          // itself matches the selector, regardless of the event's domain type.
+          return detailsWereMalformed
+            && episodicRowMatchesSelector('', '', details, selector);
         }
         return episodicRowMatchesSelector(step, summary, details, selector);
       })

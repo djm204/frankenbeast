@@ -186,6 +186,7 @@ const SUPPORTED_MEMORY_TYPES = ["working", "episodic"] as const;
 const DEFAULT_QUERY_LIMIT = 20;
 const DEFAULT_ATTRIBUTION_LIMIT = 50;
 const MAX_QUERY_LIMIT = 1000;
+const MAX_EPISODIC_VISIBILITY_SCAN = 10_000;
 const MEMORY_ACCESS_AUDIT_SCAN_MULTIPLIER = 50;
 const MAX_MEMORY_ACCESS_AUDIT_SCAN_LIMIT = 10_000;
 const AGENT_WORKING_KEY_PREFIX = "__fbeast_agent_memory__/";
@@ -470,14 +471,19 @@ function collectVisibleEntries<T>(
   canRead: (entry: T) => boolean,
 ): T[] {
   if (limit <= 0) return [];
-  const batchSize = Math.max(100, limit * 2);
+  let scanLimit = Math.min(MAX_EPISODIC_VISIBILITY_SCAN, Math.max(100, limit * 2));
 
-  for (let scanLimit = batchSize; ; scanLimit += batchSize) {
+  for (;;) {
     const entries = fetchEntries(scanLimit);
     const visible = takeVisibleEntries(entries, limit, canRead);
-    if (visible.length >= limit || entries.length < scanLimit) {
+    if (
+      visible.length >= limit
+      || entries.length < scanLimit
+      || scanLimit >= MAX_EPISODIC_VISIBILITY_SCAN
+    ) {
       return visible;
     }
+    scanLimit = Math.min(MAX_EPISODIC_VISIBILITY_SCAN, scanLimit * 2);
   }
 }
 

@@ -1036,6 +1036,36 @@ describe("createBrainAdapter", () => {
     expect(mockBrain.episodic.recent.mock.calls.every(([scanLimit]) => scanLimit > 0)).toBe(true);
   });
 
+  it("caps visibility backfill scans when every episodic row is hidden", async () => {
+    const brain = createBrainAdapter("/tmp/quarantined-backfill-cap.db");
+    const mockBrain = brainInstances[0]!;
+    mockBrain.episodic.recall.mockImplementation((_query: string, limit: number) =>
+      Array.from({ length: limit }, (_, index) => ({
+        id: index + 1,
+        type: "success",
+        summary: `quarantined event ${index + 1}`,
+        details: {
+          quarantine: {
+            field: "details",
+            eventId: index + 1,
+            reason: "invalid JSON",
+          },
+        },
+        createdAt: "2026-07-20T00:00:00.000Z",
+      })),
+    );
+
+    await expect(brain.query({
+      query: "event",
+      type: "episodic",
+      readScope: "all",
+      limit: 1,
+    })).resolves.toEqual([]);
+
+    expect(mockBrain.episodic.recall.mock.calls.at(-1)?.[1]).toBe(10_000);
+    expect(mockBrain.episodic.recall).toHaveBeenCalledTimes(8);
+  });
+
   it("does not hide ordinary episodic metadata with an incomplete quarantine marker", async () => {
     const brain = createBrainAdapter("/tmp/ordinary-quarantine-metadata.db");
     const mockBrain = brainInstances[0]!;

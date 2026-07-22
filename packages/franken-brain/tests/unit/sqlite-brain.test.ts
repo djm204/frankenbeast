@@ -907,6 +907,30 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(auditEventId);
     });
 
+    it('does not match persisted quarantine diagnostics on ordinary events', () => {
+      brain.episodic.record({
+        type: 'success',
+        summary: 'ordinary quarantined row',
+        createdAt: '2026-07-20T00:00:00.000Z',
+      });
+      const ordinaryEventId = brain.episodic.recent(1)[0]!.id;
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE episodic_events SET details = ? WHERE id = ?`).run(
+        JSON.stringify({
+          quarantine: {
+            field: 'details',
+            eventId: ordinaryEventId,
+            reason: 'invalid JSON',
+          },
+        }),
+        ordinaryEventId,
+      );
+
+      brain.rightToForget({ query: 'invalid JSON' });
+
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toContain(ordinaryEventId);
+    });
+
     it('deletes quarantined audit rows when their malformed details contain the selector', () => {
       brain.working.set('task', 'delete project note');
       const first = brain.rightToForget({ query: 'delete project' });
