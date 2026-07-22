@@ -50,6 +50,34 @@ describe('GovernorPortAdapter', () => {
     );
   });
 
+  it('preserves the governor approval session token', async () => {
+    const token = {
+      tokenId: 'token-1',
+      approvalId: 'req-2',
+      scope: 'project-1:hitl_required:task-2',
+      grantedBy: 'operator',
+      grantedAt: new Date('2026-01-01T00:00:00.000Z'),
+      expiresAt: new Date('2026-01-01T00:05:00.000Z'),
+    };
+    const gateway = {
+      requestApproval: vi.fn().mockResolvedValue({ decision: 'APPROVE', token }),
+    };
+
+    const adapter = new GovernorPortAdapter({
+      gateway,
+      projectId: 'project-1',
+      idFactory: () => 'req-2',
+    });
+
+    const result = await adapter.requestApproval({
+      taskId: 'task-2',
+      summary: 'Sensitive task',
+      requiresHitl: true,
+    });
+
+    expect(result).toEqual({ decision: 'approved', token });
+  });
+
   it('defaultDecision=approved auto-approves everything', async () => {
     const gateway = { requestApproval: vi.fn() };
     const adapter = new GovernorPortAdapter({
