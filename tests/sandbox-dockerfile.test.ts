@@ -85,8 +85,14 @@ interface DockerUser {
   group?: string;
 }
 
-function parseDockerUser(contents: string): DockerUser | undefined {
-  const match = contents.match(/^USER\s+([^\s:]+)(?::([^\s:]+))?\s*$/mu);
+function parseFinalDockerUser(contents: string): DockerUser | undefined {
+  const finalStage = contents.split(/^FROM\s+.*$/gmu).at(-1);
+  if (!finalStage || finalStage === contents) {
+    return undefined;
+  }
+
+  const directives = [...finalStage.matchAll(/^USER\s+([^\s:]+)(?::([^\s:]+))?\s*$/gmu)];
+  const match = directives.at(-1);
   if (!match?.[1]) {
     return undefined;
   }
@@ -94,13 +100,23 @@ function parseDockerUser(contents: string): DockerUser | undefined {
   return { user: match[1], ...(match[2] ? { group: match[2] } : {}) };
 }
 
+function isNumericRootId(value: string): boolean {
+  return /^[+-]?0+$/u.test(value);
+}
+
 function isNonRootDockerUser(contents: string): boolean {
-  const directive = parseDockerUser(contents);
-  if (!directive || directive.user === '0' || directive.user === 'root') {
+  const directive = parseFinalDockerUser(contents);
+  if (
+    !directive?.group
+    || directive.user === 'root'
+    || directive.group === 'root'
+    || isNumericRootId(directive.user)
+    || isNumericRootId(directive.group)
+  ) {
     return false;
   }
 
-  return directive.group !== '0' && directive.group !== 'root';
+  return true;
 }
 
 const explicitDockerfileTestRequest = collectRequestedPaths(process.argv.slice(2))
@@ -143,7 +159,7 @@ describe('sandbox Dockerfile', () => {
   }, 60_000);
 
   it('declares a non-root default container UID and GID', () => {
-    const userDirective = parseDockerUser(dockerfile);
+    const userDirective = parseFinalDockerUser(dockerfile);
 
     expect(userDirective, 'Dockerfile must declare a valid USER directive').toBeDefined();
     expect(
@@ -153,11 +169,14 @@ describe('sandbox Dockerfile', () => {
   });
 
   it.each([
-    ['numeric root user', 'USER 0'],
-    ['named root user', 'USER root'],
-    ['numeric root group', 'USER 1000:0'],
-    ['named root group', 'USER sandbox:root'],
-  ])('rejects a %s in the USER directive', (_description, directive) => {
-    expect(isNonRootDockerUser(directive)).toBe(false);
+    ['numeric root user', 'FROM node\nUSER 00:1000'],
+    ['named root user', 'FROM node\nUSER root:1000'],
+    ['numeric root group', 'FROM node\nUSER 1000:+0'],
+    ['named root group', 'FROM node\nUSER sandbox:root'],
+    ['missing explicit group', 'FROM node\nUSER 1000'],
+    ['later root-group override', 'FROM node\nUSER 1000:1000\nUSER 1000:0'],
+    ['missing final-stage user', 'FROM node\nUSER 1000:1000\nFROM scratch'],
+  ])('rejects a %s in the USER directive', (_description, contents) => {
+    expect(isNonRootDockerUser(contents)).toBe(false);
   });
 });
