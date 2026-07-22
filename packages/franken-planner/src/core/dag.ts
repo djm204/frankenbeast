@@ -371,8 +371,10 @@ export class PlanGraph {
     }
 
     const sorted: TaskId[] = [];
-    while (queue.length > 0) {
-      const current = queue.shift() as TaskId;
+    let queueHead = 0;
+    while (queueHead < queue.length) {
+      const current = queue[queueHead] as TaskId;
+      queueHead += 1;
       sorted.push(current);
       for (const dependent of dependents.get(current) ?? []) {
         const newDeg = (inDegree.get(dependent) ?? 0) - 1;
