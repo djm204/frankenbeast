@@ -14,6 +14,7 @@ import type {
   IEpisodicMemory,
   IRecoveryMemory,
   BrainSnapshot,
+  BrainSerializeOptions,
   MemoryDeletionGuardSnapshot,
   EpisodicEvent,
   ExecutionState,
@@ -6475,14 +6476,21 @@ export class SqliteBrain implements IBrain {
     return count;
   }
 
-  serialize(): BrainSnapshot {
+  serialize(options: BrainSerializeOptions = {}): BrainSnapshot {
+    const episodicLimit = options.episodicLimit ?? 100;
+    if (!Number.isSafeInteger(episodicLimit) || episodicLimit <= 0) {
+      throw new RangeError('episodicLimit must be a positive safe integer');
+    }
+
     this.flush();
     const deletionGuardHashKey = readDeletionHashKey(this.db, this.encryption);
+    const totalEvents = this.episodic.count();
+    const episodic = this.episodic.snapshotForHandoff(episodicLimit);
     return {
       version: 1,
       timestamp: isoNow(),
       working: this.working.snapshot(),
-      episodic: this.episodic.snapshotForHandoff(100),
+      episodic,
       checkpoint: this.recovery.lastCheckpoint(),
       deletionGuards: readDeletionGuardSnapshot(this.db),
       ...(deletionGuardHashKey ? { deletionGuardHashKey } : {}),
@@ -6490,6 +6498,12 @@ export class SqliteBrain implements IBrain {
         lastProvider: '',
         switchReason: '',
         totalTokensUsed: 0,
+        episodicExport: {
+          limit: episodicLimit,
+          totalEvents,
+          exportedEvents: episodic.length,
+          truncated: episodic.length < totalEvents,
+        },
       },
     };
   }

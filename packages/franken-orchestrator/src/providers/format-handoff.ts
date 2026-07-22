@@ -245,9 +245,21 @@ export function truncateSnapshot(
 
   // Phase 1: trim episodic events (oldest first, keep most recent)
   while (trimmed.episodic.length > 0 && estimateChars(trimmed) > maxChars) {
+    const episodic = trimmed.episodic.slice(1);
+    const episodicExport = trimmed.metadata.episodicExport;
     trimmed = {
       ...trimmed,
-      episodic: trimmed.episodic.slice(1),
+      episodic,
+      metadata: episodicExport
+        ? {
+            ...trimmed.metadata,
+            episodicExport: {
+              ...episodicExport,
+              exportedEvents: episodic.length,
+              truncated: episodic.length < episodicExport.totalEvents,
+            },
+          }
+        : trimmed.metadata,
     };
   }
 

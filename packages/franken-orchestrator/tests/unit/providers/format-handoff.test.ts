@@ -1624,6 +1624,39 @@ describe('truncateSnapshot', () => {
     expect(truncated.episodic[0]!.summary).not.toContain('Step 0');
   });
 
+  it('updates episodic export metadata when budget trimming drops events', () => {
+    const events = Array.from({ length: 50 }, (_, i) => ({
+      type: 'observation' as const,
+      summary: `Step ${i}: ${'x'.repeat(200)}`,
+      createdAt: '2026-03-22T00:00:00.000Z',
+    }));
+    const snapshot = makeSnapshot({
+      episodic: events,
+      metadata: {
+        lastProvider: 'claude-cli',
+        switchReason: 'rate-limit',
+        totalTokensUsed: 5000,
+        episodicExport: {
+          limit: 50,
+          totalEvents: 50,
+          exportedEvents: 50,
+          truncated: false,
+        },
+      },
+    });
+
+    const truncated = truncateSnapshot(snapshot, 500);
+
+    expect(truncated.metadata.episodicExport).toEqual({
+      limit: 50,
+      totalEvents: 50,
+      exportedEvents: truncated.episodic.length,
+      truncated: true,
+    });
+    expect(snapshot.metadata.episodicExport?.exportedEvents).toBe(50);
+    expect(snapshot.metadata.episodicExport?.truncated).toBe(false);
+  });
+
   it('trims working memory largest-values-first after episodic', () => {
     const snapshot = makeSnapshot({
       episodic: [],

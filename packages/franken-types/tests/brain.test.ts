@@ -76,6 +76,39 @@ describe('BrainSnapshot schema', () => {
     };
     expect(() => BrainSnapshotSchema.parse(bad)).toThrow();
   });
+
+  it('accepts explicit episodic export metadata', () => {
+    const snapshot: BrainSnapshot = {
+      ...validSnapshot,
+      metadata: {
+        ...validSnapshot.metadata,
+        episodicExport: {
+          limit: 100,
+          totalEvents: 2,
+          exportedEvents: 1,
+          truncated: true,
+        },
+      },
+    };
+
+    expect(BrainSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+  });
+
+  it.each([
+    { exportedEvents: 2, totalEvents: 2, truncated: false },
+    { exportedEvents: 1, totalEvents: 0, truncated: false },
+    { exportedEvents: 1, totalEvents: 2, truncated: false },
+  ])('rejects inconsistent episodic export metadata: %o', (episodicExport) => {
+    const snapshot = {
+      ...validSnapshot,
+      metadata: {
+        ...validSnapshot.metadata,
+        episodicExport: { limit: 100, ...episodicExport },
+      },
+    };
+
+    expect(() => BrainSnapshotSchema.parse(snapshot)).toThrow();
+  });
 });
 
 describe('EpisodicEvent schema', () => {
