@@ -51,10 +51,12 @@ const AGENT_CONFIG_MAX_CONTAINERS = 1024;
 const AGENT_CONFIG_MAX_OBJECT_KEYS = 512;
 const AGENT_CONFIG_MAX_ARRAY_ITEMS = 1024;
 
-// Raw request-body cap for the agent-creation route (#3214). A realistic
-// creation payload is a few KB; 64 KiB leaves ample headroom. This sits below
-// the coarser BEAST_CONTROL_MAX_BODY_SIZE (1 MiB) applied to all agent routes.
-const AGENT_CREATE_MAX_BODY_SIZE = 64 * 1024;
+// Raw request-body cap for the agent-creation route (#3214). Dashboard wizard
+// payloads serialize the same launch config into both initAction.config and
+// initConfig, so prompt attachments are effectively duplicated; 256 KiB bounds
+// those duplicated payloads while staying below the coarser
+// BEAST_CONTROL_MAX_BODY_SIZE (1 MiB) applied to all agent routes.
+const AGENT_CREATE_MAX_BODY_SIZE = 256 * 1024;
 
 function boundedConfigRecord(context: string) {
   return z.record(z.string(), z.unknown()).superRefine((value, ctx) => {

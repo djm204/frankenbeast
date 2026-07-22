@@ -546,7 +546,7 @@ describe('agent routes integration', () => {
       initAction: {
         kind: 'martin-loop',
         command: 'martin-loop',
-        config: { padding: 'x'.repeat(70 * 1024) },
+        config: { padding: 'x'.repeat(260 * 1024) },
       },
       initConfig: { provider: 'claude', objective: 'Bounded body', chunkDirectory: 'docs/chunks' },
     });
@@ -992,7 +992,7 @@ describe('agent routes integration', () => {
             objective: 'Start later',
             chunkDirectory: 'docs/chunks',
             ...CODING_POLICY,
-            promptConfig: { text: 'x'.repeat(20 * 1024) },
+            promptConfig: { text: 'x'.repeat(120 * 1024) },
           },
         },
         initConfig: {
@@ -1000,9 +1000,46 @@ describe('agent routes integration', () => {
           objective: 'Start later',
           chunkDirectory: 'docs/chunks',
           ...CODING_POLICY,
-          promptConfig: { text: 'x'.repeat(20 * 1024) },
+          promptConfig: { text: 'x'.repeat(120 * 1024) },
         },
         autoDispatch: false,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+  });
+
+  it('allows duplicated wizard config with a large prompt attachment', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const attachment = 'x'.repeat(32 * 1024);
+
+    const response = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        autoDispatch: false,
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config: {
+            provider: 'claude',
+            objective: 'Launch with duplicated attachment',
+            chunkDirectory: 'docs/chunks',
+            ...CODING_POLICY,
+            promptConfig: { text: attachment },
+          },
+        },
+        initConfig: {
+          provider: 'claude',
+          objective: 'Launch with duplicated attachment',
+          chunkDirectory: 'docs/chunks',
+          ...CODING_POLICY,
+          promptConfig: { text: attachment },
+        },
       }),
     });
 
