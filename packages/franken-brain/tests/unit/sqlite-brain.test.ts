@@ -6666,12 +6666,19 @@ describe('SqliteBrain', () => {
           };
         }
       ).db;
+      const corruptCheckpointId = Number(brain.recovery.listCheckpoints().at(-1)!.id);
       db.prepare(
         `UPDATE checkpoints SET state = ? WHERE id = (SELECT MAX(id) FROM checkpoints)`,
       ).run('{');
 
       expect(() => brain.recovery.lastCheckpoint()).not.toThrow();
       expect(brain.recovery.lastCheckpoint()?.step).toBe(1);
+      expect(
+        brain.accessAudit.list({ operation: 'recovery.lastCheckpoint' })[0],
+      ).toMatchObject({
+        outcome: 'success',
+        details: { quarantinedCheckpointIds: [corruptCheckpointId] },
+      });
       expect(() => brain.serialize()).not.toThrow();
       expect(brain.serialize().checkpoint?.step).toBe(1);
     });

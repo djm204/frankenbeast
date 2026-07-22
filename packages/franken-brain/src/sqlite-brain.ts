@@ -3233,6 +3233,7 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
 
   lastCheckpoint(): ExecutionState | null {
     try {
+      const quarantinedCheckpointIds: number[] = [];
       const stmt = this.db.prepare(
         `SELECT * FROM checkpoints ORDER BY id DESC LIMIT ? OFFSET ?`,
       );
@@ -3248,15 +3249,22 @@ class SqliteRecoveryMemory implements IRecoveryMemory {
               operation: 'recovery.lastCheckpoint',
               store: 'recovery',
               outcome: 'success',
+              ...(quarantinedCheckpointIds.length > 0
+                ? { details: { quarantinedCheckpointIds } }
+                : {}),
             });
             return state;
           }
+          quarantinedCheckpointIds.push(row.id);
         }
         if (rows.length < CORRUPT_JSON_SCAN_BATCH_SIZE) {
           this.audit?.({
             operation: 'recovery.lastCheckpoint',
             store: 'recovery',
             outcome: 'miss',
+            ...(quarantinedCheckpointIds.length > 0
+              ? { details: { quarantinedCheckpointIds } }
+              : {}),
           });
           return null;
         }
