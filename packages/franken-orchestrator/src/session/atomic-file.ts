@@ -30,6 +30,7 @@ export interface StateWriteTransactionJournal {
   readonly phase: StateWriteJournalPhase;
   readonly startedAt: string;
   readonly updatedAt: string;
+  readonly writerPid?: number;
 }
 
 export interface StateWriteJournalRecovery {
@@ -137,6 +138,9 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
   if (!Number.isFinite(Date.parse(value.updatedAt))) {
     throw new Error(`state write journal ${journalPath} updatedAt must be a valid ISO timestamp`);
   }
+  if (value.writerPid !== undefined && (!Number.isSafeInteger(value.writerPid) || value.writerPid <= 0)) {
+    throw new Error(`state write journal ${journalPath} writerPid must be a positive safe integer`);
+  }
   return {
     schemaVersion: 1,
     targetPath: value.targetPath,
@@ -144,6 +148,7 @@ function parseStateWriteJournal(raw: string, journalPath: string): StateWriteTra
     phase: value.phase,
     startedAt: value.startedAt,
     updatedAt: value.updatedAt,
+    ...(value.writerPid === undefined ? {} : { writerPid: value.writerPid }),
   };
 }
 
@@ -263,6 +268,20 @@ function isStaleJournal(journal: StateWriteTransactionJournal): boolean {
   return Date.now() - updatedAtMs >= STALE_JOURNAL_AGE_MS;
 }
 
+function journalWriterIsAlive(journal: StateWriteTransactionJournal): boolean {
+  if (journal.writerPid === undefined) {
+    // Legacy journals predate writer ownership metadata and remain protected by
+    // the stale timeout so an active writer cannot be mistaken for a crash.
+    return true;
+  }
+  try {
+    process.kill(journal.writerPid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
 function sameStateWriteTransaction(
   left: StateWriteTransactionJournal,
   right: Omit<StateWriteTransactionJournal, 'updatedAt' | 'phase'>,
@@ -271,7 +290,8 @@ function sameStateWriteTransaction(
     left.schemaVersion === right.schemaVersion &&
     pathsReferenceSameFile(left.targetPath, right.targetPath) &&
     pathsReferenceSameFile(left.tempPath, right.tempPath) &&
-    left.startedAt === right.startedAt
+    left.startedAt === right.startedAt &&
+    left.writerPid === right.writerPid
   );
 }
 
@@ -332,7 +352,7 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
   }
 
   if (targetMatches && journal.phase === 'preparing') {
-    if (!isStaleJournal(journal)) {
+    if (!isStaleJournal(journal) && journalWriterIsAlive(journal)) {
       return {
         journalPath,
         targetPath: journal.targetPath,
@@ -365,7 +385,7 @@ export function recoverStateWriteTransaction(filePath: string): StateWriteJourna
   }
 
   if (targetMatches && existsSync(journal.tempPath)) {
-    if (!isStaleJournal(journal)) {
+    if (!isStaleJournal(journal) && journalWriterIsAlive(journal)) {
       return {
         journalPath,
         targetPath: journal.targetPath,
@@ -422,6 +442,7 @@ export function atomicWriteFileSync(
     targetPath: resolve(filePath),
     tempPath: resolve(tmpPath),
     startedAt,
+    writerPid: process.pid,
   };
   try {
     let fd: number;

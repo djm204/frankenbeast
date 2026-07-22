@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,7 @@ describe('atomic-file', () => {
   const tmpDirs: string[] = [];
 
   afterEach(() => {
+    vi.restoreAllMocks();
     for (const dir of tmpDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -92,6 +93,37 @@ describe('atomic-file', () => {
 
       atomicWriteFileSync(filePath, '{"new":true}');
 
+      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
+      expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
+    });
+
+    it('immediately recovers a fresh journal left by a dead writer', () => {
+      const dir = makeTmpDir('atomic-write-dead-writer-');
+      const filePath = join(dir, 'session.json');
+      const tempPath = `${filePath}.tmp.123.00000000-0000-0000-0000-000000000011`;
+      writeFileSync(filePath, '{"old":true}');
+      writeFileSync(tempPath, '{"new":');
+      writeFileSync(
+        stateWriteJournalPath(filePath),
+        JSON.stringify({
+          schemaVersion: 1,
+          targetPath: filePath,
+          tempPath,
+          phase: 'writing-temp',
+          startedAt: '2999-01-01T00:00:00.000Z',
+          updatedAt: '2999-01-01T00:00:01.000Z',
+          writerPid: 424_242,
+        }),
+        'utf8',
+      );
+      vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('process not found'), { code: 'ESRCH' });
+      });
+
+      atomicWriteFileSync(filePath, '{"new":true}');
+
+      expect(process.kill).toHaveBeenCalledWith(424_242, 0);
       expect(existsSync(tempPath)).toBe(false);
       expect(existsSync(stateWriteJournalPath(filePath))).toBe(false);
       expect(readFileSync(filePath, 'utf-8')).toBe('{"new":true}');
