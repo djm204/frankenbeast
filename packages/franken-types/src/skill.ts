@@ -5,15 +5,25 @@ import { ToolDefinitionSchema } from './provider.js';
  * mcp.json format — collection of MCP servers for a skill.
  * The inner object matches McpServerConfig from provider.ts.
  */
+const StdioMcpServerSchema = z.object({
+  type: z.literal('stdio').optional(),
+  command: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  // Retain compatibility with existing command-based entries that also carry a URL.
+  url: z.string().url().optional(),
+});
+
+const RemoteMcpServerSchema = z.object({
+  type: z.enum(['http', 'sse']),
+  url: z.string().url(),
+  headers: z.record(z.string(), z.string()).optional(),
+});
+
 export const McpConfigSchema = z.object({
   mcpServers: z.record(
     z.string(),
-    z.object({
-      command: z.string().min(1),
-      args: z.array(z.string()).optional(),
-      env: z.record(z.string(), z.string()).optional(),
-      url: z.string().url().optional(),
-    }),
+    z.union([StdioMcpServerSchema, RemoteMcpServerSchema]),
   ),
 });
 export type McpConfig = z.infer<typeof McpConfigSchema>;

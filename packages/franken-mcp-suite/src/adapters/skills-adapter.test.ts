@@ -135,6 +135,25 @@ describe('SkillsAdapter filesystem race handling', () => {
     );
   });
 
+  it('accepts commandless remote HTTP MCP server manifests', async () => {
+    await createSkill('remote', {
+      mcp: {
+        mcpServers: {
+          remote: {
+            type: 'http',
+            url: 'https://example.com/mcp',
+            headers: { Authorization: 'Bearer token' },
+          },
+        },
+      },
+    });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('remote')).resolves.toMatchObject({
+      name: 'remote',
+      mcpConfig: { mcpServers: { remote: { type: 'http', url: 'https://example.com/mcp' } } },
+    });
+  });
+
   it('rejects tools.json that does not match the tool manifest schema', async () => {
     await createSkill('broken');
     const manifestPath = join(root, 'skills', 'broken', 'tools.json');

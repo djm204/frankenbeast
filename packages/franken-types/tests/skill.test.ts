@@ -42,6 +42,21 @@ describe('McpConfigSchema', () => {
     expect(McpConfigSchema.parse(config)).toEqual(config);
   });
 
+  it('validates commandless remote HTTP and SSE MCP servers', () => {
+    const config: McpConfig = {
+      mcpServers: {
+        remote: {
+          type: 'http',
+          url: 'https://example.com/mcp',
+          headers: { Authorization: 'Bearer token' },
+        },
+        events: { type: 'sse', url: 'https://example.com/events' },
+      },
+    };
+
+    expect(McpConfigSchema.parse(config)).toEqual(config);
+  });
+
   it('rejects empty command', () => {
     expect(() =>
       McpConfigSchema.parse({ mcpServers: { bad: { command: '' } } }),
