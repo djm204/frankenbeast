@@ -6,10 +6,10 @@ const SENSITIVE_ASSIGNMENT_RE = /\b([A-Za-z_][A-Za-z0-9_-]*)(\s*[=:]\s*)("(?:\\.
 const SENSITIVE_JSON_FIELD_RE = /("([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*)("(?:\\.|[^"\\])*"|[^,}\]\s]+)/gu
 const PRIVATE_KEY_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gu
 const COOKIE_HEADER_RE = /\b(?:Cookie|Set-Cookie)\s*:\s*[^\r\n]+/giu
-const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)(?:Basic|Bearer)\s+[^\s,;]+/giu
-const AUTHORIZATION_RE = /\b((?:Proxy-)?Authorization\s*:\s*)(?:Basic|Bearer)\s+[^\s,;]+/giu
+const AUTHORIZATION_ASSIGNMENT_RE = /\b((?:proxy[-_])?authorization\s*[=:]\s*)[^\r\n]+/giu
+const AUTHORIZATION_RE = /\b((?:Proxy-)?Authorization\s*:\s*)[^\r\n]+/giu
 const DISCORD_WEBHOOK_RE = /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/giu
-const CREDENTIAL_URL_RE = /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu
+const CREDENTIAL_URL_RE = /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?):\/\/[^\s:@/]*:[^\s@/]+@[^\s]+/giu
 const BEARER_RE = /\bBearer\s+[^\s,;]+/giu
 const TOKEN_RE = /\b(?:(?:sk|gh[oprsu]|glpat|glc|xox[baprs])[-_][A-Za-z0-9_-]{12,}|github_pat_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9_-]{12,})\b/gu
 
@@ -24,7 +24,7 @@ function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_RE.test(normalizeSensitiveKey(key))
 }
 
-function redactText(value: string): string {
+function redactPlainText(value: string): string {
   return value
     .replace(PRIVATE_KEY_RE, REDACTED)
     .replace(COOKIE_HEADER_RE, REDACTED)
@@ -42,16 +42,41 @@ function redactText(value: string): string {
     .replace(TOKEN_RE, REDACTED)
 }
 
+function redactJsonValue(value: unknown): unknown {
+  if (typeof value === 'string') return redactPlainText(value)
+  if (Array.isArray(value)) return value.map(redactJsonValue)
+  if (value === null || typeof value !== 'object') return value
+
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [
+    redactPlainText(key),
+    isSensitiveKey(key) ? REDACTED : redactJsonValue(child),
+  ]))
+}
+
+function redactText(value: string): string {
+  const trimmed = value.trim()
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}'))
+    || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      return JSON.stringify(redactJsonValue(JSON.parse(value)))
+    } catch {
+      // Fall through to best-effort text redaction for malformed JSON.
+    }
+  }
+  return redactPlainText(value)
+}
+
 function redactAttributeValue(value: OTELAttributeValue): OTELAttributeValue {
   if (value.stringValue === undefined) return { ...value }
   return { ...value, stringValue: redactText(value.stringValue) }
 }
 
 function redactAttribute(attribute: OTELAttribute): OTELAttribute {
+  const key = redactPlainText(attribute.key)
   if (isSensitiveKey(attribute.key)) {
-    return { ...attribute, value: { stringValue: REDACTED } }
+    return { ...attribute, key, value: { stringValue: REDACTED } }
   }
-  return { ...attribute, value: redactAttributeValue(attribute.value) }
+  return { ...attribute, key, value: redactAttributeValue(attribute.value) }
 }
 
 /**
