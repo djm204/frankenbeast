@@ -2880,11 +2880,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       if (this.encryption) {
         result = this.recallEncrypted(query, limit, reportCorruptDetails);
       } else {
-        const keywords = query
-          .toLowerCase()
-          .split(/\s+/)
-          .filter((w) => w.length > 2)
-          .filter((w) => !STOPWORDS.has(w));
+        const keywords = normalizeRecallKeywords(query);
 
         if (keywords.length === 0) {
           result = this.recent(limit, reportCorruptDetails);
@@ -2956,11 +2952,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     reportCorruptDetails?: CorruptEpisodicDetailsReporter,
   ): EpisodicEvent[] {
     if (limit === 0) return [];
-    const keywords = query
-      .toLowerCase()
-      .split(/\s+/)
-      .filter((w) => w.length > 2)
-      .filter((w) => !STOPWORDS.has(w));
+    const keywords = normalizeRecallKeywords(query);
     if (keywords.length === 0) {
       return this.recent(limit, reportCorruptDetails);
     }
@@ -8227,6 +8219,37 @@ const STOPWORDS = new Set([
 ]);
 
 // --- Helpers ---
+
+const RECALL_LEADING_WRAPPERS = new Set(Array.from('"\'`“‘«‹([{<（［｛〈《「『【〔〖〘〚,;:!?，；：！？'));
+const RECALL_TRAILING_WRAPPERS = new Set(Array.from('"\'`”’»›)]}>）］｝〉》」』】〕〗〙〛.,;:!?。，；：！？'));
+
+function normalizeRecallKeywords(query: string): string[] {
+  const primaryKeywords: string[] = [];
+  const literalAlternates: string[] = [];
+
+  for (const word of query.toLowerCase().split(/\s+/)) {
+    const characters = Array.from(word);
+    let start = 0;
+    let end = characters.length;
+    while (start < end && RECALL_LEADING_WRAPPERS.has(characters[start]!)) {
+      start += 1;
+    }
+    while (end > start && RECALL_TRAILING_WRAPPERS.has(characters[end - 1]!)) {
+      end -= 1;
+    }
+
+    const normalized = characters.slice(start, end).join('');
+    if (normalized && STOPWORDS.has(normalized)) continue;
+    if (isSearchableRecallKeyword(normalized)) primaryKeywords.push(normalized);
+    if (word !== normalized && isSearchableRecallKeyword(word)) literalAlternates.push(word);
+  }
+
+  return [...new Set([...primaryKeywords, ...literalAlternates])];
+}
+
+function isSearchableRecallKeyword(word: string): boolean {
+  return word.length > 2 || /^[\p{L}\p{N}]#$/u.test(word);
+}
 
 const MAX_SKILL_EVOLUTION_TEXT_LENGTH = 240;
 

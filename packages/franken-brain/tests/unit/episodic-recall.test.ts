@@ -82,14 +82,98 @@ describe('EpisodicMemory.recall()', () => {
     expect(results[0]!.createdAt).toBe('2026-03-18T11:00:00Z');
   });
 
-  it('handles LIKE wildcard characters in query', () => {
+  it('normalizes surrounding punctuation before ranking keyword matches', () => {
     brain.episodic.record({
-      type: 'observation',
-      summary: '100% completion rate achieved',
+      type: 'failure',
+      summary: 'error timeout',
       createdAt: '2026-03-18T10:30:00Z',
     });
-    const results = brain.episodic.recall('100%');
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0]!.summary).toContain('100%');
+    brain.episodic.record({
+      type: 'failure',
+      summary: 'timeout',
+      createdAt: '2026-03-18T10:31:00Z',
+    });
+
+    const results = brain.episodic.recall('error: timeout');
+
+    expect(results[0]!.summary).toBe('error timeout');
+  });
+
+  it('normalizes quotes before applying stopword filtering', () => {
+    const results = brain.episodic.recall('"the"');
+
+    expect(results).toHaveLength(5);
+    expect(results[0]!.summary).toContain('Rate limit');
+  });
+
+  it('normalizes punctuation for encrypted episodic recall', () => {
+    const encryptedBrain = new SqliteBrain(':memory:', undefined, {
+      encryption: { enabled: true, key: 'episodic-recall-test-key' },
+    });
+    try {
+      encryptedBrain.episodic.record({
+        type: 'failure',
+        summary: 'error timeout',
+        createdAt: '2026-03-18T10:30:00Z',
+      });
+
+      expect(encryptedBrain.episodic.recall('error: unavailable')).toHaveLength(1);
+    } finally {
+      encryptedBrain.close();
+    }
+  });
+
+  it.each([
+    ['C++', 'C++ compiler selected', 'compiler selected'],
+    ['C#', 'C# compiler selected', 'compiler selected'],
+    ['F#', 'F# compiler selected', 'compiler selected'],
+    ['.env', '.env file missing', 'env file missing'],
+    ['--dry-run', '--dry-run enabled', 'dry-run enabled'],
+    ['/app/src/auth.ts', '/app/src/auth.ts failed', 'app/src/auth.ts failed'],
+    ['[P1]', '[P1] incident', 'incident'],
+    ['[CI]', '[CI] failed', 'CI failed'],
+    ['<T>', '<T> generic type', 'generic type'],
+    ['<init>', '<init> method failed', 'init method failed'],
+    ['!important', '!important declaration', 'important declaration'],
+  ])('preserves significant punctuation in %s recall terms', (query, exactSummary, distractorSummary) => {
+    brain.episodic.record({
+      type: 'observation',
+      summary: exactSummary,
+      createdAt: '2026-03-18T10:30:00Z',
+    });
+    brain.episodic.record({
+      type: 'observation',
+      summary: distractorSummary,
+      createdAt: '2026-03-18T10:31:00Z',
+    });
+
+    const results = brain.episodic.recall(query);
+
+    expect(results[0]!.summary).toBe(exactSummary);
+  });
+
+  it('does not turn punctuation-only queries into recent-memory reads', () => {
+    expect(brain.episodic.recall('???')).toEqual([]);
+  });
+
+  it.each([
+    ['percent', '100%', '100% completion rate achieved', '100 percent complete'],
+    ['underscore', 'token_ab', 'token_ab accepted', 'tokenXab accepted'],
+    ['backslash', String.raw`C:\\temp`, String.raw`C:\\temp created`, 'C:temp created'],
+  ])('escapes LIKE %s characters in query', (_name, query, exactSummary, distractorSummary) => {
+    brain.episodic.record({
+      type: 'observation',
+      summary: exactSummary,
+      createdAt: '2026-03-18T10:30:00Z',
+    });
+    brain.episodic.record({
+      type: 'observation',
+      summary: distractorSummary,
+      createdAt: '2026-03-18T10:31:00Z',
+    });
+
+    const results = brain.episodic.recall(query);
+
+    expect(results.map((event) => event.summary)).toEqual([exactSummary]);
   });
 });
