@@ -146,6 +146,29 @@ describe('fbeast-hook runtime', () => {
     expect(governedContext).not.toContain(secret);
   });
 
+  it('ignores braces inside quoted shadowed structured values', async () => {
+    const secret = ['abc', '}', 'def'].join('');
+    const context = String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"${secret}\"},\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain('abc');
+    expect(governedContext).not.toContain('def');
+  });
+
+  it('redacts parent and nested labelled shadowed object values', async () => {
+    const outerSecret = ['outer', 'pair', 'fixture'].join('-');
+    const innerSecret = ['inner', 'pair', 'fixture'].join('-');
+    const context = String.raw`{\"name\":\"OPENAI_API_KEY\",\"value\":\"${outerSecret}\",\"meta\":{\"name\":\"PASSWORD\",\"value\":\"${innerSecret}\"}}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).not.toContain(outerSecret);
+    expect(governedContext).not.toContain(innerSecret);
+    expect(governedContext.match(/\[REDACTED\]/g)).toHaveLength(2);
+  });
+
   it('redacts bracket characters in shadowed tuple values', async () => {
     const secret = ['abc', ']', 'def'].join('');
     const context = String.raw`{\"output\":[[\"password\",\"${secret}\"]],\"output\":\"rm -rf /tmp/nope\"}`;
@@ -235,6 +258,18 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toBe(`--password [REDACTED] --client-secret [REDACTED] --api-key ${substitution}`);
     expect(seen).not.toContain(dollarSecret);
     expect(seen).not.toContain(escapedSecret);
+  });
+
+  it('redacts option secret prefixes and suffixes around command substitutions', async () => {
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `--api-key prefix${substitution}suffix --format json`,
+    });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe(`--api-key [REDACTED]${substitution}[REDACTED] --format json`);
+    expect(seen).not.toContain('prefix');
+    expect(seen).not.toContain('suffix');
   });
 
   it('preserves quoted command substitutions while redacting escaped credential values', async () => {

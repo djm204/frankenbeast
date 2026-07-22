@@ -168,17 +168,27 @@ function redactLabelledObjectValues(objectText: string): string {
 function redactLabelledObjects(text: string): string {
   const stack: number[] = [];
   const candidates: Array<{ start: number; end: number }> = [];
+  let quotedMarker: { quote: string; structuralSlashCount: number } | undefined;
   for (let index = 0; index < text.length; index += 1) {
-    if (text[index] === '{') stack.push(index);
-    else if (text[index] === '}' && stack.length > 0) {
+    const character = text[index]!;
+    if ((stack.length > 0 || quotedMarker) && (character === '"' || character === "'")) {
+      let slashCount = 0;
+      for (let slashIndex = index - 1; slashIndex >= 0 && text[slashIndex] === '\\'; slashIndex -= 1) slashCount += 1;
+      if (!quotedMarker) quotedMarker = { quote: character, structuralSlashCount: slashCount };
+      else if (character === quotedMarker.quote && slashCount === quotedMarker.structuralSlashCount) quotedMarker = undefined;
+      continue;
+    }
+    if (quotedMarker) continue;
+    if (character === '{') stack.push(index);
+    else if (character === '}' && stack.length > 0) {
       const start = stack.pop()!;
       const candidate = text.slice(start, index + 1);
       if (candidate.length <= 8192 && containsStructuredSecretIndicator(candidate)) candidates.push({ start, end: index + 1 });
     }
   }
-  const innermost = candidates.filter((candidate) =>
-    !candidates.some((other) => other.start > candidate.start && other.end < candidate.end));
-  return innermost.sort((left, right) => right.start - left.start).reduce(
+  const outermost = candidates.filter((candidate) =>
+    !candidates.some((other) => other.start < candidate.start && other.end > candidate.end));
+  return outermost.sort((left, right) => right.start - left.start).reduce(
     (result, candidate) => result.slice(0, candidate.start)
       + redactLabelledObjectValues(result.slice(candidate.start, candidate.end))
       + result.slice(candidate.end),
@@ -232,7 +242,7 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
       .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*(?:\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*)+|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]');
 
   const sensitiveOptionPattern = preserveShellCommands
-    ? /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+[^\s\r\n;&|<>`$]+|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi
+    ? /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+[^\s\r\n;&|<>`$]+|(?:\\.|\$\((?:[^()]|\([^()]*\))*\)|\([^()\s]*\)|[^\s\\;&|<>`])+)/gi
     : /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi;
 
   return redacted
@@ -241,9 +251,12 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(
       sensitiveOptionPattern,
-      (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
-        ? `${prefix}[REDACTED]`
-        : match,
+      (match, prefix: string, flagName: string) => {
+        if (!isSensitiveAssignmentKey(flagName)) return match;
+        return preserveShellCommands
+          ? `${prefix}${redactValuePreservingSubstitutions(match.slice(prefix.length))}`
+          : `${prefix}[REDACTED]`;
+      },
     )
     .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
 }
