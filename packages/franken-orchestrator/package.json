@@ -49,7 +49,7 @@
     "@franken/types": "0.16.0",
     "@franken/observer": "0.11.4",
     "@google/genai": "^2.13.0",
-    "better-sqlite3": "^13.0.1",
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^17.4.2",
     "@franken/planner": "0.4.24",
     "@franken/brain": "0.16.1",

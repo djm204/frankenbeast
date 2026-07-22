@@ -28,7 +28,7 @@
   "dependencies": {
     "@franken/observer": "0.11.4",
     "@franken/types": "0.16.0",
-    "better-sqlite3": "^13.0.1",
+    "better-sqlite3": "^12.11.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
