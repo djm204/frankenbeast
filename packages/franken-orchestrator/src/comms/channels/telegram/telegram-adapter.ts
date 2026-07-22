@@ -80,7 +80,7 @@ export class TelegramAdapter implements ChannelAdapter {
           'Telegram API error',
           response,
           targetUrl,
-          redactTelegramBotTokenUrls,
+          { provider: 'telegram', redact: redactTelegramBotTokenUrls },
         ));
       }
     });

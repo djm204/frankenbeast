@@ -76,7 +76,12 @@ export class DiscordAdapter implements ChannelAdapter {
       body: JSON.stringify(body),
     }, async response => {
       if (!response.ok) {
-        throw new Error(await formatHttpErrorMessage('Discord API error', response, targetUrl));
+        throw new Error(await formatHttpErrorMessage(
+          'Discord API error',
+          response,
+          targetUrl,
+          { provider: 'discord' },
+        ));
       }
     });
   }

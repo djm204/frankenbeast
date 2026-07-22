@@ -19,6 +19,17 @@ describe('http error context', () => {
     expect(message).toBe('Provider failed: 502 Bad Gateway for https://discord.example.test/webhook');
   });
 
+  it('does not treat non-Slack error strings as provider codes', async () => {
+    const message = await formatHttpErrorMessage('Discord failed', {
+      status: 502,
+      statusText: 'Bad Gateway',
+      body: responseBody(JSON.stringify({ error: 'private_request_data' })),
+    } as Response, 'https://discord.example.test/webhook', { provider: 'discord' });
+
+    expect(message).toBe('Discord failed: 502 Bad Gateway for https://discord.example.test/webhook');
+    expect(message).not.toContain('private_request_data');
+  });
+
   it('does not fall back to unbounded text() reads when a body stream is unavailable', async () => {
     const text = vi.fn().mockResolvedValue('unbounded body');
     const message = await formatHttpErrorMessage('Provider failed', {
