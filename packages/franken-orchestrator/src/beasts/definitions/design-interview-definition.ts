@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { BeastDefinition } from '../types.js';
-import { resolveCliEntrypoint } from './resolve-cli-entrypoint.js';
+import { resolveCliEntrypoint, spawnedCliEnv } from './resolve-cli-entrypoint.js';
 
 const promptConfigSchema = z.object({
   text: z.string().optional(),
@@ -41,7 +41,7 @@ export const designInterviewDefinition: BeastDefinition = {
       '--goal', String(config.goal),
       '--output', String(config.outputPath),
     ],
-    env: { FRANKENBEAST_SPAWNED: '1' },
+    env: spawnedCliEnv(),
     cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
   }),
   telemetryLabels: {

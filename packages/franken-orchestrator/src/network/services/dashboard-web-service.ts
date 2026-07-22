@@ -42,6 +42,7 @@ export const dashboardWebService: NetworkServiceDefinition = {
       cwd: context.repoRoot,
       inheritedEnvKeys: inheritedNetworkServiceEnvKeys('dashboard-web', config),
       env: {
+        ...(context.plain ? { NO_COLOR: '1', FORCE_COLOR: '0' } : {}),
         FRANKENBEAST_CONFIG_FILE: context.configFile ?? '',
         FRANKENBEAST_DASHBOARD_API_URL: config.dashboard.apiUrl,
         FRANKENBEAST_DASHBOARD_HOST: config.dashboard.host,

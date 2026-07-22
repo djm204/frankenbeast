@@ -105,6 +105,7 @@ export interface CliArgs {
   interviewOutput?: string | undefined;
   noPr: boolean;
   verbose: boolean;
+  plain: boolean;
   reset: boolean;
   resume: boolean;
   cleanup: boolean;
@@ -231,6 +232,7 @@ Options:
   --allow-origin <url>    Allow one additional websocket Origin
   --no-pr                 Skip PR creation
   --verbose               Debug logs + trace viewer
+  --plain                 Disable ANSI styling (also honors NO_COLOR and FORCE_COLOR=0)
   --reset                 Clear checkpoint and traces
   --resume                Resume from checkpoint
   --cleanup               Remove build artifacts without following symlinked entries
@@ -545,6 +547,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
       'allow-origin': { type: 'string' },
       'no-pr': { type: 'boolean', default: false },
       verbose: { type: 'boolean', default: false },
+      plain: { type: 'boolean', default: false },
       reset: { type: 'boolean', default: false },
       resume: { type: 'boolean', default: false },
       cleanup: { type: 'boolean', default: false },
@@ -835,6 +838,7 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     allowOrigin: values['allow-origin'],
     noPr: values['no-pr'] ?? false,
     verbose: values.verbose ?? false,
+    plain: values.plain ?? false,
     reset: values.reset ?? false,
     resume: values.resume ?? false,
     cleanup: values.cleanup ?? false,

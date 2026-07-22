@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Spinner } from '../../../src/cli/spinner.js';
 
 describe('Spinner', () => {
@@ -6,6 +6,10 @@ describe('Spinner', () => {
 
   beforeEach(() => {
     writeSpy = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('writes spinner frame on start', () => {
@@ -40,6 +44,16 @@ describe('Spinner', () => {
     spinner.start('Thinking...');
     spinner.stop('Done');
     expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it('prints one escape-free status line without animating in plain mode', () => {
+    vi.stubEnv('NO_COLOR', '1');
+    const spinner = new Spinner({ write: writeSpy });
+
+    spinner.start('\x1b[2mThinking...\x1b[0m');
+    spinner.stop('\x1b[32mDone\x1b[0m');
+
+    expect(writeSpy.mock.calls.flat()).toEqual(['Thinking...\n', 'Done\n']);
   });
 
   it('elapsed returns milliseconds since start', async () => {

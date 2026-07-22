@@ -48,6 +48,9 @@ vi.mock('../../../src/logging/beast-logger.js', () => ({
     this.error = vi.fn();
     this.getLogEntries = vi.fn(() => []);
   }),
+  isPlainOutput: vi.fn(() => false),
+  setPlainOutput: vi.fn(),
+  stripAnsi: vi.fn((s: string) => s),
 }));
 
 const MockMartinLoop = vi.fn(function () {});

@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
 import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
-import { BeastLogger } from '../logging/beast-logger.js';
+import { BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
 import { CliSkillExecutor, type ObserverDeps } from '../skills/cli-skill-executor.js';
@@ -51,6 +51,7 @@ export interface CliDepOptions {
   trustProviderCommandOverrides?: boolean | undefined;
   noPr: boolean;
   verbose: boolean;
+  plain?: boolean | undefined;
   reset: boolean;
   resume?: boolean | undefined;
   planDirOverride?: string | undefined;
@@ -513,6 +514,7 @@ async function createObserverDeps(
   mkdirSync(options.paths.buildDir, { recursive: true });
   const logger = new BeastLogger({
     verbose: options.verbose,
+    plain: options.plain,
     captureForFile: true,
     logFile: artifacts.logFile,
   });
@@ -1121,6 +1123,9 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
 }
 
 export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
+  if (options.plain !== undefined) {
+    setPlainOutput(options.plain);
+  }
   const config = resolveEffectiveConfig(options);
   const commandOverridePolicy = {
     allowTrustedCommandOverrides: options.trustProviderCommandOverrides,

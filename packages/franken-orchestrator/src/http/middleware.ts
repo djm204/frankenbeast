@@ -160,11 +160,11 @@ export const SECURITY_CONFIG_MAX_BODY_SIZE = 16 * 1024;
 export const BEAST_CONTROL_MAX_BODY_SIZE = 1024 * 1024;
 export const SKILL_CONTEXT_MAX_BODY_SIZE = 1024 * 1024;
 
-export function validateBody<T>(schema: ZodSchema<T>, body: unknown): T {
+export function validateBody<T>(schema: ZodSchema<T>, body: unknown, statusCode = 422): T {
   const result = schema.safeParse(body);
   if (!result.success) {
     throw new HttpError(
-      422,
+      statusCode,
       'VALIDATION_ERROR',
       'Request validation failed',
       result.error.issues,
