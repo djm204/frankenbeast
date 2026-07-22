@@ -86,6 +86,13 @@ export function resolveChatRequestCredentials(
   }
 }
 
+export class ChatApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'ChatApiError';
+  }
+}
+
 export class ChatApiClient {
   private readonly requestBaseUrl: string;
   private readonly requestCredentials: RequestCredentials;
@@ -185,7 +192,7 @@ export class ChatApiClient {
       } catch {
         // Fall through with HTTP status message
       }
-      throw new Error(message);
+      throw new ChatApiError(message, res.status);
     }
 
     const body = (await res.json()) as ApiDataEnvelope<T>;
