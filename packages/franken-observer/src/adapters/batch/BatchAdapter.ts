@@ -34,12 +34,12 @@ export interface BatchAdapterOptions {
    * bounded and intentionally excludes trace payloads and exporter errors.
    * Observer failures are ignored so they cannot interrupt future drains.
    */
-  onDrainError?: (context: Readonly<BatchDrainContext>) => void
+  onDrainError?: (context: Readonly<BatchDrainContext>) => void | PromiseLike<void>
   /**
    * Best-effort observer invoked when a timer drain succeeds after one or more
    * failed timer drains. It receives the same bounded, payload-free context.
    */
-  onDrainRecovery?: (context: Readonly<BatchDrainContext>) => void
+  onDrainRecovery?: (context: Readonly<BatchDrainContext>) => void | PromiseLike<void>
 }
 
 function validatePositiveSafeInteger(value: number, optionName: string): number {
@@ -87,8 +87,10 @@ export class BatchAdapter implements ExportAdapter {
   private readonly buffer: Trace[] = []
   private timer: ReturnType<typeof globalThis.setInterval> | null = null
   private readonly clearIntervalFn: (id: ReturnType<typeof globalThis.setInterval>) => void
-  private readonly onDrainError: ((context: Readonly<BatchDrainContext>) => void) | undefined
-  private readonly onDrainRecovery: ((context: Readonly<BatchDrainContext>) => void) | undefined
+  private readonly onDrainError:
+    ((context: Readonly<BatchDrainContext>) => void | PromiseLike<void>) | undefined
+  private readonly onDrainRecovery:
+    ((context: Readonly<BatchDrainContext>) => void | PromiseLike<void>) | undefined
   private backgroundDrainFailed = false
   private drainPromise: Promise<void> | null = null
 
@@ -119,7 +121,7 @@ export class BatchAdapter implements ExportAdapter {
   private reportDrainError(context: Readonly<BatchDrainContext>): void {
     this.backgroundDrainFailed = true
     try {
-      this.onDrainError?.(context)
+      void Promise.resolve(this.onDrainError?.(context)).catch(() => undefined)
     } catch {
       // Background observers are best-effort and must not break future drains.
     }
@@ -129,7 +131,7 @@ export class BatchAdapter implements ExportAdapter {
     if (!this.backgroundDrainFailed) return
     this.backgroundDrainFailed = false
     try {
-      this.onDrainRecovery?.(context)
+      void Promise.resolve(this.onDrainRecovery?.(context)).catch(() => undefined)
     } catch {
       // Recovery observers are also best-effort.
     }

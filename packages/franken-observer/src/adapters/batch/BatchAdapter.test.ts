@@ -164,17 +164,23 @@ describe('BatchAdapter — options', () => {
     expect(await batch.queryByTraceId(trace.id)).toEqual(trace)
   })
 
-  it('continues timer drains after an error observer throws and reports recovery', async () => {
+  it('continues timer drains after async observers reject and reports recovery', async () => {
     let intervalCallback!: () => void
     let attempts = 0
+    const errorObserverResult = Promise.reject(new Error('error observer failed'))
+    const recoveryObserverResult = Promise.reject(new Error('recovery observer failed'))
+    void errorObserverResult.catch(() => undefined)
+    void recoveryObserverResult.catch(() => undefined)
+    const errorObserverCatch = vi.spyOn(errorObserverResult, 'catch')
+    const recoveryObserverCatch = vi.spyOn(recoveryObserverResult, 'catch')
     const inner = new InMemoryAdapter()
     vi.spyOn(inner, 'flush').mockImplementation(async trace => {
       attempts += 1
       if (attempts === 1) throw new Error('transient exporter failure')
       await InMemoryAdapter.prototype.flush.call(inner, trace)
     })
-    const onDrainError = vi.fn(() => { throw new Error('observer failed') })
-    const onDrainRecovery = vi.fn()
+    const onDrainError = vi.fn(() => errorObserverResult)
+    const onDrainRecovery = vi.fn(() => recoveryObserverResult)
     const batch = new BatchAdapter({
       adapter: inner,
       maxBatchSize: 100,
@@ -194,6 +200,8 @@ describe('BatchAdapter — options', () => {
     intervalCallback()
     await vi.waitFor(() => expect(onDrainRecovery).toHaveBeenCalledOnce())
 
+    expect(errorObserverCatch).toHaveBeenCalledOnce()
+    expect(recoveryObserverCatch).toHaveBeenCalledOnce()
     expect(attempts).toBe(2)
     expect(onDrainRecovery).toHaveBeenCalledWith({
       batchSize: 1,
