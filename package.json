@@ -82,7 +82,7 @@
   },
   "overrides": {
     "@anthropic-ai/sdk": "^0.110.0",
-    "@hono/node-server": "2.0.5",
+    "@hono/node-server": "2.0.10",
     "esbuild": "^0.28.1",
     "hono": "^4.12.27",
     "protobufjs": "^7.6.5",
