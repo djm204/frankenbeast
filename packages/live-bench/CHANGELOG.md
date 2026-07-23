@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.5.0](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.5...live-bench-v0.5.0) (2026-07-23)
+
+
+### Features
+
+* **learning:** add strategy experiment sandbox ([#2579](https://github.com/djm204/frankenbeast/issues/2579)) ([bc1de3d](https://github.com/djm204/frankenbeast/commit/bc1de3d3e0d685f4a0c5e375a82c657c289fb651))
+* **learning:** add workflow regression benchmark ([#2356](https://github.com/djm204/frankenbeast/issues/2356)) ([b9101f5](https://github.com/djm204/frankenbeast/commit/b9101f5a7d0ddace3cd730532a15b4e72af8fb05))
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **live-bench:** bound corpus traversal ([#3448](https://github.com/djm204/frankenbeast/issues/3448)) ([64dada9](https://github.com/djm204/frankenbeast/commit/64dada90609944a1637c60ca7e015b5b73c0150a)), closes [#3068](https://github.com/djm204/frankenbeast/issues/3068)
+* **live-bench:** bound run timestamp years ([#3572](https://github.com/djm204/frankenbeast/issues/3572)) ([134de09](https://github.com/djm204/frankenbeast/commit/134de09389221d1475289b5e42d776e16dfc9e19))
+* **live-bench:** harden run directory cleanup ([#3294](https://github.com/djm204/frankenbeast/issues/3294)) ([a5761a5](https://github.com/djm204/frankenbeast/commit/a5761a554f2b45fc602416bfebf27d483da57890))
+* **live-bench:** quarantine malformed candidate tasks ([#3440](https://github.com/djm204/frankenbeast/issues/3440)) ([be05795](https://github.com/djm204/frankenbeast/commit/be05795e1734798f40b8cf9f14b2e90d0020a680))
+* **live-bench:** reject extra list arguments ([#3557](https://github.com/djm204/frankenbeast/issues/3557)) ([fb9955a](https://github.com/djm204/frankenbeast/commit/fb9955a9ce33e901169e4347647a82f2bcf4902c))
+* **live-bench:** validate artifact paths ([#3293](https://github.com/djm204/frankenbeast/issues/3293)) ([710c9d0](https://github.com/djm204/frankenbeast/commit/710c9d097bdc98805d9544fb8e15b46c154c4f27))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+* **mcp:** reconcile observer redaction review fixes ([66f5339](https://github.com/djm204/frankenbeast/commit/66f53391e2265a7511a008595971c3a0d0f00dd0))
+* release main ([d19cce0](https://github.com/djm204/frankenbeast/commit/d19cce08188e79330228990ea311d38b0a2218eb))
+* release main ([1064be4](https://github.com/djm204/frankenbeast/commit/1064be4436a8cc085155bf56d87668832c9e55bc))
+* release main ([750094b](https://github.com/djm204/frankenbeast/commit/750094bab0859c49829b4abe85013a5007fc272b))
+* release main ([100e3a8](https://github.com/djm204/frankenbeast/commit/100e3a887b6fbd538e8a1b83f4e88ce4caf6c443))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2572](https://github.com/djm204/frankenbeast/issues/2572)) ([1db889b](https://github.com/djm204/frankenbeast/commit/1db889b3f71d3cf81af579394ecd58c7fe481e43))
+* release main ([#2630](https://github.com/djm204/frankenbeast/issues/2630)) ([c5306fd](https://github.com/djm204/frankenbeast/commit/c5306fd4ca17ef03cbd7b2e91f731707dac5148e))
+* release main ([#3407](https://github.com/djm204/frankenbeast/issues/3407)) ([c1cb208](https://github.com/djm204/frankenbeast/commit/c1cb208923376aef3eccd371b178352abb2a6c9c))
+* release main ([#3521](https://github.com/djm204/frankenbeast/issues/3521)) ([a3c8c12](https://github.com/djm204/frankenbeast/commit/a3c8c121f2ff4b7563c88cce9b31d6163bba82b7))
+* release main ([#3606](https://github.com/djm204/frankenbeast/issues/3606)) ([3d33c74](https://github.com/djm204/frankenbeast/commit/3d33c746587a861c97c1e140e93e536ec7d23f23))
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+
+
+### Tests
+
+* **live-bench:** relax CLI smoke timeouts ([474c704](https://github.com/djm204/frankenbeast/commit/474c7048b0cad04125a7e12d236c5688f5838cc5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.11.5 to 0.12.0
+    * @franken/types bumped from 0.16.1 to 0.17.0
+
 ## [0.4.5](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.4...live-bench-v0.4.5) (2026-07-23)
 
 

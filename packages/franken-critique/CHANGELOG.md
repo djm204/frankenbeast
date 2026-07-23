@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.4...franken-critique-v0.11.0) (2026-07-23)
+
+
+### Features
+
+* **critique:** add lesson promotion critique ([#2342](https://github.com/djm204/frankenbeast/issues/2342)) ([7e6ab35](https://github.com/djm204/frankenbeast/commit/7e6ab3513dc5e074e20f18aa0791fd62635e7a8d))
+* **learning:** add post-task lesson extraction ([#2548](https://github.com/djm204/frankenbeast/issues/2548)) ([32e0bb7](https://github.com/djm204/frankenbeast/commit/32e0bb72310a6c45638c87e6212caea0c05e57c4))
+* **learning:** cluster repeated failure families ([#2341](https://github.com/djm204/frankenbeast/issues/2341)) ([659c773](https://github.com/djm204/frankenbeast/commit/659c7738ce08b72f0755f604111e4ba55d288eac))
+* **learning:** scope cross-agent lesson sharing ([#2357](https://github.com/djm204/frankenbeast/issues/2357)) ([563b8ea](https://github.com/djm204/frankenbeast/commit/563b8ea581be03f10b5f3f72aee55a4868547ddd))
+
+
+### Bug Fixes
+
+* **critique:** accept unknown error causes ([#3641](https://github.com/djm204/frankenbeast/issues/3641)) ([34f226b](https://github.com/djm204/frankenbeast/commit/34f226ba19c9726f458ab03e763abf0636d8f526))
+* **critique:** bound complexity evaluator input size ([#3605](https://github.com/djm204/frankenbeast/issues/3605)) ([56c1ced](https://github.com/djm204/frankenbeast/commit/56c1ced17c071e94dc24743280149171e7da1e6f))
+* **critique:** decode braced unicode class escapes ([#3540](https://github.com/djm204/frankenbeast/issues/3540)) ([a11e8f8](https://github.com/djm204/frankenbeast/commit/a11e8f88825bd35b935ec9349402a8ca7d893e8b))
+* **critique:** forward reflection max tokens ([891d990](https://github.com/djm204/frankenbeast/commit/891d990f24fed66da5b51f66052e0a60bc71af89)), closes [#2045](https://github.com/djm204/frankenbeast/issues/2045)
+* **critique:** harden lesson scope metadata validation ([#2613](https://github.com/djm204/frankenbeast/issues/2613)) ([ab0ea47](https://github.com/djm204/frankenbeast/commit/ab0ea4751f2838278ead921367adb088de1597ff))
+* **critique:** honor request evaluator selectors ([#3611](https://github.com/djm204/frankenbeast/issues/3611)) ([9e3e6fb](https://github.com/djm204/frankenbeast/commit/9e3e6fbc1bcd09f944d620eb52f9b62be2348800))
+* **critique:** parse nested unicode set classes ([#3399](https://github.com/djm204/frankenbeast/issues/3399)) ([613162e](https://github.com/djm204/frankenbeast/commit/613162e40b7a6345ca8fd2775b0e07279558baa0))
+* **critique:** redact token budget breaker reasons ([#3604](https://github.com/djm204/frankenbeast/issues/3604)) ([9db5cfb](https://github.com/djm204/frankenbeast/commit/9db5cfb1afb0fac02b71aa7bef282776976c6686))
+* **critique:** report reflection formatting failures ([#3625](https://github.com/djm204/frankenbeast/issues/3625)) ([72e77cf](https://github.com/djm204/frankenbeast/commit/72e77cf63647ffddf1422ff6ee8282c5b139c36b))
+* **critique:** return structured 400 for malformed review JSON ([#2595](https://github.com/djm204/frankenbeast/issues/2595)) ([261a482](https://github.com/djm204/frankenbeast/commit/261a48201ed50f104e9c4753beff6d0a66802fa0))
+* **critique:** validate rate limit configuration ([73a44f7](https://github.com/djm204/frankenbeast/commit/73a44f76249b9b07ea4b5435416e103bf6d1be5c)), closes [#2042](https://github.com/djm204/frankenbeast/issues/2042)
+* disambiguate critique result type exports ([#3316](https://github.com/djm204/frankenbeast/issues/3316)) ([48756fd](https://github.com/djm204/frankenbeast/commit/48756fd04b2490566ba5e2a28b6f96fa0cb9d153))
+* **docs:** remove stale package references ([#3473](https://github.com/djm204/frankenbeast/issues/3473)) ([8e6e431](https://github.com/djm204/frankenbeast/commit/8e6e431cbc05b337f7a56b5000b65e1f5dfd1ef1))
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **types:** share branded critique score contract ([#3433](https://github.com/djm204/frankenbeast/issues/3433)) ([6800c5d](https://github.com/djm204/frankenbeast/commit/6800c5d0da90d5b0aabd5043a24306456c9b4f8c))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+* **eslint:** enable type-aware promise linting ([#3435](https://github.com/djm204/frankenbeast/issues/3435)) ([c089f8b](https://github.com/djm204/frankenbeast/commit/c089f8b1cc0ff78a4fc5790567328b9c4928e8bf))
+* **mcp:** reconcile observer redaction review fixes ([66f5339](https://github.com/djm204/frankenbeast/commit/66f53391e2265a7511a008595971c3a0d0f00dd0))
+* release main ([d19cce0](https://github.com/djm204/frankenbeast/commit/d19cce08188e79330228990ea311d38b0a2218eb))
+* release main ([1064be4](https://github.com/djm204/frankenbeast/commit/1064be4436a8cc085155bf56d87668832c9e55bc))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2572](https://github.com/djm204/frankenbeast/issues/2572)) ([1db889b](https://github.com/djm204/frankenbeast/commit/1db889b3f71d3cf81af579394ecd58c7fe481e43))
+* release main ([#2630](https://github.com/djm204/frankenbeast/issues/2630)) ([c5306fd](https://github.com/djm204/frankenbeast/commit/c5306fd4ca17ef03cbd7b2e91f731707dac5148e))
+* release main ([#3407](https://github.com/djm204/frankenbeast/issues/3407)) ([c1cb208](https://github.com/djm204/frankenbeast/commit/c1cb208923376aef3eccd371b178352abb2a6c9c))
+* release main ([#3521](https://github.com/djm204/frankenbeast/issues/3521)) ([a3c8c12](https://github.com/djm204/frankenbeast/commit/a3c8c121f2ff4b7563c88cce9b31d6163bba82b7))
+* release main ([#3606](https://github.com/djm204/frankenbeast/issues/3606)) ([3d33c74](https://github.com/djm204/frankenbeast/commit/3d33c746587a861c97c1e140e93e536ec7d23f23))
+
+
+### Documentation
+
+* **onboarding:** relocate concise agent ramp-up guide ([#3396](https://github.com/djm204/frankenbeast/issues/3396)) ([c39eb74](https://github.com/djm204/frankenbeast/commit/c39eb74886803b2a8f041553cfc742e0655aa483))
+* remove PM-swarm terminology from Frankenbeast docs ([dcf183d](https://github.com/djm204/frankenbeast/commit/dcf183da6c8c176ecabd5278adbd6d3e6068be17))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.1 to 0.17.0
+
 ## [0.10.4](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.3...franken-critique-v0.10.4) (2026-07-23)
 
 
