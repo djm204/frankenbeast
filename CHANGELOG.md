@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.63.2](https://github.com/djm204/frankenbeast/compare/v0.63.1...v0.63.2) (2026-07-23)
+
+
+### Bug Fixes
+
+* **observer:** expose unknown model cost attribution ([#3637](https://github.com/djm204/frankenbeast/issues/3637)) ([a917af3](https://github.com/djm204/frankenbeast/commit/a917af37b46d1bc39d4fcb4d9d01b3997f6445ba))
+* **observer:** make SQLite worker shutdown non-blocking ([#3623](https://github.com/djm204/frankenbeast/issues/3623)) ([d16415b](https://github.com/djm204/frankenbeast/commit/d16415bcc35516ff3d219f18c7b0f1a9f5a68015))
+* **orchestrator:** omit comms provider error bodies ([#3638](https://github.com/djm204/frankenbeast/issues/3638)) ([e9b6703](https://github.com/djm204/frankenbeast/commit/e9b6703ff26ef9461eca04deee7e9c38c4674a83))
+* **release:** target repository for latest-tag repair ([#3618](https://github.com/djm204/frankenbeast/issues/3618)) ([67392e2](https://github.com/djm204/frankenbeast/commit/67392e2c0352fa62a85761b0e23216eeb94994c0))
+* **security:** bind observability ports to localhost ([#3627](https://github.com/djm204/frankenbeast/issues/3627)) ([00c82b5](https://github.com/djm204/frankenbeast/commit/00c82b50b2b1d96cb3afdc176a0540ae40d69c45))
+* **security:** disable anonymous Grafana by default ([#3633](https://github.com/djm204/frankenbeast/issues/3633)) ([8eea49d](https://github.com/djm204/frankenbeast/commit/8eea49d79c82f3fd64169d17af1dadb069119c38))
+* **web:** back off chat websocket reconnects ([#3640](https://github.com/djm204/frankenbeast/issues/3640)) ([653e702](https://github.com/djm204/frankenbeast/commit/653e702418f284166409384fc76b6778976b0bbc))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
 ## [0.63.1](https://github.com/djm204/frankenbeast/compare/v0.63.0...v0.63.1) (2026-07-22)
 
 

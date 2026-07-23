@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.11.5](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.4...franken-observer-v0.11.5) (2026-07-23)
+
+
+### Bug Fixes
+
+* **observer:** add safe Tempo retry defaults ([#3647](https://github.com/djm204/frankenbeast/issues/3647)) ([0b1cc8a](https://github.com/djm204/frankenbeast/commit/0b1cc8ab79e7aab6a910281d34b9e7a767a29491))
+* **observer:** bound HTTP exporter attempts ([#3630](https://github.com/djm204/frankenbeast/issues/3630)) ([aff2564](https://github.com/djm204/frankenbeast/commit/aff25646c2249da208c7fb01cd0d06814e0e7992))
+* **observer:** expose unknown model cost attribution ([#3637](https://github.com/djm204/frankenbeast/issues/3637)) ([a917af3](https://github.com/djm204/frankenbeast/commit/a917af37b46d1bc39d4fcb4d9d01b3997f6445ba))
+* **observer:** make SQLite worker shutdown non-blocking ([#3623](https://github.com/djm204/frankenbeast/issues/3623)) ([d16415b](https://github.com/djm204/frankenbeast/commit/d16415bcc35516ff3d219f18c7b0f1a9f5a68015))
+* **observer:** redact credentials from OTEL exports ([#3626](https://github.com/djm204/frankenbeast/issues/3626)) ([f6019ee](https://github.com/djm204/frankenbeast/commit/f6019ee8c864a724421c0ebbc4938e421f582408))
+* **observer:** reject unsafe webhook retry counts ([#3645](https://github.com/djm204/frankenbeast/issues/3645)) ([442d763](https://github.com/djm204/frankenbeast/commit/442d763eaaa9cd607b612dc91f07e81e8961bc93))
+* **observer:** surface periodic batch drain failures ([#3610](https://github.com/djm204/frankenbeast/issues/3610)) ([6151f31](https://github.com/djm204/frankenbeast/commit/6151f316ab1c85df1e8a1874029a99a5134efcf0))
+* **observer:** validate total cost token aggregates ([#3643](https://github.com/djm204/frankenbeast/issues/3643)) ([18e4fd7](https://github.com/djm204/frankenbeast/commit/18e4fd71c613633364b7d4a113def38337be24d1))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.0 to 0.16.1
+
 ## [0.11.4](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.3...franken-observer-v0.11.4) (2026-07-22)
 
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.2](https://github.com/djm204/frankenbeast/compare/franken-web-v0.9.1...franken-web-v0.9.2) (2026-07-23)
+
+
+### Bug Fixes
+
+* **web:** back off Beast event stream reconnects ([#3636](https://github.com/djm204/frankenbeast/issues/3636)) ([cff499f](https://github.com/djm204/frankenbeast/commit/cff499f255bed7b430bf8ac14324c2e1b089c856))
+* **web:** back off chat websocket reconnects ([#3640](https://github.com/djm204/frankenbeast/issues/3640)) ([653e702](https://github.com/djm204/frankenbeast/commit/653e702418f284166409384fc76b6778976b0bbc))
+* **web:** describe analytics event drawer ([#3622](https://github.com/djm204/frankenbeast/issues/3622)) ([d73ecff](https://github.com/djm204/frankenbeast/commit/d73ecff26b5faf4a55afd1a8fa1ab94cb460e7dd))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.0 to 0.16.1
+
 ## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.9.0...franken-web-v0.9.1) (2026-07-22)
 
 
