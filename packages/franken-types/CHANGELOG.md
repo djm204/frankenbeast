@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.16.0...franken-types-v0.16.1) (2026-07-23)
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
 ## [0.16.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.15.0...franken-types-v0.16.0) (2026-07-22)
 
 

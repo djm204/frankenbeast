@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.5](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.4...live-bench-v0.4.5) (2026-07-23)
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/observer bumped from 0.11.4 to 0.11.5
+    * @franken/types bumped from 0.16.0 to 0.16.1
+
 ## [0.4.4](https://github.com/djm204/frankenbeast/compare/live-bench-v0.4.3...live-bench-v0.4.4) (2026-07-22)
 
 

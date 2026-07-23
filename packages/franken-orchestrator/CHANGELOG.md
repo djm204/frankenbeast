@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.57.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.57.1...@franken/orchestrator-v0.57.2) (2026-07-23)
+
+
+### Bug Fixes
+
+* **observer:** make SQLite worker shutdown non-blocking ([#3623](https://github.com/djm204/frankenbeast/issues/3623)) ([d16415b](https://github.com/djm204/frankenbeast/commit/d16415bcc35516ff3d219f18c7b0f1a9f5a68015))
+* **orchestrator:** bound early process output buffers ([#3635](https://github.com/djm204/frankenbeast/issues/3635)) ([970eedb](https://github.com/djm204/frankenbeast/commit/970eedb08675ec65532ad479a8353521b76ccb4f))
+* **orchestrator:** bound rate-limit stderr warnings ([#3615](https://github.com/djm204/frankenbeast/issues/3615)) ([d1c24f7](https://github.com/djm204/frankenbeast/commit/d1c24f70e2a0e88ca031c92a1af742376d1d2e29))
+* **orchestrator:** bound skill context writes ([#3613](https://github.com/djm204/frankenbeast/issues/3613)) ([f9c010c](https://github.com/djm204/frankenbeast/commit/f9c010c9fb00a3ce2829063e91afd5ef96cec18e))
+* **orchestrator:** omit comms provider error bodies ([#3638](https://github.com/djm204/frankenbeast/issues/3638)) ([e9b6703](https://github.com/djm204/frankenbeast/commit/e9b6703ff26ef9461eca04deee7e9c38c4674a83))
+* **orchestrator:** validate decrypted local secrets ([#3620](https://github.com/djm204/frankenbeast/issues/3620)) ([368b96d](https://github.com/djm204/frankenbeast/commit/368b96d6a66264cbb9ed393c71d50c312eab3404))
+* **orchestrator:** validate signed token expiry metadata ([#3628](https://github.com/djm204/frankenbeast/issues/3628)) ([3b95908](https://github.com/djm204/frankenbeast/commit/3b959086e1f13a3c499a08a765c3faefade47229))
+* **orchestrator:** validate skill install request bodies ([#3614](https://github.com/djm204/frankenbeast/issues/3614)) ([8d0026b](https://github.com/djm204/frankenbeast/commit/8d0026bace09ab7896b9dd06cd1cd70e0b51e5e4))
+* **orchestrator:** write local secrets atomically ([#3631](https://github.com/djm204/frankenbeast/issues/3631)) ([0c04dc5](https://github.com/djm204/frankenbeast/commit/0c04dc5d328fc00a7bcc49402727313d1c789867))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.10.3 to 0.10.4
+    * @franken/governor bumped from 0.8.2 to 0.8.3
+    * @franken/types bumped from 0.16.0 to 0.16.1
+    * @franken/observer bumped from 0.11.4 to 0.11.5
+    * @franken/planner bumped from 0.4.24 to 0.4.25
+    * @franken/brain bumped from 0.16.1 to 0.16.2
+
 ## [0.57.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.57.0...@franken/orchestrator-v0.57.1) (2026-07-22)
 
 

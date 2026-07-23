@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.9.3](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.9.2...franken-mcp-suite-v0.9.3) (2026-07-23)
+
+
+### Bug Fixes
+
+* **mcp:** redact hook entrypoint failures ([#3619](https://github.com/djm204/frankenbeast/issues/3619)) ([5e08b5d](https://github.com/djm204/frankenbeast/commit/5e08b5d73a2e6f393484662f1fbcd1b52d6718b5)), closes [#3617](https://github.com/djm204/frankenbeast/issues/3617)
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.0 to 0.16.1
+    * @franken/brain bumped from 0.16.1 to 0.16.2
+    * @franken/critique bumped from 0.10.3 to 0.10.4
+    * @franken/governor bumped from 0.8.2 to 0.8.3
+    * @franken/observer bumped from 0.11.4 to 0.11.5
+    * @franken/orchestrator bumped from 0.57.1 to 0.57.2
+    * @franken/planner bumped from 0.4.24 to 0.4.25
+
 ## [0.9.2](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.9.1...franken-mcp-suite-v0.9.2) (2026-07-22)
 
 

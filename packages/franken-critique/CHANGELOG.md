@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.4](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.3...franken-critique-v0.10.4) (2026-07-23)
+
+
+### Bug Fixes
+
+* **critique:** accept unknown error causes ([#3641](https://github.com/djm204/frankenbeast/issues/3641)) ([34f226b](https://github.com/djm204/frankenbeast/commit/34f226ba19c9726f458ab03e763abf0636d8f526))
+* **critique:** honor request evaluator selectors ([#3611](https://github.com/djm204/frankenbeast/issues/3611)) ([9e3e6fb](https://github.com/djm204/frankenbeast/commit/9e3e6fbc1bcd09f944d620eb52f9b62be2348800))
+* **critique:** report reflection formatting failures ([#3625](https://github.com/djm204/frankenbeast/issues/3625)) ([72e77cf](https://github.com/djm204/frankenbeast/commit/72e77cf63647ffddf1422ff6ee8282c5b139c36b))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.0 to 0.16.1
+
 ## [0.10.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.2...franken-critique-v0.10.3) (2026-07-22)
 
 
