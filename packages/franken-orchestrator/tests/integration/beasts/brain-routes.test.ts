@@ -1,22 +1,27 @@
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BrainRegistry } from '@franken/brain';
+import { BrainRegistry, SqliteBrain } from '@franken/brain';
+import Database from 'better-sqlite3';
 
 import { errorHandler } from '../../../src/http/middleware.js';
-import { brainRoutes } from '../../../src/http/routes/brain-routes.js';
+import { brainRoutes, type BrainRouteContext } from '../../../src/http/routes/brain-routes.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { testCredential } from '../../support/test-credentials.js';
 
 const OPERATOR_TOKEN = testCredential('TEST_BRAIN_ROUTES_OPERATOR_TOKEN');
 
-function createApp(registry: BrainRegistry): Hono {
+function createApp(
+  registry: BrainRegistry,
+  resolveContext?: (agentTypeId: string) => BrainRouteContext | undefined,
+): Hono {
   const app = new Hono();
   app.onError(errorHandler);
   app.route('/', brainRoutes({
     registry,
+    resolveContext,
     operatorToken: OPERATOR_TOKEN,
     security: new TransportSecurityService(),
   }));
@@ -103,6 +108,65 @@ describe('brain routes integration', () => {
     });
   });
 
+  it('resolves a persisted custom brain path and service-side faculty configuration', async () => {
+    const { registry, brainsDir } = createRegistry();
+    mkdirSync(brainsDir, { recursive: true });
+    const customDbPath = join(brainsDir, 'custom-coder.db');
+    const writer = new SqliteBrain(customDbPath);
+    writer.working.set('custom-key', 'custom-value');
+    writer.working.flushToDb();
+    writer.close();
+
+    const response = await createApp(registry, () => ({
+      dbPath: customDbPath,
+      faculties: {
+        planning: true,
+        reasoning: true,
+        action: true,
+        learning: false,
+      },
+    })).request('/v1/brain/coder', { headers: authorizedHeaders() });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        workingMemory: { keys: ['custom-key'], total: 1 },
+        faculties: {
+          planning: { configured: true },
+          reasoning: { configured: true },
+          action: { configured: true },
+          learning: { configured: false },
+        },
+      },
+    });
+    expect(existsSync(join(brainsDir, 'coder.db'))).toBe(false);
+  });
+
+  it('does not fabricate persisted state for a configured in-memory brain', async () => {
+    const { registry } = createRegistry();
+    const response = await createApp(registry, () => ({ dbPath: ':memory:' }))
+      .request('/v1/brain/coder', { headers: authorizedHeaders() });
+
+    expect(response.status).toBe(404);
+  });
+
+  it('reads working-memory keys written after the route brain was hydrated', async () => {
+    const { registry, brainsDir } = createRegistry();
+    registry.forAgentType('coder');
+    const app = createApp(registry);
+    const writer = new SqliteBrain(join(brainsDir, 'coder.db'));
+    writer.working.set('late-key', 'late-value');
+    writer.working.flushToDb();
+    writer.close();
+
+    const response = await app.request('/v1/brain/coder', { headers: authorizedHeaders() });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { workingMemory: { keys: ['late-key'], total: 1 } },
+    });
+  });
+
   it('paginates and filters episodic history within strict query bounds', async () => {
     const { registry } = createRegistry();
     const brain = registry.forAgentType('planner');
@@ -113,6 +177,12 @@ describe('brain routes integration', () => {
         createdAt: `2026-07-24T10:0${index}:00.000Z`,
       });
     }
+    brain.episodic.record({
+      type: 'observation',
+      summary: 'neutral event',
+      details: { topic: 'gamma' },
+      createdAt: '2026-07-24T09:59:00.000Z',
+    });
     const app = createApp(registry);
 
     const first = await app.request('/v1/brain/planner/episodes?limit=2&offset=0', {
@@ -134,21 +204,40 @@ describe('brain routes integration', () => {
     expect((await filtered.json() as { data: Array<{ summary: string }> }).data.map((event) => event.summary))
       .toEqual(['alpha retry', 'alpha plan']);
 
+    const ranked = await app.request('/v1/brain/planner/episodes?query=alpha%20retry&limit=10', {
+      headers: authorizedHeaders(),
+    });
+    expect((await ranked.json() as { data: Array<{ summary: string }> }).data.map((event) => event.summary))
+      .toEqual(['alpha retry', 'alpha plan']);
+
+    const detailsMatch = await app.request('/v1/brain/planner/episodes?query=gamma&limit=10', {
+      headers: authorizedHeaders(),
+    });
+    expect(await detailsMatch.json()).toMatchObject({ data: [{ summary: 'neutral event' }] });
+    expect(brain.accessAudit.list({ operation: 'episodic.readBoundedPage' })[0]).toMatchObject({
+      outcome: 'success',
+      details: { limit: 11, offset: 0, count: 1 },
+    });
+
     const invalid = await app.request('/v1/brain/planner/episodes?limit=101', {
       headers: authorizedHeaders(),
     });
     expect(invalid.status).toBe(422);
   });
 
-  it('bounds each episodic row even when stored details are very large', async () => {
-    const { registry } = createRegistry();
-    registry.forAgentType('coder').episodic.record({
+  it('bounds each episodic row before parsing oversized stored details', async () => {
+    const { registry, brainsDir } = createRegistry();
+    const eventId = registry.forAgentType('coder').episodic.record({
       type: 'observation',
       step: 's'.repeat(1_000_000),
       summary: 'Large diagnostic event',
       details: { raw: 'x'.repeat(1_000_000) },
       createdAt: '2026-07-24T10:00:00.000Z',
     });
+    const db = new Database(join(brainsDir, 'coder.db'));
+    db.prepare('UPDATE episodic_events SET details = ? WHERE id = ?')
+      .run(`{"raw":"${'x'.repeat(1_000_000)}`, eventId);
+    db.close();
 
     const response = await createApp(registry).request('/v1/brain/coder/episodes?limit=1', {
       headers: authorizedHeaders(),

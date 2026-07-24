@@ -72,6 +72,64 @@ describe('createBeastServices', () => {
     }
   });
 
+  it('resolves persisted brain paths and module faculty flags from the latest run', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const beastsDb = join(tempDir, 'beast.db');
+    const customDbPath = join(tempDir, 'custom-brain.db');
+    const repo = new SQLiteBeastRepository(beastsDb);
+    repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        brain: { dbPath: customDbPath },
+        modules: { planner: true, critique: true, governor: false, memory: true },
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-24T10:00:00.000Z',
+    });
+    repo.createRun({
+      definitionId: 'default-modules',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-24T10:01:00.000Z',
+    });
+    repo.close();
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb,
+      beastLogsDir: join(tempDir, 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      expect(services.resolveBrainContext('martin-loop')).toEqual({
+        dbPath: customDbPath,
+        faculties: {
+          planning: true,
+          reasoning: true,
+          action: false,
+          learning: false,
+        },
+      });
+      expect(services.resolveBrainContext('default-modules')).toEqual({
+        faculties: {
+          planning: true,
+          reasoning: true,
+          action: true,
+          learning: false,
+        },
+      });
+      expect(services.resolveBrainContext('unknown')).toBeUndefined();
+    } finally {
+      services.dispose();
+    }
+  });
+
   it('persists SSE tickets in the Beast database across service restarts', async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
     const beastsDb = join(tempDir, 'beast.db');

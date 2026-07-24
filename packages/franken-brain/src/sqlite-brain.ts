@@ -562,6 +562,7 @@ export type MemoryAccessAuditOperation =
   | 'episodic.recordLearning'
   | 'episodic.recall'
   | 'episodic.recent'
+  | 'episodic.readBoundedPage'
   | 'episodic.recentFailures'
   | 'episodic.count'
   | 'recovery.checkpoint'
@@ -2447,6 +2448,27 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return keys;
   }
 
+  /** Read the current durable key set without trusting this process's cached map. */
+  persistedKeys(): string[] {
+    const rows = this.db
+      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string }>;
+    const keys = rows.flatMap((row) => {
+      const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      validateWorkingMemoryKey(row.key);
+      return isExpiredWorkingMemoryValue(parseHydratedWorkingMemoryValue(row.key, serialized))
+        ? []
+        : [row.key];
+    });
+    this.audit?.({
+      operation: 'working.keys',
+      store: 'working',
+      outcome: 'success',
+      details: { count: keys.length, source: 'persisted' },
+    });
+    return keys;
+  }
+
   private snapshotEntries(options: { expireGuardedEntries?: boolean } = {}): Record<string, unknown> {
     if (options.expireGuardedEntries ?? true) {
       this.expireRuntimeKeysMatchingCurrentGuards();
@@ -3147,6 +3169,149 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       });
       throw error;
     }
+  }
+
+  /**
+   * Read an HTTP-safe page while dropping oversized details in SQLite, before
+   * JSON parsing can materialize an unbounded payload in the Node process.
+   */
+  readBoundedPage(options: {
+    limit: number;
+    offset: number;
+    query?: string;
+    maxDetailsBytes: number;
+  }): Array<EpisodicEvent & { detailsTruncated?: true }> {
+    try {
+      const result = this.readBoundedPageUnchecked(options);
+      this.audit?.({
+        operation: 'episodic.readBoundedPage',
+        store: 'episodic',
+        ...(options.query === undefined ? {} : { query: options.query }),
+        outcome: 'success',
+        details: { limit: options.limit, offset: options.offset, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.readBoundedPage',
+        store: 'episodic',
+        ...(options.query === undefined ? {} : { query: options.query }),
+        outcome: 'error',
+        details: {
+          limit: options.limit,
+          offset: options.offset,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
+  }
+
+  private readBoundedPageUnchecked(options: {
+    limit: number;
+    offset: number;
+    query?: string;
+    maxDetailsBytes: number;
+  }): Array<EpisodicEvent & { detailsTruncated?: true }> {
+    const { limit, offset, query, maxDetailsBytes } = options;
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new RangeError('offset must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(maxDetailsBytes) || maxDetailsBytes < 0) {
+      throw new RangeError('maxDetailsBytes must be a non-negative safe integer');
+    }
+    const normalizedQuery = query?.trim();
+    const keywords = normalizedQuery ? normalizeRecallKeywords(normalizedQuery) : [];
+    const detailsProjection = `CASE
+      WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) > ? THEN NULL
+      ELSE details
+    END AS details`;
+    const truncatedProjection = `CASE
+      WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) > ? THEN 1
+      ELSE 0
+    END AS details_truncated`;
+    const projectedColumns = `id, type, step, summary, ${detailsProjection}, created_at, schema_version,
+                              ${truncatedProjection}`;
+    const mapRows = (rows: Array<EpisodicRow & { details_truncated: 0 | 1 }>) => rows.flatMap((row) => {
+      const event = rowToEvent(row, this.encryption);
+      if (!event) return [];
+      return [{
+        ...event,
+        ...(row.details_truncated === 1 ? { detailsTruncated: true as const } : {}),
+      }];
+    });
+
+    if (keywords.length === 0) {
+      const rows = this.db.prepare(
+        `SELECT ${projectedColumns}
+           FROM episodic_events
+          ORDER BY created_at DESC, id DESC
+          LIMIT ? OFFSET ?`,
+      ).all(maxDetailsBytes, maxDetailsBytes, limit, offset) as Array<
+        EpisodicRow & { details_truncated: 0 | 1 }
+      >;
+      return mapRows(rows);
+    }
+
+    if (this.encryption) {
+      const batchSize = 128;
+      const matches: Array<{ event: EpisodicEvent & { detailsTruncated?: true }; score: number }> = [];
+      let rowOffset = 0;
+      while (true) {
+        const rows = this.db.prepare(
+          `SELECT ${projectedColumns}
+             FROM episodic_events
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?`,
+        ).all(maxDetailsBytes, maxDetailsBytes, batchSize, rowOffset) as Array<
+          EpisodicRow & { details_truncated: 0 | 1 }
+        >;
+        for (const event of mapRows(rows)) {
+          const score = recallEventScore(event, keywords);
+          if (score > 0) matches.push({ event, score });
+        }
+        if (rows.length < batchSize) break;
+        rowOffset += rows.length;
+      }
+      return matches
+        .sort((a, b) =>
+          b.score - a.score
+          || b.event.createdAt.localeCompare(a.event.createdAt)
+          || Number(b.event.id ?? 0) - Number(a.event.id ?? 0))
+        .slice(offset, offset + limit)
+        .map(({ event }) => event);
+    }
+
+    const searchableDetails = `CASE WHEN json_valid(details) THEN details ELSE '' END`;
+    const scoringCases = keywords.map(() =>
+      `(CASE WHEN lower(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END
+        + CASE WHEN lower(${searchableDetails}) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
+    ).join(' + ');
+    const whereClauses = keywords.map(() =>
+      `(lower(summary) LIKE ? ESCAPE '\\' OR lower(${searchableDetails}) LIKE ? ESCAPE '\\')`,
+    ).join(' OR ');
+    const likeParams = keywords.flatMap((keyword) => {
+      const escaped = `%${escapeLike(keyword)}%`;
+      return [escaped, escaped];
+    });
+    const rows = this.db.prepare(
+      `SELECT ${projectedColumns}, (${scoringCases}) AS relevance_score
+         FROM episodic_events
+        WHERE ${whereClauses}
+        ORDER BY relevance_score DESC, created_at DESC, id DESC
+        LIMIT ? OFFSET ?`,
+    ).all(
+      maxDetailsBytes,
+      maxDetailsBytes,
+      ...likeParams,
+      ...likeParams,
+      limit,
+      offset,
+    ) as Array<EpisodicRow & { details_truncated: 0 | 1; relevance_score: number }>;
+    return mapRows(rows);
   }
 
   snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {

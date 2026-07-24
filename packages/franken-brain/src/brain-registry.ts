@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { SqliteBrain } from './sqlite-brain.js';
 
@@ -36,7 +36,7 @@ function assertSafeAgentTypeId(agentTypeId: string): void {
  * including `:memory:`, when they intentionally need different persistence.
  */
 export class BrainRegistry {
-  private readonly brains = new Map<string, SqliteBrain>();
+  private readonly brains = new Map<string, { brain: SqliteBrain; dbPath: string }>();
 
   constructor(private readonly brainsDir = join('.fbeast', 'brains')) {}
 
@@ -44,7 +44,7 @@ export class BrainRegistry {
     assertSafeAgentTypeId(agentTypeId);
 
     const existing = this.brains.get(agentTypeId);
-    if (existing) return existing;
+    if (dbPath === undefined && existing) return existing.brain;
 
     if (
       dbPath === undefined
@@ -55,21 +55,34 @@ export class BrainRegistry {
       );
     }
 
-    const resolvedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
+    const requestedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
+    const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
+    if (existing?.dbPath === resolvedDbPath) return existing.brain;
+    if (existing) {
+      existing.brain.close();
+      this.brains.delete(agentTypeId);
+    }
     if (dbPath === undefined) {
       mkdirSync(this.brainsDir, { recursive: true });
     }
     const brain = new SqliteBrain(resolvedDbPath);
-    this.brains.set(agentTypeId, brain);
+    this.brains.set(agentTypeId, { brain, dbPath: resolvedDbPath });
     return brain;
   }
 
-  /** Return an existing default agent brain without creating an unknown database. */
-  getAgentType(agentTypeId: string): SqliteBrain | undefined {
+  /** Return an existing agent brain without creating an unknown database. */
+  getAgentType(agentTypeId: string, dbPath?: string): SqliteBrain | undefined {
     assertSafeAgentTypeId(agentTypeId);
 
     const existing = this.brains.get(agentTypeId);
-    if (existing) return existing;
+    if (dbPath === undefined && existing) return existing.brain;
+
+    if (dbPath !== undefined) {
+      const resolvedDbPath = dbPath === ':memory:' ? dbPath : resolve(dbPath);
+      if (existing?.dbPath === resolvedDbPath) return existing.brain;
+      if (dbPath === ':memory:' || !existsSync(resolvedDbPath)) return undefined;
+      return this.forAgentType(agentTypeId, resolvedDbPath);
+    }
 
     if (Buffer.byteLength(agentTypeId, 'utf8') > MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES) {
       throw new RangeError(
@@ -83,7 +96,7 @@ export class BrainRegistry {
 
   /** Close every brain owned by this registry and release its process-local keys. */
   close(): void {
-    for (const brain of this.brains.values()) brain.close();
+    for (const { brain } of this.brains.values()) brain.close();
     this.brains.clear();
   }
 }

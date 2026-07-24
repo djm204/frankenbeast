@@ -13,7 +13,7 @@ import { agentRoutes } from './routes/agent-routes.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
-import { brainRoutes } from './routes/brain-routes.js';
+import { brainRoutes, type BrainRouteContext } from './routes/brain-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
@@ -67,7 +67,10 @@ export interface ChatAppOptions {
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };
-  beastControl?: BeastRoutesDeps & { brains?: BrainRegistry };
+  beastControl?: BeastRoutesDeps & {
+    brains?: BrainRegistry;
+    resolveBrainContext?: (agentTypeId: string) => BrainRouteContext | undefined;
+  };
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
   securityConfig?: {
@@ -295,6 +298,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     if (opts.beastControl.brains) {
       app.route('/', brainRoutes({
         registry: opts.beastControl.brains,
+        resolveContext: opts.beastControl.resolveBrainContext,
         operatorToken: opts.beastControl.operatorToken,
         security: opts.beastControl.security ?? transportSecurity,
         rateLimit: opts.beastControl.rateLimit,
