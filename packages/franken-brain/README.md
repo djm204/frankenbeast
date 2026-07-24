@@ -299,6 +299,21 @@ The faculty properties are intentionally inert (`configured: false`) until the p
 
 The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state. `BrainRegistry` currently creates in-memory brains and validates agent-type IDs as portable path components; it does not choose durable paths or replace current orchestrator construction yet.
 
+## Planned Hive Brain registry relationship
+
+The accepted central-command design is documented in
+[`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md).
+Issue #3685's planned `BrainRegistry.forAgentType(id)` remains the agent-type
+lookup. Hive work extends the same registry additively with a disjoint
+`forWorkspaceHive(workspaceId)` key namespace. One `BrainConversation` per
+user/workspace is persisted through that workspace Hive Brain and owns
+transcript, routing, approval, supervised-agent associations, and resumable turn
+state; it is not a second registry entry per browser session.
+
+This section describes a target contract, not a current export. Do not add
+`BrainRegistry` or `BrainConversation` to examples until their implementation
+issues land with public exports and tests.
+
 ## Memory schema versioning and migrations
 
 Durable memory stores are explicitly versioned. `working_memory`, `episodic_events`, and `checkpoints` rows include a `schema_version` column, and the `memory_schema_versions` table records the current schema version for each store. `SqliteBrain#getMemorySchemaMetadata()` returns the active store versions and record counts so callers can audit what is on disk.

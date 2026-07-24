@@ -126,6 +126,13 @@ packages/franken-orchestrator/src/
   - In managed/default dashboard flows it is a chat/control gateway client of `beasts-daemon`; it proxies `/v1/beasts/*` only after operator auth.
   - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
   - Shares the same `ChatRuntime` as the CLI REPL
+- **Hive Brain central-command chat is an accepted design, not implemented runtime behavior.**
+  [ADR-041](../adr/041-hive-brain-command-center.md)
+  (`docs/adr/041-hive-brain-command-center.md`) keeps the existing REST and
+  `/v1/chat/ws` browser contract, defines `BrainConversation` as durable
+  transcript/routing/approval state bound to the planned `BrainRegistry`, and
+  requires every Beast launch to reuse the existing governed dispatch path.
+  Do not add a second socket protocol or dispatch directly from a brain/faculty.
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
 - Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
 - **Beast daemon execution pipeline**: `ProcessBeastExecutor` manages spawned agent processes with config file passthrough (`FRANKENBEAST_RUN_CONFIG` env var), `ProcessSupervisor` three-way exit gate, early stdout/stderr buffering, and stop/kill escalation (SIGTERM → timeout → SIGKILL). `BeastEventBus` publishes real-time `run.status`, `run.log`, and `agent.status` events to SSE subscribers. `SseConnectionTicketStore` authenticates EventSource connections via single-use tickets (ADR-030). Config files are written to `.fbeast/.build/run-configs/` and cleaned up on terminal state.
