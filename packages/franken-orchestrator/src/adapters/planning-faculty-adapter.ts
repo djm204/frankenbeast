@@ -2,6 +2,10 @@ import type { EpisodicEvent, IEpisodicMemory, IPlanningFaculty } from '@franken/
 import { isoNow } from '@franken/types';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
 
+export interface PlanningFacultyAdapterOptions {
+  recordEpisodes?: boolean;
+}
+
 /**
  * Connects the Beast planner port to an agent brain's planning faculty while
  * preserving the planner's plan object and failure behavior unchanged.
@@ -13,6 +17,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
   constructor(
     private readonly delegate: IPlannerModule,
     private readonly episodic: IEpisodicMemory,
+    private readonly options: PlanningFacultyAdapterOptions = {},
   ) {}
 
   async createPlan(intent: PlanIntent): Promise<PlanGraph> {
@@ -69,6 +74,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
   }
 
   private recordLifecycleEvent(event: EpisodicEvent): void {
+    if (this.options.recordEpisodes === false) return;
     try {
       this.episodic.record(event);
     } catch {

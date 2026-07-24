@@ -3055,7 +3055,11 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     >;
   }
 
-  recentFailures(n = 10, includeQuarantined = true): EpisodicEvent[] {
+  recentFailures(
+    n = 10,
+    includeQuarantined = true,
+    excludeCategory?: string,
+  ): EpisodicEvent[] {
     try {
       const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
@@ -3067,9 +3071,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         n,
         this.encryption,
         (eventId) => quarantinedEventIds.add(eventId),
-        includeQuarantined
-          ? undefined
-          : (event) => !isQuarantinedEpisodicDetails(event),
+        (event) => (
+          (includeQuarantined || !isQuarantinedEpisodicDetails(event))
+          && (excludeCategory === undefined || event.details?.category !== excludeCategory)
+        ),
       );
       this.audit?.({
         operation: 'episodic.recentFailures',
@@ -3078,6 +3083,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         details: {
           limit: n,
           count: result.length,
+          ...(excludeCategory !== undefined ? { excludeCategory } : {}),
           ...(quarantinedEventIds.size > 0
             ? { quarantinedEventIds: [...quarantinedEventIds] }
             : {}),

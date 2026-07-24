@@ -997,6 +997,9 @@ function createConsolidatedDeps(
 
   const beastConfig = {
     ...bridgeToBeastConfig(options, options.orchestratorConfig),
+    planning: {
+      recordEpisodes: config.modules.memory,
+    },
     reasoning: {
       enabled: config.modules.critique,
       recordEpisodes: config.modules.memory,

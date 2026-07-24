@@ -69,6 +69,10 @@ export interface BeastDepsConfig {
     /** Persist compact verdict episodes. Disable with the memory module. */
     recordEpisodes?: boolean;
   };
+  planning?: {
+    /** Persist planning lifecycle episodes. Disable with the memory module. */
+    recordEpisodes?: boolean;
+  };
   skillsDir?: string;
   configDir?: string;
   reflection?: boolean;
@@ -168,7 +172,11 @@ export function createBeastDeps(
 
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
-  const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic);
+  const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic, {
+    ...(config.planning?.recordEpisodes !== undefined
+      ? { recordEpisodes: config.planning.recordEpisodes }
+      : {}),
+  });
   brain.attachPlanningFaculty(planning);
   const memory = new SqliteBrainMemoryAdapter(brain);
   const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));

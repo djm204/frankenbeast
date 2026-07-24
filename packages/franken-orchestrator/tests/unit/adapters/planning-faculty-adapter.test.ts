@@ -20,6 +20,21 @@ describe('PlanningFacultyAdapter', () => {
     return brain;
   }
 
+  it('delegates without recording lifecycle episodes when recording is disabled', async () => {
+    const brain = makeBrain();
+    const delegate: IPlannerModule = {
+      createPlan: vi.fn().mockResolvedValue({ tasks: [] }),
+    };
+    const faculty = new PlanningFacultyAdapter(delegate, brain.episodic, {
+      recordEpisodes: false,
+    });
+
+    await expect(faculty.createPlan({ goal: 'Run without memory' })).resolves.toEqual({ tasks: [] });
+    faculty.recordStepFailed(planTask('disabled', 'Do not persist'), new Error('must not persist'));
+
+    expect(brain.episodic.recent()).toEqual([]);
+  });
+
   it('delegates plan creation unchanged and records a recallable plan episode', async () => {
     const intent: PlanIntent = { goal: 'Ship the planning adapter' };
     const plan: PlanGraph = { tasks: [planTask('implement', 'Implement adapter')] };

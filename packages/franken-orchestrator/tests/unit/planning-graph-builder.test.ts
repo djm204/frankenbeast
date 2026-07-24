@@ -54,6 +54,28 @@ describe('runPlanning with GraphBuilder', () => {
     expect(reviewContext).toEqual({ source: 'graphBuilder', redactedUntrustedChunkContent: true });
   });
 
+  it('keeps a built graph when optional lifecycle recording fails', async () => {
+    writeFileSync(join(tmpDir, '05_sample.md'), '# Chunk 05: sample\n\nSample chunk', 'utf-8');
+    const ctx = new BeastContext('proj', 'sess', 'input');
+    ctx.sanitizedIntent = { goal: 'build despite telemetry failure' };
+    const planner = {
+      ...makePlanner(),
+      recordPlanCreated: vi.fn(() => {
+        throw new Error('episodic store unavailable');
+      }),
+    };
+
+    await expect(runPlanning(
+      ctx,
+      planner,
+      makeCritique(),
+      defaultConfig(),
+      undefined,
+      new ChunkFileGraphBuilder(tmpDir),
+    )).resolves.toBeUndefined();
+    expect(ctx.plan?.tasks).toHaveLength(2);
+  });
+
   it('throws CritiqueSpiralError when critique rejects a graph-builder plan', async () => {
     writeFileSync(join(tmpDir, '05_sample.md'), '# Chunk 05: sample\n\nSample chunk', 'utf-8');
 

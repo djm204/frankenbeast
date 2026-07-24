@@ -199,6 +199,24 @@ describe('E2E: Consolidated deps through BeastLoop', () => {
     expect(deps.sqliteBrain!.episodic.recentFailures(10).filter(
       (episode) => episode.summary.includes('legacy raw diagnostic'),
     )).toHaveLength(1);
+
+    await deps.memory.recordTrace({
+      taskId: 'buried-generic-failure',
+      summary: 'retain this recovery diagnostic',
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
+    for (let i = 0; i < 25; i += 1) {
+      deps.sqliteBrain!.planning.recordStepFailed({
+        id: `lifecycle-only-${i}`,
+        objective: `Telemetry ${i}`,
+        requiredSkills: [],
+        dependsOn: [],
+      }, new Error('sanitized'));
+    }
+    expect((await deps.memory.getContext('planning-project')).knownErrors).toContain(
+      '[buried-generic-failure] retain this recovery diagnostic',
+    );
   });
 
   it('provider registry has configured providers', () => {
