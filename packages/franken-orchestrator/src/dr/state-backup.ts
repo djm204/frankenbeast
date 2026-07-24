@@ -151,8 +151,14 @@ async function resolveBackupRoot(stateDir: string): Promise<string> {
   if (basename(root) === '.fbeast' && await pathIsDirectory(join(root, 'state'))) {
     throw new Error('DR backup source must be the concrete .fbeast/state directory, not the parent .fbeast root');
   }
-  if (basename(root) === 'state' && await pathIsFile(join(dirname(root), 'beast.db'))) {
-    return dirname(root);
+  if (basename(root) === 'state') {
+    const projectRoot = dirname(root);
+    if (
+      await pathIsFile(join(projectRoot, 'beast.db'))
+      || await pathIsDirectory(join(projectRoot, 'brains'))
+    ) {
+      return projectRoot;
+    }
   }
   return root;
 }
@@ -161,6 +167,7 @@ async function discoverBackupFiles(requestedStateDir: string, root: string): Pro
   const requestedRoot = resolve(requestedStateDir);
   if (root !== requestedRoot && basename(requestedRoot) === 'state') {
     const siblingDb = join(root, 'beast.db');
+    const siblingDbExists = await pathIsFile(siblingDb);
     const siblingDbSidecars = await Promise.all(
       ['-wal', '-shm', '-journal'].map(async (suffix) => {
         const sidecar = `${siblingDb}${suffix}`;
@@ -170,7 +177,7 @@ async function discoverBackupFiles(requestedStateDir: string, root: string): Pro
     const brainsDir = join(root, 'brains');
     const brainFiles = await pathIsDirectory(brainsDir) ? await walkFiles(brainsDir) : [];
     return [
-      siblingDb,
+      ...(siblingDbExists ? [siblingDb] : []),
       ...siblingDbSidecars.filter((path): path is string => path !== undefined),
       ...brainFiles,
       ...await walkFiles(requestedRoot),

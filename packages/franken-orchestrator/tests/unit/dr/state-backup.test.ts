@@ -147,6 +147,30 @@ describe('encrypted DR state backups', () => {
     }
   });
 
+  it('includes sibling brain databases when the legacy beast database is absent', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    const backupPath = join(dir, 'backup.franken-dr.json');
+
+    try {
+      await mkdir(join(dir, 'brains'), { recursive: true });
+      await writeFile(join(dir, 'brains', 'coder.db'), 'coder brain sqlite bytes', 'utf8');
+
+      const envelope = await createEncryptedStateBackup({
+        stateDir: join(dir, 'state'),
+        outputPath: backupPath,
+        keyFilePath: keyFile,
+      });
+
+      expect(envelope.manifest.sourceDir).toBe(dir);
+      expect(envelope.manifest.files.map((file) => file.path)).toEqual(expect.arrayContaining([
+        'brains/coder.db',
+        'state/kanban.db',
+      ]));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('refuses live SQLite WAL/SHM sidecars until state is quiesced', async () => {
     const { dir, keyFile } = await makeFixtureState();
     try {
