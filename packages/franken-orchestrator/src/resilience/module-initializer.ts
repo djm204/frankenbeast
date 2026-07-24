@@ -56,7 +56,11 @@ export async function checkModuleHealth(deps: BeastLoopDeps): Promise<readonly M
 
   // Critique — verify review works
   try {
-    await deps.critique.reviewPlan({ tasks: [] });
+    if (deps.critique.checkHealth) {
+      await deps.critique.checkHealth();
+    } else {
+      await deps.critique.reviewPlan({ tasks: [] });
+    }
     checks.push({ module: 'critique', healthy: true });
   } catch (error) {
     checks.push({ module: 'critique', healthy: false, error: errorMessage(error) });

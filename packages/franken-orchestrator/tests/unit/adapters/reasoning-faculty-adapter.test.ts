@@ -53,4 +53,57 @@ describe('ReasoningFacultyAdapter', () => {
       }),
     ]);
   });
+
+  it('records a failed verdict as a decision rather than an execution failure', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const faculty = new ReasoningFacultyAdapter(
+      { reviewPlan: async () => ({ verdict: 'fail', findings: [], score: 0 }) },
+      brain,
+      () => new Date('2026-07-24T12:00:00.000Z'),
+    );
+
+    await faculty.reviewPlan({ tasks: [] });
+
+    expect(brain.episodic.recentFailures()).toEqual([]);
+    expect(brain.episodic.recall('reasoning verdict fail')).toEqual([
+      expect.objectContaining({ type: 'decision', summary: 'Reasoning verdict: fail' }),
+    ]);
+  });
+
+  it('can delegate without recording when memory is disabled', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const critique: ICritiqueModule = {
+      reviewPlan: vi.fn(async () => ({ verdict: 'pass' as const, findings: [], score: 1 })),
+    };
+    const faculty = new ReasoningFacultyAdapter(
+      critique,
+      brain,
+      () => new Date('2026-07-24T12:00:00.000Z'),
+      { recordEpisodes: false },
+    );
+
+    await expect(faculty.reviewPlan({ tasks: [] })).resolves.toMatchObject({ verdict: 'pass' });
+    expect(critique.reviewPlan).toHaveBeenCalledOnce();
+    expect(brain.episodic.count()).toBe(0);
+  });
+
+  it('checks health through the wrapped critique without recording an episode', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const critique: ICritiqueModule = {
+      reviewPlan: vi.fn(async () => ({ verdict: 'pass' as const, findings: [], score: 1 })),
+    };
+    const faculty = new ReasoningFacultyAdapter(
+      critique,
+      brain,
+      () => new Date('2026-07-24T12:00:00.000Z'),
+    );
+
+    await faculty.checkHealth();
+
+    expect(critique.reviewPlan).toHaveBeenCalledWith({ tasks: [] });
+    expect(brain.episodic.count()).toBe(0);
+  });
 });

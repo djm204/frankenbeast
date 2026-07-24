@@ -63,7 +63,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 ## Key API Patterns
 
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
-- `ReasoningFacultyAdapter`: preserves the `ICritiqueModule` result and records its verdict as a queryable episodic event
+- `ReasoningFacultyAdapter`: preserves the enabled `ICritiqueModule` result and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)

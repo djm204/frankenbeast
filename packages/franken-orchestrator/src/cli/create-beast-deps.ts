@@ -62,6 +62,12 @@ export interface BeastDepsConfig {
   brain?: {
     dbPath?: string;
   };
+  reasoning?: {
+    /** Attach the real critique chain as the reasoning faculty. */
+    enabled?: boolean;
+    /** Persist compact verdict episodes. Disable with the memory module. */
+    recordEpisodes?: boolean;
+  };
   skillsDir?: string;
   configDir?: string;
   reflection?: boolean;
@@ -163,8 +169,16 @@ export function createBeastDeps(
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
   const memory = new SqliteBrainMemoryAdapter(brain);
   const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
-  const reasoning = new ReasoningFacultyAdapter(existingDeps.critique, brain, clock);
-  brain.attachReasoningFaculty(reasoning);
+  const reasoningEnabled = config.reasoning?.enabled !== false
+    && existingDeps.critique.configured !== false;
+  const reasoning = reasoningEnabled
+    ? new ReasoningFacultyAdapter(existingDeps.critique, brain, clock, {
+        ...(config.reasoning?.recordEpisodes !== undefined
+          ? { recordEpisodes: config.reasoning.recordEpisodes }
+          : {}),
+      })
+    : undefined;
+  if (reasoning) brain.attachReasoningFaculty(reasoning);
 
   // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
   const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
@@ -207,7 +221,7 @@ export function createBeastDeps(
     memory,
     planner: existingDeps.planner,
     observer,
-    critique: reasoning,
+    critique: reasoning ?? existingDeps.critique,
     governor: existingDeps.governor,
     heartbeat,
     logger: existingDeps.logger,

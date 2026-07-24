@@ -45,7 +45,7 @@ describe('SqliteBrain faculty foundation', () => {
     const brain = new SqliteBrain();
     try {
       expect(brain.planning).toEqual({ kind: 'planning', configured: false });
-      expect(brain.reasoning).toEqual({ kind: 'reasoning', configured: false });
+      expect(brain.reasoning).toMatchObject({ kind: 'reasoning', configured: false });
       expect(brain.action).toEqual({ kind: 'action', configured: false });
       expect(brain.learning).toEqual({ kind: 'learning', configured: false });
 
@@ -68,7 +68,11 @@ describe('SqliteBrain faculty foundation', () => {
 
   it('attaches a configured reasoning faculty without replacing the brain', () => {
     const brain = new SqliteBrain();
-    const faculty = { kind: 'reasoning' as const, configured: true };
+    const faculty = {
+      kind: 'reasoning' as const,
+      configured: true,
+      reviewPlan: async () => ({ verdict: 'pass' as const, findings: [], score: 1 }),
+    };
     try {
       expect(typeof brain.attachReasoningFaculty).toBe('function');
       brain.attachReasoningFaculty(faculty);
@@ -76,6 +80,17 @@ describe('SqliteBrain faculty foundation', () => {
       expect(brain.reasoning).toBe(faculty);
       expect(brain.working).toBeDefined();
       expect(brain.episodic).toBeDefined();
+    } finally {
+      brain.close();
+    }
+  });
+
+  it('fails closed when the inert reasoning faculty is called', async () => {
+    const brain = new SqliteBrain();
+    try {
+      await expect(brain.reasoning.reviewPlan({ tasks: [] })).rejects.toThrow(
+        'Reasoning faculty is not configured',
+      );
     } finally {
       brain.close();
     }

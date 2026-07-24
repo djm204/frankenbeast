@@ -149,7 +149,9 @@ start process/container executors directly.
 The current local Beast construction path attaches `ReasoningFacultyAdapter` to
 its `SqliteBrain`. The adapter remains the `ICritiqueModule` used by planning,
 delegates unchanged to the existing `@franken/critique` evaluator chain, and
-records a compact, queryable verdict episode after each completed review. This
+records a compact, queryable verdict decision after each completed review when
+memory is enabled. Disabled critique leaves the faculty inert, and startup
+health probes bypass episode recording. This
 per-run faculty wiring does not implement the future workspace Hive routing in
 ADR-041.
 

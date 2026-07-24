@@ -5573,8 +5573,11 @@ export class SqliteBrain implements IBrain {
     configured: false,
   });
   private reasoningFaculty: IReasoningFaculty = Object.freeze({
-    kind: 'reasoning',
+    kind: 'reasoning' as const,
     configured: false,
+    reviewPlan: async () => {
+      throw new Error('Reasoning faculty is not configured');
+    },
   });
   readonly action: IActionFaculty = Object.freeze({
     kind: 'action',

@@ -1,6 +1,10 @@
 import type { IBrain, IReasoningFaculty } from '@franken/types';
 import type { CritiqueResult, ICritiqueModule, PlanGraph } from '../deps.js';
 
+export interface ReasoningFacultyAdapterOptions {
+  readonly recordEpisodes?: boolean;
+}
+
 /**
  * Makes the existing critique chain an agent-scoped reasoning faculty while
  * preserving the critique port used by the orchestration phases.
@@ -13,12 +17,15 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
     private readonly critique: ICritiqueModule,
     private readonly brain: Pick<IBrain, 'episodic'>,
     private readonly clock: () => Date,
+    private readonly options: ReasoningFacultyAdapterOptions = {},
   ) {}
 
   async reviewPlan(plan: PlanGraph, context?: unknown): Promise<CritiqueResult> {
     const result = await this.critique.reviewPlan(plan, context);
+    if (this.options.recordEpisodes === false) return result;
+
     this.brain.episodic.record({
-      type: result.verdict === 'fail' ? 'failure' : 'decision',
+      type: 'decision',
       step: 'reasoning:critique',
       summary: `Reasoning verdict: ${result.verdict}`,
       details: {
@@ -32,5 +39,13 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
       createdAt: this.clock().toISOString(),
     });
     return result;
+  }
+
+  async checkHealth(): Promise<void> {
+    if (this.critique.checkHealth) {
+      await this.critique.checkHealth();
+      return;
+    }
+    await this.critique.reviewPlan({ tasks: [] });
   }
 }

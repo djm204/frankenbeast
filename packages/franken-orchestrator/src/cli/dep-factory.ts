@@ -129,6 +129,7 @@ const stubPlanner: IPlannerModule = {
   createPlan: async () => { throw new Error('Planner not available in CLI mode; use graphBuilder'); },
 };
 const stubCritique: ICritiqueModule = {
+  configured: false,
   reviewPlan: async () => ({ verdict: 'pass' as const, findings: [], score: 1.0 }),
 };
 const stubGovernor: IGovernorModule = {
@@ -994,7 +995,13 @@ function createConsolidatedDeps(
       ? { allowedSkills: config.skills }
       : undefined;
 
-  const beastConfig = bridgeToBeastConfig(options, options.orchestratorConfig);
+  const beastConfig = {
+    ...bridgeToBeastConfig(options, options.orchestratorConfig),
+    reasoning: {
+      enabled: config.modules.critique,
+      recordEpisodes: config.modules.memory,
+    },
+  };
   const existingDeps = bridgeToExistingDeps({
     planner: stubPlanner,
     critique,
