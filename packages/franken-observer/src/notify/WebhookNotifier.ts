@@ -45,6 +45,8 @@ export interface WebhookSendOptions {
   idempotencyKey?: string
   /** Optional logical target override when one notifier fronts multiple channels. */
   target?: string
+  /** Optional caller cancellation signal. Cancellation stops all delivery phases without retrying. */
+  signal?: AbortSignal
 }
 
 export interface WebhookDeliveryReceiptStore {
@@ -172,6 +174,8 @@ export interface WebhookNotifierOptions {
   dnsLookup?: WebhookDnsLookup
   /** Retry configuration. Omit to send exactly once (backwards-compatible). */
   retry?: WebhookRetryOptions
+  /** Per-attempt delivery deadline in milliseconds. Default: 10000. */
+  deliveryTimeoutMs?: number
   /**
    * Injectable sleep function for testing retry delays without real timers.
    * Defaults to a Promise-based `setTimeout` wrapper.
@@ -230,6 +234,17 @@ function validateNonNegativeInteger(value: number, fieldName: string): number {
 function validateFiniteNonNegativeNumber(value: number, fieldName: string): number {
   if (!Number.isFinite(value) || value < 0) {
     throw new RangeError(`${fieldName} must be a finite non-negative number`)
+  }
+  return value
+}
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
+function validateTimerDelay(value: number, fieldName: string): number {
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(
+      `${fieldName} must be a finite positive number no greater than ${MAX_TIMER_DELAY_MS}`,
+    )
   }
   return value
 }
@@ -456,6 +471,65 @@ function normalizeAllowedTargets(
 
 const MAX_ERROR_BODY_CHARS = 2048
 const ERROR_BODY_READ_TIMEOUT_MS = 250
+const DEFAULT_DELIVERY_TIMEOUT_MS = 10_000
+
+class WebhookDeliveryTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Webhook delivery timed out after ${timeoutMs}ms`)
+    this.name = 'WebhookDeliveryTimeoutError'
+  }
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('Webhook delivery aborted', 'AbortError')
+}
+
+async function awaitWithSignal<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return operation
+  }
+  if (signal.aborted) {
+    throw abortReason(signal)
+  }
+
+  let onAbort: (() => void) | undefined
+  const interrupted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(abortReason(signal))
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([operation, interrupted])
+  } finally {
+    if (onAbort) {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
+}
+
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(abortReason(signal))
+  }
+
+  return new Promise((resolve, reject) => {
+    let onAbort: (() => void) | undefined
+    const timeoutId = setTimeout(() => {
+      if (signal && onAbort) {
+        signal.removeEventListener('abort', onAbort)
+      }
+      resolve()
+    }, ms)
+    if (signal) {
+      const handleAbort = () => {
+        clearTimeout(timeoutId)
+        signal.removeEventListener('abort', handleAbort)
+        reject(abortReason(signal))
+      }
+      onAbort = handleAbort
+      signal.addEventListener('abort', handleAbort, { once: true })
+    }
+  })
+}
 
 function redactWebhookSecrets(value: string): string {
   return value
@@ -504,7 +578,8 @@ export class WebhookNotifier {
   private readonly usePinnedDefaultFetch: boolean
   private readonly dnsLookupFn: WebhookDnsLookup | null
   private readonly retry: Required<WebhookRetryOptions> | null
-  private readonly sleepFn: (ms: number) => Promise<void>
+  private readonly deliveryTimeoutMs: number
+  private readonly sleepFn: (ms: number, signal?: AbortSignal) => Promise<void>
   private readonly receiptStore: WebhookDeliveryReceiptStore
 
   constructor(options: WebhookNotifierOptions) {
@@ -529,8 +604,15 @@ export class WebhookNotifier {
     this.dnsLookupFn = options.dnsLookup ?? (options.fetch
       ? null
       : async hostname => (await dnsLookup(hostname, { all: true })).map(result => result.address))
-    this.sleepFn = options.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)))
+    const sleep = options.sleep
+    this.sleepFn = sleep
+      ? (ms: number) => sleep(ms)
+      : sleepWithSignal
     this.receiptStore = options.deliveryReceiptStore ?? new InMemoryWebhookDeliveryReceiptStore()
+    this.deliveryTimeoutMs = validateTimerDelay(
+      options.deliveryTimeoutMs ?? DEFAULT_DELIVERY_TIMEOUT_MS,
+      'deliveryTimeoutMs',
+    )
     this.retry = options.retry
       ? {
           maxRetries: validateNonNegativeInteger(options.retry.maxRetries, 'retry.maxRetries'),
@@ -542,6 +624,9 @@ export class WebhookNotifier {
   }
 
   async send(payload: unknown, options: WebhookSendOptions = {}): Promise<WebhookDeliveryReceipt> {
+    if (options.signal?.aborted) {
+      throw abortReason(options.signal)
+    }
     this.assertTargetAllowed()
 
     const receiptTarget = options.target ?? `${sanitizeWebhookEndpoint(this.url)}#${createHash('sha256').update(this.url).digest('hex').slice(0, 12)}`
@@ -584,45 +669,76 @@ export class WebhookNotifier {
 
     try {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (options.signal?.aborted) {
+          throw abortReason(options.signal)
+        }
         if (attempt > 0 && this.retry) {
           const { baseDelayMs, maxDelayMs, jitter } = this.retry
           const base = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs)
           const jittered = jitter ? base + seededRandom.random() * baseDelayMs : base
           // Clamp after adding jitter so maxDelayMs remains a true upper bound.
           const delay = Math.min(jittered, maxDelayMs)
-          await this.sleepFn(delay)
+          await awaitWithSignal(this.sleepFn(delay, options.signal), options.signal)
         }
 
-        let resolvedAddresses: readonly string[] = []
+        let dnsFailure = false
+        let response: WebhookFetchResponse | undefined
+        let responseBody = ''
         try {
-          resolvedAddresses = await this.resolveAllowedTargetAddresses()
+          const attemptResult = await this.runWithDeliveryDeadline(async deadlineSignal => {
+            let resolvedAddresses: readonly string[] = []
+            try {
+              resolvedAddresses = await awaitWithSignal(
+                this.resolveAllowedTargetAddresses(),
+                deadlineSignal,
+              )
+            } catch (err) {
+              dnsFailure = !deadlineSignal.aborted
+              throw err
+            }
+            const attemptResponse = await this.fetchWebhook(resolvedAddresses, {
+              method: 'POST',
+              redirect: 'manual',
+              headers: {
+                'Content-Type': 'application/json',
+                ...this.extraHeaders,
+              },
+              body: requestBody,
+              signal: deadlineSignal,
+            })
+            response = attemptResponse
+            const shouldReadBody = !attemptResponse.ok
+              && (!this.retry
+                || !isTransientStatus(attemptResponse.status)
+                || attempt === maxAttempts - 1)
+            const attemptResponseBody = shouldReadBody
+              ? await this.readResponseBody(attemptResponse, deadlineSignal)
+              : ''
+            return { response: attemptResponse, responseBody: attemptResponseBody }
+          }, options.signal)
+          response = attemptResult.response
+          responseBody = attemptResult.responseBody
         } catch (err) {
           lastError = err
-          if (this.retry && isTransientDnsError(err) && attempt < maxAttempts - 1) {
-            continue
+          if (options.signal?.aborted) {
+            throw err
           }
-          throw err
-        }
-
-        let response: WebhookFetchResponse
-        try {
-          response = await this.fetchWebhook(resolvedAddresses, {
-            method: 'POST',
-            redirect: 'manual',
-            headers: {
-              'Content-Type': 'application/json',
-              ...this.extraHeaders,
-            },
-            body: requestBody,
-          })
-        } catch (err) {
-          lastError = err
+          if (response && !response.ok && !isTransientStatus(response.status)) {
+            const bodySuffix = responseBody ? `: ${responseBody}` : ''
+            throw new Error(
+              `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
+            )
+          }
+          if (dnsFailure && (!this.retry || !isTransientDnsError(err) || attempt === maxAttempts - 1)) {
+            throw err
+          }
           continue
         }
 
+        if (!response) {
+          continue
+        }
         if (!response.ok) {
-          const shouldReadBody = !this.retry || !isTransientStatus(response.status) || attempt === maxAttempts - 1
-          const responseBody = shouldReadBody ? await this.readResponseBody(response) : ''
           const bodySuffix = responseBody ? `: ${responseBody}` : ''
           lastError = new Error(
             `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
@@ -669,7 +785,10 @@ export class WebhookNotifier {
     }
   }
 
-  private async readResponseBody(response: WebhookFetchResponse): Promise<string> {
+  private async readResponseBody(
+    response: WebhookFetchResponse,
+    signal?: AbortSignal,
+  ): Promise<string> {
     try {
       const readable = response as {
         body?: ({ getReader?: () => ReadableStreamDefaultReader<Uint8Array> } & Partial<AsyncIterable<Uint8Array | Buffer | string>>) | null
@@ -677,19 +796,25 @@ export class WebhookNotifier {
       }
       const body = readable.body
         ? typeof readable.body.getReader === 'function'
-          ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>)
-          : await this.readBoundedAsyncIterable(readable.body)
+          ? await this.readBoundedStream(readable.body as ReadableStream<Uint8Array>, signal)
+          : await this.readBoundedAsyncIterable(readable.body, signal)
         : ''
       const redactedBody = redactWebhookSecrets(body)
       return redactedBody.length > MAX_ERROR_BODY_CHARS
         ? `${redactedBody.slice(0, MAX_ERROR_BODY_CHARS)}…`
         : redactedBody
     } catch {
+      if (signal?.aborted) {
+        throw abortReason(signal)
+      }
       return ''
     }
   }
 
-  private async readBoundedStream(stream: ReadableStream<Uint8Array>): Promise<string> {
+  private async readBoundedStream(
+    stream: ReadableStream<Uint8Array>,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const reader = stream.getReader()
     const chunks: Uint8Array[] = []
     let totalBytes = 0
@@ -708,14 +833,14 @@ export class WebhookNotifier {
         const timeout = new Promise<{ done: true; value?: undefined; timedOut: true }>(resolve => {
           timeoutId = setTimeout(() => resolve({ done: true, timedOut: true }), remainingMs)
         })
-        const result = await Promise.race([
+        const result = await awaitWithSignal(Promise.race([
           reader.read().then(read => ({ ...read, timedOut: false as const })),
           timeout,
         ]).finally(() => {
           if (timeoutId) {
             clearTimeout(timeoutId)
           }
-        })
+        }), signal)
         if (result.timedOut) {
           timedOut = true
           break
@@ -734,18 +859,30 @@ export class WebhookNotifier {
           break
         }
       }
-      if (truncated || timedOut) {
-        await reader.cancel()
-      }
     } finally {
-      reader.releaseLock()
+      if (truncated || timedOut || signal?.aborted) {
+        const releaseLock = () => {
+          try {
+            reader.releaseLock()
+          } catch {
+            // A pending read retains the lock until cancellation settles.
+          }
+        }
+        try {
+          void reader.cancel().catch(() => undefined).finally(releaseLock)
+        } catch {
+          releaseLock()
+        }
+      } else {
+        reader.releaseLock()
+      }
     }
 
     const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
     return truncated || timedOut ? `${decoded}…` : decoded
   }
 
-  private async readBoundedAsyncIterable(body: unknown): Promise<string> {
+  private async readBoundedAsyncIterable(body: unknown, signal?: AbortSignal): Promise<string> {
     const iterable = body && typeof body === 'object'
       ? body as AsyncIterable<Uint8Array | Buffer | string>
       : undefined
@@ -761,49 +898,56 @@ export class WebhookNotifier {
     let timedOut = false
     const deadlineMs = Date.now() + ERROR_BODY_READ_TIMEOUT_MS
 
-    while (totalBytes < MAX_ERROR_BODY_CHARS) {
-      const remainingMs = deadlineMs - Date.now()
-      if (remainingMs <= 0) {
-        timedOut = true
-        break
+    try {
+      while (totalBytes < MAX_ERROR_BODY_CHARS) {
+        const remainingMs = deadlineMs - Date.now()
+        if (remainingMs <= 0) {
+          timedOut = true
+          break
+        }
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+        const pendingRead = Promise.race<IteratorResult<Uint8Array | Buffer | string> | 'timeout'>([
+          iterator.next(),
+          new Promise<'timeout'>(resolve => {
+            timeoutId = setTimeout(() => resolve('timeout'), remainingMs)
+          }),
+        ]).finally(() => {
+          if (timeoutId) clearTimeout(timeoutId)
+        })
+        const result = await awaitWithSignal(pendingRead, signal)
+        if (result === 'timeout') {
+          timedOut = true
+          break
+        }
+        if (result.done || result.value === undefined) {
+          break
+        }
+        const bytes = typeof result.value === 'string'
+          ? Buffer.from(result.value)
+          : Buffer.from(result.value)
+        const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
+        if (bytes.byteLength > remainingBytes) {
+          chunks.push(bytes.subarray(0, remainingBytes))
+          totalBytes += remainingBytes
+          truncated = true
+          break
+        }
+        chunks.push(bytes)
+        totalBytes += bytes.byteLength
       }
-      let timeoutId: ReturnType<typeof setTimeout> | undefined
-      const result = await Promise.race<IteratorResult<Uint8Array | Buffer | string> | 'timeout'>([
-        iterator.next(),
-        new Promise<'timeout'>(resolve => {
-          timeoutId = setTimeout(() => resolve('timeout'), remainingMs)
-        }),
-      ]).finally(() => {
-        if (timeoutId) clearTimeout(timeoutId)
-      })
-      if (result === 'timeout') {
-        timedOut = true
-        break
+    } finally {
+      if (truncated || timedOut || signal?.aborted) {
+        ;(body as { destroy?: () => void })?.destroy?.()
+        const cleanup = iterator.return?.(undefined)
+        if (cleanup && typeof (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch === 'function') {
+          void (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch(() => undefined)
+        }
       }
-      if (result.done || result.value === undefined) {
-        break
-      }
-      const bytes = typeof result.value === 'string' ? Buffer.from(result.value) : Buffer.from(result.value)
-      const remainingBytes = MAX_ERROR_BODY_CHARS - totalBytes
-      if (bytes.byteLength > remainingBytes) {
-        chunks.push(bytes.subarray(0, remainingBytes))
-        totalBytes += remainingBytes
-        truncated = true
-        break
-      }
-      chunks.push(bytes)
-      totalBytes += bytes.byteLength
     }
 
-    if (truncated || timedOut) {
-      ;(body as { destroy?: () => void })?.destroy?.()
-      const cleanup = iterator.return?.(undefined)
-      if (cleanup && typeof (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch === 'function') {
-        void (cleanup as Promise<IteratorResult<Uint8Array | Buffer | string>>).catch(() => undefined)
-      }
-    }
-
-    const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()
+    const decoded = new TextDecoder().decode(
+      Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS),
+    ).trim()
     return truncated || timedOut ? `${decoded}…` : decoded
   }
 
@@ -845,6 +989,48 @@ export class WebhookNotifier {
     throw lastError
   }
 
+  private async runWithDeliveryDeadline<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+    callerSignal?: AbortSignal,
+  ): Promise<T> {
+    if (callerSignal?.aborted) {
+      throw abortReason(callerSignal)
+    }
+
+    const controller = new AbortController()
+    const timeoutError = new WebhookDeliveryTimeoutError(this.deliveryTimeoutMs)
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    let onCallerAbort: (() => void) | undefined
+    const interrupted = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort(timeoutError)
+        reject(timeoutError)
+      }, this.deliveryTimeoutMs)
+      if (callerSignal) {
+        onCallerAbort = () => {
+          const reason = abortReason(callerSignal)
+          controller.abort(reason)
+          reject(reason)
+        }
+        callerSignal.addEventListener('abort', onCallerAbort, { once: true })
+      }
+    })
+
+    try {
+      return await Promise.race([
+        operation(controller.signal),
+        interrupted,
+      ])
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId)
+      }
+      if (callerSignal && onCallerAbort) {
+        callerSignal.removeEventListener('abort', onCallerAbort)
+      }
+    }
+  }
+
   private async fetchWithPinnedAddress(address: string, init: WebhookFetchInit): Promise<WebhookFetchResponse> {
     const originalHostname = normalizeHostnameForValidation(this.parsedUrl.hostname)
     const body = typeof init.body === 'string' ? init.body : init.body ? String(init.body) : undefined
@@ -861,6 +1047,7 @@ export class WebhookNotifier {
           ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}),
         },
       }, response => {
+        init.signal?.removeEventListener('abort', onAbort)
         resolve({
           ok: response.statusCode !== undefined && response.statusCode >= 200 && response.statusCode < 300,
           status: response.statusCode ?? 0,
@@ -868,7 +1055,20 @@ export class WebhookNotifier {
           body: response as unknown as NonNullable<WebhookFetchResponse['body']>,
         })
       })
-      request.on('error', reject)
+      const onAbort = () => {
+        const reason = abortReason(init.signal!)
+        request.destroy(reason instanceof Error ? reason : undefined)
+        reject(reason)
+      }
+      request.on('error', error => {
+        init.signal?.removeEventListener('abort', onAbort)
+        reject(error)
+      })
+      if (init.signal?.aborted) {
+        onAbort()
+        return
+      }
+      init.signal?.addEventListener('abort', onAbort, { once: true })
       if (body) {
         request.write(body)
       }

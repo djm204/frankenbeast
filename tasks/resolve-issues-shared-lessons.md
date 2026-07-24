@@ -514,3 +514,6 @@
 ## 2026-07-22 — Chat WebSocket reconnect lifecycle
 - Browser `1006` closes conflate rejected upgrades with transient setup outages; use a generous bounded setup-failure threshold, a lower explicit-authentication threshold, and reset counters only on the protocol-level ready event rather than socket open.
 - Reconnect ownership must cover timers and refresh promises: retry transient API failures through the same backoff controller, classify fatal HTTP statuses with structured errors, and route manual/online recovery through that controller so slow refreshes cannot race newer ticket requests.
+
+## 2026-07-22 — Webhook delivery deadlines and cancellation
+- A per-attempt webhook deadline must cover DNS resolution, transport, and bounded error-body reads—not stop at response headers. Caller cancellation must also interrupt DNS, active requests, response-body reads, and retry backoff, with owned timers and abort listeners removed on every terminal path.
