@@ -1745,6 +1745,7 @@ describe('BeastRunService', () => {
     expect(start).toHaveBeenCalledWith(
       expect.objectContaining({
         configSnapshot: expect.objectContaining({
+          definitionId: 'martin-loop',
           provider: 'claude',
           objective: 'Recover stopped work',
           chunkDirectory: 'docs/chunks',

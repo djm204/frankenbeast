@@ -13,7 +13,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 
 | Package | Role |
 |---------|------|
-| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` and additive planning/reasoning/action/learning faculty addressing surface. The local Beast CLI attaches the reasoning faculty to the existing critique chain; the other faculties and durable agent-type paths are not wired yet. |
+|| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` whose safe agent-type IDs default to durable `.fbeast/brains/<agentTypeId>.db` files, and an additive planning/reasoning/action/learning faculty addressing surface. The local Beast CLI attaches the reasoning faculty to the existing critique chain; the other faculties are not wired yet. |
 | `@franken/planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
 | `@franken/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
@@ -52,7 +52,7 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 The current local CLI path defaults to real adapters for every enabled module except the planner port. Disabled safety modules still use explicit stubs:
 
 - Real execution stack: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`, chunk-session store/renderer/compactor/GC
-- Real module adapters wired in `src/cli/create-beast-deps.ts`: `MiddlewareChainFirewallAdapter` (firewall), `SkillManagerAdapter` (skills registry), `SqliteBrainMemoryAdapter` (memory), `ReasoningFacultyAdapter` (the enabled critique chain plus recallable verdict decisions when memory is enabled), `ActionFacultyAdapter` (governor decisions recorded as recallable brain episodes), `ReflectionHeartbeatAdapter` (heartbeat), and `McpSdkAdapter` (fail-closed `IMcpModule`: `callTool()` throws until a live MCP transport is configured)
+- Real module adapters wired in `src/cli/create-beast-deps.ts`: `MiddlewareChainFirewallAdapter` (firewall), `SkillManagerAdapter` (skills registry), `SqliteBrainMemoryAdapter` (memory), `PlanningFacultyAdapter` (the supplied planner port plus recallable plan/step lifecycle episodes), `ReasoningFacultyAdapter` (the enabled critique chain plus recallable verdict decisions when memory is enabled), `ActionFacultyAdapter` (governor decisions recorded as recallable brain episodes), `ReflectionHeartbeatAdapter` (heartbeat), and `McpSdkAdapter` (fail-closed `IMcpModule`: `callTool()` throws until a live MCP transport is configured). Spawned Beast runs carry their catalog `definitionId` into `BrainRegistry`, selecting `.fbeast/brains/<definitionId>.db` unless `brain.dbPath` explicitly overrides persistence.
 - Real safety adapters wired in `src/cli/dep-factory.ts`: `CritiquePortAdapter` over `@franken/critique` (critique) and `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (governor; non-TTY runs default to reject). If either safety module is enabled but its package cannot be imported, the dep factory fails closed (throws) unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` explicitly opts into all-pass stubs
 - Stubbed: the planner port (`stubPlanner` in `src/cli/dep-factory.ts` throws if invoked; planning is graph-builder driven). Critique/governor use all-pass/all-approve stubs only when disabled by run config or `FRANKENBEAST_MODULE_CRITIQUE=false` / `FRANKENBEAST_MODULE_GOVERNOR=false`, or when `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe missing-package fallbacks
 - Cold `frankenbeast run` executions clear the execution checkpoint, checkpoint outputs, chunk sessions, and chunk-session snapshots by default. `--resume` preserves those artifacts so interrupted runs can continue; `--reset` additionally clears memory, traces, issue artifacts, checkpoint outputs, and chunk-session artifacts. This matches the operator guidance in [run-cli-beast.md](guides/run-cli-beast.md#6-useful-flags), and the behavior is covered by the [Beast Verification Matrix](guides/beast-verification-matrix.md#focused-proof-set)
@@ -520,7 +520,7 @@ This diagram shows the logical/target module topology using current package or i
             MEM_WORK["Working Memory<br/>In-process key/value"]
             MEM_EPIS["Episodic Memory<br/>SQLite events"]
             MEM_RECOV["Recovery Memory<br/>SQLite checkpoints"]
-            MEM_FAC["Faculty foundations<br/>planning • reasoning<br/>action • learning<br/>(inert until adapters land)"]
+            MEM_FAC["Faculty surfaces<br/>planning adapter wired<br/>reasoning • action • learning<br/>(inert pending adapters)"]
             MEM_REG --> MEM_BRAIN
             MEM_ADAPT --> MEM_BRAIN
             MEM_BRAIN --> MEM_WORK

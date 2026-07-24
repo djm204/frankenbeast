@@ -37,7 +37,7 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and the process-local agent-type `BrainRegistry`; the local CLI attaches reasoning to the real critique chain and action to the real governor, while planning/learning remain addressing stubs |
+| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches planning to the supplied planner, reasoning to the real critique chain, and action to the real governor, while learning remains an addressing stub |
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
@@ -152,7 +152,7 @@ packages/franken-orchestrator/src/
 - `dep-factory.ts` calls `createBeastDeps()` which wires real consolidated adapters for the required module ports. If consolidated dependency construction fails, `createCliDeps()` logs the cause and re-throws a `createBeastDeps failed: ...` error; it does **not** synthesize permissive passthrough success deps on the required Beast path. Missing safety packages only fall back to all-pass stubs when `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` explicitly opts into that unsafe degraded mode (ADR-033/ADR-038).
 - `ProviderRegistryIAdapter` bridges `ProviderRegistry.execute()` (async generator) to `IAdapter` (Promise), with `MiddlewareChain` applied on request/response. Active in the heartbeat/reflection LLM path.
 - `SkillConfigStore` persists enabled-skill state to `.fbeast/config.json`.
-- `OrchestratorConfigSchema` accepts `security`, `brain`, and `consolidatedProviders` fields from config files, threaded through `dep-bridge.ts` → `createBeastDeps()`.
+- `OrchestratorConfigSchema` accepts `security`, `brain`, and `consolidatedProviders` fields from config files, threaded through `dep-bridge.ts` → `createBeastDeps()`. Spawned Beast config also threads the catalog `definitionId` into `BrainRegistry`; use an explicit `brain.dbPath` of `:memory:` only when durable per-agent-type history is not wanted.
 - `run.ts` surfaces `skillManager`, `providerRegistry`, and `dashboardDeps` from `createCliDeps()` into `startChatServer()`, activating `/api/skills` and `/api/dashboard` routes.
 
 ## Build & Test

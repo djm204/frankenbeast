@@ -1,4 +1,4 @@
-import { SqliteBrain } from '@franken/brain';
+import { BrainRegistry, SqliteBrain } from '@franken/brain';
 import {
   createModelProviderFailoverAuditPayload,
   ProviderRegistry,
@@ -23,6 +23,7 @@ import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
 import { ReasoningFacultyAdapter } from '../adapters/reasoning-faculty-adapter.js';
 import { ActionFacultyAdapter } from '../adapters/action-faculty-adapter.js';
+import { PlanningFacultyAdapter } from '../adapters/planning-faculty-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
@@ -45,6 +46,10 @@ export type { ProviderConfig } from '../providers/provider-config.js';
 // --- Config types ---
 
 export interface BeastDepsConfig {
+  /** Canonical Beast definition identity used for per-agent-type brain lookup. */
+  agentTypeId?: string;
+  /** Canonical project state root used only for durable per-agent brains. */
+  brainConfigDir?: string;
   providers?: ProviderConfig[];
   network?: {
     egressPolicy?: EgressPolicyConfig;
@@ -73,6 +78,10 @@ export interface BeastDepsConfig {
     /** Attach the concrete governor as the action faculty. */
     enabled?: boolean;
     /** Persist governed action decisions. Disable with the memory module. */
+    recordEpisodes?: boolean;
+  };
+  planning?: {
+    /** Persist planning lifecycle episodes. Disable with the memory module. */
     recordEpisodes?: boolean;
   };
   skillsDir?: string;
@@ -119,7 +128,10 @@ export function createBeastDeps(
   existingDeps: ExistingDeps,
 ): ConsolidatedDeps {
   // 1. Brain
-  const brain = new SqliteBrain(config.brain?.dbPath ?? ':memory:');
+  const brain = config.agentTypeId
+    ? new BrainRegistry(join(config.brainConfigDir ?? config.configDir ?? '.fbeast', 'brains'))
+        .forAgentType(config.agentTypeId, config.brain?.dbPath)
+    : new SqliteBrain(config.brain?.dbPath ?? ':memory:');
 
   // 2. Audit trail
   const auditTrail = new AuditTrail();
@@ -174,6 +186,12 @@ export function createBeastDeps(
 
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
+  const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic, {
+    ...(config.planning?.recordEpisodes !== undefined
+      ? { recordEpisodes: config.planning.recordEpisodes }
+      : {}),
+  });
+  brain.attachPlanningFaculty(planning);
   const memory = new SqliteBrainMemoryAdapter(brain);
   const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
   const reasoningEnabled = config.reasoning?.enabled !== false
@@ -240,7 +258,7 @@ export function createBeastDeps(
     firewall,
     skills,
     memory,
-    planner: existingDeps.planner,
+    planner: planning,
     observer,
     critique: reasoning ?? existingDeps.critique,
     governor: actionFaculty ?? existingDeps.governor,

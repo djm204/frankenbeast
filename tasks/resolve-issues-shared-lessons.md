@@ -520,3 +520,7 @@
 
 ## 2026-07-22 — Webhook delivery deadlines and cancellation
 - A per-attempt webhook deadline must cover DNS resolution, transport, and bounded error-body reads—not stop at response headers. Caller cancellation must also interrupt DNS, active requests, response-body reads, and retry backoff, with owned timers and abort listeners removed on every terminal path.
+
+## 2026-07-24 — Faculty adapters should wrap lifecycle seams
+- Attach faculty adapters in the consolidated dependency factory and reuse the existing planner and execution trace seams; do not reimplement DAG ordering or add a parallel executor. Keep faculty failure episodes recallable by task objective while limiting their details to the error class, preserve established generic traces needed by recovery, suppress fake lifecycle events from health probes, and make additive telemetry best-effort so it cannot replace planner/execution outcomes.
+- Module-disable flags must also disable faculty-owned persistence, optional lifecycle hooks need a caller-side best-effort boundary, and recovery queries must filter telemetry before applying their result limit so lifecycle volume cannot starve diagnostic history.

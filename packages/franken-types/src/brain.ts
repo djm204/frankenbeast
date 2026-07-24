@@ -14,11 +14,33 @@ export interface IBrain {
   serialize(options?: BrainSerializeOptions): BrainSnapshot;
 }
 
-/** Foundation for the agent-scoped planner adapter introduced by the Hive Brain roadmap. */
+export interface PlanningIntent {
+  readonly goal: string;
+  readonly strategy?: string | undefined;
+  readonly context?: Record<string, unknown> | undefined;
+  readonly critiqueFeedback?: string | undefined;
+}
+
+export interface PlanningPlanTask {
+  readonly id: string;
+  readonly objective: string;
+  readonly requiredSkills: readonly string[];
+  readonly dependsOn: readonly string[];
+}
+
+export interface PlanningPlanGraph {
+  readonly tasks: readonly PlanningPlanTask[];
+}
+
+/** Agent-scoped adapter over the existing planner and its lifecycle events. */
 export interface IPlanningFaculty {
   readonly kind: 'planning';
   /** False until a concrete franken-planner adapter is attached. */
   readonly configured: boolean;
+  createPlan(intent: PlanningIntent): Promise<PlanningPlanGraph>;
+  recordPlanCreated(intent: PlanningIntent, plan: PlanningPlanGraph): void;
+  recordStepCompleted(task: PlanningPlanTask): void;
+  recordStepFailed(task: PlanningPlanTask, error: unknown): void;
 }
 
 /** Foundation for the agent-scoped critique/reasoning adapter. */

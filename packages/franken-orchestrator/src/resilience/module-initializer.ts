@@ -39,7 +39,11 @@ export async function checkModuleHealth(deps: BeastLoopDeps): Promise<readonly M
 
   // Planner — verify plan creation doesn't crash
   try {
-    await deps.planner.createPlan({ goal: 'health check' });
+    if (deps.planner.checkHealth) {
+      await deps.planner.checkHealth();
+    } else {
+      await deps.planner.createPlan({ goal: 'health check' });
+    }
     checks.push({ module: 'planner', healthy: true });
   } catch (error) {
     checks.push({ module: 'planner', healthy: false, error: errorMessage(error) });
