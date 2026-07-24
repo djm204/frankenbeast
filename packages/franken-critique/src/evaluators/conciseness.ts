@@ -4,6 +4,7 @@ const COMMENT_LINE_PATTERN = /^\s*\/\//;
 const BLOCK_COMMENT_PATTERN = /\/\*[\s\S]*?\*\//g;
 const TODO_PATTERN = /\/\/\s*(TODO|FIXME|HACK|XXX)\b/gi;
 const MAX_COMMENT_RATIO = 0.5;
+const MAX_INPUT_BYTES = 500_000;
 
 export class ConcisenessEvaluator implements Evaluator {
   readonly name = 'conciseness';
@@ -14,10 +15,15 @@ export class ConcisenessEvaluator implements Evaluator {
       return { evaluatorName: this.name, verdict: 'pass', score: 1, findings: [] };
     }
 
+    const content = input.content.length > MAX_INPUT_BYTES
+      ? input.content.slice(0, MAX_INPUT_BYTES)
+      : input.content;
+
     const findings: EvaluationFinding[] = [];
 
-    this.checkCommentRatio(input.content, findings);
-    this.checkTodoComments(input.content, findings);
+    this.checkCommentRatio(content, findings);
+    this.checkTodoComments(content, findings);
+
 
     const score = Math.max(0, 1 - findings.length * 0.2);
 

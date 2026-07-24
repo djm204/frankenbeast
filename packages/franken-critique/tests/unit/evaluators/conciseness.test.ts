@@ -55,4 +55,20 @@ describe('ConcisenessEvaluator', () => {
     expect(result.verdict).toBe('pass');
     expect(result.score).toBe(1);
   });
+
+  it('bounds execution and memory on oversized inputs (>500KB)', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    // Generate an input larger than 500KB (600,000 chars)
+    const largeLine = 'const x = 42; // some code comment\n';
+    const oversizedContent = largeLine.repeat(20_000); // ~700KB
+    expect(oversizedContent.length).toBeGreaterThan(500_000);
+
+    const start = Date.now();
+    const result = await evaluator.evaluate(createInput(oversizedContent));
+    const duration = Date.now() - start;
+
+    expect(result.evaluatorName).toBe('conciseness');
+    expect(duration).toBeLessThan(1000); // Execution should complete very quickly
+  });
 });
+
