@@ -1,5 +1,12 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runHook, type HookDeps } from './hook.js';
+import {
+  defaultHookDeps,
+  runHook,
+  TOOL_CONTEXT_FILE_ENV,
+  type HookDeps,
+} from './hook.js';
 
 function hookDeps() {
   const log = vi.fn().mockResolvedValue(undefined);
@@ -24,7 +31,23 @@ function hookDeps() {
 describe('runHook', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     process.exitCode = undefined;
+  });
+
+  it('fails closed when the configured context file cannot be read', async () => {
+    const missingContextFile = join(tmpdir(), `fbeast-missing-context-${process.pid}`);
+    vi.stubEnv(TOOL_CONTEXT_FILE_ENV, missingContextFile);
+    const deps = defaultHookDeps();
+    const governorCheck = vi.fn().mockResolvedValue({ decision: 'approved', reason: 'ok' });
+    deps.governor.check = governorCheck;
+
+    await expect(runHook([
+      'pre-tool',
+      'benign-tool',
+      'legacy-positional-context',
+    ], deps)).rejects.toThrow('Unable to read fbeast tool context file');
+    expect(governorCheck).not.toHaveBeenCalled();
   });
 
   it('redacts retention-report post-tool payloads before observer logging', async () => {
