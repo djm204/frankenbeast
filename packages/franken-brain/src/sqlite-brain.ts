@@ -725,6 +725,16 @@ export class MemoryEncryptionWrongKeyError extends Error {
 const MEMORY_ENCRYPTION_ALGORITHM = 'aes-256-gcm' as const;
 const MEMORY_ENCRYPTION_PREFIX = 'enc:v1:';
 const MEMORY_ENCRYPTION_VERIFIER = 'franken-memory-encryption-verifier:v1';
+
+function encryptedPayloadByteLimit(plaintextBytes: number): number {
+  const base64UrlLength = (bytes: number) => Math.ceil(bytes * 4 / 3);
+  return Buffer.byteLength(MEMORY_ENCRYPTION_PREFIX)
+    + base64UrlLength(12)
+    + 1
+    + base64UrlLength(16)
+    + 1
+    + base64UrlLength(plaintextBytes);
+}
 const MEMORY_STORES = [
   'working_memory',
   'episodic_events',
@@ -3225,6 +3235,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
     const normalizedQuery = query?.trim();
     const keywords = normalizedQuery ? normalizeRecallKeywords(normalizedQuery) : [];
+    // AES-GCM envelopes are larger than their plaintext. Bound the envelope at
+    // the exact maximum size for an allowed plaintext instead of comparing
+    // base64 ciphertext bytes to the public JSON response limit.
+    const storedDetailsByteLimit = this.encryption
+      ? encryptedPayloadByteLimit(maxDetailsBytes)
+      : maxDetailsBytes;
     const detailsProjection = `CASE
       WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) > ? THEN NULL
       ELSE details
@@ -3250,7 +3266,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
            FROM episodic_events
           ORDER BY created_at DESC, id DESC
           LIMIT ? OFFSET ?`,
-      ).all(maxDetailsBytes, maxDetailsBytes, limit, offset) as Array<
+      ).all(storedDetailsByteLimit, storedDetailsByteLimit, limit, offset) as Array<
         EpisodicRow & { details_truncated: 0 | 1 }
       >;
       return mapRows(rows);
@@ -3266,7 +3282,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
              FROM episodic_events
             ORDER BY created_at DESC, id DESC
             LIMIT ? OFFSET ?`,
-        ).all(maxDetailsBytes, maxDetailsBytes, batchSize, rowOffset) as Array<
+        ).all(storedDetailsByteLimit, storedDetailsByteLimit, batchSize, rowOffset) as Array<
           EpisodicRow & { details_truncated: 0 | 1 }
         >;
         for (const event of mapRows(rows)) {
@@ -3304,8 +3320,8 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         ORDER BY relevance_score DESC, created_at DESC, id DESC
         LIMIT ? OFFSET ?`,
     ).all(
-      maxDetailsBytes,
-      maxDetailsBytes,
+      storedDetailsByteLimit,
+      storedDetailsByteLimit,
       ...likeParams,
       ...likeParams,
       limit,

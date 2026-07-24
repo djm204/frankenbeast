@@ -227,7 +227,7 @@ describe('brain routes integration', () => {
 
   it('bounds each episodic row before parsing oversized stored details', async () => {
     const { registry, brainsDir } = createRegistry();
-    const eventId = registry.forAgentType('coder').episodic.record({
+    registry.forAgentType('coder').episodic.record({
       type: 'observation',
       step: 's'.repeat(1_000_000),
       summary: 'Large diagnostic event',
@@ -235,6 +235,9 @@ describe('brain routes integration', () => {
       createdAt: '2026-07-24T10:00:00.000Z',
     });
     const db = new Database(join(brainsDir, 'coder.db'));
+    const { id: eventId } = db.prepare(
+      'SELECT id FROM episodic_events ORDER BY id DESC LIMIT 1',
+    ).get() as { id: string };
     db.prepare('UPDATE episodic_events SET details = ? WHERE id = ?')
       .run(`{"raw":"${'x'.repeat(1_000_000)}`, eventId);
     db.close();

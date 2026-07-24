@@ -98,7 +98,31 @@ describe('createBeastServices', () => {
       dispatchedByUser: 'operator',
       createdAt: '2026-07-24T10:01:00.000Z',
     });
+    repo.createTrackedAgent({
+      definitionId: 'default-modules',
+      source: 'api',
+      status: 'completed',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'run', config: {} },
+      initConfig: {},
+      moduleConfig: { planner: false, critique: false, governor: false },
+      createdAt: '2026-07-24T09:00:00.000Z',
+      updatedAt: '2026-07-24T09:00:00.000Z',
+    });
+    const corruptUnrelatedRun = repo.createRun({
+      definitionId: 'unrelated',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { unrelated: true },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-24T10:02:00.000Z',
+    });
     repo.close();
+    const rawDb = new Database(beastsDb);
+    rawDb.prepare('UPDATE beast_runs SET config_snapshot = ? WHERE id = ?')
+      .run('{"corrupt":', corruptUnrelatedRun.id);
+    rawDb.close();
     const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
     const services = createBeastServices({
       beastsDb,

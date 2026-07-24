@@ -394,6 +394,19 @@ export class SQLiteBeastRepository {
     return row ? mapRun(row) : undefined;
   }
 
+  getLatestRunForDefinition(
+    definitionId: string,
+    options: CorruptJsonRecoveryOptions = {},
+  ): BeastRun | undefined {
+    const row = this.db.prepare(
+      `SELECT * FROM beast_runs
+        WHERE definition_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+    ).get(definitionId) as BeastRunRow | undefined;
+    return row ? mapRowsRecoveringCorruptJson([row], mapRun, options)[0] : undefined;
+  }
+
   listRuns(options: CorruptJsonRecoveryOptions = {}): BeastRun[] {
     const rows = this.db.prepare('SELECT * FROM beast_runs ORDER BY created_at DESC, id DESC').all() as BeastRunRow[];
     return mapRowsRecoveringCorruptJson(rows, mapRun, options);
@@ -732,6 +745,19 @@ export class SQLiteBeastRepository {
 
   getTrackedAgent(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgent | undefined {
     const row = this.db.prepare('SELECT * FROM tracked_agents WHERE id = ?').get(agentId) as TrackedAgentRow | undefined;
+    return row ? mapRowsRecoveringCorruptJson([row], mapTrackedAgent, options)[0] : undefined;
+  }
+
+  getLatestTrackedAgentForDefinition(
+    definitionId: string,
+    options: CorruptJsonRecoveryOptions = {},
+  ): TrackedAgent | undefined {
+    const row = this.db.prepare(
+      `SELECT * FROM tracked_agents
+        WHERE definition_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+    ).get(definitionId) as TrackedAgentRow | undefined;
     return row ? mapRowsRecoveringCorruptJson([row], mapTrackedAgent, options)[0] : undefined;
   }
 

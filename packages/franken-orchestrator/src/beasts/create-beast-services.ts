@@ -56,8 +56,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
   const brains = new BrainRegistry(join(projectRoot, '.fbeast', 'brains'));
   const resolveBrainContext = (agentTypeId: string): BrainRouteContext | undefined => {
-    const run = repository.listRuns().find((candidate) => candidate.definitionId === agentTypeId);
-    const agent = repository.listTrackedAgents().find((candidate) => candidate.definitionId === agentTypeId);
+    const run = repository.getLatestRunForDefinition(agentTypeId);
+    const agent = run?.trackedAgentId
+      ? repository.getTrackedAgent(run.trackedAgentId)
+      : run
+        ? undefined
+        : repository.getLatestTrackedAgentForDefinition(agentTypeId);
     if (!run && !agent) return undefined;
     const runSnapshot = run?.configSnapshot;
     const agentSnapshot = agent?.initConfig;

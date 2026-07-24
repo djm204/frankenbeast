@@ -9,6 +9,7 @@ import { wallClockNow } from '@franken/types';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
 import { UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
+import { BrainConfigSchema } from '../../config/orchestrator-config.js';
 import {
   CapacityReservationError,
   type CapacityReservationPolicy,
@@ -47,6 +48,7 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'category',
   'categories',
   'issue',
+  'brain',
 ] as const;
 
 const TOOL_POLICY_CONFIG_KEYS = [
@@ -134,6 +136,8 @@ function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown
       return Array.isArray(value) && value.every((entry) => typeof entry === 'string') ? value : undefined;
     case 'issue':
       return isRecord(value) ? value : undefined;
+    case 'brain':
+      return parseOptionalSharedConfig(BrainConfigSchema, value);
     default:
       return undefined;
   }
