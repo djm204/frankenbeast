@@ -1002,7 +1002,7 @@ function createConsolidatedDeps(
       recordEpisodes: config.modules.memory,
     },
     action: {
-      recordEpisodes: config.modules.memory,
+      recordEpisodes: config.modules.memory && config.modules.governor,
     },
   };
   const existingDeps = bridgeToExistingDeps({

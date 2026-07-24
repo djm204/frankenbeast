@@ -12,6 +12,7 @@ import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import { ReasoningFacultyAdapter } from '../../../src/adapters/reasoning-faculty-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
 import { ActionFacultyAdapter } from '../../../src/adapters/action-faculty-adapter.js';
+import type { ConsolidatedDeps } from '../../../src/cli/create-beast-deps.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
 import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
@@ -389,6 +390,7 @@ describe('dep-factory wiring integration', () => {
       taskId: 'test', summary: 'test', requiresHitl: true,
     });
     expect(result).toEqual({ decision: 'approved' });
+    expect((deps as ConsolidatedDeps).sqliteBrain?.episodic.recall('test')).toEqual([]);
     await finalize();
   });
 
