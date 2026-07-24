@@ -290,11 +290,20 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.reflection).toBe(true);
     });
 
-    it('derives brain.dbPath from paths.frankenbeastDir', () => {
+    it('keeps the legacy project brain path when no agent type is present', () => {
       const config = bridgeToBeastConfig(makeOptions({
         paths: makePaths({ frankenbeastDir: '/project/.fbeast' }),
       }));
       expect(config.brain?.dbPath).toBe('/project/.fbeast/beast.db');
+    });
+
+    it('threads spawned Beast definition identity without overriding its durable default path', () => {
+      const config = bridgeToBeastConfig(makeOptions({
+        runConfig: { definitionId: 'martin-loop' },
+      }));
+
+      expect(config).toMatchObject({ agentTypeId: 'martin-loop' });
+      expect(config.brain?.dbPath).toBeUndefined();
     });
   });
 

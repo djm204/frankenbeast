@@ -112,6 +112,9 @@ unchanged. Hive work extends that class additively with
 `forWorkspaceHive(workspaceId)`; both methods share the registry lifecycle but
 use disjoint canonical keys (`agent-type:<id>` and `workspace-hive:<id>`) so a
 workspace cannot collide with an agent type. No second Hive registry is added.
+Agent-type entries default to durable `.fbeast/brains/<agentTypeId>.db` files;
+spawned Beast runs derive that identity from the catalog `definitionId`, while an
+explicit database-path override (including `:memory:`) remains available.
 
 The registry owns stable brain instance lookup. Faculty/capability metadata and
 health come from the faculty/hive-mind work that consumes those instances; this

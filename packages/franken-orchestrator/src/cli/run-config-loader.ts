@@ -51,6 +51,7 @@ export const PromptConfigSchema = z.object({
 }).strict();
 
 export const RunConfigSchema = z.object({
+  definitionId: z.string().min(1).optional(),
   provider: z.string().optional(),
   objective: z.string().optional(),
   chunkDirectory: z.string().optional(),

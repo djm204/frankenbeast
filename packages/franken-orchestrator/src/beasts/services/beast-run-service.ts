@@ -523,7 +523,8 @@ export class BeastRunService {
     const modules = snapshotModules && typeof snapshotModules === 'object' && !Array.isArray(snapshotModules)
       ? snapshotModules
       : trackedAgent.moduleConfig;
-    return modules ? { ...rebuiltPolicyConfig, modules } : rebuiltPolicyConfig;
+    const canonicalConfig = { ...rebuiltPolicyConfig, definitionId: run.definitionId };
+    return modules ? { ...canonicalConfig, modules } : canonicalConfig;
   }
 
   private persistRebuiltTrackedRunConfig(
