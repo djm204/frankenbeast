@@ -38,7 +38,7 @@ describe('BrainRegistry', () => {
       'con.json',
       'COM1',
       'LPT9',
-      'a'.repeat(252),
+      'a'.repeat(245),
     ]) {
       expect(() => registry.forAgentType(id)).toThrow(RangeError);
     }

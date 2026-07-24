@@ -167,7 +167,14 @@ async function discoverBackupFiles(requestedStateDir: string, root: string): Pro
         return await pathIsFile(sidecar) ? sidecar : undefined;
       }),
     );
-    return [siblingDb, ...siblingDbSidecars.filter((path): path is string => path !== undefined), ...await walkFiles(requestedRoot)].sort();
+    const brainsDir = join(root, 'brains');
+    const brainFiles = await pathIsDirectory(brainsDir) ? await walkFiles(brainsDir) : [];
+    return [
+      siblingDb,
+      ...siblingDbSidecars.filter((path): path is string => path !== undefined),
+      ...brainFiles,
+      ...await walkFiles(requestedRoot),
+    ].sort();
   }
   return walkFiles(root);
 }

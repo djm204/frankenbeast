@@ -112,6 +112,8 @@ describe('encrypted DR state backups', () => {
 
     try {
       await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
+      await mkdir(join(dir, 'brains'), { recursive: true });
+      await writeFile(join(dir, 'brains', 'coder.db'), 'coder brain sqlite bytes', 'utf8');
       await mkdir(join(dir, '.cache'), { recursive: true });
       await writeFile(join(dir, '.cache', 'unrelated-secret.log'), 'not state', 'utf8');
       await writeFile(join(dir, 'dr.key'), 'embedded key should be excluded', 'utf8');
@@ -128,6 +130,7 @@ describe('encrypted DR state backups', () => {
       expect(paths).not.toContain('dr.key');
       expect(paths).not.toContain('.cache/unrelated-secret.log');
       expect(paths).toContain('beast.db');
+      expect(paths).toContain('brains/coder.db');
       expect(paths).toContain('state/kanban.db');
 
       await mkdir(outsideDir, { recursive: true });

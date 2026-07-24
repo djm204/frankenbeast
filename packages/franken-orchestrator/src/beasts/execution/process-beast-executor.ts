@@ -773,7 +773,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
     this.supervisor.validateCwd?.(processSpec.cwd);
     const worktree = this.allocateWorktree(run, processSpec);
     const isolatedConfigSnapshot = worktree
-      ? remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd)
+      ? {
+          ...remapRuntimeConfigSnapshot(run.configSnapshot, processSpec.cwd, worktree.executionCwd),
+          brainConfigDir: join(worktree.projectRoot, '.fbeast'),
+        }
       : run.configSnapshot;
     const isolatedSpec = this.buildIsolatedSpec(processSpec, worktree);
     const { configFilePath, configManifestPath } = this.prepareRunConfigFiles(run, isolatedSpec);

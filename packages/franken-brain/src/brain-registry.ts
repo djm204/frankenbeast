@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { SqliteBrain } from './sqlite-brain.js';
 
 const MAX_AGENT_TYPE_ID_BYTES = 255;
-const MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES = 251;
+const MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES = 244;
 const UNSAFE_AGENT_TYPE_ID_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f\u007f]/u;
 const WINDOWS_RESERVED_AGENT_TYPE_ID =
   /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
