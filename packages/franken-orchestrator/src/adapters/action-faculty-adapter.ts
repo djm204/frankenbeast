@@ -18,6 +18,9 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
 
   async requestApproval(request: ApprovalPayload): Promise<ApprovalOutcome> {
     const outcome = await this.governor.requestApproval(request);
+    if (isSyntheticHealthProbe(request)) {
+      return outcome;
+    }
     try {
       this.episodic.record({
         type: 'decision',
@@ -42,6 +45,12 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
     }
     return outcome;
   }
+}
+
+function isSyntheticHealthProbe(request: ApprovalPayload): boolean {
+  return request.taskId === '__health__'
+    && request.summary === 'health check'
+    && !request.requiresHitl;
 }
 
 function defaultDecisionReason(request: ApprovalPayload, outcome: ApprovalOutcome): string {

@@ -4,6 +4,7 @@ import { SqliteBrain } from '@franken/brain';
 import { ActionFacultyAdapter } from '../../../src/adapters/action-faculty-adapter.js';
 import { createBeastDeps } from '../../../src/cli/create-beast-deps.js';
 import type { ApprovalOutcome, ApprovalPayload, IGovernorModule } from '../../../src/deps.js';
+import { checkModuleHealth } from '../../../src/resilience/module-initializer.js';
 import { makeCritique, makeLogger, makeObserver, makePlanner } from '../../helpers/stubs.js';
 
 describe('ActionFacultyAdapter', () => {
@@ -92,6 +93,9 @@ describe('ActionFacultyAdapter', () => {
     try {
       expect(deps.sqliteBrain?.action).toBe(deps.governor);
       expect(deps.sqliteBrain?.action.configured).toBe(true);
+
+      await checkModuleHealth(deps);
+      expect(deps.sqliteBrain?.episodic.recall('health check')).toEqual([]);
 
       const request: ApprovalPayload = {
         taskId: 'wired-task',
