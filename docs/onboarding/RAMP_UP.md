@@ -64,6 +64,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
 - `ReasoningFacultyAdapter`: preserves the enabled `ICritiqueModule` result and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
+- `ActionFacultyAdapter`: preserves governor approval outcomes and records real gating decisions as queryable episodic context; synthetic health probes do not create episodes
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)

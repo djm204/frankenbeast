@@ -26,8 +26,8 @@ The local Beast construction path now has two concrete faculty integrations:
 records recallable verdict episodes, while `ActionFacultyAdapter` attaches the
 existing governor port, preserves every approval outcome unchanged, and records
 recallable governance-decision episodes without persisting approval tokens.
-That agent-scoped, per-run wiring does not provide the workspace Hive registry, conversation
-aggregate, or cross-faculty routing decided here.
+That agent-scoped, per-run wiring does not provide the workspace Hive registry,
+conversation aggregate, or cross-faculty routing decided here.
 
 ## Decision
 

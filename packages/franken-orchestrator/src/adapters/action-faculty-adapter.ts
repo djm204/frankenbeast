@@ -12,7 +12,8 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
   constructor(
     private readonly governor: IGovernorModule,
     private readonly episodic: IEpisodicMemory,
-    private readonly clock: () => Date,
+    private readonly clock: () => Date = () => new Date(),
+    private readonly onRecordError: (error: unknown) => void = () => undefined,
   ) {}
 
   async requestApproval(request: ApprovalPayload): Promise<ApprovalOutcome> {
@@ -31,8 +32,13 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
         },
         createdAt: this.clock().toISOString(),
       });
-    } catch {
+    } catch (error) {
       // Observability must never replace or bypass the governor's decision.
+      try {
+        this.onRecordError(error);
+      } catch {
+        // Error reporting is also best-effort on this safety-critical path.
+      }
     }
     return outcome;
   }

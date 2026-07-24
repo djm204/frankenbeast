@@ -125,15 +125,23 @@ describe('ActionFacultyAdapter', () => {
     const governor: IGovernorModule = {
       requestApproval: vi.fn(async () => outcome),
     };
-    const faculty = new ActionFacultyAdapter(governor, brain.episodic, () => new Date());
+    const recordFailure = new Error('brain write failed');
+    const onRecordError = vi.fn();
     vi.spyOn(brain.episodic, 'record').mockImplementation(() => {
-      throw new Error('episodic store unavailable');
+      throw recordFailure;
     });
+    const faculty = new ActionFacultyAdapter(
+      governor,
+      brain.episodic,
+      () => new Date('2026-07-24T15:00:00.000Z'),
+      onRecordError,
+    );
 
     await expect(faculty.requestApproval({
       taskId: 'recording-failure',
       summary: 'Preserve the governor outcome',
       requiresHitl: true,
     })).resolves.toBe(outcome);
+    expect(onRecordError).toHaveBeenCalledWith(recordFailure);
   });
 });
