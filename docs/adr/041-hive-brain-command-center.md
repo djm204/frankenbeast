@@ -236,6 +236,13 @@ Those issues remain blocked until this decision is merged. Issue #3685 must
 provide the registry contract before #3701 or #3702 can bind persisted foreign
 keys to it.
 
+The agent-scoped planning faculty adapter is now implemented independently of
+this command-center routing work: consolidated Beast dependencies attach the
+existing planner port to `SqliteBrain.planning` and record recallable plan and
+step lifecycle episodes. This does not implement workspace Hive routing,
+conversation persistence, or a new dispatch path, and it does not change the
+boundaries for #3701, #3702, or #3703.
+
 ## Consequences
 
 ### Positive

@@ -29,6 +29,22 @@ export class SqliteBrainMemoryAdapter implements IMemoryModule {
   }
 
   async recordTrace(trace: EpisodicEntry): Promise<void> {
+    if (this.brain.planning.configured) {
+      const task = {
+        id: trace.taskId,
+        objective: trace.objective ?? trace.summary,
+        requiredSkills: [],
+        dependsOn: [],
+      };
+      if (trace.outcome === 'success') {
+        this.brain.planning.recordStepCompleted(task);
+      } else {
+        this.brain.planning.recordStepFailed(task, new Error(trace.summary));
+      }
+    }
+
+    // Preserve the established generic trace used by recovery context. The
+    // additive faculty event intentionally omits raw error messages.
     this.brain.episodic.record({
       type: trace.outcome === 'success' ? 'success' : 'failure',
       summary: `[${trace.taskId}] ${trace.summary}`,

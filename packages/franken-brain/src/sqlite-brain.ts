@@ -5568,9 +5568,18 @@ export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
-  readonly planning: IPlanningFaculty = Object.freeze({
+  private planningFaculty: IPlanningFaculty = Object.freeze({
     kind: 'planning',
     configured: false,
+    async createPlan() {
+      throw new Error('Planning faculty is not configured');
+    },
+    recordStepCompleted() {
+      throw new Error('Planning faculty is not configured');
+    },
+    recordStepFailed() {
+      throw new Error('Planning faculty is not configured');
+    },
   });
   private reasoningFaculty: IReasoningFaculty = Object.freeze({
     kind: 'reasoning' as const,
@@ -5589,6 +5598,14 @@ export class SqliteBrain implements IBrain {
   });
   readonly memoryReview: SqliteMemoryReviewQueue;
   readonly accessAudit: SqliteMemoryAccessAuditTrail;
+
+  get planning(): IPlanningFaculty {
+    return this.planningFaculty;
+  }
+
+  attachPlanningFaculty(faculty: IPlanningFaculty): void {
+    this.planningFaculty = faculty;
+  }
 
   get reasoning(): IReasoningFaculty {
     return this.reasoningFaculty;

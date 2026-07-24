@@ -22,6 +22,7 @@ import { join, basename, dirname } from 'node:path';
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
 import { ReasoningFacultyAdapter } from '../adapters/reasoning-faculty-adapter.js';
+import { PlanningFacultyAdapter } from '../adapters/planning-faculty-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
@@ -167,6 +168,8 @@ export function createBeastDeps(
 
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
+  const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic);
+  brain.attachPlanningFaculty(planning);
   const memory = new SqliteBrainMemoryAdapter(brain);
   const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
   const reasoningEnabled = config.reasoning?.enabled !== false
@@ -219,7 +222,7 @@ export function createBeastDeps(
     firewall,
     skills,
     memory,
-    planner: existingDeps.planner,
+    planner: planning,
     observer,
     critique: reasoning ?? existingDeps.critique,
     governor: existingDeps.governor,

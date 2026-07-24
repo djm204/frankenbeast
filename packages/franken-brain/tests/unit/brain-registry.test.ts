@@ -44,7 +44,13 @@ describe('SqliteBrain faculty foundation', () => {
   it('adds inert faculty surfaces without disturbing memory APIs', () => {
     const brain = new SqliteBrain();
     try {
-      expect(brain.planning).toEqual({ kind: 'planning', configured: false });
+      expect(brain.planning).toMatchObject({ kind: 'planning', configured: false });
+      expect(() => brain.planning.recordStepCompleted({
+        id: 'not-configured',
+        objective: 'Remain inert',
+        requiredSkills: [],
+        dependsOn: [],
+      })).toThrow('Planning faculty is not configured');
       expect(brain.reasoning).toMatchObject({ kind: 'reasoning', configured: false });
       expect(brain.action).toEqual({ kind: 'action', configured: false });
       expect(brain.learning).toEqual({ kind: 'learning', configured: false });

@@ -136,6 +136,46 @@ describe('E2E: Consolidated deps through BeastLoop', () => {
     expect(allRecent.length).toBeGreaterThan(0);
   });
 
+  it('wires the real planner through the brain planning faculty lifecycle', async () => {
+    const existing = mockExistingDeps();
+    const deps = createBeastDeps(
+      { providers: [{ name: 'claude', type: 'claude-cli' }] },
+      existing,
+    );
+
+    const plan = await deps.planner.createPlan({ goal: 'Wire planning faculty' });
+    expect(plan).toBe(await existing.planner.createPlan({ goal: 'Wire planning faculty' }));
+    expect(deps.sqliteBrain!.planning).toBe(deps.planner);
+    expect(deps.sqliteBrain!.planning.configured).toBe(true);
+
+    await deps.memory.recordTrace({
+      taskId: 'task-1',
+      summary: 'Test planning lifecycle',
+      outcome: 'success',
+      timestamp: new Date().toISOString(),
+    });
+    await deps.memory.recordTrace({
+      taskId: 'task-2',
+      summary: 'compiler exploded in /private/path',
+      objective: 'Handle planning failure',
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(deps.sqliteBrain!.episodic.recall('plan created wire faculty').some(
+      (episode) => episode.type === 'decision' && episode.step === 'planning',
+    )).toBe(true);
+    expect(deps.sqliteBrain!.episodic.recall('completed planning lifecycle').some(
+      (episode) => episode.type === 'success' && episode.step === 'task-1',
+    )).toBe(true);
+    expect(deps.sqliteBrain!.episodic.recall('failed planning failure').some(
+      (episode) => episode.type === 'failure' && episode.step === 'task-2',
+    )).toBe(true);
+    expect((await deps.memory.getContext('planning-project')).knownErrors).toContain(
+      '[task-2] compiler exploded in /private/path',
+    );
+  });
+
   it('provider registry has configured providers', () => {
     const deps = createBeastDeps(
       {
