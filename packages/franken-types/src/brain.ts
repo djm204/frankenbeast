@@ -38,6 +38,7 @@ export interface IPlanningFaculty {
   /** False until a concrete franken-planner adapter is attached. */
   readonly configured: boolean;
   createPlan(intent: PlanningIntent): Promise<PlanningPlanGraph>;
+  recordPlanCreated(intent: PlanningIntent, plan: PlanningPlanGraph): void;
   recordStepCompleted(task: PlanningPlanTask): void;
   recordStepFailed(task: PlanningPlanTask, error: unknown): void;
 }

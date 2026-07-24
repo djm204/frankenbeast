@@ -56,13 +56,17 @@ describe('PlanningFacultyAdapter', () => {
   });
 
   it('checks delegate health without recording a fake plan episode', async () => {
-    const delegate: IPlannerModule = { createPlan: vi.fn().mockResolvedValue({ tasks: [] }) };
+    const delegate: IPlannerModule = {
+      createPlan: vi.fn().mockResolvedValue({ tasks: [] }),
+      checkHealth: vi.fn().mockResolvedValue(undefined),
+    };
     const brain = makeBrain();
     const faculty = new PlanningFacultyAdapter(delegate, brain.episodic);
 
     await faculty.checkHealth();
 
-    expect(delegate.createPlan).toHaveBeenCalledWith({ goal: 'health check' });
+    expect(delegate.checkHealth).toHaveBeenCalledOnce();
+    expect(delegate.createPlan).not.toHaveBeenCalled();
     expect(brain.episodic.recall('plan created health check')).toEqual([]);
   });
 
@@ -99,7 +103,7 @@ describe('PlanningFacultyAdapter', () => {
     expect(failure).toMatchObject({
       type: 'failure',
       step: 'build',
-      details: { taskId: 'build', errorName: 'Error' },
+      details: { category: 'planning-lifecycle', taskId: 'build', errorName: 'Error' },
     });
     expect(JSON.stringify(failure)).not.toContain('compiler output must not be persisted');
   });

@@ -21,8 +21,10 @@ export class SqliteBrainMemoryAdapter implements IMemoryModule {
     // Build context from brain's working memory and episodic records
     const adrs = (this.brain.working.get('adrs') as string[]) ?? [];
     const knownErrors = this.brain.episodic
-      .recentFailures(10)
-      .map((e) => e.summary);
+      .recentFailures(20)
+      .filter((event) => event.details?.category !== 'planning-lifecycle')
+      .slice(0, 10)
+      .map((event) => event.summary);
     const rules = (this.brain.working.get('rules') as string[]) ?? [];
 
     return { adrs, knownErrors, rules };
@@ -38,7 +40,7 @@ export class SqliteBrainMemoryAdapter implements IMemoryModule {
       };
       if (trace.outcome === 'success') {
         this.brain.planning.recordStepCompleted(task);
-      } else {
+      } else if (trace.objective !== undefined) {
         this.brain.planning.recordStepFailed(task, new Error(trace.summary));
       }
     }

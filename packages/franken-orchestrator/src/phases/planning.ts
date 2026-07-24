@@ -58,6 +58,7 @@ export async function runPlanning(
       context: ctx.sanitizedIntent.context,
     });
 
+    planner.recordPlanCreated?.(ctx.sanitizedIntent, plan);
     ctx.plan = plan;
     ctx.addAudit('planner', 'plan:created', {
       iteration: 1,

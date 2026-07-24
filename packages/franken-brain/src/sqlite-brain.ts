@@ -5569,12 +5569,15 @@ export class SqliteBrain implements IBrain {
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
   private planningFaculty: IPlanningFaculty = Object.freeze({
-    kind: 'planning',
+    kind: 'planning' as const,
     configured: false,
-    async createPlan() {
+    createPlan(): Promise<never> {
+      return Promise.reject(new Error('Planning faculty is not configured'));
+    },
+    recordPlanCreated(): never {
       throw new Error('Planning faculty is not configured');
     },
-    recordStepCompleted() {
+    recordStepCompleted(): never {
       throw new Error('Planning faculty is not configured');
     },
     recordStepFailed() {

@@ -174,6 +174,31 @@ describe('E2E: Consolidated deps through BeastLoop', () => {
     expect((await deps.memory.getContext('planning-project')).knownErrors).toContain(
       '[task-2] compiler exploded in /private/path',
     );
+
+    for (let i = 0; i < 6; i += 1) {
+      await deps.memory.recordTrace({
+        taskId: `failure-${i}`,
+        summary: `diagnostic-${i}`,
+        objective: `Recover task ${i}`,
+        outcome: 'failure',
+        timestamp: new Date().toISOString(),
+      });
+    }
+    const recoveryContext = await deps.memory.getContext('planning-project');
+    expect(recoveryContext.knownErrors).toContain('[failure-0] diagnostic-0');
+    expect(recoveryContext.knownErrors.some(
+      (entry) => entry.startsWith('Planning step failed:'),
+    )).toBe(false);
+
+    await deps.memory.recordTrace({
+      taskId: 'legacy-failure',
+      summary: 'legacy raw diagnostic',
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
+    expect(deps.sqliteBrain!.episodic.recentFailures(10).filter(
+      (episode) => episode.summary.includes('legacy raw diagnostic'),
+    )).toHaveLength(1);
   });
 
   it('provider registry has configured providers', () => {

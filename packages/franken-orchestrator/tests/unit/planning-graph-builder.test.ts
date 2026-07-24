@@ -25,7 +25,10 @@ describe('runPlanning with GraphBuilder', () => {
     const ctx = new BeastContext('proj', 'sess', 'input');
     ctx.sanitizedIntent = { goal: 'build from chunks' };
 
-    const planner = makePlanner();
+    const planner = {
+      ...makePlanner(),
+      recordPlanCreated: vi.fn(),
+    };
     const critique = makeCritique();
     const graphBuilder = new ChunkFileGraphBuilder(tmpDir);
 
@@ -38,6 +41,10 @@ describe('runPlanning with GraphBuilder', () => {
       'harden:05_sample',
     ]);
     expect(planner.createPlan).not.toHaveBeenCalled();
+    expect(planner.recordPlanCreated).toHaveBeenCalledWith(
+      { goal: 'build from chunks', strategy: undefined, context: undefined },
+      ctx.plan,
+    );
     // Regression guard for issue #20: a graph-builder plan must not bypass
     // critique review just because it wasn't produced by the planner module.
     expect(critique.reviewPlan).toHaveBeenCalledTimes(1);

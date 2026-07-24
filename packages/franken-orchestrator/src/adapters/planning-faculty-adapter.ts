@@ -17,21 +17,30 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
 
   async createPlan(intent: PlanIntent): Promise<PlanGraph> {
     const plan = await this.delegate.createPlan(intent);
+    this.recordPlanCreated(intent, plan);
+    return plan;
+  }
+
+  recordPlanCreated(intent: PlanIntent, plan: PlanGraph): void {
     this.recordLifecycleEvent({
       type: 'decision',
       step: 'planning',
       summary: `Planning plan created: ${intent.goal}`,
       details: {
+        category: 'planning-lifecycle',
         taskCount: plan.tasks.length,
         taskIds: plan.tasks.map((task) => task.id),
       },
       createdAt: isoNow(),
     });
-    return plan;
   }
 
   /** Exercises the delegate without creating a user-visible lifecycle event. */
   async checkHealth(): Promise<void> {
+    if (this.delegate.checkHealth) {
+      await this.delegate.checkHealth();
+      return;
+    }
     await this.delegate.createPlan({ goal: 'health check' });
   }
 
@@ -40,7 +49,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
       type: 'success',
       step: task.id,
       summary: `Planning step completed: ${task.objective}`,
-      details: { taskId: task.id },
+      details: { category: 'planning-lifecycle', taskId: task.id },
       createdAt: isoNow(),
     });
   }
@@ -51,6 +60,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
       step: task.id,
       summary: `Planning step failed: ${task.objective}`,
       details: {
+        category: 'planning-lifecycle',
         taskId: task.id,
         errorName: error instanceof Error ? error.name : 'Error',
       },

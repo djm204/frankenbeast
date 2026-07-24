@@ -96,8 +96,10 @@ export interface EpisodicEntry {
 /** What the orchestrator needs from MOD-04 (Planner). */
 export interface IPlannerModule {
   createPlan(intent: PlanIntent): Promise<PlanGraph>;
-  /** Optional side-effect-free readiness probe for recording planner adapters. */
+  /** Optional non-recording liveness probe for planner wrappers. */
   checkHealth?(): Promise<void>;
+  /** Records plans created through an alternate graph-builder seam. */
+  recordPlanCreated?(intent: PlanIntent, plan: PlanGraph): void;
 }
 
 export type PlanIntent = PlanningIntent;
