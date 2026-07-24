@@ -46,7 +46,10 @@ export function defaultHookDeps(dbPath?: string, configPath?: string): HookDeps 
         try {
           return readFileSync(contextFile, 'utf8');
         } catch {
-          return '';
+          // A configured context file is an enforcement boundary, not an
+          // optional source. Throw so pre-tool callers fail closed instead of
+          // governing an empty or legacy positional fallback.
+          throw new Error('Unable to read fbeast tool context file');
         }
       }
       return process.env[TOOL_CONTEXT_ENV] ?? '';
@@ -441,7 +444,15 @@ export async function runHook(
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     const rawPostPayload = payload || streamedPayload;
-    const hookArgs = hookArgsFromContext(resolvedDeps.readContext(), toolName);
+    let postToolContext = '';
+    try {
+      postToolContext = resolvedDeps.readContext();
+    } catch {
+      // Post-tool context enriches audit args but is not the enforcement input.
+      // Keep logging the completed tool call even if its context transport was
+      // removed or became unreadable after pre-tool authorization.
+    }
+    const hookArgs = hookArgsFromContext(postToolContext, toolName);
     const auditToolName = effectiveHookAuditTool(toolName, hookArgs);
     const outcome = hookAuditOutcomeFromPayload(auditToolName, rawPostPayload);
     await resolvedDeps.observer.log({
