@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildProviderList, createBeastDeps } from '../../../src/cli/create-beast-deps.js';
+import {
+  buildProviderList,
+  createBeastDeps,
+  type BeastDepsConfig,
+} from '../../../src/cli/create-beast-deps.js';
 import { makeCritique, makeGovernor, makeLogger, makeObserver, makePlanner } from '../../helpers/stubs.js';
 
 describe('createBeastDeps', () => {
@@ -102,6 +106,72 @@ describe('createBeastDeps', () => {
     expect(deps.mcp).toBe(liveMcp);
   });
 
+  it('routes critique through the brain reasoning faculty and records a recallable verdict', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
+    const skillsDir = join(root, 'skills');
+    const configDir = join(root, '.fbeast');
+    mkdirSync(skillsDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    const verdict = {
+      verdict: 'warn' as const,
+      findings: [{ evaluator: 'factuality', severity: 'medium', message: 'Verify the claim' }],
+      score: 0.75,
+    };
+    const critique = makeCritique({ reviewPlan: vi.fn(async () => verdict) });
+    const deps = createDeps(skillsDir, configDir, { critique });
+    const plan = {
+      tasks: [{ id: 'task-1', objective: 'Check the claim', requiredSkills: [], dependsOn: [] }],
+    };
+
+    expect(deps.sqliteBrain!.reasoning).toBe(deps.critique);
+    const result = await deps.sqliteBrain!.reasoning.reviewPlan(plan, { source: 'test' });
+
+    expect(result.verdict).toBe('warn');
+    expect(result).toBe(verdict);
+    expect(critique.reviewPlan).toHaveBeenCalledWith(plan, { source: 'test' });
+    expect(deps.sqliteBrain!.reasoning.configured).toBe(true);
+    expect(deps.sqliteBrain!.episodic.recall('reasoning verdict warn')).toEqual([
+      expect.objectContaining({
+        type: 'decision',
+        step: 'reasoning:critique',
+        summary: 'Reasoning verdict: warn',
+        details: expect.objectContaining({ verdict: 'warn', score: 0.75, findingCount: 1 }),
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ]);
+  });
+
+  it('leaves the reasoning faculty inert when critique is disabled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
+    const critique = makeCritique({ configured: false });
+    const deps = createDeps(
+      join(root, 'skills'),
+      join(root, '.fbeast'),
+      { critique },
+      { reasoning: { enabled: false } },
+    );
+
+    expect(deps.critique).toBe(critique);
+    expect(deps.sqliteBrain!.reasoning.configured).toBe(false);
+    await deps.critique.reviewPlan({ tasks: [] });
+    expect(deps.sqliteBrain!.episodic.count()).toBe(0);
+  });
+
+  it('delegates reasoning without episodes when memory is disabled', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-'));
+    const deps = createDeps(
+      join(root, 'skills'),
+      join(root, '.fbeast'),
+      {},
+      { reasoning: { recordEpisodes: false } },
+    );
+
+    await deps.sqliteBrain!.reasoning.reviewPlan({ tasks: [] });
+
+    expect(deps.sqliteBrain!.reasoning.configured).toBe(true);
+    expect(deps.sqliteBrain!.episodic.count()).toBe(0);
+  });
+
   it('points missing-provider guidance at config instead of a nonexistent provider CLI', () => {
     const createWithoutProviders = () => createBeastDeps(
       {
@@ -127,6 +197,7 @@ function createDeps(
   skillsDir: string,
   configDir: string,
   overrides: Partial<Parameters<typeof createBeastDeps>[1]> = {},
+  configOverrides: Partial<BeastDepsConfig> = {},
 ) {
   return createBeastDeps(
     {
@@ -134,6 +205,7 @@ function createDeps(
       skillsDir,
       configDir,
       reflection: false,
+      ...configOverrides,
     },
     {
       planner: makePlanner(),

@@ -5572,9 +5572,12 @@ export class SqliteBrain implements IBrain {
     kind: 'planning',
     configured: false,
   });
-  readonly reasoning: IReasoningFaculty = Object.freeze({
-    kind: 'reasoning',
+  private reasoningFaculty: IReasoningFaculty = Object.freeze({
+    kind: 'reasoning' as const,
     configured: false,
+    reviewPlan: async () => {
+      throw new Error('Reasoning faculty is not configured');
+    },
   });
   readonly action: IActionFaculty = Object.freeze({
     kind: 'action',
@@ -5586,6 +5589,17 @@ export class SqliteBrain implements IBrain {
   });
   readonly memoryReview: SqliteMemoryReviewQueue;
   readonly accessAudit: SqliteMemoryAccessAuditTrail;
+
+  get reasoning(): IReasoningFaculty {
+    return this.reasoningFaculty;
+  }
+
+  attachReasoningFaculty(faculty: IReasoningFaculty): void {
+    if (faculty.kind !== 'reasoning' || !faculty.configured) {
+      throw new TypeError('A reasoning faculty must be configured before attachment');
+    }
+    this.reasoningFaculty = faculty;
+  }
 
   private db: Database.Database;
   private readonly dbPath: string;

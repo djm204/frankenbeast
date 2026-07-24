@@ -9,6 +9,7 @@ import { MiddlewareChainFirewallAdapter } from '../../../src/adapters/middleware
 import { SkillManagerAdapter } from '../../../src/adapters/skill-manager-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../../../src/adapters/reflection-heartbeat-adapter.js';
 import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
+import { ReasoningFacultyAdapter } from '../../../src/adapters/reasoning-faculty-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
@@ -230,7 +231,7 @@ describe('dep-factory wiring integration', () => {
     await finalize();
   });
 
-  it('creates real CritiquePortAdapter when modules are enabled', async () => {
+  it('wraps the real critique chain as a configured reasoning faculty', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
@@ -244,7 +245,8 @@ describe('dep-factory wiring integration', () => {
       reset: false,
     });
 
-    expect(deps.critique).toBeInstanceOf(CritiquePortAdapter);
+    expect(deps.critique).toBeInstanceOf(ReasoningFacultyAdapter);
+    expect(deps.critique.configured).toBe(true);
     await finalize();
   });
 
@@ -342,6 +344,7 @@ describe('dep-factory wiring integration', () => {
     });
 
     expect(deps.critique).not.toBeInstanceOf(CritiquePortAdapter);
+    expect(deps.critique.configured).toBe(false);
     const result = await deps.critique.reviewPlan({ tasks: [] });
     expect(result).toEqual({ verdict: 'pass', findings: [], score: 1.0 });
     await finalize();

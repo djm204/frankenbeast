@@ -1,6 +1,12 @@
 import type { CliSkillExecutor } from './skills/cli-skill-executor.js';
 import type { PrCreator } from './closure/pr-creator.js';
 import type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
+import type {
+  ReasoningCritiqueFinding,
+  ReasoningCritiqueResult,
+  ReasoningPlanGraph,
+  ReasoningPlanTask,
+} from '@franken/types';
 
 /**
  * BeastLoopDeps — dependency injection interface for the orchestrator.
@@ -100,16 +106,9 @@ export interface PlanIntent {
   readonly critiqueFeedback?: string | undefined;
 }
 
-export interface PlanGraph {
-  readonly tasks: readonly PlanTask[];
-}
+export type PlanGraph = ReasoningPlanGraph;
 
-export interface PlanTask {
-  readonly id: string;
-  readonly objective: string;
-  readonly requiredSkills: readonly string[];
-  readonly dependsOn: readonly string[];
-}
+export type PlanTask = ReasoningPlanTask;
 
 /** What the orchestrator needs from MOD-05 (Observer). */
 export interface IObserverModule {
@@ -139,30 +138,17 @@ export interface TokenSpendData {
 
 /** What the orchestrator needs from MOD-06 (Critique). */
 export interface ICritiqueModule {
+  /** False for an explicit no-critique or unavailable-module stub. */
+  readonly configured?: boolean;
   reviewPlan(plan: PlanGraph, context?: unknown): Promise<CritiqueResult>;
+  /** Optional read-only startup probe. */
+  checkHealth?(): Promise<void>;
 }
 
-export interface CritiqueResult {
-  readonly verdict: 'pass' | 'warn' | 'fail';
-  readonly findings: readonly CritiqueFinding[];
-  readonly score: number;
-  /**
-   * True when the critique loop stopped because a halt-action breaker tripped
-   * (e.g. the token/cost budget). A halt is terminal — the orchestrator must
-   * not replan, since replanning would issue further (billable) planner calls
-   * after the budget is already exhausted.
-   */
-  readonly halted?: boolean;
-  /** Human-readable reason for the halt, when `halted` is true. */
-  readonly haltReason?: string;
-}
+/** A halt is terminal: replanning would issue more billable calls after budget exhaustion. */
+export type CritiqueResult = ReasoningCritiqueResult;
 
-export interface CritiqueFinding {
-  readonly evaluator: string;
-  readonly severity: string;
-  readonly message: string;
-  readonly location?: string | undefined;
-}
+export type CritiqueFinding = ReasoningCritiqueFinding;
 
 /** What the orchestrator needs from MOD-07 (Governor). */
 export interface IGovernorModule {

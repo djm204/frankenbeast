@@ -26,6 +26,35 @@ export interface IReasoningFaculty {
   readonly kind: 'reasoning';
   /** False until a concrete franken-critique adapter is attached. */
   readonly configured: boolean;
+  reviewPlan(plan: ReasoningPlanGraph, context?: unknown): Promise<ReasoningCritiqueResult>;
+}
+
+/** Package-neutral plan shape consumed by the reasoning faculty. */
+export interface ReasoningPlanGraph {
+  readonly tasks: readonly ReasoningPlanTask[];
+}
+
+export interface ReasoningPlanTask {
+  readonly id: string;
+  readonly objective: string;
+  readonly requiredSkills: readonly string[];
+  readonly dependsOn: readonly string[];
+}
+
+/** Package-neutral verdict returned by the reasoning faculty. */
+export interface ReasoningCritiqueResult {
+  readonly verdict: 'pass' | 'warn' | 'fail';
+  readonly findings: readonly ReasoningCritiqueFinding[];
+  readonly score: number;
+  readonly halted?: boolean;
+  readonly haltReason?: string;
+}
+
+export interface ReasoningCritiqueFinding {
+  readonly evaluator: string;
+  readonly severity: string;
+  readonly message: string;
+  readonly location?: string | undefined;
 }
 
 /** Foundation for the agent-scoped governor/action adapter. */
