@@ -265,8 +265,8 @@ export class BeastDispatchService {
       delete policyDefaults.requestedTools;
     }
     const parsedConfigSnapshot: Readonly<Record<string, unknown>> = moduleConfig
-      ? { ...policyDefaults, ...config, ...directRunPolicyConfig, modules: moduleConfig }
-      : { ...policyDefaults, ...config, ...directRunPolicyConfig };
+      ? { ...policyDefaults, ...config, ...directRunPolicyConfig, definitionId: definition.id, modules: moduleConfig }
+      : { ...policyDefaults, ...config, ...directRunPolicyConfig, definitionId: definition.id };
     const policyConfigSnapshot = preserveTrackedAgentPolicyConfig(parsedConfigSnapshot, trackedAgent);
     this.assertRoleToolManifestAllows(request, policyConfigSnapshot);
     const configSnapshot = policyConfigSnapshot;

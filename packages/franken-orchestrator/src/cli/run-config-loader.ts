@@ -51,6 +51,10 @@ export const PromptConfigSchema = z.object({
 }).strict();
 
 export const RunConfigSchema = z.object({
+  /** Canonical Beast definition identity for agent-scoped durable brain resolution. */
+  definitionId: z.string().min(1).optional(),
+  /** Parent-project state root used by worktree-isolated agents for durable brains. */
+  brainConfigDir: z.string().min(1).optional(),
   provider: z.string().optional(),
   objective: z.string().optional(),
   chunkDirectory: z.string().optional(),

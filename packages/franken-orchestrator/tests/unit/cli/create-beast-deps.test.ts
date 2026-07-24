@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -10,6 +10,45 @@ import {
 import { makeCritique, makeGovernor, makeLogger, makeObserver, makePlanner } from '../../helpers/stubs.js';
 
 describe('createBeastDeps', () => {
+  it('persists each spawned agent type under the project brain directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-create-deps-brain-'));
+    const configDir = join(root, '.fbeast');
+
+    try {
+      const first = createBeastDeps(
+        {
+          agentTypeId: 'martin-loop',
+          configDir,
+          providers: [{ name: 'claude', type: 'claude-cli' }],
+          reflection: false,
+        },
+        makeExistingDeps(),
+      );
+      first.sqliteBrain!.episodic.record({
+        type: 'observation',
+        summary: 'Durable spawned-agent history',
+        createdAt: new Date().toISOString(),
+      });
+      first.sqliteBrain!.close();
+
+      expect(existsSync(join(configDir, 'brains', 'martin-loop.db'))).toBe(true);
+
+      const second = createBeastDeps(
+        {
+          agentTypeId: 'martin-loop',
+          configDir,
+          providers: [{ name: 'claude', type: 'claude-cli' }],
+          reflection: false,
+        },
+        makeExistingDeps(),
+      );
+      expect(second.sqliteBrain!.episodic.count()).toBe(1);
+      second.sqliteBrain!.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('builds consolidated CLI providers from the same typed provider config used by the CLI bridge', () => {
     const providers = buildProviderList([
       {
@@ -217,4 +256,15 @@ function createDeps(
       ...overrides,
     },
   );
+}
+
+function makeExistingDeps(): Parameters<typeof createBeastDeps>[1] {
+  return {
+    planner: makePlanner(),
+    critique: makeCritique(),
+    governor: makeGovernor(),
+    observer: makeObserver(),
+    logger: makeLogger(),
+    clock: vi.fn(() => new Date('2026-01-01T00:00:00Z')),
+  };
 }

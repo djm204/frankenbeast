@@ -1,4 +1,4 @@
-import { SqliteBrain } from '@franken/brain';
+import { BrainRegistry, SqliteBrain } from '@franken/brain';
 import {
   createModelProviderFailoverAuditPayload,
   ProviderRegistry,
@@ -44,6 +44,10 @@ export type { ProviderConfig } from '../providers/provider-config.js';
 // --- Config types ---
 
 export interface BeastDepsConfig {
+  /** Canonical Beast definition identity used for per-agent-type brain lookup. */
+  agentTypeId?: string;
+  /** Canonical project state root used only for durable per-agent brains. */
+  brainConfigDir?: string;
   providers?: ProviderConfig[];
   network?: {
     egressPolicy?: EgressPolicyConfig;
@@ -112,7 +116,10 @@ export function createBeastDeps(
   existingDeps: ExistingDeps,
 ): ConsolidatedDeps {
   // 1. Brain
-  const brain = new SqliteBrain(config.brain?.dbPath ?? ':memory:');
+  const brain = config.agentTypeId
+    ? new BrainRegistry(join(config.brainConfigDir ?? config.configDir ?? '.fbeast', 'brains'))
+        .forAgentType(config.agentTypeId, config.brain?.dbPath)
+    : new SqliteBrain(config.brain?.dbPath ?? ':memory:');
 
   // 2. Audit trail
   const auditTrail = new AuditTrail();

@@ -112,6 +112,8 @@ describe('encrypted DR state backups', () => {
 
     try {
       await writeFile(join(dir, 'beast.db'), 'project sqlite bytes', 'utf8');
+      await mkdir(join(dir, 'brains'), { recursive: true });
+      await writeFile(join(dir, 'brains', 'coder.db'), 'coder brain sqlite bytes', 'utf8');
       await mkdir(join(dir, '.cache'), { recursive: true });
       await writeFile(join(dir, '.cache', 'unrelated-secret.log'), 'not state', 'utf8');
       await writeFile(join(dir, 'dr.key'), 'embedded key should be excluded', 'utf8');
@@ -128,6 +130,7 @@ describe('encrypted DR state backups', () => {
       expect(paths).not.toContain('dr.key');
       expect(paths).not.toContain('.cache/unrelated-secret.log');
       expect(paths).toContain('beast.db');
+      expect(paths).toContain('brains/coder.db');
       expect(paths).toContain('state/kanban.db');
 
       await mkdir(outsideDir, { recursive: true });
@@ -139,6 +142,54 @@ describe('encrypted DR state backups', () => {
         keyFilePath: join(dir, 'dr.key'),
       })).rejects.toThrow(/non-empty target/);
       await expect(stat(join(outsideDir, 'ledger.json'))).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('includes sibling brain databases when the legacy beast database is absent', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    const fbeastDir = join(dir, '.fbeast');
+    const backupPath = join(dir, 'backup.franken-dr.json');
+
+    try {
+      await mkdir(join(fbeastDir, 'state'), { recursive: true });
+      await writeFile(join(fbeastDir, 'state', 'kanban.db'), 'sqlite-kanban-bytes', 'utf8');
+      await mkdir(join(fbeastDir, 'brains'), { recursive: true });
+      await writeFile(join(fbeastDir, 'brains', 'coder.db'), 'coder brain sqlite bytes', 'utf8');
+
+      const envelope = await createEncryptedStateBackup({
+        stateDir: join(fbeastDir, 'state'),
+        outputPath: backupPath,
+        keyFilePath: keyFile,
+      });
+
+      expect(envelope.manifest.sourceDir).toBe(fbeastDir);
+      expect(envelope.manifest.files.map((file) => file.path)).toEqual(expect.arrayContaining([
+        'brains/coder.db',
+        'state/kanban.db',
+      ]));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not include a generic sibling brains directory for custom state roots', async () => {
+    const { dir, keyFile } = await makeFixtureState();
+    const backupPath = join(dir, 'backup.franken-dr.json');
+
+    try {
+      await mkdir(join(dir, 'brains'), { recursive: true });
+      await writeFile(join(dir, 'brains', 'private.txt'), 'unrelated private data', 'utf8');
+
+      const envelope = await createEncryptedStateBackup({
+        stateDir: join(dir, 'state'),
+        outputPath: backupPath,
+        keyFilePath: keyFile,
+      });
+
+      expect(envelope.manifest.sourceDir).toBe(join(dir, 'state'));
+      expect(envelope.manifest.files.map((file) => file.path)).not.toContain('brains/private.txt');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
