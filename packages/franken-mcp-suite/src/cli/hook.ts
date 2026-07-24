@@ -444,7 +444,15 @@ export async function runHook(
       ? await (resolvedDeps.readPostToolPayload?.() ?? readStdinPayload())
       : '';
     const rawPostPayload = payload || streamedPayload;
-    const hookArgs = hookArgsFromContext(resolvedDeps.readContext(), toolName);
+    let postToolContext = '';
+    try {
+      postToolContext = resolvedDeps.readContext();
+    } catch {
+      // Post-tool context enriches audit args but is not the enforcement input.
+      // Keep logging the completed tool call even if its context transport was
+      // removed or became unreadable after pre-tool authorization.
+    }
+    const hookArgs = hookArgsFromContext(postToolContext, toolName);
     const auditToolName = effectiveHookAuditTool(toolName, hookArgs);
     const outcome = hookAuditOutcomeFromPayload(auditToolName, rawPostPayload);
     await resolvedDeps.observer.log({

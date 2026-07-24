@@ -50,6 +50,24 @@ describe('runHook', () => {
     expect(governorCheck).not.toHaveBeenCalled();
   });
 
+  it('continues post-tool auditing when the context file cannot be read', async () => {
+    const missingContextFile = join(tmpdir(), `fbeast-missing-post-context-${process.pid}`);
+    vi.stubEnv(TOOL_CONTEXT_FILE_ENV, missingContextFile);
+    const deps = defaultHookDeps();
+    const observerLog = vi.fn().mockResolvedValue(undefined);
+    deps.observer.log = observerLog;
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runHook([
+      'post-tool',
+      'benign-tool',
+      '{"ok":true}',
+    ], deps)).resolves.toBeUndefined();
+    expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'tool_call',
+    }));
+  });
+
   it('redacts retention-report post-tool payloads before observer logging', async () => {
     const { deps, log } = hookDeps();
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
