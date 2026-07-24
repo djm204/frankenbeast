@@ -115,11 +115,12 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
         }
       : { profile: securityProfile },
     ...(agentTypeId ? { agentTypeId } : {}),
+    ...(agentTypeId ? { brainConfigDir } : {}),
     brain: agentTypeId && config?.brain?.dbPath === undefined
       ? {}
       : { dbPath: config?.brain?.dbPath ?? dbPath },
     skillsDir: options.skillsDir ?? resolve(options.paths.root, '.fbeast', 'skills'),
-    configDir: brainConfigDir,
+    configDir: resolve(options.paths.root, '.fbeast'),
     reflection: true,
   };
 }

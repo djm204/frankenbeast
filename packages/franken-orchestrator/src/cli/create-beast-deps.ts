@@ -46,6 +46,8 @@ export type { ProviderConfig } from '../providers/provider-config.js';
 export interface BeastDepsConfig {
   /** Canonical Beast definition identity used for per-agent-type brain lookup. */
   agentTypeId?: string;
+  /** Canonical project state root used only for durable per-agent brains. */
+  brainConfigDir?: string;
   providers?: ProviderConfig[];
   network?: {
     egressPolicy?: EgressPolicyConfig;
@@ -115,7 +117,7 @@ export function createBeastDeps(
 ): ConsolidatedDeps {
   // 1. Brain
   const brain = config.agentTypeId
-    ? new BrainRegistry(join(config.configDir ?? '.fbeast', 'brains'))
+    ? new BrainRegistry(join(config.brainConfigDir ?? config.configDir ?? '.fbeast', 'brains'))
         .forAgentType(config.agentTypeId, config.brain?.dbPath)
     : new SqliteBrain(config.brain?.dbPath ?? ':memory:');
 

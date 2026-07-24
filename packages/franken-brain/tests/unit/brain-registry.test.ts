@@ -99,6 +99,17 @@ describe('BrainRegistry', () => {
       registry.close();
     }
   });
+
+  it('reports the actual identifier limit for default database filenames', () => {
+    const registry = new BrainRegistry();
+    try {
+      expect(() => registry.forAgentType('a'.repeat(245))).toThrow(
+        'agentTypeId must be at most 244 UTF-8 bytes when deriving the default .db filename',
+      );
+    } finally {
+      registry.close();
+    }
+  });
 });
 
 describe('SqliteBrain faculty foundation', () => {

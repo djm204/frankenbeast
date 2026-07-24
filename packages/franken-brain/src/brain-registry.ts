@@ -51,7 +51,7 @@ export class BrainRegistry {
       && Buffer.byteLength(agentTypeId, 'utf8') > MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES
     ) {
       throw new RangeError(
-        'agentTypeId must be at most 251 UTF-8 bytes when deriving the default .db filename',
+        `agentTypeId must be at most ${MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES} UTF-8 bytes when deriving the default .db filename`,
       );
     }
 

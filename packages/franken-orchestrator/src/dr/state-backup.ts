@@ -155,7 +155,10 @@ async function resolveBackupRoot(stateDir: string): Promise<string> {
     const projectRoot = dirname(root);
     if (
       await pathIsFile(join(projectRoot, 'beast.db'))
-      || await pathIsDirectory(join(projectRoot, 'brains'))
+      || (
+        basename(projectRoot) === '.fbeast'
+        && await pathIsDirectory(join(projectRoot, 'brains'))
+      )
     ) {
       return projectRoot;
     }

@@ -410,6 +410,7 @@ describe('ProcessBeastExecutor', () => {
     const configPath = (spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG;
     expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
       brainConfigDir: join(workDir, '.fbeast'),
+      definitionId: 'test-beast',
     });
     expect(attempt.executorMetadata).toMatchObject({
       worktreeIsolation: true,

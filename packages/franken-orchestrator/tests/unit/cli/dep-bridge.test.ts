@@ -299,6 +299,7 @@ describe('bridgeToBeastConfig()', () => {
 
     it('threads spawned Beast definition identity without overriding its durable default path', () => {
       const config = bridgeToBeastConfig(makeOptions({
+        paths: makePaths({ root: '/worktree' }),
         runConfig: {
           brainConfigDir: '/project/.fbeast',
           definitionId: 'martin-loop',
@@ -307,7 +308,8 @@ describe('bridgeToBeastConfig()', () => {
 
       expect(config).toMatchObject({
         agentTypeId: 'martin-loop',
-        configDir: '/project/.fbeast',
+        brainConfigDir: '/project/.fbeast',
+        configDir: '/worktree/.fbeast',
       });
       expect(config.brain?.dbPath).toBeUndefined();
     });
