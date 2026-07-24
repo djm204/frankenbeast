@@ -118,6 +118,8 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
 
   app.get('/v1/brain/:agentTypeId', (c) => readBrainState(() => {
     const { agentTypeId, brain } = resolveBrain(c, deps.registry);
+    // Refresh persisted working memory view to avoid stale in-memory cache
+    (brain as any).refreshPreparedStateForFlush?.();
     const allWorkingKeys = brain.working.keys().sort();
     const lastCheckpoint = brain.recovery.lastCheckpoint();
 
@@ -131,6 +133,7 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
         },
         episodic: { eventCount: brain.episodic.count() },
         recovery: { lastCheckpointAt: lastCheckpoint?.timestamp ?? null },
+        // Updated to reflect latest runtime faculty configuration
         faculties: {
           planning: { configured: brain.planning.configured },
           reasoning: { configured: brain.reasoning.configured },
