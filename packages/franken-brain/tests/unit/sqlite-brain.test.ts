@@ -259,6 +259,32 @@ describe('SqliteBrain', () => {
       expect(result.deleted).toEqual({ episodic: 1, checkpoints: 0 });
     });
 
+    it('resumes at undeleted episodic candidates when the delete cap is smaller than the scan cap', () => {
+      for (let day = 1; day <= 8; day += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `expired candidate ${day}`,
+          details: { memoryClass: 'transient_observation' },
+          createdAt: `2026-01-${String(day).padStart(2, '0')}T00:00:00.000Z`,
+        });
+      }
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 4,
+      });
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 4,
+      });
+
+      expect(first.report.compactionCandidates.map((entry) => entry.key)).toEqual(['1', '2', '3', '4']);
+      expect(second.report.compactionCandidates.map((entry) => entry.key)).toContain('2');
+      expect(brain.episodic.recent(-1).map((event) => event.id)).not.toContain(2);
+    });
+
     it('advances bounded episodic scans past protected rows on later batches', () => {
       for (const id of [1, 2]) {
         brain.episodic.record({

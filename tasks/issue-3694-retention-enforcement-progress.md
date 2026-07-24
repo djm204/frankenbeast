@@ -14,5 +14,7 @@
 - [x] Address the fresh Codex round's MCP scan-bound/audit findings with focused RED/GREEN plus full MCP test, lint, typecheck, and build verification.
 - [x] Publish the follow-up commit through Approval Cop and verify exact-head CI green.
 - [x] Address Codex round 4 checkpoint-progress, working-scan-bound, and embedding-projection findings with focused RED/GREEN and full brain gates.
-- [ ] Publish the round-4 follow-up through Approval Cop, then reach current-head Codex clean with zero unresolved Codex threads and green CI before exact-head merge.
+- [x] Publish the round-4 follow-up through Approval Cop.
+- [ ] Fix the fifth-round episodic cursor finding, reconcile current `main`, and publish through Approval Cop.
+- [ ] Reach current-head Codex clean with zero unresolved Codex threads and green CI before exact-head merge.
 - [ ] Append reusable lessons and post terminal evidence to root task `t_7b3979ad`.

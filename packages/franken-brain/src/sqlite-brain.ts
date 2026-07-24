@@ -2725,6 +2725,7 @@ interface MemoryRetentionScanCursor {
 interface MemoryRetentionEnforcementScanState {
   episodicCursor?: MemoryRetentionScanCursor;
   nextEpisodicCursor?: MemoryRetentionScanCursor;
+  episodicRows?: EpisodicRow[];
   checkpointCursor?: MemoryRetentionScanCursor;
   nextCheckpointCursor?: MemoryRetentionScanCursor;
 }
@@ -6273,6 +6274,7 @@ export class SqliteBrain implements IBrain {
         .all(maxScanRows) as EpisodicRow[];
     }
     if (enforcementScanState !== undefined && episodicRows !== undefined) {
+      enforcementScanState.episodicRows = episodicRows;
       const lastRow = episodicRows.at(-1);
       if (lastRow === undefined) {
         delete enforcementScanState.nextEpisodicCursor;
@@ -6503,6 +6505,30 @@ export class SqliteBrain implements IBrain {
       const candidates = report.compactionCandidates
         .filter((entry) => entry.store === 'episodic' || entry.store === 'checkpoint')
         .slice(0, maxDeletes);
+      const selectedEpisodicIds = new Set(
+        candidates
+          .filter((entry) => entry.store === 'episodic')
+          .map((entry) => Number(entry.key)),
+      );
+      const pendingEpisodicIds = new Set(
+        report.compactionCandidates
+          .filter((entry) => entry.store === 'episodic' && !selectedEpisodicIds.has(Number(entry.key)))
+          .map((entry) => Number(entry.key)),
+      );
+      const firstPendingEpisodicIndex = scanState.episodicRows
+        ?.findIndex((row) => pendingEpisodicIds.has(row.id)) ?? -1;
+      if (firstPendingEpisodicIndex >= 0) {
+        const predecessor = firstPendingEpisodicIndex === 0
+          ? scanState.episodicCursor
+          : scanState.episodicRows?.[firstPendingEpisodicIndex - 1];
+        if (predecessor === undefined) {
+          delete scanState.nextEpisodicCursor;
+        } else {
+          scanState.nextEpisodicCursor = 'created_at' in predecessor
+            ? { createdAt: predecessor.created_at, id: predecessor.id }
+            : predecessor;
+        }
+      }
       const deleted = { episodic: 0, checkpoints: 0 };
       const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
       const deleteCheckpoint = this.db.prepare(`DELETE FROM checkpoints WHERE id = ?`);
