@@ -548,19 +548,47 @@ describe('fbeast init', () => {
     expect(calls.filter((c) => c.args[1] === 'remove').map((c) => c.args[2])).toEqual(['fbeast-memory']);
   });
 
-  it('throws when legacy Codex removal fails', () => {
+  it('reports a resumable repair path when legacy Codex removal partially fails', () => {
     const root = tmpDir();
     dirs.push(root);
     const dbPath = join(root, '.fbeast', 'beast.db');
     const mockSpawn = (_cmd: string, args: string[]) => {
-      if (args[1] === 'get' && args[2] === 'fbeast-memory') return { status: 0, stdout: Buffer.from(dbPath) };
-      if (args[1] === 'remove' && args[2] === 'fbeast-memory') return { status: 1, stderr: Buffer.from('permission denied') };
+      if (args[1] === 'get' && ['fbeast-memory', 'fbeast-planner'].includes(args[2]!)) {
+        return { status: 0, stdout: Buffer.from(dbPath) };
+      }
+      if (args[1] === 'remove' && args[2] === 'fbeast-memory') return { status: 0 };
+      if (args[1] === 'remove' && args[2] === 'fbeast-planner') {
+        return { status: 1, stderr: Buffer.from('\u001b[31mpermission denied\u001b[0m') };
+      }
       return { status: 1 };
     };
 
-    expect(() =>
-      runInit({ root, claudeDir: join(root, '.codex'), hooks: false, client: 'codex', spawn: mockSpawn }),
-    ).toThrow('failed to remove legacy Codex MCP server fbeast-memory');
+    let thrown: unknown;
+    try {
+      runInit({
+        root,
+        claudeDir: join(root, '.codex'),
+        hooks: true,
+        servers: ['memory'],
+        client: 'codex',
+        spawn: mockSpawn,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      name: 'LegacyCodexMigrationError',
+      code: 'LEGACY_CODEX_MCP_MIGRATION_FAILED',
+      failedServer: 'fbeast-planner',
+      command: ['codex', 'mcp', 'remove', 'fbeast-planner'],
+      removedServers: ['fbeast-memory'],
+      stderr: 'permission denied',
+    });
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain('Legacy entries already removed: fbeast-memory');
+    expect((thrown as Error).message).toContain('Repair: codex mcp remove fbeast-planner');
+    expect((thrown as Error).message).toContain('Resume: fbeast mcp init --client=codex --hooks --pick=memory');
   });
 
   it('uses project-root placeholders for Claude .mcp.json across project roots', () => {
