@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-24 — Recovering a blocked issue lane without destructive reset
+- When a dedicated issue worktree is clean but its branch contains unrelated historical commits, preserve that worktree and its audit trail. Create a new isolated branch/worktree directly from current `origin/main`, verify exact HEAD equality and no competing PR, and continue the same one-issue lifecycle there instead of waiting on or bypassing a destructive reset gate.
+
 ## 2026-07-22 — Isolated monorepo worktree dependencies
 - Do not symlink a fresh worktree's root `node_modules` to another checkout when npm workspace packages are symlinked within it: internal imports can resolve that other checkout's stale build outputs and produce misleading missing-export errors. Run a local `npm ci`, then build prerequisite workspace packages before package-level typecheck/build gates.
 
