@@ -401,7 +401,7 @@ export class SQLiteBeastRepository {
     const row = this.db.prepare(
       `SELECT * FROM beast_runs
         WHERE definition_id = ?
-        ORDER BY created_at DESC, id DESC
+        ORDER BY created_at DESC, rowid DESC
         LIMIT 1`,
     ).get(definitionId) as BeastRunRow | undefined;
     return row ? mapRowsRecoveringCorruptJson([row], mapRun, options)[0] : undefined;
@@ -755,7 +755,7 @@ export class SQLiteBeastRepository {
     const row = this.db.prepare(
       `SELECT * FROM tracked_agents
         WHERE definition_id = ?
-        ORDER BY created_at DESC, id DESC
+        ORDER BY created_at DESC, rowid DESC
         LIMIT 1`,
     ).get(definitionId) as TrackedAgentRow | undefined;
     return row ? mapRowsRecoveringCorruptJson([row], mapTrackedAgent, options)[0] : undefined;

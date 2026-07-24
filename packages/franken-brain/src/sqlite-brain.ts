@@ -3277,17 +3277,34 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       const matches: Array<{ event: EpisodicEvent & { detailsTruncated?: true }; score: number }> = [];
       let rowOffset = 0;
       while (true) {
+        // Search a separately bounded ciphertext projection so details modestly
+        // larger than the response budget remain searchable without allowing a
+        // corrupted database row to allocate unbounded memory during decrypt.
+        const searchableDetailsByteLimit = encryptedPayloadByteLimit(1024 * 1024);
         const rows = this.db.prepare(
-          `SELECT ${projectedColumns}
+          `SELECT ${projectedColumns},
+                  CASE WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) <= ?
+                    THEN details ELSE NULL END AS search_details
              FROM episodic_events
             ORDER BY created_at DESC, id DESC
             LIMIT ? OFFSET ?`,
-        ).all(storedDetailsByteLimit, storedDetailsByteLimit, batchSize, rowOffset) as Array<
-          EpisodicRow & { details_truncated: 0 | 1 }
+        ).all(storedDetailsByteLimit, storedDetailsByteLimit, searchableDetailsByteLimit, batchSize, rowOffset) as Array<
+          EpisodicRow & { details_truncated: 0 | 1; search_details: string | null }
         >;
-        for (const event of mapRows(rows)) {
-          const score = recallEventScore(event, keywords);
-          if (score > 0) matches.push({ event, score });
+        for (const row of rows) {
+          const searchableEvent = rowToEvent({ ...row, details: row.search_details }, this.encryption);
+          const boundedEvent = rowToEvent(row, this.encryption);
+          if (!searchableEvent || !boundedEvent) continue;
+          const score = recallEventScore(searchableEvent, keywords);
+          if (score > 0) {
+            matches.push({
+              event: {
+                ...boundedEvent,
+                ...(row.details_truncated === 1 ? { detailsTruncated: true as const } : {}),
+              },
+              score,
+            });
+          }
         }
         if (rows.length < batchSize) break;
         rowOffset += rows.length;

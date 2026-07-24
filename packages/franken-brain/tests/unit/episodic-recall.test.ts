@@ -137,7 +137,7 @@ describe('EpisodicMemory.recall()', () => {
       encryptedBrain.episodic.record({
         type: 'observation',
         summary: 'outside plaintext bound',
-        details: { payload: 'x'.repeat(9_000) },
+        details: { marker: 'oversized-search-needle', payload: 'x'.repeat(9_000) },
         createdAt: '2026-03-18T10:31:00Z',
       });
 
@@ -150,6 +150,12 @@ describe('EpisodicMemory.recall()', () => {
       expect(encryptedBrain.episodic.readBoundedPage({
         limit: 10,
         offset: 0,
+        maxDetailsBytes: 8_192,
+      })[0]).toMatchObject({ detailsTruncated: true });
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'oversized-search-needle',
         maxDetailsBytes: 8_192,
       })[0]).toMatchObject({ detailsTruncated: true });
     } finally {

@@ -65,16 +65,25 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     if (!run && !agent) return undefined;
     const runSnapshot = run?.configSnapshot;
     const agentSnapshot = agent?.initConfig;
-    const configuredDbPath = stringValue(recordValue(runSnapshot, 'brain'), 'dbPath')
+    const configuredBrainPath = stringValue(recordValue(runSnapshot, 'brain'), 'dbPath')
       ?? stringValue(recordValue(agentSnapshot, 'brain'), 'dbPath');
-    const dbPath = configuredDbPath === undefined || configuredDbPath === ':memory:' || isAbsolute(configuredDbPath)
-      ? configuredDbPath
-      : resolve(projectRoot, configuredDbPath);
+    const attempt = run?.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
+    const worktreeExecutionCwd = attempt?.executorMetadata?.worktreeExecutionCwd;
+    const configuredProjectRoot = stringValue(runSnapshot, 'projectRoot')
+      ?? stringValue(agentSnapshot, 'projectRoot');
+    const runtimeRoot = typeof worktreeExecutionCwd === 'string'
+      ? worktreeExecutionCwd
+      : configuredProjectRoot ?? projectRoot;
+    const dbPath = configuredBrainPath === undefined
+      ? join(projectRoot, '.fbeast', 'brains', `${agentTypeId}.db`)
+      : configuredBrainPath === ':memory:' || isAbsolute(configuredBrainPath)
+        ? configuredBrainPath
+        : resolve(runtimeRoot, configuredBrainPath);
     const runModules = recordValue(runSnapshot, 'modules') as ModuleConfig | undefined;
     const agentModules = recordValue(agentSnapshot, 'modules') as ModuleConfig | undefined;
     const modules = runModules ?? agent?.moduleConfig ?? agentModules;
     return {
-      ...(dbPath ? { dbPath } : {}),
+      dbPath,
       faculties: {
         planning: moduleEnabled(modules?.planner, 'FRANKENBEAST_MODULE_PLANNER'),
         reasoning: moduleEnabled(modules?.critique, 'FRANKENBEAST_MODULE_CRITIQUE'),
