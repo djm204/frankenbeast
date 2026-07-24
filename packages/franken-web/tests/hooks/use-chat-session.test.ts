@@ -1055,6 +1055,7 @@ describe('useChatSession', () => {
       socket.message({
         type: 'turn.approval.requested',
         description: 'Deploy the generated fix',
+        command: 'npm run deploy',
         timestamp: '2026-03-09T00:00:06Z',
       });
     });
@@ -1063,12 +1064,19 @@ describe('useChatSession', () => {
     expect(result.current.sessionState).toBe('pending_approval');
 
     await act(async () => {
-      await result.current.approve(true);
+      await result.current.approve(true, {
+        requestedAt: '2026-03-09T00:00:06Z',
+        command: 'npm run deploy',
+      });
     });
 
     expect(JSON.parse(socket.sent[0] ?? '{}')).toMatchObject({
       type: 'approval.respond',
       approved: true,
+      request: {
+        requestedAt: '2026-03-09T00:00:06Z',
+        command: 'npm run deploy',
+      },
     });
 
     act(() => {

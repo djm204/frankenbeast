@@ -1,6 +1,7 @@
 import type {
   ApiDataEnvelope,
   ApiErrorEnvelope,
+  ApprovalDecisionRequest,
   ApproveResult,
   ChatSocketTicketResponse,
   ChatSessionResponse as ChatSession,
@@ -13,6 +14,7 @@ import type {
 } from '@franken/types';
 
 export type {
+  ApprovalDecisionRequest,
   ApproveResult,
   ChatSessionSummary,
   MessageResult,
@@ -153,13 +155,17 @@ export class ChatApiClient {
     );
   }
 
-  async approve(sessionId: string, approved: boolean): Promise<ApproveResult> {
+  async approve(
+    sessionId: string,
+    approved: boolean,
+    request?: ApprovalDecisionRequest,
+  ): Promise<ApproveResult> {
     return this.request<ApproveResult>(
       `/v1/chat/sessions/${encodeURIComponent(sessionId)}/approve`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved }),
+        body: JSON.stringify({ approved, ...(request ? { request } : {}) }),
       },
     );
   }

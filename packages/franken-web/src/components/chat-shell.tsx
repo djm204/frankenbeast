@@ -995,11 +995,11 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
                 resolving={approvalResolving}
                 error={approvalError}
                 sessionId={activeSessionId}
-                onApprove={() => {
-                  void approve(true);
+                onApprove={(request) => {
+                  void approve(true, request);
                 }}
-                onReject={() => {
-                  void approve(false);
+                onReject={(request) => {
+                  void approve(false, request);
                 }}
               />
             </aside>

@@ -24,6 +24,17 @@ export type PendingApproval = z.infer<typeof PendingApprovalSchema> & {
   workdir?: string | undefined;
 };
 
+export const ApprovalDecisionRequestSchema = z.object({
+  sessionId: z.string().min(1).optional(),
+  requestedAt: z.string().min(1).optional(),
+  command: z.string().optional(),
+  approvalToken: z.string().min(1).optional(),
+}).strict().refine(
+  (request) => Object.values(request).some((value) => value !== undefined),
+  { message: 'Approval request identity must include at least one field.' },
+);
+export type ApprovalDecisionRequest = z.infer<typeof ApprovalDecisionRequestSchema>;
+
 export const TranscriptMessageSchema = z.object({
   id: z.string().optional(),
   role: z.enum(['user', 'assistant', 'system']),

@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
+import { approvalDecisionMatches, approvalRuntimeInput, UnsafeApprovalCommandError } from '../../chat/approval-input.js';
 import { FileApprovalAuditLog, commandSha256, type ApprovalAuditLog } from '../../chat/approval-audit-log.js';
 import { BeastDaemonRequestError } from '../../chat/beast-daemon-dispatch-adapter.js';
 import { isValidChatSessionId, type CorruptChatSessionFile, type ISessionStore } from '../../chat/session-store.js';
@@ -18,7 +18,7 @@ import type {
   MessageResult,
   TurnOutcome,
 } from '@franken/types';
-import { isoNow, MAX_CHAT_MESSAGE_CONTENT_LENGTH } from '@franken/types';
+import { ApprovalDecisionRequestSchema, isoNow, MAX_CHAT_MESSAGE_CONTENT_LENGTH } from '@franken/types';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 import { createSseHandler } from '../sse.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
@@ -37,6 +37,7 @@ const SubmitMessageBody = z.object({
 
 const ApproveBody = z.object({
   approved: z.boolean(),
+  request: ApprovalDecisionRequestSchema.optional(),
 }).strict();
 
 export interface ChatRoutesDeps {
@@ -461,8 +462,17 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   app.post('/v1/chat/sessions/:id/approve', async (c) => {
     const id = validateChatSessionId(c.req.param('id'));
     const body = await parseJsonBody(c);
-    const { approved } = validateBody(ApproveBody, body);
+    const { approved, request } = validateBody(ApproveBody, body);
     return withChatMutationAdmission(c, id, async (session) => {
+      if (session.pendingApproval && request && !approvalDecisionMatches(session.id, session.pendingApproval, request)) {
+        return c.json({
+          error: {
+            code: 'APPROVAL_REQUEST_CHANGED',
+            message: 'The pending approval changed before this decision was submitted. Review the current request and try again.',
+          },
+        }, 409);
+      }
+
       if (!session.pendingApproval) {
         if (session.state === 'approved' || session.state === 'rejected') {
           return c.json({
