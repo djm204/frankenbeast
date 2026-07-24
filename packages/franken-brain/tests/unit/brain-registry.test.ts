@@ -125,7 +125,12 @@ describe('SqliteBrain faculty foundation', () => {
       })).toThrow('Planning faculty is not configured');
       expect(brain.reasoning).toMatchObject({ kind: 'reasoning', configured: false });
       expect(brain.action).toEqual({ kind: 'action', configured: false });
-      expect(brain.learning).toEqual({ kind: 'learning', configured: false });
+      expect(brain.learning).toMatchObject({
+        kind: 'learning',
+        configured: true,
+        consolidate: expect.any(Function),
+        relevantLessons: expect.any(Function),
+      });
 
       brain.working.set('current-goal', 'keep existing memory consumers working');
       brain.episodic.record({

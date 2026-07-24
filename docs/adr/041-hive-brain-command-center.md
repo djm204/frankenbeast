@@ -248,6 +248,15 @@ step lifecycle episodes. This does not implement workspace Hive routing,
 conversation persistence, or a new dispatch path, and it does not change the
 boundaries for #3701, #3702, or #3703.
 
+The agent-scoped learning faculty is also implemented independently of command-
+center routing. It clusters a bounded set of similar failure episodes with a
+deterministic normalized-token connected-component heuristic, proposes
+consolidated patterns through the existing memory-review queue, refreshes pending
+candidates as evidence grows, and exposes occurrence/confidence-aware retrieval.
+Confidence is evidence-count based and capped rather than presented as model
+certainty. It does not inject lessons into planning or reasoning (#3699), share
+them across brains (#3689), or change the dispatch boundaries above.
+
 ## Consequences
 
 ### Positive

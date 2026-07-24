@@ -27,6 +27,11 @@ import type {
   LearningCooldownOptions,
   LearningRecordResult,
   SkillFailureSignature,
+  LessonConsolidationOptions,
+  RelevantLessonsOptions,
+  ConsolidatedLesson,
+  LessonConsolidationItem,
+  RelevantLesson,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
 
@@ -5547,6 +5552,109 @@ function normalizeSemanticMemoryToken(token: string): string {
   return SEMANTIC_MEMORY_SYNONYMS.get(stemmed) ?? stemmed;
 }
 
+function lessonEventText(event: EpisodicEvent): string {
+  return [event.step, event.summary].filter(Boolean).join(' ');
+}
+
+function clusterSimilarFailureEvents(
+  events: readonly EpisodicEvent[],
+  similarityThreshold: number,
+): EpisodicEvent[][] {
+  const remaining = new Set(events.map((_, index) => index));
+  const clusters: EpisodicEvent[][] = [];
+  while (remaining.size > 0) {
+    const seed = Math.min(...remaining);
+    remaining.delete(seed);
+    const component = [seed];
+    for (let cursor = 0; cursor < component.length; cursor += 1) {
+      const current = component[cursor]!;
+      for (const candidate of [...remaining]) {
+        if (semanticMemorySimilarity(
+          lessonEventText(events[current]!),
+          lessonEventText(events[candidate]!),
+        ) >= similarityThreshold) {
+          remaining.delete(candidate);
+          component.push(candidate);
+        }
+      }
+    }
+    clusters.push(component.map((index) => events[index]!));
+  }
+  return clusters;
+}
+
+function lessonConfidence(occurrenceCount: number): number {
+  return Math.round(Math.min(0.95, 0.35 + ((occurrenceCount - 1) * 0.15)) * 100) / 100;
+}
+
+function consolidatedLesson(cluster: readonly EpisodicEvent[]): ConsolidatedLesson {
+  const ordered = [...cluster].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
+  );
+  const summaries = ordered.map((event) => event.summary);
+  const pattern = [...summaries].sort((left, right) =>
+    left.length - right.length || left.localeCompare(right),
+  )[0]!;
+  const tokenSets = ordered.map((event) => semanticMemoryTokens(lessonEventText(event)));
+  const commonTokens = [...tokenSets[0]!].filter((token) =>
+    tokenSets.every((tokens) => tokens.has(token)),
+  );
+  const evidenceEventIds = ordered
+    .map((event) => event.id)
+    .filter((id): id is number => id !== undefined);
+  return {
+    kind: 'consolidated-lesson',
+    pattern,
+    keywords: commonTokens.sort(),
+    occurrenceCount: ordered.length,
+    confidence: lessonConfidence(ordered.length),
+    evidenceEventIds,
+    firstSeenAt: ordered[0]!.createdAt,
+    lastSeenAt: ordered.at(-1)!.createdAt,
+  };
+}
+
+function lessonReviewKey(cluster: readonly EpisodicEvent[]): string {
+  const anchor = [...cluster].sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
+  )[0]!;
+  const signature = createHash('sha256')
+    .update(JSON.stringify({
+      eventId: anchor.id,
+      tokens: [...semanticMemoryTokens(lessonEventText(anchor))].sort(),
+    }))
+    .digest('hex');
+  return `lesson.review.${signature.slice(0, 16)}`;
+}
+
+function isConsolidatedLesson(value: unknown): value is ConsolidatedLesson {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.kind === 'consolidated-lesson'
+    && typeof record.pattern === 'string'
+    && Array.isArray(record.keywords)
+    && record.keywords.every((keyword) => typeof keyword === 'string')
+    && Number.isSafeInteger(record.occurrenceCount)
+    && typeof record.confidence === 'number'
+    && Array.isArray(record.evidenceEventIds)
+    && record.evidenceEventIds.every((id) => Number.isSafeInteger(id))
+    && typeof record.firstSeenAt === 'string'
+    && typeof record.lastSeenAt === 'string';
+}
+
+function lessonRelevance(query: string, lesson: ConsolidatedLesson): number {
+  const queryTokens = semanticMemoryTokens(query);
+  const lessonTokens = semanticMemoryTokens([lesson.pattern, ...lesson.keywords]);
+  if (queryTokens.size === 0 || lessonTokens.size === 0) return 0;
+  const intersection = [...queryTokens].filter((token) => lessonTokens.has(token)).length;
+  if (intersection === 0) return 0;
+  const unionSize = new Set([...queryTokens, ...lessonTokens]).size;
+  return Math.round(Math.max(
+    intersection / unionSize,
+    intersection / queryTokens.size,
+  ) * 1000) / 1000;
+}
+
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') {
     return JSON.stringify(value);
@@ -5617,7 +5725,10 @@ export class SqliteBrain implements IBrain {
   }
   readonly learning: ILearningFaculty = Object.freeze({
     kind: 'learning',
-    configured: false,
+    configured: true,
+    consolidate: (options?: LessonConsolidationOptions) => this.consolidateLessons(options),
+    relevantLessons: (query: string, options?: RelevantLessonsOptions) =>
+      this.findRelevantLessons(query, options),
   });
   readonly memoryReview: SqliteMemoryReviewQueue;
   readonly accessAudit: SqliteMemoryAccessAuditTrail;
@@ -5825,6 +5936,121 @@ export class SqliteBrain implements IBrain {
       return created;
     });
     return createReviewItems();
+  }
+
+  private consolidateLessons(
+    options: LessonConsolidationOptions = {},
+  ): LessonConsolidationItem[] {
+    const threshold = options.threshold ?? 3;
+    const lookback = options.lookback ?? 100;
+    const similarityThreshold = options.similarityThreshold ?? 0.5;
+    if (!Number.isSafeInteger(threshold) || threshold < 1) {
+      throw new RangeError('Lesson consolidation threshold must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(lookback) || lookback < threshold || lookback > 1_000) {
+      throw new RangeError('Lesson consolidation lookback must be a safe integer between threshold and 1000');
+    }
+    if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
+      throw new RangeError('Lesson consolidation similarityThreshold must be between 0 and 1');
+    }
+
+    const events = this.episodic
+      .recentFailures(lookback, false)
+      .sort((left, right) =>
+        left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
+      );
+    const pendingLessons = new Map(
+      this.memoryReview
+        .list('pending')
+        .filter((candidate) => isConsolidatedLesson(candidate.value))
+        .map((candidate) => [candidate.key, candidate] as const),
+    );
+    const approvedKeys = new Set(
+      this.memoryReview
+        .list('approved')
+        .filter((candidate) => isConsolidatedLesson(candidate.value))
+        .map((candidate) => candidate.key),
+    );
+    const created: LessonConsolidationItem[] = [];
+    for (const cluster of clusterSimilarFailureEvents(events, similarityThreshold)) {
+      if (cluster.length < threshold) continue;
+      const key = lessonReviewKey(cluster);
+      const value = consolidatedLesson(cluster);
+      const pending = pendingLessons.get(key);
+      if (pending) {
+        const previous = pending.value as ConsolidatedLesson;
+        if (value.occurrenceCount <= previous.occurrenceCount) continue;
+        const updated = this.memoryReview.edit(pending.id, {
+          value,
+          evidenceId: value.evidenceEventIds[0] === undefined
+            ? key
+            : `episodic:${value.evidenceEventIds[0]}`,
+          confidence: value.confidence,
+          reason: `${value.occurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
+        });
+        pendingLessons.set(key, updated);
+        if (isConsolidatedLesson(updated.value)) {
+          created.push({ id: updated.id, key: updated.key, status: 'pending', value: updated.value });
+        }
+        continue;
+      }
+      if (approvedKeys.has(key)) continue;
+      const candidate = this.memoryReview.propose({
+        targetStore: 'working',
+        key,
+        value,
+        source: 'episodic-lesson-consolidation',
+        evidenceId: value.evidenceEventIds[0] === undefined
+          ? key
+          : `episodic:${value.evidenceEventIds[0]}`,
+        confidence: value.confidence,
+        reason: `${value.occurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
+      });
+      if (candidate.status === 'pending' && isConsolidatedLesson(candidate.value)) {
+        pendingLessons.set(key, candidate);
+        created.push({ id: candidate.id, key: candidate.key, status: 'pending', value: candidate.value });
+      }
+    }
+    return created;
+  }
+
+  private findRelevantLessons(
+    query: string,
+    options: RelevantLessonsOptions = {},
+  ): RelevantLesson[] {
+    const normalizedQuery = query.trim();
+    const limit = options.limit ?? 10;
+    const minConfidence = options.minConfidence ?? 0;
+    if (!normalizedQuery) {
+      throw new Error('Relevant lesson query must not be empty');
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Relevant lesson limit must be a safe integer between 1 and 100');
+    }
+    if (!Number.isFinite(minConfidence) || minConfidence < 0 || minConfidence > 1) {
+      throw new RangeError('Relevant lesson minConfidence must be between 0 and 1');
+    }
+
+    return (['pending', 'approved'] as const)
+      .flatMap((status) => this.memoryReview.list(status).map((candidate) => ({ status, candidate })))
+      .filter(({ candidate }) => isConsolidatedLesson(candidate.value))
+      .map(({ status, candidate }) => {
+        const value = candidate.value as ConsolidatedLesson;
+        return {
+          ...value,
+          key: candidate.key,
+          status,
+          relevance: lessonRelevance(normalizedQuery, value),
+        } satisfies RelevantLesson;
+      })
+      .filter((lesson) => lesson.relevance > 0 && lesson.confidence >= minConfidence)
+      .sort((left, right) =>
+        right.relevance - left.relevance
+        || right.confidence - left.confidence
+        || right.occurrenceCount - left.occurrenceCount
+        || right.lastSeenAt.localeCompare(left.lastSeenAt),
+      )
+      .slice(0, limit);
   }
 
   private static registerLiveBrain(dbPath: string, brain: SqliteBrain): void {

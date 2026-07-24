@@ -708,6 +708,114 @@ describe('SqliteBrain', () => {
     });
   });
 
+  describe('learning faculty lesson consolidation', () => {
+    const recordStaleDeclarationFailure = (summary: string, createdAt: string): void => {
+      brain.episodic.record({
+        type: 'failure',
+        step: 'workspace-build',
+        summary,
+        createdAt,
+      });
+    };
+
+    it('clusters differently worded failures into one memory-review candidate', () => {
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed after stale declarations were loaded',
+        '2026-07-24T10:00:00.000Z',
+      );
+      recordStaleDeclarationFailure(
+        'Stale declaration files broke the workspace TypeScript build',
+        '2026-07-24T10:01:00.000Z',
+      );
+      expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
+
+      recordStaleDeclarationFailure(
+        'Workspace TypeScript build stopped because declarations were stale',
+        '2026-07-24T10:02:00.000Z',
+      );
+      brain.episodic.record({
+        type: 'failure',
+        step: 'approval-gate',
+        summary: 'Governor approval token expired before execution',
+        createdAt: '2026-07-24T10:03:00.000Z',
+      });
+
+      const [item] = brain.learning.consolidate({ threshold: 3, lookback: 10 });
+
+      expect(brain.learning.configured).toBe(true);
+      expect(item).toMatchObject({
+        id: expect.stringMatching(/^memcand_/),
+        key: expect.stringMatching(/^lesson\.review\.[a-f0-9]{16}$/),
+        status: 'pending',
+        value: {
+          kind: 'consolidated-lesson',
+          occurrenceCount: 3,
+          confidence: 0.65,
+          evidenceEventIds: expect.arrayContaining([1, 2, 3]),
+        },
+      });
+      expect(brain.memoryReview.list()).toHaveLength(1);
+      expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
+    });
+
+    it('returns relevant consolidated lessons with honest occurrence confidence', () => {
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed after stale declarations were loaded',
+        '2026-07-24T10:00:00.000Z',
+      );
+      brain.learning.consolidate({ threshold: 1, lookback: 10 });
+
+      const [single] = brain.learning.relevantLessons('workspace TypeScript build');
+      expect(single).toMatchObject({ occurrenceCount: 1, confidence: 0.35 });
+      expect(brain.learning.relevantLessons('governor approval timeout')).toEqual([]);
+
+      brain.close();
+      brain = new SqliteBrain();
+      for (let occurrence = 0; occurrence < 10; occurrence += 1) {
+        recordStaleDeclarationFailure(
+          'TypeScript workspace build failed after stale declarations were loaded',
+          `2026-07-24T10:${String(occurrence).padStart(2, '0')}:00.000Z`,
+        );
+      }
+      brain.learning.consolidate({ threshold: 10, lookback: 10 });
+
+      const [established] = brain.learning.relevantLessons('workspace TypeScript build');
+      expect(established).toMatchObject({ occurrenceCount: 10, confidence: 0.95 });
+      expect(established!.confidence).toBeGreaterThan(single!.confidence);
+    });
+
+    it('refreshes a pending pattern when later similar failures increase its evidence', () => {
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed after stale declarations were loaded',
+        '2026-07-24T10:00:00.000Z',
+      );
+      recordStaleDeclarationFailure(
+        'Stale declaration files broke the workspace TypeScript build',
+        '2026-07-24T10:01:00.000Z',
+      );
+
+      const [initial] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      expect(initial?.value).toMatchObject({ occurrenceCount: 2, confidence: 0.5 });
+
+      recordStaleDeclarationFailure(
+        'Workspace TypeScript build stopped because declarations were stale',
+        '2026-07-24T10:02:00.000Z',
+      );
+
+      const [updated] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      expect(updated).toMatchObject({
+        id: initial?.id,
+        key: initial?.key,
+        value: { occurrenceCount: 3, confidence: 0.65 },
+      });
+      expect(brain.memoryReview.list()).toHaveLength(1);
+      expect(brain.learning.relevantLessons('workspace TypeScript build')[0]).toMatchObject({
+        occurrenceCount: 3,
+        confidence: 0.65,
+      });
+    });
+  });
+
   describe('working memory', () => {
     it('stores and retrieves values', () => {
       brain.working.set('key', 'value');
