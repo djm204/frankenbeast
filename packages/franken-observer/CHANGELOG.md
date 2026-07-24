@@ -1,5 +1,87 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.5...franken-observer-v0.12.0) (2026-07-23)
+
+
+### Features
+
+* **observer:** add decision outcome attribution ([#2412](https://github.com/djm204/frankenbeast/issues/2412)) ([081eba6](https://github.com/djm204/frankenbeast/commit/081eba6568b2ea05f64409bdd81308a262748756)), closes [#1693](https://github.com/djm204/frankenbeast/issues/1693)
+
+
+### Bug Fixes
+
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* **observer:** add idempotent webhook receipts ([#2350](https://github.com/djm204/frankenbeast/issues/2350)) ([b6ab9f1](https://github.com/djm204/frankenbeast/commit/b6ab9f145de48914adf7c318b05faa2f97235fb8))
+* **observer:** add safe Tempo retry defaults ([#3647](https://github.com/djm204/frankenbeast/issues/3647)) ([0b1cc8a](https://github.com/djm204/frankenbeast/commit/0b1cc8ab79e7aab6a910281d34b9e7a767a29491))
+* **observer:** batch SQLite adapter drains ([#3417](https://github.com/djm204/frankenbeast/issues/3417)) ([eeba02e](https://github.com/djm204/frankenbeast/commit/eeba02eff4cad61607956caf5b0655b782c1fed6))
+* **observer:** bound HTTP exporter attempts ([#3630](https://github.com/djm204/frankenbeast/issues/3630)) ([aff2564](https://github.com/djm204/frankenbeast/commit/aff25646c2249da208c7fb01cd0d06814e0e7992))
+* **observer:** bound MultiAdapter list fan-out ([#3597](https://github.com/djm204/frankenbeast/issues/3597)) ([c38773a](https://github.com/djm204/frankenbeast/commit/c38773a00d0631b8e1d539bb187e0b618716b8d8))
+* **observer:** cap model attribution cardinality ([#3450](https://github.com/djm204/frankenbeast/issues/3450)) ([205d538](https://github.com/djm204/frankenbeast/commit/205d5383bbaac32ddb2d45c22778d00c6d5f1890))
+* **observer:** expose unknown model cost attribution ([#3637](https://github.com/djm204/frankenbeast/issues/3637)) ([a917af3](https://github.com/djm204/frankenbeast/commit/a917af37b46d1bc39d4fcb4d9d01b3997f6445ba))
+* **observer:** handle missing trace details ([#3274](https://github.com/djm204/frankenbeast/issues/3274)) ([8272ed0](https://github.com/djm204/frankenbeast/commit/8272ed0b44df8f61f85a4a746af7999efb589fc5))
+* **observer:** harden trace server responses ([#3285](https://github.com/djm204/frankenbeast/issues/3285)) ([5399908](https://github.com/djm204/frankenbeast/commit/539990832073b5540134f14ec301311f5fba77c2))
+* **observer:** index ordered SQLite trace queries ([#3430](https://github.com/djm204/frankenbeast/issues/3430)) ([e79d239](https://github.com/djm204/frankenbeast/commit/e79d239a1fc0dae51ea6320f875ff21ffcab4180))
+* **observer:** make SQLite worker shutdown non-blocking ([#3623](https://github.com/djm204/frankenbeast/issues/3623)) ([d16415b](https://github.com/djm204/frankenbeast/commit/d16415bcc35516ff3d219f18c7b0f1a9f5a68015))
+* **observer:** make trace rows keyboard accessible ([#3394](https://github.com/djm204/frankenbeast/issues/3394)) ([b806101](https://github.com/djm204/frankenbeast/commit/b8061014299210ab688e84a8280612e3227f1c7c))
+* **observer:** multiply token counts before rate scaling ([#3405](https://github.com/djm204/frankenbeast/issues/3405)) ([3e9178b](https://github.com/djm204/frankenbeast/commit/3e9178b048893c3cc370365fc90c376210cae17c))
+* **observer:** offload SQLite operations to worker ([#3444](https://github.com/djm204/frankenbeast/issues/3444)) ([c527b11](https://github.com/djm204/frankenbeast/commit/c527b117a9d4744029172b87e8e77e47760a59cc))
+* **observer:** redact credentials from OTEL exports ([#3626](https://github.com/djm204/frankenbeast/issues/3626)) ([f6019ee](https://github.com/djm204/frankenbeast/commit/f6019ee8c864a724421c0ebbc4938e421f582408))
+* **observer:** reject unsafe webhook retry counts ([#3645](https://github.com/djm204/frankenbeast/issues/3645)) ([442d763](https://github.com/djm204/frankenbeast/commit/442d763eaaa9cd607b612dc91f07e81e8961bc93))
+* **observer:** reset trace server state after stop ([#3601](https://github.com/djm204/frankenbeast/issues/3601)) ([cbc1b5c](https://github.com/djm204/frankenbeast/commit/cbc1b5ca2dfa67c5f91a6a25a5db30057ca6ed83))
+* **observer:** retry sqlite lock failures ([7723f66](https://github.com/djm204/frankenbeast/commit/7723f66f67591e6e3fafe3af97bca6a53fb2c77b))
+* **observer:** stabilize cost accumulation ([#3432](https://github.com/djm204/frankenbeast/issues/3432)) ([ebf0b8b](https://github.com/djm204/frankenbeast/commit/ebf0b8b9b2e89b41c5a436d1a9930bccfb9ecf7c))
+* **observer:** surface periodic batch drain failures ([#3610](https://github.com/djm204/frankenbeast/issues/3610)) ([6151f31](https://github.com/djm204/frankenbeast/commit/6151f316ab1c85df1e8a1874029a99a5134efcf0))
+* **observer:** unref BatchAdapter flush interval timers ([7f5354c](https://github.com/djm204/frankenbeast/commit/7f5354cec9f5ff5392dfe6703d538a4207c0f229)), closes [#2030](https://github.com/djm204/frankenbeast/issues/2030)
+* **observer:** use monotonic span durations ([#3562](https://github.com/djm204/frankenbeast/issues/3562)) ([a99d66c](https://github.com/djm204/frankenbeast/commit/a99d66c6c060c8186c48445f9efc59b35a871eb7))
+* **observer:** validate total cost token aggregates ([#3643](https://github.com/djm204/frankenbeast/issues/3643)) ([18e4fd7](https://github.com/djm204/frankenbeast/commit/18e4fd71c613633364b7d4a113def38337be24d1))
+
+
+### Performance
+
+* **observer:** avoid repeated SQLite schema DDL ([#3411](https://github.com/djm204/frankenbeast/issues/3411)) ([5b7479c](https://github.com/djm204/frankenbeast/commit/5b7479ccbee4879f97493ad7df441e63e061793d))
+* **observer:** cache loop detector comparisons ([#3408](https://github.com/djm204/frankenbeast/issues/3408)) ([5e9b678](https://github.com/djm204/frankenbeast/commit/5e9b678d2f3e038ab2904c6821ec77230cfaf8ca))
+* **observer:** pre-index allowed tool parameters ([#3410](https://github.com/djm204/frankenbeast/issues/3410)) ([be3c7f2](https://github.com/djm204/frankenbeast/commit/be3c7f28ef7d0ce0d5bec96f47d230cc37247cdd))
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+* **mcp:** reconcile observer redaction review fixes ([66f5339](https://github.com/djm204/frankenbeast/commit/66f53391e2265a7511a008595971c3a0d0f00dd0))
+* release main ([d19cce0](https://github.com/djm204/frankenbeast/commit/d19cce08188e79330228990ea311d38b0a2218eb))
+* release main ([1064be4](https://github.com/djm204/frankenbeast/commit/1064be4436a8cc085155bf56d87668832c9e55bc))
+* release main ([750094b](https://github.com/djm204/frankenbeast/commit/750094bab0859c49829b4abe85013a5007fc272b))
+* release main ([100e3a8](https://github.com/djm204/frankenbeast/commit/100e3a887b6fbd538e8a1b83f4e88ce4caf6c443))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2572](https://github.com/djm204/frankenbeast/issues/2572)) ([1db889b](https://github.com/djm204/frankenbeast/commit/1db889b3f71d3cf81af579394ecd58c7fe481e43))
+* release main ([#2630](https://github.com/djm204/frankenbeast/issues/2630)) ([c5306fd](https://github.com/djm204/frankenbeast/commit/c5306fd4ca17ef03cbd7b2e91f731707dac5148e))
+* release main ([#3407](https://github.com/djm204/frankenbeast/issues/3407)) ([c1cb208](https://github.com/djm204/frankenbeast/commit/c1cb208923376aef3eccd371b178352abb2a6c9c))
+* release main ([#3521](https://github.com/djm204/frankenbeast/issues/3521)) ([a3c8c12](https://github.com/djm204/frankenbeast/commit/a3c8c121f2ff4b7563c88cce9b31d6163bba82b7))
+* release main ([#3606](https://github.com/djm204/frankenbeast/issues/3606)) ([3d33c74](https://github.com/djm204/frankenbeast/commit/3d33c746587a861c97c1e140e93e536ec7d23f23))
+* **types:** enforce workspace strictness ([#3458](https://github.com/djm204/frankenbeast/issues/3458)) ([503b644](https://github.com/djm204/frankenbeast/commit/503b6448f05f74ccd28493fcf8f46a23ba4d80aa))
+
+
+### Documentation
+
+* **observer:** clarify trace server bind security ([#3289](https://github.com/djm204/frankenbeast/issues/3289)) ([f1da921](https://github.com/djm204/frankenbeast/commit/f1da9210a57f8c4c489cf17fb5d63572c4add86a))
+* **observer:** fix SamplingAdapter SQLite example ([df2e92a](https://github.com/djm204/frankenbeast/commit/df2e92a50815a99a1dca64d72facaf52920c2935)), closes [#2628](https://github.com/djm204/frankenbeast/issues/2628)
+
+
+### Tests
+
+* **observer:** clean replay temp fixtures ([9fcb921](https://github.com/djm204/frankenbeast/commit/9fcb921594dd6fcdd4d90dee718a1a97ca8dd94a)), closes [#2067](https://github.com/djm204/frankenbeast/issues/2067)
+* **observer:** cover invalid CircuitBreaker budgets ([d76ddd5](https://github.com/djm204/frankenbeast/commit/d76ddd518f964e3cce57f3b759f72e79af48e35c)), closes [#1965](https://github.com/djm204/frankenbeast/issues/1965)
+* **observer:** cover invalid traceparent version fields ([de157da](https://github.com/djm204/frankenbeast/commit/de157dabb583a1d5b7688f56f7bfa5320505f3a5)), closes [#2055](https://github.com/djm204/frankenbeast/issues/2055)
+* **observer:** focus TraceServer client script coverage ([acc4341](https://github.com/djm204/frankenbeast/commit/acc434169c0cc156e6bec90fe6e6ccf0a5c3114a))
+* **security:** add secret redaction regression suite ([#2575](https://github.com/djm204/frankenbeast/issues/2575)) ([04a708f](https://github.com/djm204/frankenbeast/commit/04a708fcf324599aab9c490718ecd625090482c8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.1 to 0.17.0
+
 ## [0.11.5](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.4...franken-observer-v0.11.5) (2026-07-23)
 
 

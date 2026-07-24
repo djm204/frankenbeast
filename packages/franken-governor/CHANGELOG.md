@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.8.3...franken-governor-v0.9.0) (2026-07-23)
+
+
+### Features
+
+* **governor:** add policy-as-code engine and gate PrCreator git pushes ([#2661](https://github.com/djm204/frankenbeast/issues/2661)) ([ebb2b91](https://github.com/djm204/frankenbeast/commit/ebb2b91b0f94c09159fc7f119f782a017517631c))
+
+
+### Bug Fixes
+
+* **docs:** remove stale package references ([#3473](https://github.com/djm204/frankenbeast/issues/3473)) ([8e6e431](https://github.com/djm204/frankenbeast/commit/8e6e431cbc05b337f7a56b5000b65e1f5dfd1ef1))
+* **dx:** align workspace TypeScript versions ([#3232](https://github.com/djm204/frankenbeast/issues/3232)) ([5a58ead](https://github.com/djm204/frankenbeast/commit/5a58ead0e541104b41d87e5780419386ea727c26))
+* explain invalid CLI approval responses ([#3314](https://github.com/djm204/frankenbeast/issues/3314)) ([745723f](https://github.com/djm204/frankenbeast/commit/745723f7fe7d78cab6959a1b4451cc305b45eb53))
+* **governor:** add approval anomaly detection ([#2353](https://github.com/djm204/frankenbeast/issues/2353)) ([84a1222](https://github.com/djm204/frankenbeast/commit/84a12225d5e900e9c9be5597cf6ae6a10ea604e7))
+* **governor:** authorize Slack approvers ([#3269](https://github.com/djm204/frankenbeast/issues/3269)) ([938940b](https://github.com/djm204/frankenbeast/commit/938940b3f561f5f916ef61505fc05508df877aa5))
+* **governor:** preserve out-of-order approval responses ([#3456](https://github.com/djm204/frankenbeast/issues/3456)) ([f89fcef](https://github.com/djm204/frankenbeast/commit/f89fcef6291fd564944626dc260bebdead750e97))
+* **governor:** validate Slack timestamp integers ([#3566](https://github.com/djm204/frankenbeast/issues/3566)) ([b4cc339](https://github.com/djm204/frankenbeast/commit/b4cc339f772026faa8f9273007fdd7ecad3d9edb))
+* **orchestrator:** prevent duplicate terminal input ([#3436](https://github.com/djm204/frankenbeast/issues/3436)) ([fd4517b](https://github.com/djm204/frankenbeast/commit/fd4517b0bd1e365942b6e1dd55cf31397fb004e7)), closes [#3364](https://github.com/djm204/frankenbeast/issues/3364)
+
+
+### Miscellaneous
+
+* **deps:** bump the npm-security-and-maintenance group across 1 directory with 27 updates ([#3602](https://github.com/djm204/frankenbeast/issues/3602)) ([367903b](https://github.com/djm204/frankenbeast/commit/367903b8989dfbb8a52e3510c2fde8be95a6b391))
+* **mcp:** reconcile observer redaction review fixes ([66f5339](https://github.com/djm204/frankenbeast/commit/66f53391e2265a7511a008595971c3a0d0f00dd0))
+* release main ([d19cce0](https://github.com/djm204/frankenbeast/commit/d19cce08188e79330228990ea311d38b0a2218eb))
+* release main ([1064be4](https://github.com/djm204/frankenbeast/commit/1064be4436a8cc085155bf56d87668832c9e55bc))
+* release main ([#2408](https://github.com/djm204/frankenbeast/issues/2408)) ([5545389](https://github.com/djm204/frankenbeast/commit/55453895d39a81c081dc9e919ac84f7750bfa2ee))
+* release main ([#2409](https://github.com/djm204/frankenbeast/issues/2409)) ([39306c3](https://github.com/djm204/frankenbeast/commit/39306c3d03ed85ffa3624c8aad9c3b963542533b))
+* release main ([#2572](https://github.com/djm204/frankenbeast/issues/2572)) ([1db889b](https://github.com/djm204/frankenbeast/commit/1db889b3f71d3cf81af579394ecd58c7fe481e43))
+* release main ([#2630](https://github.com/djm204/frankenbeast/issues/2630)) ([c5306fd](https://github.com/djm204/frankenbeast/commit/c5306fd4ca17ef03cbd7b2e91f731707dac5148e))
+* release main ([#3407](https://github.com/djm204/frankenbeast/issues/3407)) ([c1cb208](https://github.com/djm204/frankenbeast/commit/c1cb208923376aef3eccd371b178352abb2a6c9c))
+* release main ([#3521](https://github.com/djm204/frankenbeast/issues/3521)) ([a3c8c12](https://github.com/djm204/frankenbeast/commit/a3c8c121f2ff4b7563c88cce9b31d6163bba82b7))
+
+
+### Documentation
+
+* **onboarding:** relocate concise agent ramp-up guide ([#3396](https://github.com/djm204/frankenbeast/issues/3396)) ([c39eb74](https://github.com/djm204/frankenbeast/commit/c39eb74886803b2a8f041553cfc742e0655aa483))
+
+
+### Tests
+
+* **governor:** make integration script config-only ([#2601](https://github.com/djm204/frankenbeast/issues/2601)) ([ee0d289](https://github.com/djm204/frankenbeast/commit/ee0d2891e2c448e116d1a7d8d72aa5b28ec6afb4)), closes [#2022](https://github.com/djm204/frankenbeast/issues/2022)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.16.1 to 0.17.0
+
 ## [0.8.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.8.2...franken-governor-v0.8.3) (2026-07-23)
 
 
