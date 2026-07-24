@@ -15,7 +15,7 @@ export function ActivityPane({ events }: ActivityPaneProps) {
   }, [events.length]);
 
   return (
-    <section className="rail-card" aria-label="Activity">
+    <section className="rail-card" role="region" aria-label="Activity">
       <div className="rail-card__header">
         <p className="eyebrow">Activity</p>
         <h2>Runtime Events</h2>
