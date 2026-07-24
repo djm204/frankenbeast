@@ -1242,6 +1242,40 @@ describe("createBrainAdapter", () => {
     });
   });
 
+  it("marks capped scoped retention reports partial when hidden rows can consume the scan", async () => {
+    const brain = createBrainAdapter("/tmp/scoped-retention-scan.db");
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-21T00:00:00.000Z",
+      policies: [],
+      counts: { total: 1, protected: 0, expired: 1, nearingExpiry: 0, compactionCandidates: 0 },
+      entries: [{
+        store: "episodic",
+        key: "1",
+        agentId: "other-agent",
+        class: "transient_observation",
+        action: "expired",
+        policy: { class: "transient_observation", retentionDays: 7, compactPriority: 80, protected: false, description: "transient" },
+        protected: false,
+        reason: "retention window elapsed",
+      }],
+      compactionCandidates: [],
+    });
+
+    const report = await brain.memoryRetentionReport({
+      readScope: "agent",
+      agentId: "current-agent",
+      maxScanRows: 1,
+    });
+
+    expect(brainInstances[0].memoryRetentionReport).toHaveBeenCalledWith({ maxScanRows: 1 });
+    expect(report.entries).toEqual([]);
+    expect(report.scan).toEqual({
+      maxRowsPerStore: 1,
+      truncated: true,
+      scopeFilterAppliedAfterScan: true,
+    });
+  });
+
   it("preserves priority and oldest-first candidate ordering after scope filtering", async () => {
     const brain = createBrainAdapter("/tmp/retention-order.db");
     const policy = {

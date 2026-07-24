@@ -146,6 +146,20 @@ export interface ProjectMemoryExport {
 
 export interface MemoryRetentionReportInput extends MemoryRetentionReportOptions, MemoryScopeInput {}
 
+export interface ScopedMemoryRetentionReport extends MemoryRetentionReport {
+  /**
+   * Present when maxScanRows bounded the underlying per-store scan. Because
+   * read-scope filtering happens after that scan, callers must treat a capped
+   * scoped report as partial rather than interpreting an empty result as proof
+   * that no visible retention candidates exist.
+   */
+  scan?: {
+    maxRowsPerStore: number;
+    truncated: true;
+    scopeFilterAppliedAfterScan: boolean;
+  };
+}
+
 export interface BrainAdapter {
   query(input: BrainQueryInput): Promise<BrainMemoryEntry[]>;
   store(input: {
@@ -158,7 +172,7 @@ export interface BrainAdapter {
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
   exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
   memoryAccessAuditReport(input?: MemoryAccessAuditReportInput): Promise<MemoryAccessAuditReport>;
-  memoryRetentionReport(input?: MemoryRetentionReportInput): Promise<MemoryRetentionReport>;  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
+  memoryRetentionReport(input?: MemoryRetentionReportInput): Promise<ScopedMemoryRetentionReport>;  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
   ): Promise<RightToForgetReport>;
@@ -524,7 +538,8 @@ function filterRetentionReportByScope(
   report: MemoryRetentionReport,
   scope: { readScope: MemoryReadScope; agentId?: string },
   maxEntries?: number,
-): MemoryRetentionReport {
+  maxScanRows?: number,
+): ScopedMemoryRetentionReport {
   const entries = applyRetentionBudget(
     report.entries
       .filter((entry) => canReadMemoryEntry(entry.agentId, scope))
@@ -545,6 +560,15 @@ function filterRetentionReportByScope(
     },
     entries,
     compactionCandidates,
+    ...(maxScanRows === undefined
+      ? {}
+      : {
+          scan: {
+            maxRowsPerStore: maxScanRows,
+            truncated: true as const,
+            scopeFilterAppliedAfterScan: scope.readScope !== "all",
+          },
+        }),
   };
 }
 
@@ -1566,6 +1590,7 @@ export function createBrainAdapter(
         brain.memoryRetentionReport(reportOptions),
         readScope,
         input.maxEntries,
+        input.maxScanRows,
       );    },
 
     async forget(key, input = {}) {
