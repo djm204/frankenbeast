@@ -3,7 +3,8 @@
 - [x] Read the live issue and confirm no open PR owns #3700.
 - [x] Sync the isolated issue branch to current `origin/main`.
 - [x] Read PM/root handoffs, epic progress, and shared lessons.
-- [x] Locate ADR-039 or establish its live source/status without guessing.
+- [x] Locate the referenced ADR, resolve the live ADR-039 collision by assigning
+  this decision the next unused identifier (ADR-041), and update all links.
 - [x] Trace the existing chat runtime, session persistence, WebSocket/REST contracts, web client, BrainRegistry dependency, and governor-gated dispatch path.
 - [x] Write concrete transport, entity/namespace, migration, persistence/API, and dispatch decisions with implementation-child acceptance mapping.
 - [x] Address independent review findings: enforce one conversation per

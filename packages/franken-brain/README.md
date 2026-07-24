@@ -286,7 +286,7 @@ The package creates the required SQLite schema in its constructor and enables WA
 ## Planned Hive Brain registry relationship
 
 The accepted central-command design is documented in
-[`docs/adr/039-hive-brain-command-center.md`](../../docs/adr/039-hive-brain-command-center.md).
+[`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md).
 Issue #3685's planned `BrainRegistry.forAgentType(id)` remains the agent-type
 lookup. Hive work extends the same registry additively with a disjoint
 `forWorkspaceHive(workspaceId)` key namespace. One `BrainConversation` per

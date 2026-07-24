@@ -1,4 +1,4 @@
-# ADR-039: Hive Brain command center
+# ADR-041: Hive Brain command center
 
 - **Date:** 2026-07-24
 - **Status:** Accepted

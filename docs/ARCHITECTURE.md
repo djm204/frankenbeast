@@ -461,7 +461,7 @@ The old standalone Firewall/Critique/Governor HTTP-service table describes histo
 
 ### Hive Brain central-command chat (accepted design)
 
-[ADR-039](adr/039-hive-brain-command-center.md) fixes the architecture for the
+[ADR-041](adr/041-hive-brain-command-center.md) fixes the architecture for the
 planned Hive Brain command center. A durable `BrainConversation` extends the
 existing project-scoped chat session model; it does not replace
 `/v1/chat/ws`, its `franken.chat.v1` events, or the REST reconciliation routes.
@@ -474,7 +474,7 @@ implementation must preserve the current `franken-web` transport and route all
 Beast launches through `ChatRuntime` -> `BeastDispatchPort` ->
 `BeastDispatchService`; direct process/container execution from a brain or
 faculty is prohibited. See
-`docs/adr/039-hive-brain-command-center.md` for the entity fields, migration,
+`docs/adr/041-hive-brain-command-center.md` for the entity fields, migration,
 failure rules, and the boundaries for #3701, #3702, and #3703.
 
 ## Shared Types (@franken/types)

@@ -56,7 +56,7 @@ Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxi
 ### Hive Brain compatibility contract
 
 The accepted central-command design in
-[`docs/adr/039-hive-brain-command-center.md`](../../docs/adr/039-hive-brain-command-center.md)
+[`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md)
 keeps this package's existing session and WebSocket behavior. The dashboard
 continues to create or resume `/v1/chat/sessions`, mint one-shot socket tickets,
 connect to `/v1/chat/ws` with `franken.chat.v1`, and reconcile from

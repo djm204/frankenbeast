@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const readDoc = (path: string) => readFileSync(resolve(ROOT, path), 'utf8');
-const ADR_PATH = 'docs/adr/039-hive-brain-command-center.md';
+const ADR_PATH = 'docs/adr/041-hive-brain-command-center.md';
 
 describe('issue #3700 Hive Brain central-command chat decision', () => {
   it('answers the transport, entity, registry, compatibility, and dispatch questions', () => {

@@ -127,8 +127,8 @@ packages/franken-orchestrator/src/
   - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
   - Shares the same `ChatRuntime` as the CLI REPL
 - **Hive Brain central-command chat is an accepted design, not implemented runtime behavior.**
-  [ADR-039](../adr/039-hive-brain-command-center.md)
-  (`docs/adr/039-hive-brain-command-center.md`) keeps the existing REST and
+  [ADR-041](../adr/041-hive-brain-command-center.md)
+  (`docs/adr/041-hive-brain-command-center.md`) keeps the existing REST and
   `/v1/chat/ws` browser contract, defines `BrainConversation` as durable
   transcript/routing/approval state bound to the planned `BrainRegistry`, and
   requires every Beast launch to reuse the existing governed dispatch path.

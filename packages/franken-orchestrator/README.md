@@ -133,7 +133,7 @@ Each criterion reports `pass` only when matching evidence is present in working 
 
 ## Hive Brain central-command chat contract
 
-[`docs/adr/039-hive-brain-command-center.md`](../../docs/adr/039-hive-brain-command-center.md)
+[`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md)
 defines the accepted, not-yet-implemented Hive Brain chat architecture. The
 existing REST session routes and `/v1/chat/ws` remain the browser transport. A
 future `BrainConversation` compatibility repository will provide the current
