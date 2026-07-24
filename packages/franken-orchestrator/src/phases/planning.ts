@@ -58,6 +58,11 @@ export async function runPlanning(
       context: ctx.sanitizedIntent.context,
     });
 
+    try {
+      planner.recordPlanCreated?.(ctx.sanitizedIntent, plan);
+    } catch {
+      // Optional lifecycle telemetry must not replace a successfully built graph.
+    }
     ctx.plan = plan;
     ctx.addAudit('planner', 'plan:created', {
       iteration: 1,

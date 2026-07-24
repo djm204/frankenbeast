@@ -16,6 +16,13 @@ import { BeastLoop } from '@franken/orchestrator';
 
 The package's main public API is its compiled `dist/index.js` export. Most day-to-day usage goes through the CLI binaries.
 
+`createBeastDeps()` wraps the supplied `IPlannerModule` in the exported
+`PlanningFacultyAdapter`, attaches it to `SqliteBrain.planning`, and routes
+execution trace writes through recallable plan-created, step-completed, and
+step-failed episodes. The adapter delegates plan creation unchanged; DAG
+ordering, critique, recovery, and execution remain owned by their existing
+planner/orchestrator paths.
+
 ## CLI binaries
 
 This package publishes three aliases that resolve to the same CLI entrypoint:

@@ -136,6 +136,89 @@ describe('E2E: Consolidated deps through BeastLoop', () => {
     expect(allRecent.length).toBeGreaterThan(0);
   });
 
+  it('wires the real planner through the brain planning faculty lifecycle', async () => {
+    const existing = mockExistingDeps();
+    const deps = createBeastDeps(
+      { providers: [{ name: 'claude', type: 'claude-cli' }] },
+      existing,
+    );
+
+    const plan = await deps.planner.createPlan({ goal: 'Wire planning faculty' });
+    expect(plan).toBe(await existing.planner.createPlan({ goal: 'Wire planning faculty' }));
+    expect(deps.sqliteBrain!.planning).toBe(deps.planner);
+    expect(deps.sqliteBrain!.planning.configured).toBe(true);
+
+    await deps.memory.recordTrace({
+      taskId: 'task-1',
+      summary: 'Test planning lifecycle',
+      outcome: 'success',
+      timestamp: new Date().toISOString(),
+    });
+    await deps.memory.recordTrace({
+      taskId: 'task-2',
+      summary: 'compiler exploded in /private/path',
+      objective: 'Handle planning failure',
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(deps.sqliteBrain!.episodic.recall('plan created wire faculty').some(
+      (episode) => episode.type === 'decision' && episode.step === 'planning',
+    )).toBe(true);
+    expect(deps.sqliteBrain!.episodic.recall('completed planning lifecycle').some(
+      (episode) => episode.type === 'success' && episode.step === 'task-1',
+    )).toBe(true);
+    expect(deps.sqliteBrain!.episodic.recall('failed planning failure').some(
+      (episode) => episode.type === 'failure' && episode.step === 'task-2',
+    )).toBe(true);
+    expect((await deps.memory.getContext('planning-project')).knownErrors).toContain(
+      '[task-2] compiler exploded in /private/path',
+    );
+
+    for (let i = 0; i < 6; i += 1) {
+      await deps.memory.recordTrace({
+        taskId: `failure-${i}`,
+        summary: `diagnostic-${i}`,
+        objective: `Recover task ${i}`,
+        outcome: 'failure',
+        timestamp: new Date().toISOString(),
+      });
+    }
+    const recoveryContext = await deps.memory.getContext('planning-project');
+    expect(recoveryContext.knownErrors).toContain('[failure-0] diagnostic-0');
+    expect(recoveryContext.knownErrors.some(
+      (entry) => entry.startsWith('Planning step failed:'),
+    )).toBe(false);
+
+    await deps.memory.recordTrace({
+      taskId: 'legacy-failure',
+      summary: 'legacy raw diagnostic',
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
+    expect(deps.sqliteBrain!.episodic.recentFailures(10).filter(
+      (episode) => episode.summary.includes('legacy raw diagnostic'),
+    )).toHaveLength(1);
+
+    await deps.memory.recordTrace({
+      taskId: 'buried-generic-failure',
+      summary: 'retain this recovery diagnostic',
+      outcome: 'failure',
+      timestamp: new Date().toISOString(),
+    });
+    for (let i = 0; i < 25; i += 1) {
+      deps.sqliteBrain!.planning.recordStepFailed({
+        id: `lifecycle-only-${i}`,
+        objective: `Telemetry ${i}`,
+        requiredSkills: [],
+        dependsOn: [],
+      }, new Error('sanitized'));
+    }
+    expect((await deps.memory.getContext('planning-project')).knownErrors).toContain(
+      '[buried-generic-failure] retain this recovery diagnostic',
+    );
+  });
+
   it('provider registry has configured providers', () => {
     const deps = createBeastDeps(
       {

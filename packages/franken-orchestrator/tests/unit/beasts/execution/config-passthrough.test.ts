@@ -72,9 +72,9 @@ describe('Config file passthrough', () => {
     expect(configFilePath).toContain('.fbeast');
     expect(configFilePath).toContain('run-configs');
 
-    // Config file content should match the configSnapshot
+    // Config file content should preserve the snapshot and backfill canonical identity.
     const written = JSON.parse(readFileSync(configFilePath, 'utf-8'));
-    expect(written).toEqual(configSnapshot);
+    expect(written).toEqual({ ...configSnapshot, definitionId: 'martin-loop' });
   });
 
   it('cleans up config file after process exits successfully', async () => {

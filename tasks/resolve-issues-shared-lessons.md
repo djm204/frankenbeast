@@ -521,3 +521,7 @@
 ## 2026-07-24 — Retention enforcement safety
 - Explicit SQLite retention enforcement should consume the same report snapshot it presents, cap each atomic deletion batch, and record a non-sensitive success audit inside the transaction so audit failure rolls back destructive writes; record the error outcome after rollback.
 - Recovery compaction must protect the newest usable checkpoint rather than the highest row ID, because recovery already skips corrupt rows. Keep every adapter's scoped candidate ordering aligned by exporting and reusing the core priority/age comparator instead of reimplementing lexical ID sorting.
+
+## 2026-07-24 — Faculty adapters should wrap lifecycle seams
+- Attach faculty adapters in the consolidated dependency factory and reuse the existing planner and execution trace seams; do not reimplement DAG ordering or add a parallel executor. Keep faculty failure episodes recallable by task objective while limiting their details to the error class, preserve established generic traces needed by recovery, suppress fake lifecycle events from health probes, and make additive telemetry best-effort so it cannot replace planner/execution outcomes.
+- Module-disable flags must also disable faculty-owned persistence, optional lifecycle hooks need a caller-side best-effort boundary, and recovery queries must filter telemetry before applying their result limit so lifecycle volume cannot starve diagnostic history.

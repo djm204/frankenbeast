@@ -155,6 +155,7 @@ export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from
 
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
+export { PlanningFacultyAdapter } from './adapters/planning-faculty-adapter.js';
 export {
   AGENT_HANDOFF_TEMPLATE_REQUIREMENTS,
   PM_HANDOFF_QUALITY_RUBRIC,

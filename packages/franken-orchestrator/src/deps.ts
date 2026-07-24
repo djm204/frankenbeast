@@ -4,8 +4,9 @@ import type { GraphBuilder } from './planning/chunk-file-graph-builder.js';
 import type {
   ReasoningCritiqueFinding,
   ReasoningCritiqueResult,
-  ReasoningPlanGraph,
-  ReasoningPlanTask,
+  PlanningIntent,
+  PlanningPlanGraph,
+  PlanningPlanTask,
 } from '@franken/types';
 
 /**
@@ -86,6 +87,8 @@ export interface MemoryContext {
 export interface EpisodicEntry {
   readonly taskId: string;
   readonly summary: string;
+  /** Plan objective when summary carries failure diagnostics instead. */
+  readonly objective?: string | undefined;
   readonly outcome: 'success' | 'failure';
   readonly timestamp: string;
 }
@@ -93,22 +96,15 @@ export interface EpisodicEntry {
 /** What the orchestrator needs from MOD-04 (Planner). */
 export interface IPlannerModule {
   createPlan(intent: PlanIntent): Promise<PlanGraph>;
+  /** Optional non-recording liveness probe for planner wrappers. */
+  checkHealth?(): Promise<void>;
+  /** Records plans created through an alternate graph-builder seam. */
+  recordPlanCreated?(intent: PlanIntent, plan: PlanGraph): void;
 }
 
-export interface PlanIntent {
-  readonly goal: string;
-  readonly strategy?: string | undefined;
-  readonly context?: Record<string, unknown> | undefined;
-  /**
-   * Internally generated critique guidance from a prior planning iteration.
-   * User/retrieved context fields with the same name must stay in context.
-   */
-  readonly critiqueFeedback?: string | undefined;
-}
-
-export type PlanGraph = ReasoningPlanGraph;
-
-export type PlanTask = ReasoningPlanTask;
+export type PlanIntent = PlanningIntent;
+export type PlanGraph = PlanningPlanGraph;
+export type PlanTask = PlanningPlanTask;
 
 /** What the orchestrator needs from MOD-05 (Observer). */
 export interface IObserverModule {

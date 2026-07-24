@@ -39,9 +39,9 @@ import {
 
 const brain = new SqliteBrain('.fbeast/beast.db');
 
-// BrainRegistry provides one stable process-local brain per agent type. Its
-// foundation keeps SqliteBrain's existing in-memory default; durable path
-// selection and runtime definitionId wiring are separate follow-up work.
+// BrainRegistry provides one stable process-local brain per agent type. The
+// default path is .fbeast/brains/<agentTypeId>.db; pass ':memory:' explicitly
+// when persistence is not wanted.
 const registry = new BrainRegistry();
 const coderBrain = registry.forAgentType('coder');
 const sameCoderBrain = registry.forAgentType('coder');
@@ -73,6 +73,12 @@ const enforcement = brain.enforceMemoryRetention({
   maxDeletes: 100,
   maxScanRows: 1_000,
 });
+
+// SqliteBrain starts with an explicit fail-closed planning faculty. The
+// orchestrator's createBeastDeps() attaches its PlanningFacultyAdapter, which
+// delegates to the existing planner and records plan-created, step-completed,
+// and step-failed episodes without changing DAG behavior.
+console.assert(brain.planning.configured === false);
 
 // Agent learning capture can opt into a cooldown so retrospectives or coordinator
 // handoffs do not churn the same lesson repeatedly. The key is stored in
@@ -307,12 +313,12 @@ SqliteBrain
 └── faculties     planning/reasoning/action/learning addressing surfaces
 
 BrainRegistry
-└── agentTypeId → stable process-local SqliteBrain instance
+└── agentTypeId → stable `.fbeast/brains/<agentTypeId>.db` SqliteBrain instance
 ```
 
 Faculty properties start inert (`configured: false`). The orchestrator's local CLI attaches a configured reasoning adapter that delegates to the existing critique chain and records compact verdict episodes through `episodic.record()`; `SqliteBrain` does not import or reimplement critique logic. Planning, action, and learning remain inert pending their adapters. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
 
-The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state. `BrainRegistry` currently creates in-memory brains and validates agent-type IDs as portable path components; it does not choose durable paths or replace current orchestrator construction yet.
+The package creates the required SQLite schema in its constructor and enables WAL mode. `BrainRegistry` validates agent-type IDs as portable path components and defaults each one to `.fbeast/brains/<agentTypeId>.db`; `forAgentType(id, ':memory:')` remains the explicit ephemeral opt-out. Spawned Beast runtime config carries the canonical catalog `definitionId` into orchestrator dependency construction, so repeated runs of one agent type reopen the same database while different definitions remain isolated. An explicit `brain.dbPath` still overrides the registry default. The repository ignores the entire `.fbeast/` state tree, including SQLite WAL/SHM sidecars.
 
 ## Planned Hive Brain registry relationship
 
@@ -356,7 +362,7 @@ Future schema changes should increment `CURRENT_MEMORY_SCHEMA_VERSION`, add a fo
 ```text
 src/
   index.ts          Public barrel exports (`SqliteBrain`, `BrainRegistry`)
-  brain-registry.ts Process-local stable brain lookup by safe agent-type ID
+  brain-registry.ts Durable process-local brain lookup by safe agent-type ID
   sqlite-brain.ts   Working, episodic, recovery, serialize/hydrate implementation
 
 tests/
