@@ -682,7 +682,7 @@ export class WebhookNotifier {
         }
 
         let dnsFailure = false
-        let response: WebhookFetchResponse
+        let response: WebhookFetchResponse | undefined
         let responseBody = ''
         try {
           const attemptResult = await this.runWithDeliveryDeadline(async deadlineSignal => {
@@ -706,6 +706,7 @@ export class WebhookNotifier {
               body: requestBody,
               signal: deadlineSignal,
             })
+            response = attemptResponse
             const shouldReadBody = !attemptResponse.ok
               && (!this.retry
                 || !isTransientStatus(attemptResponse.status)
@@ -722,12 +723,21 @@ export class WebhookNotifier {
           if (options.signal?.aborted) {
             throw err
           }
+          if (response && !response.ok && !isTransientStatus(response.status)) {
+            const bodySuffix = responseBody ? `: ${responseBody}` : ''
+            throw new Error(
+              `Webhook delivery failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ''} for ${sanitizeWebhookEndpoint(this.url)}${bodySuffix}`,
+            )
+          }
           if (dnsFailure && (!this.retry || !isTransientDnsError(err) || attempt === maxAttempts - 1)) {
             throw err
           }
           continue
         }
 
+        if (!response) {
+          continue
+        }
         if (!response.ok) {
           const bodySuffix = responseBody ? `: ${responseBody}` : ''
           lastError = new Error(
@@ -851,9 +861,21 @@ export class WebhookNotifier {
       }
     } finally {
       if (truncated || timedOut || signal?.aborted) {
-        await reader.cancel().catch(() => undefined)
+        const releaseLock = () => {
+          try {
+            reader.releaseLock()
+          } catch {
+            // A pending read retains the lock until cancellation settles.
+          }
+        }
+        try {
+          void reader.cancel().catch(() => undefined).finally(releaseLock)
+        } catch {
+          releaseLock()
+        }
+      } else {
+        reader.releaseLock()
       }
-      reader.releaseLock()
     }
 
     const decoded = new TextDecoder().decode(Buffer.concat(chunks).subarray(0, MAX_ERROR_BODY_CHARS)).trim()

@@ -638,6 +638,25 @@ describe('WebhookNotifier', () => {
       expect(Date.now() - startedAt).toBeLessThan(750)
     })
 
+    it('does not wait for stalled stream cancellation after the body-read deadline', async () => {
+      const cancel = vi.fn(() => new Promise<void>(() => undefined))
+      const stream = new ReadableStream<Uint8Array>({ cancel })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        body: stream,
+      })
+      const notifier = createNotifier({ deliveryTimeoutMs: 1_000 })
+      const startedAt = Date.now()
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow(
+        'Webhook delivery failed: 500 Internal Server Error',
+      )
+      expect(Date.now() - startedAt).toBeLessThan(750)
+      expect(cancel).toHaveBeenCalledTimes(1)
+    })
+
     it('keeps the delivery deadline active while reading an error body', async () => {
       const cancel = vi.fn()
       const stream = new ReadableStream<Uint8Array>({ cancel })
@@ -1470,6 +1489,29 @@ describe('WebhookNotifier', () => {
       })
 
       await expect(notifier.send({ type: 'test' })).rejects.toThrow('401')
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      expect(sleepFn).not.toHaveBeenCalled()
+    })
+
+    it('does not retry non-transient 4xx responses when body collection times out', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        cancel: vi.fn(),
+      })
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        body: stream,
+      })
+      const sleepFn = vi.fn().mockResolvedValue(undefined)
+      const notifier = createNotifier({
+        deliveryTimeoutMs: 10,
+        retry: { maxRetries: 2 },
+        sleep: sleepFn,
+      })
+
+      await expect(notifier.send({ type: 'test' })).rejects.toThrow('401 Unauthorized')
 
       expect(mockFetch).toHaveBeenCalledTimes(1)
       expect(sleepFn).not.toHaveBeenCalled()
