@@ -1,5 +1,10 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-24 — Review-gated lesson consolidation
+- A consolidation pass should refresh an existing pending review candidate when later episodes increase its evidence; otherwise occurrence counts and confidence become stale as soon as the threshold is first crossed. Keep approved values stable and route future evolution through a separately reviewed update.
+- Derive consolidated-memory keys from normalized patterns, not bounded-window event ids; preserve reviewer-edited fields on evidence refresh and check key-level suppressions before re-proposing rejected candidates.
+- Keep `skill-evolution` failures in their dedicated review gate by using `recentFailures(..., excludeCategory)` so excluded rows do not consume the generic lesson lookback.
+
 ## 2026-07-24 — Recovering a blocked issue lane without destructive reset
 - When a dedicated issue worktree is clean but its branch contains unrelated historical commits, preserve that worktree and its audit trail. Create a new isolated branch/worktree directly from current `origin/main`, verify exact HEAD equality and no competing PR, and continue the same one-issue lifecycle there instead of waiting on or bypassing a destructive reset gate.
 

@@ -113,8 +113,50 @@ export interface ActionFacultyApprovalOutcome {
 /** Foundation for learning that builds on episodic memory and the memory-review queue. */
 export interface ILearningFaculty {
   readonly kind: 'learning';
-  /** False until the consolidation/query implementation is attached. */
+  /** True when the brain can consolidate episodes and query reviewed patterns. */
   readonly configured: boolean;
+  consolidate(options?: LessonConsolidationOptions): LessonConsolidationItem[];
+  relevantLessons(query: string, options?: RelevantLessonsOptions): RelevantLesson[];
+}
+
+export interface LessonConsolidationOptions {
+  /** Matching episodes required before proposing a lesson. Defaults to 3. */
+  readonly threshold?: number;
+  /** Recent failure episodes inspected by the bounded clustering pass. Defaults to 100. */
+  readonly lookback?: number;
+  /** Minimum normalized-text similarity for cluster membership. Defaults to 0.5. */
+  readonly similarityThreshold?: number;
+}
+
+export interface RelevantLessonsOptions {
+  /** Maximum matching patterns returned. Defaults to 10. */
+  readonly limit?: number;
+  /** Hide patterns below this occurrence-derived confidence. Defaults to 0. */
+  readonly minConfidence?: number;
+}
+
+export interface ConsolidatedLesson {
+  readonly kind: 'consolidated-lesson';
+  readonly pattern: string;
+  readonly keywords: readonly string[];
+  readonly occurrenceCount: number;
+  readonly confidence: number;
+  readonly evidenceEventIds: readonly number[];
+  readonly firstSeenAt: string;
+  readonly lastSeenAt: string;
+}
+
+export interface LessonConsolidationItem {
+  readonly id: string;
+  readonly key: string;
+  readonly status: 'pending';
+  readonly value: ConsolidatedLesson;
+}
+
+export interface RelevantLesson extends ConsolidatedLesson {
+  readonly key: string;
+  readonly status: 'pending' | 'approved';
+  readonly relevance: number;
 }
 
 export interface BrainSerializeOptions {
