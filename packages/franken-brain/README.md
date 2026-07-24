@@ -61,6 +61,12 @@ brain.episodic.record({
 });
 const related = brain.episodic.recall('package inventory', 5);
 
+// SqliteBrain starts with an explicit fail-closed planning faculty. The
+// orchestrator's createBeastDeps() attaches its PlanningFacultyAdapter, which
+// delegates to the existing planner and records plan-created, step-completed,
+// and step-failed episodes without changing DAG behavior.
+console.assert(brain.planning.configured === false);
+
 // Agent learning capture can opt into a cooldown so retrospectives or coordinator
 // handoffs do not churn the same lesson repeatedly. The key is stored in
 // details.learningKey; duplicate attempts return a structured cooldown result

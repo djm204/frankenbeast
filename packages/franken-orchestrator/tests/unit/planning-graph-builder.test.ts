@@ -25,7 +25,10 @@ describe('runPlanning with GraphBuilder', () => {
     const ctx = new BeastContext('proj', 'sess', 'input');
     ctx.sanitizedIntent = { goal: 'build from chunks' };
 
-    const planner = makePlanner();
+    const planner = {
+      ...makePlanner(),
+      recordPlanCreated: vi.fn(),
+    };
     const critique = makeCritique();
     const graphBuilder = new ChunkFileGraphBuilder(tmpDir);
 
@@ -38,6 +41,10 @@ describe('runPlanning with GraphBuilder', () => {
       'harden:05_sample',
     ]);
     expect(planner.createPlan).not.toHaveBeenCalled();
+    expect(planner.recordPlanCreated).toHaveBeenCalledWith(
+      { goal: 'build from chunks', strategy: undefined, context: undefined },
+      ctx.plan,
+    );
     // Regression guard for issue #20: a graph-builder plan must not bypass
     // critique review just because it wasn't produced by the planner module.
     expect(critique.reviewPlan).toHaveBeenCalledTimes(1);
@@ -45,6 +52,28 @@ describe('runPlanning with GraphBuilder', () => {
     expect(reviewedPlan.tasks).toHaveLength(ctx.plan!.tasks.length);
     expect(reviewedPlan.tasks[0]?.objective).not.toContain('Sample chunk');
     expect(reviewContext).toEqual({ source: 'graphBuilder', redactedUntrustedChunkContent: true });
+  });
+
+  it('keeps a built graph when optional lifecycle recording fails', async () => {
+    writeFileSync(join(tmpDir, '05_sample.md'), '# Chunk 05: sample\n\nSample chunk', 'utf-8');
+    const ctx = new BeastContext('proj', 'sess', 'input');
+    ctx.sanitizedIntent = { goal: 'build despite telemetry failure' };
+    const planner = {
+      ...makePlanner(),
+      recordPlanCreated: vi.fn(() => {
+        throw new Error('episodic store unavailable');
+      }),
+    };
+
+    await expect(runPlanning(
+      ctx,
+      planner,
+      makeCritique(),
+      defaultConfig(),
+      undefined,
+      new ChunkFileGraphBuilder(tmpDir),
+    )).resolves.toBeUndefined();
+    expect(ctx.plan?.tasks).toHaveLength(2);
   });
 
   it('throws CritiqueSpiralError when critique rejects a graph-builder plan', async () => {

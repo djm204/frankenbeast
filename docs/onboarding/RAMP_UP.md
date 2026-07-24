@@ -37,7 +37,9 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches reasoning to the real critique chain, while planning/action/learning remain addressing stubs pending adapter work |
+|| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches reasoning to the real critique chain, while planning/action/learning remain addressing stubs pending adapter work |
+
+>>>>>>> origin/main
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |

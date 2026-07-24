@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { checkModuleHealth, allHealthy } from '../../../src/resilience/module-initializer.js';
 import { makeDeps } from '../../helpers/stubs.js';
 
@@ -13,6 +13,17 @@ describe('ModuleInitializer', () => {
       expect(r.healthy).toBe(true);
       expect(r.error).toBeUndefined();
     }
+  });
+
+  it('uses a non-recording planner health probe when available', async () => {
+    const createPlan = vi.fn(async () => ({ tasks: [] }));
+    const checkHealth = vi.fn(async () => {});
+    const deps = makeDeps({ planner: { createPlan, checkHealth } });
+
+    await checkModuleHealth(deps);
+
+    expect(checkHealth).toHaveBeenCalledOnce();
+    expect(createPlan).not.toHaveBeenCalled();
   });
 
   it('detects unhealthy firewall module', async () => {

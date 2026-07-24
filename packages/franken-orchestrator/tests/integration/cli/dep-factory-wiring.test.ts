@@ -11,6 +11,7 @@ import { ReflectionHeartbeatAdapter } from '../../../src/adapters/reflection-hea
 import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import { ReasoningFacultyAdapter } from '../../../src/adapters/reasoning-faculty-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
+import { SqliteBrain } from '@franken/brain';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
 import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
@@ -145,6 +146,10 @@ describe('dep-factory wiring integration', () => {
     expect(deps.memory).not.toBeInstanceOf(SqliteBrainMemoryAdapter);
     expect(deps.firewall).not.toBeInstanceOf(MiddlewareChainFirewallAdapter);
     expect(deps.heartbeat).not.toBeInstanceOf(ReflectionHeartbeatAdapter);
+    deps.planner.recordPlanCreated?.(
+      { goal: 'Do not persist disabled memory lifecycle' },
+      { tasks: [] },
+    );
     const ctx = await deps.memory.getContext('test');
     expect(ctx).toEqual({ adrs: [], knownErrors: [], rules: [] });
     await expect(deps.heartbeat.pulse()).resolves.toEqual({
@@ -153,6 +158,10 @@ describe('dep-factory wiring integration', () => {
       techDebt: [],
     });
     await finalize();
+
+    const brain = new SqliteBrain(join(paths.buildDir, 'memory.db'));
+    expect(brain.episodic.recall('disabled memory lifecycle')).toEqual([]);
+    brain.close();
   });
 
   it('resets memory.db when reset is true', { timeout: 15_000 }, async () => {

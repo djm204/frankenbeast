@@ -22,6 +22,7 @@ import { join, basename, dirname } from 'node:path';
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
 import { ReasoningFacultyAdapter } from '../adapters/reasoning-faculty-adapter.js';
+import { PlanningFacultyAdapter } from '../adapters/planning-faculty-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
@@ -70,6 +71,10 @@ export interface BeastDepsConfig {
     /** Attach the real critique chain as the reasoning faculty. */
     enabled?: boolean;
     /** Persist compact verdict episodes. Disable with the memory module. */
+    recordEpisodes?: boolean;
+  };
+  planning?: {
+    /** Persist planning lifecycle episodes. Disable with the memory module. */
     recordEpisodes?: boolean;
   };
   skillsDir?: string;
@@ -174,6 +179,12 @@ export function createBeastDeps(
 
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
+  const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic, {
+    ...(config.planning?.recordEpisodes !== undefined
+      ? { recordEpisodes: config.planning.recordEpisodes }
+      : {}),
+  });
+  brain.attachPlanningFaculty(planning);
   const memory = new SqliteBrainMemoryAdapter(brain);
   const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
   const reasoningEnabled = config.reasoning?.enabled !== false
@@ -226,7 +237,7 @@ export function createBeastDeps(
     firewall,
     skills,
     memory,
-    planner: existingDeps.planner,
+    planner: planning,
     observer,
     critique: reasoning ?? existingDeps.critique,
     governor: existingDeps.governor,

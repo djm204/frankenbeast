@@ -802,6 +802,7 @@ async function recordFailureTrace(memory: IMemoryModule, task: PlanTask, summary
   await memory.recordTrace({
     taskId: task.id,
     summary,
+    objective: task.objective,
     outcome: 'failure',
     timestamp: isoNow(),
   });

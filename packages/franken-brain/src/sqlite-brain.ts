@@ -3055,7 +3055,11 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     >;
   }
 
-  recentFailures(n = 10, includeQuarantined = true): EpisodicEvent[] {
+  recentFailures(
+    n = 10,
+    includeQuarantined = true,
+    excludeCategory?: string,
+  ): EpisodicEvent[] {
     try {
       const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
@@ -3067,9 +3071,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         n,
         this.encryption,
         (eventId) => quarantinedEventIds.add(eventId),
-        includeQuarantined
-          ? undefined
-          : (event) => !isQuarantinedEpisodicDetails(event),
+        (event) => (
+          (includeQuarantined || !isQuarantinedEpisodicDetails(event))
+          && (excludeCategory === undefined || event.details?.category !== excludeCategory)
+        ),
       );
       this.audit?.({
         operation: 'episodic.recentFailures',
@@ -3078,6 +3083,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         details: {
           limit: n,
           count: result.length,
+          ...(excludeCategory !== undefined ? { excludeCategory } : {}),
           ...(quarantinedEventIds.size > 0
             ? { quarantinedEventIds: [...quarantinedEventIds] }
             : {}),
@@ -5568,9 +5574,21 @@ export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
-  readonly planning: IPlanningFaculty = Object.freeze({
-    kind: 'planning',
+  private planningFaculty: IPlanningFaculty = Object.freeze({
+    kind: 'planning' as const,
     configured: false,
+    createPlan(): Promise<never> {
+      return Promise.reject(new Error('Planning faculty is not configured'));
+    },
+    recordPlanCreated(): never {
+      throw new Error('Planning faculty is not configured');
+    },
+    recordStepCompleted(): never {
+      throw new Error('Planning faculty is not configured');
+    },
+    recordStepFailed() {
+      throw new Error('Planning faculty is not configured');
+    },
   });
   private reasoningFaculty: IReasoningFaculty = Object.freeze({
     kind: 'reasoning' as const,
@@ -5589,6 +5607,14 @@ export class SqliteBrain implements IBrain {
   });
   readonly memoryReview: SqliteMemoryReviewQueue;
   readonly accessAudit: SqliteMemoryAccessAuditTrail;
+
+  get planning(): IPlanningFaculty {
+    return this.planningFaculty;
+  }
+
+  attachPlanningFaculty(faculty: IPlanningFaculty): void {
+    this.planningFaculty = faculty;
+  }
 
   get reasoning(): IReasoningFaculty {
     return this.reasoningFaculty;
