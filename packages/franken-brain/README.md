@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `BrainRegistry`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types.
+Current public API: `SqliteBrain`, `BrainRegistry`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types. `SqliteBrain#attachReasoningFaculty()` lets an orchestrator replace the inert reasoning marker with a configured adapter without replacing the brain or its memory stores.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -289,13 +289,13 @@ SqliteBrain
 ├── memoryReview  SQLite candidate/provenance/suppression queue for consented writes
 ├── episodic      SQLite `episodic_events` table with recent/query/failure recall
 ├── recovery      SQLite `checkpoints` table for execution state recovery
-└── faculties     planning/reasoning/action/learning addressing stubs
+└── faculties     planning/reasoning/action/learning addressing surfaces
 
 BrainRegistry
 └── agentTypeId → stable process-local SqliteBrain instance
 ```
 
-The faculty properties are intentionally inert (`configured: false`) until the planner, critique, governor, and learning adapters are implemented. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
+Faculty properties start inert (`configured: false`). The orchestrator's local CLI attaches a configured reasoning adapter that delegates to the existing critique chain and records compact verdict episodes through `episodic.record()`; `SqliteBrain` does not import or reimplement critique logic. Planning, action, and learning remain inert pending their adapters. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
 
 The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state. `BrainRegistry` currently creates in-memory brains and validates agent-type IDs as portable path components; it does not choose durable paths or replace current orchestrator construction yet.
 

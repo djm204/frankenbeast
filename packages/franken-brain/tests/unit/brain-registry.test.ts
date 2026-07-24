@@ -65,4 +65,19 @@ describe('SqliteBrain faculty foundation', () => {
       brain.close();
     }
   });
+
+  it('attaches a configured reasoning faculty without replacing the brain', () => {
+    const brain = new SqliteBrain();
+    const faculty = { kind: 'reasoning' as const, configured: true };
+    try {
+      expect(typeof brain.attachReasoningFaculty).toBe('function');
+      brain.attachReasoningFaculty(faculty);
+
+      expect(brain.reasoning).toBe(faculty);
+      expect(brain.working).toBeDefined();
+      expect(brain.episodic).toBeDefined();
+    } finally {
+      brain.close();
+    }
+  });
 });

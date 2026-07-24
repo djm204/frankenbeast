@@ -21,6 +21,7 @@ import { join, basename, dirname } from 'node:path';
 
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
+import { ReasoningFacultyAdapter } from '../adapters/reasoning-faculty-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
@@ -161,6 +162,9 @@ export function createBeastDeps(
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
   const memory = new SqliteBrainMemoryAdapter(brain);
+  const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
+  const reasoning = new ReasoningFacultyAdapter(existingDeps.critique, brain, clock);
+  brain.attachReasoningFaculty(reasoning);
 
   // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
   const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
@@ -203,11 +207,11 @@ export function createBeastDeps(
     memory,
     planner: existingDeps.planner,
     observer,
-    critique: existingDeps.critique,
+    critique: reasoning,
     governor: existingDeps.governor,
     heartbeat,
     logger: existingDeps.logger,
-    clock: existingDeps.clock ?? (() => new Date(deterministicNow())),
+    clock,
     mcp,
 
     // Direct access to new components

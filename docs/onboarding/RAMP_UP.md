@@ -37,7 +37,7 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and the process-local agent-type `BrainRegistry`; planning/reasoning/action/learning faculties are addressing stubs pending adapter work |
+| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and the process-local agent-type `BrainRegistry`; the local CLI attaches reasoning to the real critique chain, while planning/action/learning remain addressing stubs pending adapter work |
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
@@ -63,6 +63,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 ## Key API Patterns
 
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
+- `ReasoningFacultyAdapter`: preserves the `ICritiqueModule` result and records its verdict as a queryable episodic event
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)
