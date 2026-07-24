@@ -5614,14 +5614,10 @@ function consolidatedLesson(cluster: readonly EpisodicEvent[]): ConsolidatedLess
   };
 }
 
-function lessonReviewKey(cluster: readonly EpisodicEvent[]): string {
-  const anchor = [...cluster].sort((left, right) =>
-    left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
-  )[0]!;
+function lessonReviewKey(lesson: ConsolidatedLesson): string {
   const signature = createHash('sha256')
     .update(JSON.stringify({
-      eventId: anchor.id,
-      tokens: [...semanticMemoryTokens(lessonEventText(anchor))].sort(),
+      tokens: [...semanticMemoryTokens(lesson.pattern)].sort(),
     }))
     .digest('hex');
   return `lesson.review.${signature.slice(0, 16)}`;
@@ -5955,7 +5951,7 @@ export class SqliteBrain implements IBrain {
     }
 
     const events = this.episodic
-      .recentFailures(lookback, false)
+      .recentFailures(lookback, false, 'skill-evolution')
       .sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
       );
@@ -5974,14 +5970,21 @@ export class SqliteBrain implements IBrain {
     const created: LessonConsolidationItem[] = [];
     for (const cluster of clusterSimilarFailureEvents(events, similarityThreshold)) {
       if (cluster.length < threshold) continue;
-      const key = lessonReviewKey(cluster);
       const value = consolidatedLesson(cluster);
+      const key = lessonReviewKey(value);
       const pending = pendingLessons.get(key);
       if (pending) {
         const previous = pending.value as ConsolidatedLesson;
         if (value.occurrenceCount <= previous.occurrenceCount) continue;
         const updated = this.memoryReview.edit(pending.id, {
-          value,
+          value: {
+            ...previous,
+            occurrenceCount: value.occurrenceCount,
+            confidence: value.confidence,
+            evidenceEventIds: value.evidenceEventIds,
+            firstSeenAt: value.firstSeenAt,
+            lastSeenAt: value.lastSeenAt,
+          },
           evidenceId: value.evidenceEventIds[0] === undefined
             ? key
             : `episodic:${value.evidenceEventIds[0]}`,
@@ -5995,6 +5998,10 @@ export class SqliteBrain implements IBrain {
         continue;
       }
       if (approvedKeys.has(key)) continue;
+      const suppressedReviewKey = this.db
+        .prepare(`SELECT 1 FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ? LIMIT 1`)
+        .get('working', key);
+      if (suppressedReviewKey) continue;
       const candidate = this.memoryReview.propose({
         targetStore: 'working',
         key,

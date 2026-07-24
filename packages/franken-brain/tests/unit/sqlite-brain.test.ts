@@ -814,6 +814,72 @@ describe('SqliteBrain', () => {
         confidence: 0.65,
       });
     });
+
+    it('keeps one lesson key when the bounded lookback moves past older evidence', () => {
+      for (let occurrence = 0; occurrence < 2; occurrence += 1) {
+        recordStaleDeclarationFailure(
+          'TypeScript workspace build failed after stale declarations were loaded',
+          `2026-07-24T10:0${occurrence}:00.000Z`,
+        );
+      }
+      const [initial] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed after stale declarations were loaded',
+        '2026-07-24T10:02:00.000Z',
+      );
+
+      const refreshed = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+
+      expect(refreshed).toEqual([]);
+      expect(brain.memoryReview.list()).toHaveLength(1);
+      expect(brain.memoryReview.list()[0]?.key).toBe(initial?.key);
+    });
+
+    it('does not cluster skill-evolution review signals as generic lessons', () => {
+      brain.episodic.recordSkillFailure({
+        skillName: 'resolve-issues',
+        failureSignature: 'worker exited without completing',
+        evidenceId: 'run-1',
+        suggestedPatchArea: 'worker closeout',
+      });
+      brain.episodic.recordSkillFailure({
+        skillName: 'resolve-issues',
+        failureSignature: 'worker missed required heartbeat',
+        evidenceId: 'run-2',
+        suggestedPatchArea: 'heartbeat guidance',
+      });
+
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 10 })).toEqual([]);
+    });
+
+    it('preserves reviewer-authored pattern fields when refreshing evidence', () => {
+      recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('Stale declarations broke the TypeScript workspace build', '2026-07-24T10:01:00.000Z');
+      const [initial] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      brain.memoryReview.edit(initial!.id, {
+        value: { ...initial!.value, pattern: 'Reviewer-curated stale declaration lesson', keywords: ['reviewed'] },
+      });
+      recordStaleDeclarationFailure('Workspace TypeScript build failed because declarations were stale', '2026-07-24T10:02:00.000Z');
+
+      brain.learning.consolidate({ threshold: 2, lookback: 10 });
+
+      expect(brain.memoryReview.list()[0]?.value).toMatchObject({
+        pattern: 'Reviewer-curated stale declaration lesson',
+        keywords: ['reviewed'],
+        occurrenceCount: 3,
+      });
+    });
+
+    it('does not re-propose a rejected lesson when later evidence changes its value', () => {
+      recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('Stale declarations broke the TypeScript workspace build', '2026-07-24T10:01:00.000Z');
+      const [initial] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      brain.memoryReview.reject(initial!.id, { reviewer: 'operator' });
+      recordStaleDeclarationFailure('Workspace TypeScript build failed because declarations were stale', '2026-07-24T10:02:00.000Z');
+
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 10 })).toEqual([]);
+      expect(brain.memoryReview.list()).toEqual([]);
+    });
   });
 
   describe('working memory', () => {
