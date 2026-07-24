@@ -830,10 +830,50 @@ describe('SqliteBrain', () => {
 
       const refreshed = brain.learning.consolidate({ threshold: 2, lookback: 2 });
 
-      expect(refreshed).toEqual([]);
+      expect(refreshed).toHaveLength(1);
       expect(brain.memoryReview.list()).toHaveLength(1);
       expect(brain.memoryReview.list()[0]?.key).toBe(initial?.key);
+      expect(brain.memoryReview.list()[0]?.value).toMatchObject({
+        evidenceEventIds: [1, 2, 3],
+        firstSeenAt: '2026-07-24T10:00:00.000Z',
+        lastSeenAt: '2026-07-24T10:02:00.000Z',
+      });
     });
+
+    it.each(['pending', 'approved', 'rejected'] as const)(
+      'forgets %s lessons using evidence lineage retained past the lookback',
+      (status) => {
+        recordStaleDeclarationFailure(
+          'RolloverMarker stale declarations broke build',
+          '2026-07-24T10:00:00.000Z',
+        );
+        recordStaleDeclarationFailure(
+          'Stale declarations broke build',
+          '2026-07-24T10:01:00.000Z',
+        );
+        const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+        recordStaleDeclarationFailure(
+          'Stale declarations broke workspace build',
+          '2026-07-24T10:02:00.000Z',
+        );
+        brain.learning.consolidate({ threshold: 2, lookback: 2 });
+        if (status === 'approved') {
+          brain.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+        } else if (status === 'rejected') {
+          brain.memoryReview.reject(candidate!.id, { reviewer: 'operator' });
+        }
+
+        brain.rightToForget({ type: 'episodic', query: 'RolloverMarker' });
+
+        expect(brain.memoryReview.list('pending')).toEqual([]);
+        expect(brain.memoryReview.list('approved')).toEqual([]);
+        expect(brain.memoryReview.list('rejected')).toEqual([]);
+        expect(brain.memoryReview.list('suppressed')).toEqual([]);
+        if (status === 'approved') {
+          expect(brain.working.get(candidate!.key)).toBeUndefined();
+        }
+      },
+    );
 
     it('keeps the existing lesson key when later evidence becomes the shortest pattern', () => {
       recordStaleDeclarationFailure('TypeScript workspace build failed after stale declarations were loaded', '2026-07-24T10:00:00.000Z');
@@ -933,6 +973,63 @@ describe('SqliteBrain', () => {
       expect(brain.memoryReview.list()).toEqual([]);
     });
 
+    it('coalesces every pending lesson absorbed by a bridging failure', () => {
+      for (const [summary, createdAt] of [
+        ['alpha parser timeout fault', '2026-07-24T10:00:00.000Z'],
+        ['alpha parser timeout stalled', '2026-07-24T10:01:00.000Z'],
+        ['omega cache mismatch fault', '2026-07-24T10:02:00.000Z'],
+        ['omega cache mismatch diverged', '2026-07-24T10:03:00.000Z'],
+      ] as const) {
+        recordStaleDeclarationFailure(summary, createdAt);
+      }
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.5 })).toHaveLength(2);
+      recordStaleDeclarationFailure(
+        'RolloverOnlyMarker unrelated worker deadlock',
+        '2026-07-24T10:04:00.000Z',
+      );
+      const duplicateWithRolledEvidence = brain.memoryReview.list('pending')[1]!;
+      const rolledLesson = duplicateWithRolledEvidence.value as Record<string, unknown> & {
+        evidenceEventIds: number[];
+      };
+      brain.memoryReview.edit(duplicateWithRolledEvidence.id, {
+        value: {
+          ...rolledLesson,
+          evidenceEventIds: [
+            ...rolledLesson.evidenceEventIds,
+            5,
+          ],
+          firstSeenAt: '2026-07-24T09:59:00.000Z',
+        },
+      });
+
+      recordStaleDeclarationFailure(
+        'alpha parser timeout omega cache mismatch',
+        '2026-07-24T10:05:00.000Z',
+      );
+      brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.25 });
+
+      const pending = brain.memoryReview.list('pending');
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.value).toMatchObject({
+        occurrenceCount: 5,
+        evidenceEventIds: [1, 2, 3, 4, 5, 6],
+        firstSeenAt: '2026-07-24T09:59:00.000Z',
+      });
+    });
+
+    it('keeps a rejected lesson suppressed when a bridge changes shared keywords', () => {
+      recordStaleDeclarationFailure('alpha parser timeout fault', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('alpha parser timeout stalled', '2026-07-24T10:01:00.000Z');
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.5 });
+      brain.memoryReview.reject(candidate!.id, { reviewer: 'operator' });
+
+      recordStaleDeclarationFailure('alpha parser timeout omega cache mismatch', '2026-07-24T10:02:00.000Z');
+      recordStaleDeclarationFailure('omega cache mismatch diverged', '2026-07-24T10:03:00.000Z');
+
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.25 })).toEqual([]);
+      expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
+
     it('does not return an approved lesson after its durable working value is removed', () => {
       recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
       const [candidate] = brain.learning.consolidate({ threshold: 1, lookback: 10 });
@@ -953,6 +1050,263 @@ describe('SqliteBrain', () => {
       brain.rightToForget({ type: 'episodic', query: 'UniqueMarker' });
 
       expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
+
+    it('removes rejected lessons and suppression rows that depend on forgotten evidence', () => {
+      recordStaleDeclarationFailure('Stale declarations broke build', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('RejectedMarker stale declarations broke build', '2026-07-24T10:01:00.000Z');
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      brain.memoryReview.reject(candidate!.id, { reviewer: 'operator' });
+      const db = (brain as unknown as { db: Database.Database }).db;
+      expect(db.prepare(`SELECT COUNT(*) FROM memory_review_suppressions`).pluck().get()).toBe(1);
+
+      brain.rightToForget({ type: 'episodic', query: 'RejectedMarker' });
+
+      expect(brain.memoryReview.list('rejected')).toEqual([]);
+      expect(db.prepare(`SELECT COUNT(*) FROM memory_review_suppressions`).pluck().get()).toBe(0);
+    });
+
+    it('preserves unrelated same-key provenance and suppressions during evidence cleanup', () => {
+      brain.episodic.record({
+        type: 'failure',
+        step: 'build',
+        summary: 'SameKeyForgottenMarker stale declarations broke build',
+        createdAt: '2026-07-24T10:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'failure',
+        step: 'test',
+        summary: 'Retained cache mismatch failure',
+        createdAt: '2026-07-24T10:01:00.000Z',
+      });
+      const [retained, forgotten] = brain.episodic.recentFailures(2);
+      const lesson = (pattern: string, evidenceEventIds: number[]) => ({
+        kind: 'consolidated-lesson' as const,
+        pattern,
+        keywords: pattern.toLowerCase().split(' '),
+        occurrenceCount: evidenceEventIds.length,
+        confidence: 0.5,
+        evidenceEventIds,
+        firstSeenAt: '2026-07-24T10:00:00.000Z',
+        lastSeenAt: '2026-07-24T10:01:00.000Z',
+      });
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'lesson:same-key',
+        value: lesson('forgotten declarations', [forgotten!.id!]),
+        source: 'lesson-consolidation',
+        sourceId: 'forgotten',
+        reason: 'old lesson',
+        confidence: 0.5,
+      });
+      const forgottenCandidate = brain.memoryReview.list('pending')[0]!;
+      brain.memoryReview.reject(forgottenCandidate.id, { reviewer: 'operator' });
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'lesson:same-key',
+        value: lesson('retained cache mismatch', [retained!.id!]),
+        source: 'lesson-consolidation',
+        sourceId: 'retained-approved',
+        reason: 'current lesson',
+        confidence: 0.5,
+      });
+      const retainedApproved = brain.memoryReview.list('pending')[0]!;
+      brain.memoryReview.approve(retainedApproved.id, { reviewer: 'operator' });
+      const retainedRejectedProposal = {
+        targetStore: 'working' as const,
+        key: 'lesson:same-key',
+        value: lesson('retained worker deadlock', [retained!.id!]),
+        source: 'lesson-consolidation',
+        sourceId: 'retained-rejected',
+        reason: 'other rejected lesson',
+        confidence: 0.5,
+      };
+      brain.memoryReview.propose(retainedRejectedProposal);
+      const retainedRejected = brain.memoryReview.list('pending')[0]!;
+      brain.memoryReview.reject(retainedRejected.id, { reviewer: 'operator' });
+
+      brain.rightToForget({ type: 'episodic', query: 'SameKeyForgottenMarker' });
+
+      expect(brain.memoryReview.list('approved').map(({ id }) => id)).toEqual([retainedApproved.id]);
+      expect(brain.memoryReview.list('rejected').map(({ id }) => id)).toEqual([retainedRejected.id]);
+      expect(brain.memoryReview.provenanceFor('working', 'lesson:same-key')?.candidateId)
+        .toBe(retainedApproved.id);
+      expect(brain.working.get('lesson:same-key')).toEqual(retainedApproved.value);
+      brain.memoryReview.propose(retainedRejectedProposal);
+      expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
+
+    it('preserves a replacement value when forgetting an approved lesson evidence event', () => {
+      recordStaleDeclarationFailure('Stale declarations broke build', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('ReplacementMarker stale declarations broke build', '2026-07-24T10:01:00.000Z');
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      brain.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+      brain.working.set(candidate!.key, { replacement: true });
+      brain.flush();
+
+      brain.rightToForget({ type: 'episodic', query: 'ReplacementMarker' });
+
+      expect(brain.working.get(candidate!.key)).toEqual({ replacement: true });
+    });
+
+    it('preserves an unflushed replacement value when forgetting approved lesson evidence', () => {
+      recordStaleDeclarationFailure('Stale declarations broke build', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure(
+        'RuntimeReplacementMarker stale declarations broke build',
+        '2026-07-24T10:01:00.000Z',
+      );
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      brain.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+      brain.working.set(candidate!.key, { replacement: 'runtime' });
+
+      brain.rightToForget({ type: 'episodic', query: 'RuntimeReplacementMarker' });
+
+      expect(brain.working.get(candidate!.key)).toEqual({ replacement: 'runtime' });
+      brain.flush();
+      expect(brain.working.get(candidate!.key)).toEqual({ replacement: 'runtime' });
+    });
+
+    it('preserves a concurrent persisted replacement when a stale brain forgets lesson evidence', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-stale-lesson-replacement-'));
+      const dbPath = join(dir, 'brain.db');
+      const owner = new SqliteBrain(dbPath);
+      let stale: SqliteBrain | undefined;
+      try {
+        owner.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'Stale declarations broke build',
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        owner.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'ConcurrentReplacementMarker stale declarations broke build',
+          createdAt: '2026-07-24T10:01:00.000Z',
+        });
+        const [candidate] = owner.learning.consolidate({ threshold: 2, lookback: 10 });
+        owner.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+        stale = new SqliteBrain(dbPath);
+        owner.working.set(candidate!.key, { replacement: 'concurrent' });
+        owner.flush();
+
+        const report = stale.rightToForget({
+          type: 'episodic',
+          query: 'ConcurrentReplacementMarker',
+        });
+
+        expect(report.deleted.working).toBe(0);
+        expect(stale.working.get(candidate!.key)).toEqual({ replacement: 'concurrent' });
+        const verify = new SqliteBrain(dbPath);
+        try {
+          expect(verify.working.get(candidate!.key)).toEqual({ replacement: 'concurrent' });
+        } finally {
+          verify.close();
+        }
+      } finally {
+        stale?.close();
+        owner.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves a concurrent dirty replacement when another brain forgets lesson evidence', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-dirty-lesson-replacement-'));
+      const dbPath = join(dir, 'brain.db');
+      const owner = new SqliteBrain(dbPath);
+      let stale: SqliteBrain | undefined;
+      try {
+        owner.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'Stale declarations broke build',
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        owner.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'ConcurrentDirtyMarker stale declarations broke build',
+          createdAt: '2026-07-24T10:01:00.000Z',
+        });
+        const [candidate] = owner.learning.consolidate({ threshold: 2, lookback: 10 });
+        owner.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+        stale = new SqliteBrain(dbPath);
+        owner.working.set(candidate!.key, { replacement: 'dirty' });
+
+        const report = stale.rightToForget({
+          type: 'episodic',
+          query: 'ConcurrentDirtyMarker',
+        });
+
+        expect(report.deleted.working).toBe(1);
+        expect(owner.working.get(candidate!.key)).toEqual({ replacement: 'dirty' });
+        const beforeFlush = new SqliteBrain(dbPath);
+        try {
+          expect(beforeFlush.working.get(candidate!.key)).toBeUndefined();
+        } finally {
+          beforeFlush.close();
+        }
+        owner.flush();
+        expect(owner.working.get(candidate!.key)).toEqual({ replacement: 'dirty' });
+      } finally {
+        stale?.close();
+        owner.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('deletes a concurrently approved lesson from a stale non-hydrated cache', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-stale-lesson-approval-'));
+      const dbPath = join(dir, 'brain.db');
+      const owner = new SqliteBrain(dbPath);
+      let stale: SqliteBrain | undefined;
+      try {
+        owner.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'Stale declarations broke build',
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        owner.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'ConcurrentApprovalMarker stale declarations broke build',
+          createdAt: '2026-07-24T10:01:00.000Z',
+        });
+        const [candidate] = owner.learning.consolidate({ threshold: 2, lookback: 10 });
+        stale = new SqliteBrain(dbPath);
+        owner.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+
+        const report = stale.rightToForget({
+          type: 'episodic',
+          query: 'ConcurrentApprovalMarker',
+        });
+
+        expect(report.deleted.working).toBe(1);
+        expect(owner.working.get(candidate!.key)).toBeUndefined();
+        const verify = new SqliteBrain(dbPath);
+        try {
+          expect(verify.working.get(candidate!.key)).toBeUndefined();
+          expect(verify.memoryReview.list()).toEqual([]);
+        } finally {
+          verify.close();
+        }
+      } finally {
+        stale?.close();
+        owner.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('counts the approved candidate and provenance rows removed with forgotten evidence', () => {
+      recordStaleDeclarationFailure('Stale declarations broke build', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('CountMarker stale declarations broke build', '2026-07-24T10:01:00.000Z');
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      brain.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+
+      const report = brain.rightToForget({ type: 'episodic', query: 'CountMarker' });
+
+      expect(report.deleted).toEqual({ working: 1, episodic: 1, derived: 3 });
     });
   });
 

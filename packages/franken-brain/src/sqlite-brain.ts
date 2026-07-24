@@ -1887,6 +1887,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
+  matchesRuntimeValue(key: string, expected: unknown): boolean {
+    return this.store.has(key) && memoryValuesEqual(this.store.get(key), expected);
+  }
+
   get(key: string): unknown {
     if (this.expireRuntimeKeyIfUnavailable(key)) {
       this.audit?.({
@@ -5962,16 +5966,16 @@ export class SqliteBrain implements IBrain {
       .sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
       );
-    const pendingLessons = new Map(
-      this.memoryReview
-        .list('pending')
-        .filter((candidate) => isConsolidatedLesson(candidate.value))
-        .map((candidate) => [candidate.key, candidate] as const),
-    );
+    let pendingLessons = this.memoryReview
+      .list('pending')
+      .filter((candidate) => isConsolidatedLesson(candidate.value));
     const approvedLessons = this.memoryReview
       .list('approved')
       .filter((candidate) => isConsolidatedLesson(candidate.value))
       .filter((candidate) => this.memoryReview.provenanceFor('working', candidate.key) !== null);
+    const suppressedLessons = (['rejected', 'suppressed'] as const)
+      .flatMap((status) => this.memoryReview.list(status))
+      .filter((candidate) => isConsolidatedLesson(candidate.value));
     const approvedKeys = new Set(
       approvedLessons.map((candidate) => candidate.key),
     );
@@ -5981,9 +5985,10 @@ export class SqliteBrain implements IBrain {
       const value = consolidatedLesson(cluster);
       const evidenceIds = new Set(value.evidenceEventIds);
       let key = lessonReviewKey(value);
-      const pending = pendingLessons.get(key) ?? [...pendingLessons.values()]
+      const matchingPending = pendingLessons
         .map((candidate) => ({
           candidate,
+          exactKey: candidate.key === key,
           sharesEvidence: (candidate.value as ConsolidatedLesson).evidenceEventIds
             .some((id) => evidenceIds.has(id)),
           similarity: semanticMemorySimilarity(
@@ -5991,30 +5996,65 @@ export class SqliteBrain implements IBrain {
             value.pattern,
           ),
         }))
-        .filter(({ sharesEvidence, similarity }) => sharesEvidence || similarity >= similarityThreshold)
-        .sort((left, right) => Number(right.sharesEvidence) - Number(left.sharesEvidence)
-          || right.similarity - left.similarity)[0]?.candidate;
+        .filter(({ exactKey, sharesEvidence, similarity }) =>
+          exactKey || sharesEvidence || similarity >= similarityThreshold)
+        .sort((left, right) => Number(right.exactKey) - Number(left.exactKey)
+          || Number(right.sharesEvidence) - Number(left.sharesEvidence)
+          || right.similarity - left.similarity
+          || left.candidate.createdAt.localeCompare(right.candidate.createdAt)
+          || left.candidate.id.localeCompare(right.candidate.id));
+      const pending = matchingPending[0]?.candidate;
       if (pending) {
         key = pending.key;
         const previous = pending.value as ConsolidatedLesson;
-        if (value.occurrenceCount <= previous.occurrenceCount) continue;
-        const updated = this.memoryReview.edit(pending.id, {
-          value: {
-            ...previous,
-            occurrenceCount: value.occurrenceCount,
-            confidence: value.confidence,
-            evidenceEventIds: value.evidenceEventIds,
-            firstSeenAt: value.firstSeenAt,
-            lastSeenAt: value.lastSeenAt,
-          },
-          evidenceId: value.evidenceEventIds[0] === undefined
-            ? key
-            : `episodic:${value.evidenceEventIds[0]}`,
-          confidence: value.confidence,
-          reason: `${value.occurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
-        });
-        pendingLessons.set(key, updated);
-        if (isConsolidatedLesson(updated.value)) {
+        const matchedLessons = matchingPending.map(({ candidate }) => candidate.value as ConsolidatedLesson);
+        const mergedEvidenceEventIds = Array.from(new Set([
+          ...matchedLessons.flatMap((lesson) => lesson.evidenceEventIds),
+          ...value.evidenceEventIds,
+        ])).sort((left, right) => left - right);
+        const mergedFirstSeenAt = [
+          ...matchedLessons.map((lesson) => lesson.firstSeenAt),
+          value.firstSeenAt,
+        ].sort()[0]!;
+        const mergedLastSeenAt = [
+          ...matchedLessons.map((lesson) => lesson.lastSeenAt),
+          value.lastSeenAt,
+        ].sort().at(-1)!;
+        const evidenceChanged = previous.evidenceEventIds.length !== mergedEvidenceEventIds.length
+          || previous.evidenceEventIds.some((id, index) => id !== mergedEvidenceEventIds[index]);
+        const lessonChanged = previous.occurrenceCount !== value.occurrenceCount
+          || previous.confidence !== value.confidence
+          || previous.firstSeenAt !== mergedFirstSeenAt
+          || previous.lastSeenAt !== mergedLastSeenAt
+          || evidenceChanged;
+        const updated = lessonChanged
+          ? this.memoryReview.edit(pending.id, {
+              value: {
+                ...previous,
+                occurrenceCount: value.occurrenceCount,
+                confidence: value.confidence,
+                evidenceEventIds: mergedEvidenceEventIds,
+                firstSeenAt: mergedFirstSeenAt,
+                lastSeenAt: mergedLastSeenAt,
+              },
+              evidenceId: value.evidenceEventIds[0] === undefined
+                ? key
+                : `episodic:${value.evidenceEventIds[0]}`,
+              confidence: value.confidence,
+              reason: `${value.occurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
+            })
+          : pending;
+        const duplicateIds = new Set(matchingPending.slice(1).map(({ candidate }) => candidate.id));
+        if (duplicateIds.size > 0) {
+          const deletePending = this.db.prepare(
+            `DELETE FROM memory_review_candidates WHERE id = ? AND status = 'pending'`,
+          );
+          for (const id of duplicateIds) deletePending.run(id);
+        }
+        const matchedIds = new Set(matchingPending.map(({ candidate }) => candidate.id));
+        pendingLessons = pendingLessons.filter((candidate) => !matchedIds.has(candidate.id));
+        pendingLessons.push(updated);
+        if ((lessonChanged || duplicateIds.size > 0) && isConsolidatedLesson(updated.value)) {
           created.push({ id: updated.id, key: updated.key, status: 'pending', value: updated.value });
         }
         continue;
@@ -6029,9 +6069,22 @@ export class SqliteBrain implements IBrain {
           ) >= similarityThreshold
         ));
       if (approvedKeys.has(key) || matchingApproved) continue;
+      const matchingSuppressed = suppressedLessons.some((candidate) => (
+        candidate.key === key
+        || (candidate.value as ConsolidatedLesson).evidenceEventIds.some((id) => evidenceIds.has(id))
+        || semanticMemorySimilarity(
+          (candidate.value as ConsolidatedLesson).pattern,
+          value.pattern,
+        ) >= similarityThreshold
+      ));
+      if (matchingSuppressed) continue;
       const reviewKeys = new Set([
         key,
-        ...cluster.map((event) => lessonReviewKey({ ...value, pattern: event.summary })),
+        ...cluster.map((event) => lessonReviewKey({
+          ...value,
+          keywords: [],
+          pattern: event.summary,
+        })),
       ]);
       const suppressionLookup = this.db
         .prepare(`SELECT 1 FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ? LIMIT 1`);
@@ -6048,7 +6101,7 @@ export class SqliteBrain implements IBrain {
         reason: `${value.occurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
       });
       if (candidate.status === 'pending' && isConsolidatedLesson(candidate.value)) {
-        pendingLessons.set(key, candidate);
+        pendingLessons.push(candidate);
         created.push({ id: candidate.id, key: candidate.key, status: 'pending', value: candidate.value });
       }
     }
@@ -6105,12 +6158,67 @@ export class SqliteBrain implements IBrain {
   private lessonCandidatesDependingOn(eventIds: readonly number[]): MemoryCandidate[] {
     const ids = new Set(eventIds);
     if (ids.size === 0) return [];
-    return (['pending', 'approved'] as const)
+    return (['pending', 'approved', 'rejected', 'suppressed'] as const)
       .flatMap((status) => this.memoryReview.list(status))
       .filter((candidate) => isConsolidatedLesson(candidate.value))
       .filter((candidate) => (
         (candidate.value as ConsolidatedLesson).evidenceEventIds.some((id) => ids.has(id))
       ));
+  }
+
+  private lessonReviewRowsDependingOn(candidates: readonly MemoryCandidate[]): ReviewPayloadMatch[] {
+    const matches: ReviewPayloadMatch[] = [];
+    const provenanceForKey = this.db.prepare(
+      `SELECT candidate_id AS candidateId
+         FROM memory_review_provenance
+        WHERE target_store = 'working' AND memory_key = ?`,
+    );
+    const suppressionsForKey = this.db.prepare(
+      `SELECT signature, value
+         FROM memory_review_suppressions
+        WHERE target_store = 'working' AND memory_key = ?`,
+    );
+    for (const candidate of candidates) {
+      matches.push({ table: 'memory_review_candidates', id: candidate.id, key: candidate.key });
+      const provenance = provenanceForKey.get(candidate.key) as { candidateId: string } | undefined;
+      if (provenance?.candidateId === candidate.id) {
+        matches.push({ table: 'memory_review_provenance', targetStore: 'working', key: candidate.key });
+      }
+      const rows = suppressionsForKey.all(candidate.key) as Array<{ signature: string; value: string }>;
+      for (const row of rows) {
+        try {
+          const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+          if (!memoryValuesEqual(JSON.parse(serialized), candidate.value)) continue;
+          matches.push({ table: 'memory_review_suppressions', signature: row.signature, key: candidate.key });
+        } catch {
+          // Malformed unrelated suppression payloads are handled by normal quarantine flows.
+        }
+      }
+    }
+    return this.uniqueReviewPayloadMatches(matches);
+  }
+
+  private lessonOwnsPersistedWorkingValue(candidate: MemoryCandidate): boolean {
+    const provenance = this.db.prepare(
+      `SELECT candidate_id AS candidateId
+         FROM memory_review_provenance
+        WHERE target_store = 'working' AND memory_key = ?`,
+    ).get(candidate.key) as { candidateId: string } | undefined;
+    if (provenance?.candidateId !== candidate.id) return false;
+    return this.memoryReview.provenanceFor('working', candidate.key) !== null;
+  }
+
+  private uniqueReviewPayloadMatches(matches: readonly ReviewPayloadMatch[]): ReviewPayloadMatch[] {
+    const unique = new Map<string, ReviewPayloadMatch>();
+    for (const match of matches) {
+      const identity = match.table === 'memory_review_candidates'
+        ? `${match.table}:${match.id}`
+        : match.table === 'memory_review_provenance'
+          ? `${match.table}:${match.targetStore}:${match.key}`
+          : `${match.table}:${match.signature}`;
+      unique.set(identity, match);
+    }
+    return [...unique.values()];
   }
 
   private static registerLiveBrain(dbPath: string, brain: SqliteBrain): void {
@@ -6139,6 +6247,18 @@ export class SqliteBrain implements IBrain {
     if (!liveBrains) return;
     for (const brain of liveBrains) {
       brain.working.expirePrunedRuntimeKeys(keys);
+    }
+  }
+
+  private static refreshLiveWorkingKeys(dbPath: string, keys: readonly string[]): void {
+    const normalizedDbPath = normalizeSqliteDbPath(dbPath);
+    if (normalizedDbPath === ':memory:' || keys.length === 0) return;
+    const liveBrains = liveSqliteBrainsByPath.get(normalizedDbPath);
+    if (!liveBrains) return;
+    for (const brain of liveBrains) {
+      for (const key of keys) {
+        brain.working.reviewValueState(key);
+      }
     }
   }
 
@@ -6494,6 +6614,8 @@ export class SqliteBrain implements IBrain {
     const memoryType = normalizedSelector.type ?? 'all';
     let deletedWorkingKeys = new Set<string>();
     let runtimeWorkingKeysToDelete = new Set<string>();
+    const dependentWorkingKeysToDelete = new Set<string>();
+    const dependentWorkingKeysToRefresh = new Set<string>();
     let episodicMatchCount = 0;
     let checkpointMatchCount = 0;
     let reviewMatchCount = 0;
@@ -6518,17 +6640,22 @@ export class SqliteBrain implements IBrain {
         : this.matchingEpisodicIds(normalizedSelector);
       episodicMatchCount = episodicMatches.length;
       const dependentLessons = this.lessonCandidatesDependingOn(episodicMatches);
+      const dependentReviewRows = this.lessonReviewRowsDependingOn(dependentLessons);
       for (const candidate of dependentLessons) {
-        if (candidate.status === 'approved') deletedWorkingKeys.add(candidate.key);
+        if (
+          candidate.status === 'approved'
+          && this.lessonOwnsPersistedWorkingValue(candidate)
+        ) {
+          deletedWorkingKeys.add(candidate.key);
+        }
       }
       checkpointMatchCount = memoryType === 'all'
         ? this.matchingCheckpointIds(normalizedSelector).length
         : 0;
-      const directCandidateIds = new Set(reviewMatches
-        .filter((match) => match.table === 'memory_review_candidates')
-        .map((match) => match.id));
-      reviewMatchCount = reviewMatches.length
-        + dependentLessons.filter((candidate) => !directCandidateIds.has(candidate.id)).length;
+      reviewMatchCount = this.uniqueReviewPayloadMatches([
+        ...reviewMatches,
+        ...dependentReviewRows,
+      ]).length;
       const accessEvent: MemoryAccessAuditInput = {
         operation: 'privacy.rightToForget',
         store: 'privacy',
@@ -6581,6 +6708,7 @@ export class SqliteBrain implements IBrain {
           ? []
           : this.matchingReviewPayloads(normalizedSelector);
         const dependentLessons = this.lessonCandidatesDependingOn(episodicMatches);
+        const dependentReviewRows = this.lessonReviewRowsDependingOn(dependentLessons);
         for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
           persistedWorkingMatches.add(key);
           runtimeWorkingKeysToDelete.add(key);
@@ -6588,17 +6716,21 @@ export class SqliteBrain implements IBrain {
         }
         for (const candidate of dependentLessons) {
           if (candidate.status !== 'approved') continue;
+          dependentWorkingKeysToRefresh.add(candidate.key);
+          if (!this.lessonOwnsPersistedWorkingValue(candidate)) continue;
           persistedWorkingMatches.add(candidate.key);
-          runtimeWorkingKeysToDelete.add(candidate.key);
+          if (this.working.matchesRuntimeValue(candidate.key, candidate.value)) {
+            runtimeWorkingKeysToDelete.add(candidate.key);
+          }
+          dependentWorkingKeysToDelete.add(candidate.key);
           deletedWorkingKeys.add(candidate.key);
         }
         episodicMatchCount = episodicMatches.length;
         checkpointMatchCount = checkpointMatches.length;
-        const directCandidateIds = new Set(reviewMatches
-          .filter((match) => match.table === 'memory_review_candidates')
-          .map((match) => match.id));
-        reviewMatchCount = reviewMatches.length
-          + dependentLessons.filter((candidate) => !directCandidateIds.has(candidate.id)).length;
+        reviewMatchCount = this.uniqueReviewPayloadMatches([
+          ...reviewMatches,
+          ...dependentReviewRows,
+        ]).length;
         finalizePersistedWorkingDelete = this.working.deletePersistedKeys(Array.from(persistedWorkingMatches));
         if (episodicMatches.length > 0) {
           const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
@@ -6615,11 +6747,20 @@ export class SqliteBrain implements IBrain {
         if (dependentLessons.length > 0) {
           const deleteCandidate = this.db.prepare(`DELETE FROM memory_review_candidates WHERE id = ?`);
           const deleteProvenance = this.db.prepare(
-            `DELETE FROM memory_review_provenance WHERE target_store = 'working' AND memory_key = ?`,
+            `DELETE FROM memory_review_provenance WHERE target_store = ? AND memory_key = ?`,
+          );
+          const deleteSuppression = this.db.prepare(
+            `DELETE FROM memory_review_suppressions WHERE signature = ?`,
           );
           for (const candidate of dependentLessons) {
             deleteCandidate.run(candidate.id);
-            deleteProvenance.run(candidate.key);
+          }
+          for (const match of dependentReviewRows) {
+            if (match.table === 'memory_review_provenance') {
+              deleteProvenance.run(match.targetStore, match.key);
+            } else if (match.table === 'memory_review_suppressions') {
+              deleteSuppression.run(match.signature);
+            }
           }
         }
         this.redactReviewPayloadMatches(reviewMatches, isoNow());
@@ -6672,7 +6813,12 @@ export class SqliteBrain implements IBrain {
       SqliteBrain.expireLiveWorkingMatches(
         this.dbPath,
         normalizedSelector,
-        Array.from(runtimeWorkingKeysToDelete),
+        Array.from(runtimeWorkingKeysToDelete)
+          .filter((key) => !dependentWorkingKeysToDelete.has(key)),
+      );
+      SqliteBrain.refreshLiveWorkingKeys(
+        this.dbPath,
+        Array.from(dependentWorkingKeysToRefresh),
       );
       return {
         selectorHash,
