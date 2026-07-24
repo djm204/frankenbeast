@@ -294,6 +294,87 @@ describe('SqliteBrain', () => {
       ]);
     });
 
+    it('advances bounded checkpoint scans past a protected floor row', () => {
+      brain.recovery.checkpoint({
+        runId: 'expired-before-floor',
+        phase: 'execution',
+        step: 1,
+        context: {},
+        timestamp: '2026-01-02T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'expired-after-floor',
+        phase: 'execution',
+        step: 2,
+        context: {},
+        timestamp: '2026-01-03T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'protected-floor-with-old-state-time',
+        phase: 'execution',
+        step: 3,
+        context: {},
+        timestamp: '2026-01-01T00:00:00.000Z',
+      });
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 1,
+      });
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 1,
+      });
+
+      expect(first.deleted.checkpoints).toBe(0);
+      expect(second.deleted.checkpoints).toBe(1);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('protected-floor-with-old-state-time');
+    });
+
+    it('bounds working-memory rows in bounded retention reports', () => {
+      brain.working.set('working.a', 'a');
+      brain.working.set('working.b', 'b');
+      brain.working.set('working.c', 'c');
+      brain.flush();
+
+      const report = brain.memoryRetentionReport({
+        now: '2026-01-20T00:00:00.000Z',
+        maxScanRows: 2,
+      });
+
+      expect(report.entries.filter((entry) => entry.store === 'working')).toHaveLength(2);
+    });
+
+    it('projects only retention columns during bounded episodic scans', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'expired candidate',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const originalPrepare = db.prepare.bind(db);
+      const preparedSql: string[] = [];
+      db.prepare = ((sql: string) => {
+        preparedSql.push(sql);
+        return originalPrepare(sql);
+      }) as typeof db.prepare;
+      try {
+        brain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 1,
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      const episodicRetentionQueries = preparedSql.filter((sql) => sql.includes('FROM episodic_events'));
+      expect(episodicRetentionQueries).not.toContainEqual(expect.stringMatching(/SELECT\s+\*/));
+    });
+
     it('uses a composite keyset seek when a retention cursor lands inside a timestamp tie', () => {
       for (let id = 1; id <= 4; id += 1) {
         brain.episodic.record({

@@ -2262,11 +2262,21 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
   }
 
-  retentionEntries(nowIso = isoNow()): Array<{ key: string; value: unknown; updatedAt: string }> {
+  retentionEntries(
+    nowIso = isoNow(),
+    maxEntries?: number,
+  ): Array<{ key: string; value: unknown; updatedAt: string }> {
     this.expireRuntimeKeysMatchingCurrentDeletionGuards();
-    const rows = this.db
-      .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
-      .all() as Array<{ key: string; value: string; updatedAt: string }>;
+    const rows = maxEntries === undefined
+      ? this.db
+          .prepare(`SELECT key, value, updated_at as updatedAt FROM working_memory ORDER BY key ASC`)
+          .all() as Array<{ key: string; value: string; updatedAt: string }>
+      : this.db
+          .prepare(
+            `SELECT key, value, updated_at as updatedAt FROM working_memory
+             ORDER BY key ASC LIMIT ?`,
+          )
+          .all(maxEntries) as Array<{ key: string; value: string; updatedAt: string }>;
     const entries = new Map<string, { key: string; value: unknown; updatedAt: string }>();
     for (const row of rows) {
       const serialized = this.encryption?.decrypt(row.value) ?? row.value;
@@ -2279,14 +2289,30 @@ class SqliteWorkingMemory implements IWorkingMemory {
     for (const key of this.deletedKeys) {
       entries.delete(key);
     }
-    for (const [key, value] of this.store.entries()) {
+    const runtimeEntries = maxEntries === undefined
+      ? this.store.entries()
+      : (() => {
+          const bounded: Array<[string, unknown]> = [];
+          for (const entry of this.store.entries()) {
+            const insertionIndex = bounded.findIndex(([key]) => key.localeCompare(entry[0]) > 0);
+            if (insertionIndex < 0) {
+              bounded.push(entry);
+            } else {
+              bounded.splice(insertionIndex, 0, entry);
+            }
+            if (bounded.length > maxEntries) bounded.pop();
+          }
+          return bounded;
+        })();
+    for (const [key, value] of runtimeEntries) {
       entries.set(key, {
         key,
         value,
         updatedAt: this.dirtyKeys.has(key) ? nowIso : entries.get(key)?.updatedAt ?? nowIso,
       });
     }
-    return Array.from(entries.values()).sort((a, b) => a.key.localeCompare(b.key));
+    const sortedEntries = Array.from(entries.values()).sort((a, b) => a.key.localeCompare(b.key));
+    return maxEntries === undefined ? sortedEntries : sortedEntries.slice(0, maxEntries);
   }
 
   snapshotIncludingPersistedEntries(options: { expireRuntimeGuardedEntries?: boolean; expirePersistedTtlEntries?: boolean } = {}): Array<{ key: string; value: unknown; source: 'persisted' | 'runtime' }> {
@@ -2699,6 +2725,8 @@ interface MemoryRetentionScanCursor {
 interface MemoryRetentionEnforcementScanState {
   episodicCursor?: MemoryRetentionScanCursor;
   nextEpisodicCursor?: MemoryRetentionScanCursor;
+  checkpointCursor?: MemoryRetentionScanCursor;
+  nextCheckpointCursor?: MemoryRetentionScanCursor;
 }
 
 type CorruptEpisodicDetailsReporter = (eventId: number) => void;
@@ -5681,6 +5709,7 @@ export class SqliteBrain implements IBrain {
   private readonly encryption: MemoryCipher | undefined;
   private readonly auditRecorder: MemoryAccessAuditRecorder;
   private retentionEpisodicScanCursor: MemoryRetentionScanCursor | undefined;
+  private retentionCheckpointScanCursor: MemoryRetentionScanCursor | undefined;
 
   constructor(
     dbPath: string = ':memory:',
@@ -6114,7 +6143,9 @@ export class SqliteBrain implements IBrain {
     return this.buildMemoryRetentionReport(options, true);
   }
 
-  private persistedRetentionEpisodicScanCursor(): MemoryRetentionScanCursor | undefined {
+  private persistedRetentionScanCursor(
+    store: 'episodic' | 'checkpoint',
+  ): MemoryRetentionScanCursor | undefined {
     const row = this.db.prepare(
       `SELECT details
        FROM memory_access_audit_events
@@ -6125,8 +6156,8 @@ export class SqliteBrain implements IBrain {
        LIMIT 1`,
     ).get() as Pick<MemoryAccessAuditRow, 'details'> | undefined;
     const details = parseMemoryAccessDetails(row?.details ?? null);
-    const createdAt = details?.episodicScanCursorCreatedAt;
-    const id = details?.episodicScanCursorId;
+    const createdAt = details?.[`${store}ScanCursorCreatedAt`];
+    const id = details?.[`${store}ScanCursorId`];
     return typeof createdAt === 'string' && Number.isInteger(id) && Number(id) > 0
       ? { createdAt, id: Number(id) }
       : undefined;
@@ -6163,7 +6194,7 @@ export class SqliteBrain implements IBrain {
 
     const entries: MemoryRetentionEntryReport[] = [];
     const workingEntries = includeWorking
-      ? this.working.retentionEntries(now.toISOString())
+      ? this.working.retentionEntries(now.toISOString(), maxScanRows)
       : [];
     for (const { key, value, updatedAt } of workingEntries) {
       const className = classifyMemoryEntry({ store: 'working', key, value });
@@ -6209,33 +6240,36 @@ export class SqliteBrain implements IBrain {
       // Split each side of the composite cursor into indexable ranges. A single OR predicate
       // makes SQLite seek only by created_at and filter every preceding row in a large tie.
       appendKeysetRows(
-        `SELECT * FROM episodic_events
+        `SELECT id, type, step, summary, details, created_at FROM episodic_events
          WHERE created_at = ? AND id > ?
          ORDER BY created_at ASC, id ASC LIMIT ?`,
         [cursor.createdAt, cursor.id],
       );
       appendKeysetRows(
-        `SELECT * FROM episodic_events
+        `SELECT id, type, step, summary, details, created_at FROM episodic_events
          WHERE created_at > ?
          ORDER BY created_at ASC, id ASC LIMIT ?`,
         [cursor.createdAt],
       );
       // Wrap from the beginning once the rows after the cursor are exhausted.
       appendKeysetRows(
-        `SELECT * FROM episodic_events
+        `SELECT id, type, step, summary, details, created_at FROM episodic_events
          WHERE created_at < ?
          ORDER BY created_at ASC, id ASC LIMIT ?`,
         [cursor.createdAt],
       );
       appendKeysetRows(
-        `SELECT * FROM episodic_events
+        `SELECT id, type, step, summary, details, created_at FROM episodic_events
          WHERE created_at = ? AND id < ?
          ORDER BY created_at ASC, id ASC LIMIT ?`,
         [cursor.createdAt, cursor.id],
       );
     } else if (maxScanRows !== undefined) {
       episodicRows = this.db
-        .prepare(`SELECT * FROM episodic_events ORDER BY created_at ASC, id ASC LIMIT ?`)
+        .prepare(
+          `SELECT id, type, step, summary, details, created_at FROM episodic_events
+           ORDER BY created_at ASC, id ASC LIMIT ?`,
+        )
         .all(maxScanRows) as EpisodicRow[];
     }
     if (enforcementScanState !== undefined && episodicRows !== undefined) {
@@ -6293,16 +6327,62 @@ export class SqliteBrain implements IBrain {
       });
     }
 
-    const checkpointRows = maxScanRows === undefined
-      ? this.db
-          .prepare(`SELECT id, state, created_at FROM checkpoints ORDER BY id ASC`)
-          .all() as CheckpointRow[]
-      : this.db
-          .prepare(
-            `SELECT id, state, created_at FROM checkpoints
-             ORDER BY created_at ASC, id ASC LIMIT ?`,
-          )
-          .all(maxScanRows) as CheckpointRow[];
+    let checkpointRows: CheckpointRow[];
+    if (maxScanRows !== undefined && enforcementScanState?.checkpointCursor !== undefined) {
+      const cursor = enforcementScanState.checkpointCursor;
+      checkpointRows = [];
+      const appendCheckpointRows = (sql: string, parameters: Array<string | number>): void => {
+        const remaining = maxScanRows - checkpointRows.length;
+        if (remaining < 1) return;
+        checkpointRows.push(...this.db.prepare(sql).all(...parameters, remaining) as CheckpointRow[]);
+      };
+      appendCheckpointRows(
+        `SELECT id, state, created_at FROM checkpoints
+         WHERE created_at = ? AND id > ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt, cursor.id],
+      );
+      appendCheckpointRows(
+        `SELECT id, state, created_at FROM checkpoints
+         WHERE created_at > ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt],
+      );
+      appendCheckpointRows(
+        `SELECT id, state, created_at FROM checkpoints
+         WHERE created_at < ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt],
+      );
+      appendCheckpointRows(
+        `SELECT id, state, created_at FROM checkpoints
+         WHERE created_at = ? AND id < ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt, cursor.id],
+      );
+    } else if (maxScanRows === undefined) {
+      checkpointRows = this.db
+        .prepare(`SELECT id, state, created_at FROM checkpoints ORDER BY id ASC`)
+        .all() as CheckpointRow[];
+    } else {
+      checkpointRows = this.db
+        .prepare(
+          `SELECT id, state, created_at FROM checkpoints
+           ORDER BY created_at ASC, id ASC LIMIT ?`,
+        )
+        .all(maxScanRows) as CheckpointRow[];
+    }
+    if (enforcementScanState !== undefined) {
+      const lastRow = checkpointRows.at(-1);
+      if (lastRow === undefined) {
+        delete enforcementScanState.nextCheckpointCursor;
+      } else {
+        enforcementScanState.nextCheckpointCursor = {
+          createdAt: lastRow.created_at,
+          id: lastRow.id,
+        };
+      }
+    }
     const newestCheckpointProbeRows = maxScanRows === undefined
       ? checkpointRows.slice().reverse()
       : this.db
@@ -6403,11 +6483,16 @@ export class SqliteBrain implements IBrain {
     const maxScanRows = options.maxScanRows
       ?? Math.min(MAX_MEMORY_RETENTION_SCAN_ENTRIES, Math.max(maxDeletes * 10, 100));
     const episodicCursor = this.retentionEpisodicScanCursor
-      ?? this.persistedRetentionEpisodicScanCursor();
+      ?? this.persistedRetentionScanCursor('episodic');
+    const checkpointCursor = this.retentionCheckpointScanCursor
+      ?? this.persistedRetentionScanCursor('checkpoint');
     const scanState: MemoryRetentionEnforcementScanState = {
       ...(episodicCursor === undefined
         ? {}
         : { episodicCursor }),
+      ...(checkpointCursor === undefined
+        ? {}
+        : { checkpointCursor }),
     };
     const enforce = this.db.transaction((): MemoryRetentionEnforcementResult => {
       const report = this.buildMemoryRetentionReport(
@@ -6444,6 +6529,9 @@ export class SqliteBrain implements IBrain {
           episodicScanCursorCreatedAt:
             scanState.nextEpisodicCursor?.createdAt ?? null,
           episodicScanCursorId: scanState.nextEpisodicCursor?.id ?? null,
+          checkpointScanCursorCreatedAt:
+            scanState.nextCheckpointCursor?.createdAt ?? null,
+          checkpointScanCursorId: scanState.nextCheckpointCursor?.id ?? null,
         },
       });
       return { report, deleted };
@@ -6451,6 +6539,7 @@ export class SqliteBrain implements IBrain {
     try {
       const result = enforce.immediate() as MemoryRetentionEnforcementResult;
       this.retentionEpisodicScanCursor = scanState.nextEpisodicCursor;
+      this.retentionCheckpointScanCursor = scanState.nextCheckpointCursor;
       return result;
     } catch (error) {
       this.auditRecorder({

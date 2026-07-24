@@ -12,5 +12,7 @@
 - [x] Commit as David Mendez <me@davidmendez.dev>, push, and open one PR with `Closes #3694`.
 - [x] Resolve Codex's tied-timestamp keyset finding on current head and pass exact-head CI.
 - [x] Address the fresh Codex round's MCP scan-bound/audit findings with focused RED/GREEN plus full MCP test, lint, typecheck, and build verification.
-- [ ] Publish the follow-up commit through Approval Cop, then reach current-head Codex clean with zero unresolved Codex threads and green CI before exact-head merge.
+- [x] Publish the follow-up commit through Approval Cop and verify exact-head CI green.
+- [x] Address Codex round 4 checkpoint-progress, working-scan-bound, and embedding-projection findings with focused RED/GREEN and full brain gates.
+- [ ] Publish the round-4 follow-up through Approval Cop, then reach current-head Codex clean with zero unresolved Codex threads and green CI before exact-head merge.
 - [ ] Append reusable lessons and post terminal evidence to root task `t_7b3979ad`.
