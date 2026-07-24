@@ -66,6 +66,22 @@ describe('chat app beast daemon proxy', () => {
     expect((init.headers as Headers).get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
   });
 
+  it('proxies authenticated brain reads to the Beast daemon', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: { agentTypeId: 'coder' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp();
+
+    const response = await app.request('/v1/brain/coder/episodes?limit=5', {
+      headers: { authorization: `Bearer ${TEST_DAEMON_TOKEN}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toBe('http://127.0.0.1:4050/v1/brain/coder/episodes?limit=5');
+    expect((init.headers as Headers).get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
+  });
+
   it('forwards cookie-authenticated SSE streams without putting tickets in the URL', async () => {
     const fetchMock = vi.fn(async () => new Response('event: snapshot\ndata: {}\n\n', {
       headers: { 'content-type': 'text/event-stream' },

@@ -1,5 +1,6 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
+import type { BrainRegistry } from '@franken/brain';
 import type { ILlmClient } from '@franken/types';
 import { FileSessionStore } from '../chat/session-store.js';
 import type { ISessionStore } from '../chat/session-store.js';
@@ -12,6 +13,7 @@ import { agentRoutes } from './routes/agent-routes.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
+import { brainRoutes } from './routes/brain-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
@@ -65,7 +67,7 @@ export interface ChatAppOptions {
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };
-  beastControl?: BeastRoutesDeps;
+  beastControl?: BeastRoutesDeps & { brains?: BrainRegistry };
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
   securityConfig?: {
@@ -217,6 +219,8 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       }
       return requireAuth()(c, next);
     });
+    app.use('/v1/brain', requireAuth());
+    app.use('/v1/brain/*', requireAuth());
     app.use('/api/dashboard', requireAuth());
     app.use('/api/dashboard/*', async (c, next) => {
       if (new URL(c.req.url).pathname === '/api/dashboard/events') {
@@ -288,6 +292,14 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       security: opts.beastControl.security ?? transportSecurity,
       rateLimit: opts.beastControl.rateLimit,
     }));
+    if (opts.beastControl.brains) {
+      app.route('/', brainRoutes({
+        registry: opts.beastControl.brains,
+        operatorToken: opts.beastControl.operatorToken,
+        security: opts.beastControl.security ?? transportSecurity,
+        rateLimit: opts.beastControl.rateLimit,
+      }));
+    }
     const bc = opts.beastControl;
     app.route('/', createBeastSseRoutes({
       bus: bc.eventBus,
@@ -310,6 +322,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   } else if (opts.beastDaemon) {
     const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;
     app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
+    app.all('/v1/brain/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));

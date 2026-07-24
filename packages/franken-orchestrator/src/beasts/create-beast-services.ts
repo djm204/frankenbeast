@@ -23,6 +23,7 @@ import { BeastRunService } from './services/beast-run-service.js';
 import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
+import { BrainRegistry } from '@franken/brain';
 
 
 export interface BeastServicePaths {
@@ -34,6 +35,7 @@ export interface BeastServicePaths {
 
 export interface BeastServiceBundle {
   agents: AgentService;
+  brains: BrainRegistry;
   catalog: BeastCatalogService;
   dispatch: BeastDispatchService;
   runs: BeastRunService;
@@ -49,6 +51,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const repository = new SQLiteBeastRepository(paths.beastsDb);
   const logStore = new BeastLogStore(paths.beastLogsDir, createBeastLogStoreOptionsFromEnv());
   const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
+  const brains = new BrainRegistry(join(projectRoot, '.fbeast', 'brains'));
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
@@ -114,6 +117,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
 
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests }),
+    brains,
     catalog,
     dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, {
       eventBus,
@@ -128,6 +132,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     eventBus,
     ticketStore,
     dispose: () => {
+      brains.close();
       ticketStore.destroy();
       repository.close();
     },

@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { SqliteBrain } from './sqlite-brain.js';
@@ -62,6 +62,23 @@ export class BrainRegistry {
     const brain = new SqliteBrain(resolvedDbPath);
     this.brains.set(agentTypeId, brain);
     return brain;
+  }
+
+  /** Return an existing default agent brain without creating an unknown database. */
+  getAgentType(agentTypeId: string): SqliteBrain | undefined {
+    assertSafeAgentTypeId(agentTypeId);
+
+    const existing = this.brains.get(agentTypeId);
+    if (existing) return existing;
+
+    if (Buffer.byteLength(agentTypeId, 'utf8') > MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES) {
+      throw new RangeError(
+        `agentTypeId must be at most ${MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES} UTF-8 bytes when deriving the default .db filename`,
+      );
+    }
+
+    if (!existsSync(join(this.brainsDir, `${agentTypeId}.db`))) return undefined;
+    return this.forAgentType(agentTypeId);
   }
 
   /** Close every brain owned by this registry and release its process-local keys. */

@@ -72,6 +72,33 @@ describe('BrainRegistry', () => {
     }
   });
 
+  it('opens only existing default agent brains without creating unknown databases', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-brain-registry-existing-'));
+    const brainsDir = join(root, '.fbeast', 'brains');
+
+    try {
+      const writer = new BrainRegistry(brainsDir);
+      writer.forAgentType('coder').episodic.record({
+        type: 'observation',
+        summary: 'Ship safe HTTP routes',
+        createdAt: new Date().toISOString(),
+      });
+      writer.close();
+
+      const reader = new BrainRegistry(brainsDir);
+      try {
+        expect(reader.getAgentType('coder')?.episodic.count()).toBe(1);
+        expect(reader.getAgentType('reviewer')).toBeUndefined();
+        expect(existsSync(join(brainsDir, 'reviewer.db'))).toBe(false);
+        expect(() => reader.getAgentType('../escape')).toThrow(RangeError);
+      } finally {
+        reader.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps explicit in-memory agent brains ephemeral', () => {
     const firstRegistry = new BrainRegistry();
     firstRegistry.forAgentType('coder', ':memory:').episodic.record({
