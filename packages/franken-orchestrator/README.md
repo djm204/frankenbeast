@@ -131,6 +131,21 @@ The rubric checks six criteria:
 
 Each criterion reports `pass` only when matching evidence is present in working memory, recent events, or checkpoint context; sparse handoffs report `needs-attention` with guidance instead of inventing missing evidence. Structured tooling can import `assessPmHandoffQuality` from `@franken/orchestrator` when it needs the rubric score without parsing handoff prose.
 
+## Hive Brain central-command chat contract
+
+[`docs/adr/039-hive-brain-command-center.md`](../../docs/adr/039-hive-brain-command-center.md)
+defines the accepted, not-yet-implemented Hive Brain chat architecture. The
+existing REST session routes and `/v1/chat/ws` remain the browser transport. A
+future `BrainConversation` compatibility repository will provide the current
+`ISessionStore` projection while binding browser sessions to the unique
+user/workspace command-center conversation, workspace Hive Brain, and optional
+registered faculty. Explicit legacy agent/run sessions remain supported.
+
+The dispatch invariant is unchanged: transport -> `ChatRuntime` ->
+`BeastDispatchPort` -> `BeastDispatchService` -> the normal Beast executor and
+governor/HITL policy. Brain/faculty code must not create runs in storage or
+start process/container executors directly.
+
 ## Package areas
 
 | Area | Paths | Responsibility |

@@ -53,6 +53,16 @@ The frontend uses same-origin API paths at runtime:
 
 Open the Vite URL, usually `http://127.0.0.1:5173/`. The `dev:chat` script proxies `/api` and `/v1` requests to the local plain-HTTP chat server on `http://127.0.0.1:3737`; production deployments should use TLS-terminated `https://`/`wss://` endpoints.
 
+### Hive Brain compatibility contract
+
+The accepted central-command design in
+[`docs/adr/039-hive-brain-command-center.md`](../../docs/adr/039-hive-brain-command-center.md)
+keeps this package's existing session and WebSocket behavior. The dashboard
+continues to create or resume `/v1/chat/sessions`, mint one-shot socket tickets,
+connect to `/v1/chat/ws` with `franken.chat.v1`, and reconcile from
+`session.ready`/the session GET route. Hive/faculty selection will be additive;
+no second brain-chat socket or browser-side Beast dispatch path is permitted.
+
 If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. Beast routes (`/v1/beasts/*`) reuse that same target by default. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls run on a different backend, for example a separate local orchestrator or daemon port:
 
 | Local workflow | Backend topology | Vite env vars to set |
