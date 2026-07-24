@@ -29,6 +29,14 @@ export interface ProviderOpts {
   readonly sessionId?: string | undefined;
   /** Keep a newly started provider session so its native id can be captured. */
   readonly persistSession?: boolean | undefined;
+  /**
+   * First-party runtime metadata to deliver via the provider's system-prompt
+   * channel, when it has one (see `ICliProvider.supportsSystemPromptAddendum`).
+   * Only meaningful when that capability is true; providers without a real
+   * system-prompt channel should ignore this field entirely — the caller
+   * falls back to appending it to the prompt text instead.
+   */
+  readonly systemPromptAddendum?: string | undefined;
 }
 
 export interface ProviderCacheCapabilities {
@@ -76,6 +84,18 @@ export interface ICliProvider {
    * exposes this (Codex's `--json` output never reports a model field).
    */
   extractModel?(raw: string): string | undefined;
+  /**
+   * Whether this provider's CLI has a real system-prompt channel (distinct
+   * from the user-turn prompt) that `buildArgs` can route
+   * `ProviderOpts.systemPromptAddendum` through — e.g. Claude Code CLI's
+   * `--append-system-prompt`. Verified live: content delivered this way is
+   * treated as authoritative runtime context even when it contradicts what
+   * the model would otherwise say, and survives `--continue`/`--resume`
+   * session continuation. Providers without an equivalent flag (Codex,
+   * Gemini today) omit this — callers must fall back to appending the
+   * addendum to the prompt text for them.
+   */
+  supportsSystemPromptAddendum?(): boolean;
 }
 
 export function resolveProviderCacheCapabilities(provider: ICliProvider): ProviderCacheCapabilities {

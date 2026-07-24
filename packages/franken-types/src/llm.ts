@@ -11,6 +11,15 @@ export interface LlmCompletionOptions {
   signal?: AbortSignal | undefined;
   /** Maximum time for this logical completion, including provider fallback/retries. */
   timeoutMs?: number | undefined;
+  /**
+   * First-party runtime metadata (e.g. provider/fallback status) to deliver
+   * through a genuine system-level channel when the underlying CLI supports
+   * one, rather than concatenating it onto the user-turn prompt text — where
+   * it is textually indistinguishable from injected content and gets
+   * (correctly) distrusted by safety-conscious models. Providers without an
+   * equivalent channel fall back to appending it to the prompt.
+   */
+  systemPromptAddendum?: string | undefined;
 }
 
 export interface LlmCompletionResult {

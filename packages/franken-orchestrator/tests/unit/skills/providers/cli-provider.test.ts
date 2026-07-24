@@ -124,6 +124,7 @@ describe('ProviderOpts', () => {
       model: 'sonnet',
       extraArgs: ['--verbose'],
       commandOverride: '/usr/local/bin/claude',
+      systemPromptAddendum: 'Runtime status: fallback in effect.',
     };
     expect(opts.maxTurns).toBe(50);
     expect(opts.timeoutMs).toBe(300_000);
@@ -131,6 +132,7 @@ describe('ProviderOpts', () => {
     expect(opts.model).toBe('sonnet');
     expect(opts.extraArgs).toEqual(['--verbose']);
     expect(opts.commandOverride).toBe('/usr/local/bin/claude');
+    expect(opts.systemPromptAddendum).toBe('Runtime status: fallback in effect.');
   });
 });
 

@@ -49,10 +49,17 @@ export class ClaudeProvider implements ICliProvider {
     if (opts.maxTurns !== undefined) {
       args.push('--max-turns', String(opts.maxTurns));
     }
+    if (opts.systemPromptAddendum) {
+      args.push('--append-system-prompt', opts.systemPromptAddendum);
+    }
     if (opts.extraArgs) {
       args.push(...opts.extraArgs);
     }
     return args;
+  }
+
+  supportsSystemPromptAddendum(): boolean {
+    return true;
   }
 
   normalizeOutput(raw: string): string {

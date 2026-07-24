@@ -17,6 +17,7 @@ type UnifiedRequest = {
   sessionContinue?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
+  systemPromptAddendum?: string;
 };
 
 type UnifiedResponse = {
@@ -98,6 +99,7 @@ export class AdapterLlmClient implements ILlmClient {
       ...(options?.sessionContinue !== undefined ? { sessionContinue: options.sessionContinue } : {}),
       ...(options?.signal ? { signal: options.signal } : {}),
       ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      ...(options?.systemPromptAddendum ? { systemPromptAddendum: options.systemPromptAddendum } : {}),
     };
 
     let span: any;

@@ -309,9 +309,13 @@ describe('chat runtime parity', () => {
       lastProviderContext: first.providerContext,
     });
 
-    const [secondPrompt] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
-    expect(secondPrompt).toContain('That completed turn used an automatic fallback');
-    expect(secondPrompt).toContain('"codex" was rate-limited');
+    const [secondPrompt, secondOptions] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
+    // Delivered via systemPromptAddendum, not concatenated into the prompt —
+    // see docs/adr/040: appending it to raw user-turn text made it
+    // indistinguishable from injected content and got (correctly) distrusted.
+    expect(secondPrompt).not.toContain('Runtime status');
+    expect(secondOptions.systemPromptAddendum).toContain('That completed turn used an automatic fallback');
+    expect(secondOptions.systemPromptAddendum).toContain('"codex" was rate-limited');
     // Still reported forward even though this turn's own response carried no new providerContext.
     expect(second.providerContext).toEqual(first.providerContext);
   });
@@ -352,7 +356,8 @@ describe('chat runtime parity', () => {
       lastProviderContext: statusTurn.providerContext,
     });
 
-    const [thirdPrompt] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
-    expect(thirdPrompt).toContain('"claude" CLI provider');
+    const [thirdPrompt, thirdOptions] = (llm.completeWithUsage as ReturnType<typeof vi.fn>).mock.calls[1]!;
+    expect(thirdPrompt).not.toContain('Runtime status');
+    expect(thirdOptions.systemPromptAddendum).toContain('"claude" CLI provider');
   });
 });
