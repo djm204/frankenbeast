@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.10.0...franken-mcp-suite-v0.10.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **mcp:** report resumable Codex migration failures ([#3708](https://github.com/djm204/frankenbeast/issues/3708)) ([585ce48](https://github.com/djm204/frankenbeast/commit/585ce4863c8584ff2db1353083193a5d9786c9f8))
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.9.3...franken-mcp-suite-v0.10.0) (2026-07-23)
 
 
