@@ -21,7 +21,20 @@ describe('BrainRegistry', () => {
   it('rejects identifiers that are ambiguous or unsafe as path components', () => {
     const registry = new BrainRegistry();
 
-    for (const id of ['', ' coder', 'coder ', '.', '..', 'team/coder', 'team\\coder', 'coder\0']) {
+    for (const id of [
+      '',
+      ' coder',
+      'coder ',
+      '.',
+      '..',
+      'team/coder',
+      'team\\coder',
+      'coder\0',
+      'CON',
+      'con.json',
+      'COM1',
+      'LPT9',
+    ]) {
       expect(() => registry.forAgentType(id)).toThrow(RangeError);
     }
   });

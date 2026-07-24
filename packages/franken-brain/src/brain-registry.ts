@@ -6,6 +6,8 @@ import { SqliteBrain } from './sqlite-brain.js';
 
 const MAX_AGENT_TYPE_ID_BYTES = 255;
 const UNSAFE_AGENT_TYPE_ID_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f\u007f]/u;
+const WINDOWS_RESERVED_AGENT_TYPE_ID =
+  /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 
 function assertSafeAgentTypeId(agentTypeId: string): void {
   if (
@@ -16,6 +18,7 @@ function assertSafeAgentTypeId(agentTypeId: string): void {
     agentTypeId === '..' ||
     agentTypeId.endsWith('.') ||
     UNSAFE_AGENT_TYPE_ID_CHARACTERS.test(agentTypeId) ||
+    WINDOWS_RESERVED_AGENT_TYPE_ID.test(agentTypeId) ||
     Buffer.byteLength(agentTypeId, 'utf8') > MAX_AGENT_TYPE_ID_BYTES
   ) {
     throw new RangeError(
