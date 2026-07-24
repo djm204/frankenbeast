@@ -517,3 +517,7 @@
 
 ## 2026-07-22 — Webhook delivery deadlines and cancellation
 - A per-attempt webhook deadline must cover DNS resolution, transport, and bounded error-body reads—not stop at response headers. Caller cancellation must also interrupt DNS, active requests, response-body reads, and retry backoff, with owned timers and abort listeners removed on every terminal path.
+
+## 2026-07-24 — Retention enforcement safety
+- Explicit SQLite retention enforcement should consume the same report snapshot it presents, cap each atomic deletion batch, and record a non-sensitive success audit inside the transaction so audit failure rolls back destructive writes; record the error outcome after rollback.
+- Recovery compaction must protect the newest usable checkpoint rather than the highest row ID, because recovery already skips corrupt rows. Keep every adapter's scoped candidate ordering aligned by exporting and reusing the core priority/age comparator instead of reimplementing lexical ID sorting.

@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `BrainRegistry`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types. `SqliteBrain#attachReasoningFaculty()` lets an orchestrator replace the inert reasoning marker with a configured adapter without replacing the brain or its memory stores.
+Current public API: `SqliteBrain`, `BrainRegistry`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, `memoryRetentionPolicies`, `compareMemoryRetentionCompactionCandidates`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryRetentionReport`, `MemoryRetentionEnforcementOptions`, `MemoryRetentionEnforcementResult`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types. `SqliteBrain#attachReasoningFaculty()` lets an orchestrator replace the inert reasoning marker with a configured adapter without replacing the brain or its memory stores.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -60,6 +60,19 @@ brain.episodic.record({
   createdAt: new Date().toISOString(),
 });
 const related = brain.episodic.recall('package inventory', 5);
+
+// Retention reporting is read-only. Explicit enforcement applies the same
+// decisions to a bounded episodic/checkpoint snapshot and atomically deletes
+// only candidates from that snapshot. Working rows are omitted from the
+// enforcement result because their retention decisions remain report-only.
+// Run it from an operator-selected schedule or checkpoint boundary; writes do
+// not trigger compaction implicitly.
+const retention = brain.memoryRetentionReport({ maxEntries: 10_000 });
+const enforcement = brain.enforceMemoryRetention({
+  maxEntries: 10_000,
+  maxDeletes: 100,
+  maxScanRows: 1_000,
+});
 
 // Agent learning capture can opt into a cooldown so retrospectives or coordinator
 // handoffs do not churn the same lesson repeatedly. The key is stored in
@@ -234,6 +247,8 @@ registry.close();
 ## Persistence atomicity
 
 `SqliteBrain` persists each working-memory flush as one immediate SQLite transaction. All dirty upserts, deletions, provenance cleanup, and the success audit record commit together; if any statement fails, SQLite rolls the entire batch back and the in-memory changes remain pending for a later retry. Recovery checkpoints include their working-memory flush in the same transaction, so a checkpoint cannot commit against a partially persisted memory snapshot.
+
+Retention enforcement is also one immediate transaction and is bounded to 100 row deletions by default (`maxDeletes` accepts positive safe integers up to 1,000). Each episodic/checkpoint scan is capped separately (`maxScanRows` defaults from the deletion budget and cannot exceed 10,000), while report-only working memory is not scanned inside the enforcement writer lock. The returned report is therefore the bounded episodic/checkpoint enforcement snapshot, not a full read-only report. Enforcement reuses `memoryRetentionReport()` decisions instead of maintaining a second pruning policy. Checkpoints use the existing seven-day `transient_observation` policy, while the newest usable checkpoint is always protected as a rollback floor; corrupt newer rows cannot displace it. If the bounded newest-checkpoint scan cannot prove a usable floor, checkpoint deletion fails closed for that batch. Candidate order follows policy compaction priority, then oldest-first within a class, and the exported comparator keeps scoped MCP reports aligned with core ordering. This v1 strategy does not infer semantic rarity: callers should classify important episodic failures as a protected or longer-lived memory class, and lessons-aware pruning remains future work. Successful enforcement emits a `retention.enforce` audit event with aggregate counts, never memory contents.
 
 Keep future multi-row modifications inside `db.transaction(...)` rather than issuing independent statements. This preserves the same all-or-nothing contract for failures and concurrent writers.
 

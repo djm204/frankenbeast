@@ -459,6 +459,26 @@ The shipped HTTP server is integrated in `@franken/orchestrator`:
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
 
+### Brain retention and compaction
+
+`SqliteBrain.memoryRetentionReport()` is the single policy decision surface for
+working-memory, episodic-event, and recovery-checkpoint retention. Checkpoints
+reuse the existing `transient_observation` policy; the newest usable checkpoint
+is always protected so a corrupt newer row cannot displace the recovery floor.
+
+`SqliteBrain.enforceMemoryRetention()` is an explicit operator/scheduler call,
+not an eager write hook. It applies the same policy decisions to a bounded
+episodic/checkpoint snapshot and atomically deletes only reported compaction
+candidates, with a default hard bound of
+100 deleted rows per call. Per-store scans are also bounded (`maxScanRows`,
+maximum 10,000); checkpoint pruning fails closed when the bounded validation
+window cannot identify a usable recovery floor. The enforcement result omits
+working-memory rows because they are report-only and keep
+their existing TTL/write-path semantics. Candidate ordering uses retention-class
+priority and then oldest-first age; v1 does not recognize rare-but-important
+patterns semantically, so callers must classify durable/audit memories correctly.
+Lessons-aware pruning is intentionally outside this path.
+
 ### Hive Brain central-command chat (accepted design)
 
 [ADR-041](adr/041-hive-brain-command-center.md) fixes the architecture for the

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   DEFAULT_WORKING_MEMORY_LIMITS,
   SqliteBrain,
+  compareMemoryRetentionCompactionCandidates,
   type MemoryAttributionListOptions,
   type MemoryCandidate,
   type MemoryCandidateStatus,
@@ -511,7 +512,7 @@ function applyRetentionBudget(
   if (extraBudgetCompactions === 0) return scopedEntries;
   const retainedCandidates = scopedEntries
     .filter((entry) => !entry.protected && (entry.action === "retain" || entry.action === "nearing_expiry"))
-    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+    .sort(compareMemoryRetentionCompactionCandidates);
   for (const entry of retainedCandidates.slice(0, extraBudgetCompactions)) {
     entry.action = "compact";
     entry.reason = `Scoped memory report has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
@@ -532,7 +533,7 @@ function filterRetentionReportByScope(
   );
   const compactionCandidates = entries
     .filter((entry) => entry.action === "compact")
-    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+    .sort(compareMemoryRetentionCompactionCandidates);
   return {
     ...report,
     counts: {

@@ -127,6 +127,13 @@ packages/franken-orchestrator/src/
   - In managed/default dashboard flows it is a chat/control gateway client of `beasts-daemon`; it proxies `/v1/beasts/*` only after operator auth.
   - `ChatSocketController` handles WebSocket connections with chunk-based content delivery and turn event streaming
   - Shares the same `ChatRuntime` as the CLI REPL
+- **Brain retention is explicitly scheduled, not eager on write.**
+  `SqliteBrain.memoryRetentionReport()` classifies working, episodic, and
+  checkpoint rows; `enforceMemoryRetention()` atomically deletes only its
+  episodic/checkpoint compaction candidates, defaults to at most 100 deletions,
+  bounds each scan with `maxScanRows`, and always preserves the newest usable
+  checkpoint. The v1 order is policy priority
+  then oldest-first; it does not perform lessons-aware or semantic pruning.
 - **Hive Brain central-command chat is an accepted design, not implemented runtime behavior.**
   [ADR-041](../adr/041-hive-brain-command-center.md)
   (`docs/adr/041-hive-brain-command-center.md`) keeps the existing REST and

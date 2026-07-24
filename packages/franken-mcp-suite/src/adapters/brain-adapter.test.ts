@@ -419,6 +419,23 @@ vi.mock("better-sqlite3", () => ({
 }));
 
 vi.mock("@franken/brain", () => ({
+  compareMemoryRetentionCompactionCandidates: (
+    left: { policy: { compactPriority: number }; ageDays?: number; store: string; key: string },
+    right: { policy: { compactPriority: number }; ageDays?: number; store: string; key: string },
+  ) => {
+    const priority = right.policy.compactPriority - left.policy.compactPriority;
+    if (priority !== 0) return priority;
+    const age = (right.ageDays ?? -1) - (left.ageDays ?? -1);
+    if (age !== 0) return age;
+    const store = left.store.localeCompare(right.store);
+    if (store !== 0) return store;
+    const leftId = Number(left.key);
+    const rightId = Number(right.key);
+    if (Number.isSafeInteger(leftId) && Number.isSafeInteger(rightId)) {
+      return leftId - rightId;
+    }
+    return left.key.localeCompare(right.key);
+  },
   DEFAULT_WORKING_MEMORY_LIMITS: {
     maxEntries: 10_000,
     maxValueBytes: 5 * 1024 * 1024,
@@ -1223,6 +1240,32 @@ describe("createBrainAdapter", () => {
       total: 2,
       compactionCandidates: 1,
     });
+  });
+
+  it("preserves priority and oldest-first candidate ordering after scope filtering", async () => {
+    const brain = createBrainAdapter("/tmp/retention-order.db");
+    const policy = {
+      class: "transient_observation" as const,
+      retentionDays: 7,
+      compactPriority: 90,
+      protected: false,
+      description: "transient",
+    };
+    const entries = [
+      { store: "episodic" as const, key: "10", class: "transient_observation" as const, action: "compact" as const, policy, protected: false, ageDays: 8, reason: "old" },
+      { store: "episodic" as const, key: "2", class: "transient_observation" as const, action: "compact" as const, policy, protected: false, ageDays: 10, reason: "older" },
+    ];
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-21T00:00:00.000Z",
+      policies: [policy],
+      counts: { total: 2, protected: 0, expired: 0, nearingExpiry: 0, compactionCandidates: 2 },
+      entries,
+      compactionCandidates: entries,
+    });
+
+    const report = await brain.memoryRetentionReport({ readScope: "shared" });
+
+    expect(report.compactionCandidates.map((entry) => entry.key)).toEqual(["2", "10"]);
   });
 
   it("hides quarantined episodic rows from scoped retention reports", async () => {
