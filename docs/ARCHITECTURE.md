@@ -52,11 +52,7 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 The current local CLI path defaults to real adapters for every enabled module except the planner port. Disabled safety modules still use explicit stubs:
 
 - Real execution stack: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`, chunk-session store/renderer/compactor/GC
-<<<<<<< HEAD
-- Real module adapters wired in `src/cli/create-beast-deps.ts`: `MiddlewareChainFirewallAdapter` (firewall), `SkillManagerAdapter` (skills registry), `SqliteBrainMemoryAdapter` (memory), `PlanningFacultyAdapter` (the supplied planner port plus recallable plan/step lifecycle episodes), `ReasoningFacultyAdapter` (the enabled critique chain plus recallable verdict decisions when memory is enabled), `ReflectionHeartbeatAdapter` (heartbeat), and `McpSdkAdapter` (fail-closed `IMcpModule`: `callTool()` throws until a live MCP transport is configured)
-=======
-- Real module adapters wired in `src/cli/create-beast-deps.ts`: `MiddlewareChainFirewallAdapter` (firewall), `SkillManagerAdapter` (skills registry), `SqliteBrainMemoryAdapter` (memory), `ReasoningFacultyAdapter` (the enabled critique chain plus recallable verdict decisions when memory is enabled), `ReflectionHeartbeatAdapter` (heartbeat), and `McpSdkAdapter` (fail-closed `IMcpModule`: `callTool()` throws until a live MCP transport is configured). Spawned Beast runs carry their catalog `definitionId` into `BrainRegistry`, selecting `.fbeast/brains/<definitionId>.db` unless `brain.dbPath` explicitly overrides persistence.
->>>>>>> origin/main
+- Real module adapters wired in `src/cli/create-beast-deps.ts`: `MiddlewareChainFirewallAdapter` (firewall), `SkillManagerAdapter` (skills registry), `SqliteBrainMemoryAdapter` (memory), `PlanningFacultyAdapter` (the supplied planner port plus recallable plan/step lifecycle episodes), `ReasoningFacultyAdapter` (the enabled critique chain plus recallable verdict decisions when memory is enabled), `ReflectionHeartbeatAdapter` (heartbeat), and `McpSdkAdapter` (fail-closed `IMcpModule`: `callTool()` throws until a live MCP transport is configured). Spawned Beast runs carry their catalog `definitionId` into `BrainRegistry`, selecting `.fbeast/brains/<definitionId>.db` unless `brain.dbPath` explicitly overrides persistence.
 - Real safety adapters wired in `src/cli/dep-factory.ts`: `CritiquePortAdapter` over `@franken/critique` (critique) and `GovernorPortAdapter` over the governor's `ApprovalGateway`/`CliChannel` (governor; non-TTY runs default to reject). If either safety module is enabled but its package cannot be imported, the dep factory fails closed (throws) unless `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` explicitly opts into all-pass stubs
 - Stubbed: the planner port (`stubPlanner` in `src/cli/dep-factory.ts` throws if invoked; planning is graph-builder driven). Critique/governor use all-pass/all-approve stubs only when disabled by run config or `FRANKENBEAST_MODULE_CRITIQUE=false` / `FRANKENBEAST_MODULE_GOVERNOR=false`, or when `FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES=1` opts into unsafe missing-package fallbacks
 - Cold `frankenbeast run` executions clear the execution checkpoint, checkpoint outputs, chunk sessions, and chunk-session snapshots by default. `--resume` preserves those artifacts so interrupted runs can continue; `--reset` additionally clears memory, traces, issue artifacts, checkpoint outputs, and chunk-session artifacts. This matches the operator guidance in [run-cli-beast.md](guides/run-cli-beast.md#6-useful-flags), and the behavior is covered by the [Beast Verification Matrix](guides/beast-verification-matrix.md#focused-proof-set)
@@ -462,6 +458,26 @@ The shipped HTTP server is integrated in `@franken/orchestrator`:
 | Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @franken/web run dev:chat`. |
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
+
+### Brain retention and compaction
+
+`SqliteBrain.memoryRetentionReport()` is the single policy decision surface for
+working-memory, episodic-event, and recovery-checkpoint retention. Checkpoints
+reuse the existing `transient_observation` policy; the newest usable checkpoint
+is always protected so a corrupt newer row cannot displace the recovery floor.
+
+`SqliteBrain.enforceMemoryRetention()` is an explicit operator/scheduler call,
+not an eager write hook. It applies the same policy decisions to a bounded
+episodic/checkpoint snapshot and atomically deletes only reported compaction
+candidates, with a default hard bound of
+100 deleted rows per call. Per-store scans are also bounded (`maxScanRows`,
+maximum 10,000); checkpoint pruning fails closed when the bounded validation
+window cannot identify a usable recovery floor. The enforcement result omits
+working-memory rows because they are report-only and keep
+their existing TTL/write-path semantics. Candidate ordering uses retention-class
+priority and then oldest-first age; v1 does not recognize rare-but-important
+patterns semantically, so callers must classify durable/audit memories correctly.
+Lessons-aware pruning is intentionally outside this path.
 
 ### Hive Brain central-command chat (accepted design)
 

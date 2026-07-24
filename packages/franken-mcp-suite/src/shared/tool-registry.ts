@@ -560,6 +560,7 @@ const TOOLS: ToolFull[] = [
         now: { type: 'string', description: 'Optional report timestamp for deterministic evaluation' },
         expiryHorizonMs: { type: 'string', description: 'Report TTL entries expiring within this many milliseconds (default seven days)' },
         maxEntries: { type: 'string', description: 'Optional entry budget used to mark overflow compaction candidates' },
+        maxScanRows: { type: 'string', description: 'Optional per-store row scan budget for bounded reports' },
         readScope: { type: 'string', description: 'Memory visibility scope: all, shared, or agent', enum: ['all', 'shared', 'agent'] },
         agentId: { type: 'string', description: 'Required when readScope is agent; filters report to shared plus that agent-scoped memory' },
       },
@@ -577,6 +578,10 @@ const TOOLS: ToolFull[] = [
       if (!maxEntries.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${maxEntries.message}` }], isError: true };
       }
+      const maxScanRows = parseOptionalPositiveIntegerArg('maxScanRows', args['maxScanRows']);
+      if (!maxScanRows.ok) {
+        return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${maxScanRows.message}` }], isError: true };
+      }
       const scopeArgs = parseMemoryReadScopeArgs(args);
       if (!scopeArgs.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_memory_retention_report ${scopeArgs.message}` }], isError: true };
@@ -586,6 +591,7 @@ const TOOLS: ToolFull[] = [
         ...(now.value ? { now: now.value } : {}),
         ...(expiryHorizonMs.value === undefined ? {} : { expiryHorizonMs: expiryHorizonMs.value }),
         ...(maxEntries.value === undefined ? {} : { maxEntries: maxEntries.value }),
+        ...(maxScanRows.value === undefined ? {} : { maxScanRows: maxScanRows.value }),
       });
       return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] };
     },

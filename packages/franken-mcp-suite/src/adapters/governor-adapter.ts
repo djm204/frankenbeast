@@ -449,6 +449,11 @@ function sanitizeMemoryRetentionReportGovernanceArgs(args: Record<string, unknow
   } else if (Object.prototype.hasOwnProperty.call(args, 'maxEntries')) {
     safe['maxEntries'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
   }
+  if (typeof args['maxScanRows'] === 'number') {
+    safe['maxScanRows'] = args['maxScanRows'];
+  } else if (Object.prototype.hasOwnProperty.call(args, 'maxScanRows')) {
+    safe['maxScanRows'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
+  }
   if (Object.prototype.hasOwnProperty.call(args, 'agentId')) {
     safe['agentId'] = MEMORY_RETENTION_REPORT_CONTEXT_REDACTION;
   }
@@ -466,6 +471,7 @@ function contextLooksLikeMemoryRetentionReportArgs(context: string): boolean {
       'now',
       'expiryHorizonMs',
       'maxEntries',
+      'maxScanRows',
       'agentId',
     ]);
 

@@ -95,6 +95,35 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
+  it('rolls back retention deletions when success audit persistence fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    brain.episodic.record({
+      type: 'observation',
+      summary: 'must remain after audit failure',
+      details: { memoryClass: 'transient_observation' },
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_retention_success_audit
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'retention.enforce' AND NEW.outcome = 'success'
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated retention audit failure');
+      END;
+    `);
+
+    expect(() => brain.enforceMemoryRetention({
+      now: '2026-01-10T00:00:00.000Z',
+    })).toThrow('simulated retention audit failure');
+    expect(brain.episodic.recall('must remain', 10)).toHaveLength(1);
+    expect(brain.accessAudit.list({ operation: 'retention.enforce' })[0]).toMatchObject({
+      outcome: 'error',
+      details: { errorName: 'SqliteError' },
+    });
+    brain.close();
+  });
+
   it('rolls back review proposals when success audit persistence fails', () => {
     const brain = new SqliteBrain(':memory:');
     const db = (brain as unknown as { db: Database.Database }).db;

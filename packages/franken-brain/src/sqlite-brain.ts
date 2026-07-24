@@ -136,7 +136,7 @@ export interface MemoryRetentionPolicy {
 }
 
 export interface MemoryRetentionEntryReport {
-  store: 'working' | 'episodic';
+  store: 'working' | 'episodic' | 'checkpoint';
   key: string;
   agentId?: string | null;
   class: MemoryRetentionClass;
@@ -152,6 +152,8 @@ export interface MemoryRetentionReportOptions {
   now?: string | Date;
   expiryHorizonMs?: number;
   maxEntries?: number;
+  /** Optional per-store row scan cap. Bounded enforcement always supplies one. */
+  maxScanRows?: number;
 }
 
 export interface MemoryRetentionReport {
@@ -166,6 +168,20 @@ export interface MemoryRetentionReport {
   };
   entries: MemoryRetentionEntryReport[];
   compactionCandidates: MemoryRetentionEntryReport[];
+}
+
+export interface MemoryRetentionEnforcementOptions extends MemoryRetentionReportOptions {
+  /** Hard cap on rows deleted by one explicit enforcement call. Defaults to 100; maximum 1,000. */
+  maxDeletes?: number;
+}
+
+export interface MemoryRetentionEnforcementResult {
+  /** The immutable decision snapshot used by this enforcement transaction. */
+  report: MemoryRetentionReport;
+  deleted: {
+    episodic: number;
+    checkpoints: number;
+  };
 }
 
 export type MemoryCandidateTargetStore = 'working';
@@ -244,6 +260,9 @@ type ExistingMemoryMergeCandidate = {
 };
 
 const AGENT_WORKING_KEY_PREFIX = '__fbeast_agent_memory__/';
+const DEFAULT_MEMORY_RETENTION_MAX_DELETES = 100;
+const MAX_MEMORY_RETENTION_MAX_DELETES = 1_000;
+const MAX_MEMORY_RETENTION_SCAN_ENTRIES = 10_000;
 
 const MEMORY_RETENTION_POLICIES: Record<MemoryRetentionClass, MemoryRetentionPolicy> = {
   user_preference: {
@@ -543,6 +562,7 @@ export type MemoryAccessAuditStore =
   | 'working'
   | 'episodic'
   | 'recovery'
+  | 'retention'
   | 'review'
   | 'privacy';
 
@@ -568,6 +588,7 @@ export type MemoryAccessAuditOperation =
   | 'recovery.lastCheckpoint'
   | 'recovery.listCheckpoints'
   | 'recovery.clearCheckpoints'
+  | 'retention.enforce'
   | 'review.propose'
   | 'review.list'
   | 'review.edit'
@@ -1310,6 +1331,24 @@ function retentionActionForEntry(input: {
     return { action: 'compact', reason: `${input.className} age ${input.ageDays.toFixed(1)}d exceeds ${input.policy.retentionDays}d retention` };
   }
   return { action: 'retain', reason: `${input.className} is within retention policy` };
+}
+
+export function compareMemoryRetentionCompactionCandidates(
+  left: MemoryRetentionEntryReport,
+  right: MemoryRetentionEntryReport,
+): number {
+  const priority = right.policy.compactPriority - left.policy.compactPriority;
+  if (priority !== 0) return priority;
+  const age = (right.ageDays ?? -1) - (left.ageDays ?? -1);
+  if (age !== 0) return age;
+  const store = left.store.localeCompare(right.store);
+  if (store !== 0) return store;
+  const leftId = Number(left.key);
+  const rightId = Number(right.key);
+  if (Number.isSafeInteger(leftId) && Number.isSafeInteger(rightId)) {
+    return leftId - rightId;
+  }
+  return left.key.localeCompare(right.key);
 }
 
 class SqliteWorkingMemory implements IWorkingMemory {
@@ -2650,6 +2689,16 @@ interface EpisodicRow {
   summary: string;
   details: string | null;
   created_at: string;
+}
+
+interface MemoryRetentionScanCursor {
+  createdAt: string;
+  id: number;
+}
+
+interface MemoryRetentionEnforcementScanState {
+  episodicCursor?: MemoryRetentionScanCursor;
+  nextEpisodicCursor?: MemoryRetentionScanCursor;
 }
 
 type CorruptEpisodicDetailsReporter = (eventId: number) => void;
@@ -5631,6 +5680,7 @@ export class SqliteBrain implements IBrain {
   private readonly dbPath: string;
   private readonly encryption: MemoryCipher | undefined;
   private readonly auditRecorder: MemoryAccessAuditRecorder;
+  private retentionEpisodicScanCursor: MemoryRetentionScanCursor | undefined;
 
   constructor(
     dbPath: string = ':memory:',
@@ -6061,6 +6111,32 @@ export class SqliteBrain implements IBrain {
   }
 
   memoryRetentionReport(options: MemoryRetentionReportOptions = {}): MemoryRetentionReport {
+    return this.buildMemoryRetentionReport(options, true);
+  }
+
+  private persistedRetentionEpisodicScanCursor(): MemoryRetentionScanCursor | undefined {
+    const row = this.db.prepare(
+      `SELECT details
+       FROM memory_access_audit_events
+       WHERE store = 'retention'
+         AND operation = 'retention.enforce'
+         AND outcome = 'success'
+       ORDER BY id DESC
+       LIMIT 1`,
+    ).get() as Pick<MemoryAccessAuditRow, 'details'> | undefined;
+    const details = parseMemoryAccessDetails(row?.details ?? null);
+    const createdAt = details?.episodicScanCursorCreatedAt;
+    const id = details?.episodicScanCursorId;
+    return typeof createdAt === 'string' && Number.isInteger(id) && Number(id) > 0
+      ? { createdAt, id: Number(id) }
+      : undefined;
+  }
+
+  private buildMemoryRetentionReport(
+    options: MemoryRetentionReportOptions,
+    includeWorking: boolean,
+    enforcementScanState?: MemoryRetentionEnforcementScanState,
+  ): MemoryRetentionReport {
     const now = resolveRetentionNow(options.now);
     const nowMs = now.getTime();
     const expiryHorizonMs = options.expiryHorizonMs ?? 7 * 24 * 60 * 60 * 1000;
@@ -6071,9 +6147,25 @@ export class SqliteBrain implements IBrain {
     if (maxEntries !== undefined && (!Number.isSafeInteger(maxEntries) || maxEntries < 1)) {
       throw new Error('maxEntries must be a positive safe integer');
     }
+    const maxScanRows = options.maxScanRows;
+    if (
+      maxScanRows !== undefined
+      && (
+        !Number.isSafeInteger(maxScanRows)
+        || maxScanRows < 1
+        || maxScanRows > MAX_MEMORY_RETENTION_SCAN_ENTRIES
+      )
+    ) {
+      throw new RangeError(
+        `maxScanRows must be a positive safe integer no greater than ${MAX_MEMORY_RETENTION_SCAN_ENTRIES}`,
+      );
+    }
 
     const entries: MemoryRetentionEntryReport[] = [];
-    for (const { key, value, updatedAt } of this.working.retentionEntries(now.toISOString())) {
+    const workingEntries = includeWorking
+      ? this.working.retentionEntries(now.toISOString())
+      : [];
+    for (const { key, value, updatedAt } of workingEntries) {
       const className = classifyMemoryEntry({ store: 'working', key, value });
       const policy = MEMORY_RETENTION_POLICIES[className];
       const expiresAt = extractTemporaryOperationalExpiresAt(value, className);
@@ -6101,7 +6193,68 @@ export class SqliteBrain implements IBrain {
       });
     }
 
-    for (const event of this.episodic.recent(-1)) {
+    let episodicRows: EpisodicRow[] | undefined;
+    if (maxScanRows !== undefined && enforcementScanState?.episodicCursor !== undefined) {
+      const cursor = enforcementScanState.episodicCursor;
+      episodicRows = [];
+      const appendKeysetRows = (sql: string, parameters: Array<string | number>): void => {
+        const remaining = maxScanRows - (episodicRows?.length ?? 0);
+        if (remaining < 1) return;
+        const rows = this.db
+          .prepare(sql)
+          .all(...parameters, remaining) as EpisodicRow[];
+        episodicRows?.push(...rows);
+      };
+
+      // Split each side of the composite cursor into indexable ranges. A single OR predicate
+      // makes SQLite seek only by created_at and filter every preceding row in a large tie.
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at = ? AND id > ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt, cursor.id],
+      );
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at > ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt],
+      );
+      // Wrap from the beginning once the rows after the cursor are exhausted.
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at < ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt],
+      );
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at = ? AND id < ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt, cursor.id],
+      );
+    } else if (maxScanRows !== undefined) {
+      episodicRows = this.db
+        .prepare(`SELECT * FROM episodic_events ORDER BY created_at ASC, id ASC LIMIT ?`)
+        .all(maxScanRows) as EpisodicRow[];
+    }
+    if (enforcementScanState !== undefined && episodicRows !== undefined) {
+      const lastRow = episodicRows.at(-1);
+      if (lastRow === undefined) {
+        delete enforcementScanState.nextEpisodicCursor;
+      } else {
+        enforcementScanState.nextEpisodicCursor = {
+          createdAt: lastRow.created_at,
+          id: lastRow.id,
+        };
+      }
+    }
+    const episodicEvents = episodicRows === undefined
+      ? this.episodic.recent(-1)
+      : episodicRows
+          .map(row => rowToEvent(row, this.encryption))
+          .filter((event): event is EpisodicEvent => event !== null);
+    for (const event of episodicEvents) {
       const key = String(event.id ?? event.summary);
       const className = (
         isRightToForgetAuditEvent(event)
@@ -6140,10 +6293,68 @@ export class SqliteBrain implements IBrain {
       });
     }
 
+    const checkpointRows = maxScanRows === undefined
+      ? this.db
+          .prepare(`SELECT id, state, created_at FROM checkpoints ORDER BY id ASC`)
+          .all() as CheckpointRow[]
+      : this.db
+          .prepare(
+            `SELECT id, state, created_at FROM checkpoints
+             ORDER BY created_at ASC, id ASC LIMIT ?`,
+          )
+          .all(maxScanRows) as CheckpointRow[];
+    const newestCheckpointProbeRows = maxScanRows === undefined
+      ? checkpointRows.slice().reverse()
+      : this.db
+          .prepare(`SELECT id, state, created_at FROM checkpoints ORDER BY id DESC LIMIT ?`)
+          .all(maxScanRows + 1) as CheckpointRow[];
+    const checkpointValidationWasTruncated = maxScanRows !== undefined
+      && newestCheckpointProbeRows.length > maxScanRows;
+    const newestCheckpointRows = maxScanRows === undefined
+      ? newestCheckpointProbeRows
+      : newestCheckpointProbeRows.slice(0, maxScanRows);
+    let newestUsableCheckpointId: number | undefined;
+    for (const checkpoint of newestCheckpointRows) {
+      if (parseCheckpointState(checkpoint, this.encryption) !== null) {
+        newestUsableCheckpointId = checkpoint.id;
+        break;
+      }
+    }
+
+    for (const checkpoint of checkpointRows) {
+      const className: MemoryRetentionClass = 'transient_observation';
+      const policy = MEMORY_RETENTION_POLICIES[className];
+      const observedAgeDays = ageDays(checkpoint.created_at, nowMs);
+      const decision = retentionActionForEntry({
+        className,
+        policy,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        nowMs,
+        expiryHorizonMs,
+      });
+      const isNewestCheckpoint = checkpoint.id === newestUsableCheckpointId;
+      const protectForUnknownFloor = newestUsableCheckpointId === undefined
+        && checkpointValidationWasTruncated;
+      entries.push({
+        store: 'checkpoint',
+        key: String(checkpoint.id),
+        class: className,
+        action: isNewestCheckpoint || protectForUnknownFloor ? 'protect' : decision.action,
+        policy: { ...policy },
+        protected: isNewestCheckpoint || protectForUnknownFloor,
+        ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
+        reason: isNewestCheckpoint
+          ? 'Newest usable recovery checkpoint is always preserved as a safe rollback floor'
+          : protectForUnknownFloor
+            ? 'Checkpoint compaction is paused because the bounded scan could not identify a usable rollback floor'
+          : decision.reason,
+      });
+    }
+
     if (maxEntries !== undefined) {
       const nonProtectedBudgetCandidates = entries
         .filter((entry) => !entry.protected && (entry.action === 'retain' || entry.action === 'nearing_expiry'))
-        .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+        .sort(compareMemoryRetentionCompactionCandidates);
       const activeEntries = entries.filter((entry) => entry.action !== 'expired');
       const existingCompactionCount = activeEntries.filter((entry) => entry.action === 'compact').length;
       const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
@@ -6155,7 +6366,7 @@ export class SqliteBrain implements IBrain {
 
     const compactionCandidates = entries
       .filter((entry) => entry.action === 'compact')
-      .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+      .sort(compareMemoryRetentionCompactionCandidates);
 
     return {
       generatedAt: now.toISOString(),
@@ -6170,6 +6381,90 @@ export class SqliteBrain implements IBrain {
       entries,
       compactionCandidates,
     };
+  }
+
+  /**
+   * Explicitly enforce the same episodic/checkpoint decisions returned by
+   * memoryRetentionReport(). Callers choose the schedule or checkpoint boundary.
+   */
+  enforceMemoryRetention(
+    options: MemoryRetentionEnforcementOptions = {},
+  ): MemoryRetentionEnforcementResult {
+    const maxDeletes = options.maxDeletes ?? DEFAULT_MEMORY_RETENTION_MAX_DELETES;
+    if (
+      !Number.isSafeInteger(maxDeletes)
+      || maxDeletes < 1
+      || maxDeletes > MAX_MEMORY_RETENTION_MAX_DELETES
+    ) {
+      throw new RangeError(
+        `maxDeletes must be a positive safe integer no greater than ${MAX_MEMORY_RETENTION_MAX_DELETES}`,
+      );
+    }
+    const maxScanRows = options.maxScanRows
+      ?? Math.min(MAX_MEMORY_RETENTION_SCAN_ENTRIES, Math.max(maxDeletes * 10, 100));
+    const episodicCursor = this.retentionEpisodicScanCursor
+      ?? this.persistedRetentionEpisodicScanCursor();
+    const scanState: MemoryRetentionEnforcementScanState = {
+      ...(episodicCursor === undefined
+        ? {}
+        : { episodicCursor }),
+    };
+    const enforce = this.db.transaction((): MemoryRetentionEnforcementResult => {
+      const report = this.buildMemoryRetentionReport(
+        { ...options, maxScanRows },
+        false,
+        scanState,
+      );
+      const candidates = report.compactionCandidates
+        .filter((entry) => entry.store === 'episodic' || entry.store === 'checkpoint')
+        .slice(0, maxDeletes);
+      const deleted = { episodic: 0, checkpoints: 0 };
+      const deleteEpisodic = this.db.prepare(`DELETE FROM episodic_events WHERE id = ?`);
+      const deleteCheckpoint = this.db.prepare(`DELETE FROM checkpoints WHERE id = ?`);
+      for (const candidate of candidates) {
+        const id = Number(candidate.key);
+        if (!Number.isSafeInteger(id) || id < 1) {
+          throw new Error(`Invalid retention candidate id: ${candidate.key}`);
+        }
+        if (candidate.store === 'episodic') {
+          deleted.episodic += deleteEpisodic.run(id).changes;
+        } else {
+          deleted.checkpoints += deleteCheckpoint.run(id).changes;
+        }
+      }
+      this.auditRecorder({
+        operation: 'retention.enforce',
+        store: 'retention',
+        outcome: 'success',
+        details: {
+          episodicDeleted: deleted.episodic,
+          checkpointsDeleted: deleted.checkpoints,
+          maxDeletes,
+          maxScanRows,
+          episodicScanCursorCreatedAt:
+            scanState.nextEpisodicCursor?.createdAt ?? null,
+          episodicScanCursorId: scanState.nextEpisodicCursor?.id ?? null,
+        },
+      });
+      return { report, deleted };
+    });
+    try {
+      const result = enforce.immediate() as MemoryRetentionEnforcementResult;
+      this.retentionEpisodicScanCursor = scanState.nextEpisodicCursor;
+      return result;
+    } catch (error) {
+      this.auditRecorder({
+        operation: 'retention.enforce',
+        store: 'retention',
+        outcome: 'error',
+        details: {
+          errorName: error instanceof Error ? error.name : 'Error',
+          maxDeletes,
+          maxScanRows,
+        },
+      });
+      throw error;
+    }
   }
 
   /** Flush working memory to SQLite before serialization or checkpoint. */
@@ -6839,11 +7134,28 @@ function migrateMemorySchemaDatabase(
     );
     if (
       !episodicIndexes.has('idx_episodic_events_type_created_at') ||
-      !episodicIndexes.has('idx_episodic_events_created_at')
+      !episodicIndexes.has('idx_episodic_events_created_at') ||
+      !episodicIndexes.has('idx_episodic_events_retention')
     ) {
       operations.push({
         table: 'episodic_events',
-        action: 'create type and recency query indexes',
+        action: 'create type, recency, and retention query indexes',
+      });
+    }
+  }
+
+  if (existingTables.has('checkpoints')) {
+    const checkpointIndexes = new Set(
+      (
+        db
+          .prepare(`PRAGMA index_list(checkpoints)`)
+          .all() as Array<{ name: string }>
+      ).map((row) => row.name),
+    );
+    if (!checkpointIndexes.has('idx_checkpoints_retention')) {
+      operations.push({
+        table: 'checkpoints',
+        action: 'create retention query index',
       });
     }
   }
@@ -6935,12 +7247,16 @@ function migrateMemorySchemaDatabase(
         ON episodic_events(type, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_episodic_events_created_at
         ON episodic_events(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_episodic_events_retention
+        ON episodic_events(created_at ASC, id ASC);
       CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         state TEXT NOT NULL,
         created_at TEXT NOT NULL,
         schema_version INTEGER NOT NULL DEFAULT ${CURRENT_MEMORY_SCHEMA_VERSION}
       );
+      CREATE INDEX IF NOT EXISTS idx_checkpoints_retention
+        ON checkpoints(created_at ASC, id ASC);
       CREATE TABLE IF NOT EXISTS memory_review_candidates (
         id TEXT PRIMARY KEY,
         target_store TEXT NOT NULL,

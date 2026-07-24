@@ -42,6 +42,8 @@ describe('state schema migration smoke tests', () => {
       withoutIndexes.exec(`
         DROP INDEX idx_episodic_events_type_created_at;
         DROP INDEX idx_episodic_events_created_at;
+        DROP INDEX idx_episodic_events_retention;
+        DROP INDEX idx_checkpoints_retention;
       `);
       withoutIndexes.close();
 
@@ -56,7 +58,11 @@ describe('state schema migration smoke tests', () => {
         expect.arrayContaining([
           {
             table: 'episodic_events',
-            action: 'create type and recency query indexes',
+            action: 'create type, recency, and retention query indexes',
+          },
+          {
+            table: 'checkpoints',
+            action: 'create retention query index',
           },
         ]),
       );
@@ -85,6 +91,18 @@ describe('state schema migration smoke tests', () => {
           `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT 10 OFFSET 0`,
         ).join('\n'),
       ).toContain('USING INDEX idx_episodic_events_created_at');
+      expect(
+        readQueryPlan(
+          indexed,
+          `SELECT * FROM episodic_events ORDER BY created_at ASC, id ASC LIMIT 10`,
+        ).join('\n'),
+      ).toContain('USING INDEX idx_episodic_events_retention');
+      expect(
+        readQueryPlan(
+          indexed,
+          `SELECT * FROM checkpoints ORDER BY created_at ASC, id ASC LIMIT 10`,
+        ).join('\n'),
+      ).toContain('USING INDEX idx_checkpoints_retention');
       indexed.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
