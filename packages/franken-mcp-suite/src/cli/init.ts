@@ -41,6 +41,42 @@ export interface InitOptions {
   spawn?: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string; stdout?: Buffer | string };
 }
 
+export class LegacyCodexMigrationError extends Error {
+  readonly code = 'LEGACY_CODEX_MCP_MIGRATION_FAILED';
+  readonly failedServer: string;
+  readonly command: readonly string[];
+  readonly removedServers: readonly string[];
+  readonly stderr: string;
+  readonly resumeCommand: readonly string[];
+
+  constructor(options: {
+    failedServer: string;
+    command: readonly string[];
+    removedServers: readonly string[];
+    stderr: string;
+    resumeCommand: readonly string[];
+  }) {
+    const command = [...options.command];
+    const removedServers = [...options.removedServers];
+    const resumeCommand = [...options.resumeCommand];
+    const commandText = command.join(' ');
+    const removedText = removedServers.length > 0 ? removedServers.join(', ') : 'none';
+    super([
+      `fbeast init: legacy Codex MCP migration failed while running: ${commandText}`,
+      `Legacy entries already removed: ${removedText}`,
+      `Codex error: ${options.stderr}`,
+      `Repair: ${commandText}`,
+      `Resume: ${resumeCommand.join(' ')}`,
+    ].join('\n'));
+    this.name = 'LegacyCodexMigrationError';
+    this.failedServer = options.failedServer;
+    this.command = command;
+    this.removedServers = removedServers;
+    this.stderr = options.stderr;
+    this.resumeCommand = resumeCommand;
+  }
+}
+
 export function runInit(options: InitOptions): void {
   const {
     root,
@@ -170,7 +206,7 @@ function initCodex(options: {
   const dbPath = join(root, '.fbeast', 'beast.db');
   const configPath = join(root, '.fbeast', 'config.json');
 
-  migrateLegacyCodexServers(root, spawnFn);
+  migrateLegacyCodexServers(root, spawnFn, codexInitResumeCommand({ servers, hooks, mode }));
   writeCodexProjectConfig(root, servers, mode, dbPath, configPath);
 
   // Drop instructions into AGENTS.md
@@ -196,9 +232,11 @@ function initCodex(options: {
 function migrateLegacyCodexServers(
   root: string,
   spawnFn: (cmd: string, args: string[]) => { status: number | null; stderr?: Buffer | string; stdout?: Buffer | string },
+  resumeCommand: readonly string[],
 ): void {
   const dbPath = join(root, '.fbeast', 'beast.db');
   const legacyNames = [...ALL_SERVERS.map((srv) => `fbeast-${srv}`), 'fbeast-proxy'];
+  const removedServers: string[] = [];
 
   for (const name of legacyNames) {
     const getResult = spawnFn('codex', ['mcp', 'get', name]);
@@ -207,11 +245,46 @@ function migrateLegacyCodexServers(
     const output = `${getResult.stdout?.toString() ?? ''}\n${getResult.stderr?.toString() ?? ''}`;
     if (!output.includes(dbPath)) continue;
 
-    const removeResult = spawnFn('codex', ['mcp', 'remove', name]);
+    const command = ['codex', 'mcp', 'remove', name] as const;
+    const removeResult = spawnFn(command[0], command.slice(1));
     if (removeResult.status !== 0) {
-      throw new Error(`fbeast init: failed to remove legacy Codex MCP server ${name}: ${removeResult.stderr?.toString().trim() ?? 'unknown error'}`);
+      throw new LegacyCodexMigrationError({
+        failedServer: name,
+        command,
+        removedServers,
+        stderr: sanitizeCodexDiagnostic(removeResult.stderr),
+        resumeCommand,
+      });
     }
+    removedServers.push(name);
   }
+}
+
+function codexInitResumeCommand(options: {
+  servers: readonly FbeastServer[];
+  hooks: boolean;
+  mode: 'standard' | 'proxy';
+}): string[] {
+  const command = ['fbeast', 'mcp', 'init', '--client=codex'];
+  if (options.hooks) command.push('--hooks');
+  if (options.mode === 'proxy') {
+    command.push('--mode=proxy');
+  } else if (
+    options.servers.length !== ALL_SERVERS.length
+    || options.servers.some((server, index) => server !== ALL_SERVERS[index])
+  ) {
+    command.push(`--pick=${options.servers.join(',')}`);
+  }
+  return command;
+}
+
+function sanitizeCodexDiagnostic(stderr: Buffer | string | undefined): string {
+  const diagnostic = stderr?.toString() ?? '';
+  const sanitized = diagnostic
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+    .trim();
+  return sanitized.slice(0, 2_000) || 'unknown error';
 }
 
 function writeCodexProjectConfig(
