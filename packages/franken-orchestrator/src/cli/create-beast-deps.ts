@@ -22,6 +22,7 @@ import { join, basename, dirname } from 'node:path';
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
 import { ReasoningFacultyAdapter } from '../adapters/reasoning-faculty-adapter.js';
+import { ActionFacultyAdapter } from '../adapters/action-faculty-adapter.js';
 import { PlanningFacultyAdapter } from '../adapters/planning-faculty-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
@@ -71,6 +72,12 @@ export interface BeastDepsConfig {
     /** Attach the real critique chain as the reasoning faculty. */
     enabled?: boolean;
     /** Persist compact verdict episodes. Disable with the memory module. */
+    recordEpisodes?: boolean;
+  };
+  action?: {
+    /** Attach the concrete governor as the action faculty. */
+    enabled?: boolean;
+    /** Persist governed action decisions. Disable with the memory module. */
     recordEpisodes?: boolean;
   };
   planning?: {
@@ -197,6 +204,20 @@ export function createBeastDeps(
       })
     : undefined;
   if (reasoning) brain.attachReasoningFaculty(reasoning);
+  const actionFaculty = config.action?.enabled !== false
+    ? new ActionFacultyAdapter(
+        existingDeps.governor,
+        brain.episodic,
+        clock,
+        (error) => existingDeps.logger.warn(
+          'Failed to record governor action decision in episodic memory',
+          error,
+          'brain.action',
+        ),
+        config.action?.recordEpisodes !== false,
+      )
+    : undefined;
+  if (actionFaculty) brain.attachActionFaculty(actionFaculty);
 
   // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
   const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
@@ -240,7 +261,7 @@ export function createBeastDeps(
     planner: planning,
     observer,
     critique: reasoning ?? existingDeps.critique,
-    governor: existingDeps.governor,
+    governor: actionFaculty ?? existingDeps.governor,
     heartbeat,
     logger: existingDeps.logger,
     clock,

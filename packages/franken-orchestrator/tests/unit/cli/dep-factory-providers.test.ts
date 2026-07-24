@@ -153,23 +153,29 @@ vi.mock('../../../src/cli/dep-bridge.js', () => ({
 }));
 
 vi.mock('../../../src/cli/create-beast-deps.js', () => ({
-  createBeastDeps: vi.fn((_config: unknown, existing: Record<string, unknown>) => ({
-    firewall: { runPipeline: vi.fn(async (input: string) => ({ sanitizedText: input, violations: [], blocked: false })) },
-    skills: { hasSkill: vi.fn(() => false), getAvailableSkills: vi.fn(() => []), execute: vi.fn() },
-    memory: { frontload: vi.fn(), getContext: vi.fn(async () => ({ adrs: [], knownErrors: [], rules: [] })), recordTrace: vi.fn() },
-    heartbeat: { pulse: vi.fn(async () => ({ improvements: [], techDebt: [], summary: '' })) },
-    observer: existing.observer,
-    planner: existing.planner,
-    critique: existing.critique,
-    governor: existing.governor,
-    logger: existing.logger,
-    clock: existing.clock ?? (() => new Date()),
-    ...(existing.cliExecutor ? { cliExecutor: existing.cliExecutor } : {}),
-    ...(existing.checkpoint ? { checkpoint: existing.checkpoint } : {}),
-    ...(existing.prCreator ? { prCreator: existing.prCreator } : {}),
-    ...(existing.runConfigOverrides ? { runConfigOverrides: existing.runConfigOverrides } : {}),
-    sqliteBrain: { close: vi.fn() },
-  })),
+  createBeastDeps: vi.fn((_config: unknown, existing: Record<string, unknown>) => {
+    const config = _config as { action?: { enabled?: boolean } };
+    return {
+      firewall: { runPipeline: vi.fn(async (input: string) => ({ sanitizedText: input, violations: [], blocked: false })) },
+      skills: { hasSkill: vi.fn(() => false), getAvailableSkills: vi.fn(() => []), execute: vi.fn() },
+      memory: { frontload: vi.fn(), getContext: vi.fn(async () => ({ adrs: [], knownErrors: [], rules: [] })), recordTrace: vi.fn() },
+      heartbeat: { pulse: vi.fn(async () => ({ improvements: [], techDebt: [], summary: '' })) },
+      observer: existing.observer,
+      planner: existing.planner,
+      critique: existing.critique,
+      governor: existing.governor,
+      logger: existing.logger,
+      clock: existing.clock ?? (() => new Date()),
+      ...(existing.cliExecutor ? { cliExecutor: existing.cliExecutor } : {}),
+      ...(existing.checkpoint ? { checkpoint: existing.checkpoint } : {}),
+      ...(existing.prCreator ? { prCreator: existing.prCreator } : {}),
+      ...(existing.runConfigOverrides ? { runConfigOverrides: existing.runConfigOverrides } : {}),
+      sqliteBrain: {
+        action: { configured: config.action?.enabled !== false },
+        close: vi.fn(),
+      },
+    };
+  }),
 }));
 
 vi.mock('../../../src/issues/issue-fetcher.js', () => ({
@@ -1082,6 +1088,9 @@ describe('dep-factory provider wiring', () => {
       summary: 'test',
       requiresHitl: true,
     })).resolves.toEqual({ decision: 'approved' });
+    expect((result.deps as typeof result.deps & {
+      sqliteBrain?: { action: { configured: boolean } };
+    }).sqliteBrain?.action.configured).toBe(false);
   });
 
   it('retains governor stub for a missing module when the unsafe opt-out is set', async () => {
@@ -1103,6 +1112,9 @@ describe('dep-factory provider wiring', () => {
         summary: 'test',
         requiresHitl: true,
       })).resolves.toEqual({ decision: 'approved' });
+      expect((result.deps as typeof result.deps & {
+        sqliteBrain?: { action: { configured: boolean } };
+      }).sqliteBrain?.action.configured).toBe(false);
     } finally {
       delete process.env.FRANKENBEAST_ALLOW_MISSING_SAFETY_MODULES;
     }
