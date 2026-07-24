@@ -69,6 +69,10 @@ export interface BeastDepsConfig {
     /** Persist compact verdict episodes. Disable with the memory module. */
     recordEpisodes?: boolean;
   };
+  action?: {
+    /** Persist governed action decisions. Disable with the memory module. */
+    recordEpisodes?: boolean;
+  };
   skillsDir?: string;
   configDir?: string;
   reflection?: boolean;
@@ -189,6 +193,7 @@ export function createBeastDeps(
       error,
       'brain.action',
     ),
+    config.action?.recordEpisodes !== false,
   );
   brain.attachActionFaculty(actionFaculty);
 

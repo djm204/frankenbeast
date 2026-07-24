@@ -1001,6 +1001,9 @@ function createConsolidatedDeps(
       enabled: config.modules.critique,
       recordEpisodes: config.modules.memory,
     },
+    action: {
+      recordEpisodes: config.modules.memory,
+    },
   };
   const existingDeps = bridgeToExistingDeps({
     planner: stubPlanner,

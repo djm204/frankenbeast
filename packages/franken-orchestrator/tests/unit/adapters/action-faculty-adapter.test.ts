@@ -148,4 +148,36 @@ describe('ActionFacultyAdapter', () => {
     })).resolves.toBe(outcome);
     expect(onRecordError).toHaveBeenCalledWith(recordFailure);
   });
+
+  it('does not record action episodes when memory recording is disabled', async () => {
+    const governor: IGovernorModule = {
+      requestApproval: vi.fn(async () => ({ decision: 'approved' as const })),
+    };
+    const deps = createBeastDeps(
+      {
+        providers: [{ name: 'claude', type: 'claude-cli' }],
+        reflection: false,
+        action: { recordEpisodes: false },
+      },
+      {
+        planner: makePlanner(),
+        critique: makeCritique(),
+        governor,
+        observer: makeObserver(),
+        logger: makeLogger(),
+      },
+    );
+
+    try {
+      await deps.governor.requestApproval({
+        taskId: 'memory-disabled',
+        summary: 'Do not retain this governed action',
+        requiresHitl: true,
+      });
+
+      expect(deps.sqliteBrain?.episodic.recall('memory-disabled')).toEqual([]);
+    } finally {
+      deps.sqliteBrain?.close();
+    }
+  });
 });

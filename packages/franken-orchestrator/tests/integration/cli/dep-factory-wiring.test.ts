@@ -11,6 +11,7 @@ import { ReflectionHeartbeatAdapter } from '../../../src/adapters/reflection-hea
 import { CritiquePortAdapter } from '../../../src/adapters/critique-adapter.js';
 import { ReasoningFacultyAdapter } from '../../../src/adapters/reasoning-faculty-adapter.js';
 import { GovernorPortAdapter } from '../../../src/adapters/governor-adapter.js';
+import { ActionFacultyAdapter } from '../../../src/adapters/action-faculty-adapter.js';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
 import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
@@ -350,7 +351,7 @@ describe('dep-factory wiring integration', () => {
     await finalize();
   });
 
-  it('creates real GovernorPortAdapter when modules are enabled', async () => {
+  it('wraps the real governor with the action faculty when modules are enabled', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);
 
@@ -364,7 +365,7 @@ describe('dep-factory wiring integration', () => {
       reset: false,
     });
 
-    expect(deps.governor).toBeInstanceOf(GovernorPortAdapter);
+    expect(deps.governor).toBeInstanceOf(ActionFacultyAdapter);
     await finalize();
   });
 

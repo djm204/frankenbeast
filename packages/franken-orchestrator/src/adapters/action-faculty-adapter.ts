@@ -14,11 +14,12 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
     private readonly episodic: IEpisodicMemory,
     private readonly clock: () => Date = () => new Date(),
     private readonly onRecordError: (error: unknown) => void = () => undefined,
+    private readonly recordEpisodes = true,
   ) {}
 
   async requestApproval(request: ApprovalPayload): Promise<ApprovalOutcome> {
     const outcome = await this.governor.requestApproval(request);
-    if (isSyntheticHealthProbe(request)) {
+    if (!this.recordEpisodes || isSyntheticHealthProbe(request)) {
       return outcome;
     }
     try {
