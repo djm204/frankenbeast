@@ -1,5 +1,16 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { McpConfigSchema, SkillToolManifestSchema, type McpConfig, type SkillToolManifest } from '@franken/types';
+
+export class SkillManifestValidationError extends Error {
+  readonly path: string;
+
+  constructor(path: string, reason: string) {
+    super(`Invalid skill manifest at ${path}: ${reason}. Repair or reinstall the skill so the file matches the expected schema.`);
+    this.name = 'SkillManifestValidationError';
+    this.path = path;
+  }
+}
 
 export interface SkillsListEntry {
   name: string;
@@ -29,16 +40,14 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
 
   return {
     async list(input) {
-      const entries = listInstalledSkills(skillsDir, readEnabledSkills(configPath));
-      if (input.enabled === undefined) {
-        return entries;
-      }
-      return entries.filter((entry) => entry.enabled === input.enabled);
+      return listInstalledSkills(skillsDir, readEnabledSkills(configPath), input.enabled);
     },
 
     async info(skillId) {
-      const installed = listInstalledSkills(skillsDir, readEnabledSkills(configPath));
-      const summary = installed.find((entry) => entry.name === skillId);
+      if (!isInstalledSkill(skillsDir, skillId)) {
+        return undefined;
+      }
+      const summary = readSkillSummary(skillsDir, skillId, readEnabledSkills(configPath));
 
       if (!summary) {
         return undefined;
@@ -55,14 +64,31 @@ export function createSkillsAdapter(dbPathOrDeps: string | SkillsAdapterDeps): S
         ...summary,
         hasContext: existsSync(contextPath),
         context,
-        mcpConfig: readJsonFile(mcpPath),
-        tools: readJsonFile(toolsPath) ?? [],
+        mcpConfig: readMcpManifest(mcpPath),
+        tools: readToolManifest(toolsPath) ?? [],
       };
     },
   };
 }
 
-function listInstalledSkills(skillsDir: string, enabledSkills: Set<string>): SkillsListEntry[] {
+function isInstalledSkill(skillsDir: string, skillId: string): boolean {
+  if (!existsSync(skillsDir)) {
+    return false;
+  }
+
+  try {
+    return readdirSync(skillsDir, { withFileTypes: true })
+      .some((entry) => entry.isDirectory() && entry.name === skillId);
+  } catch {
+    return false;
+  }
+}
+
+function listInstalledSkills(
+  skillsDir: string,
+  enabledSkills: Set<string>,
+  enabledFilter?: boolean,
+): SkillsListEntry[] {
   if (!existsSync(skillsDir)) {
     return [];
   }
@@ -76,6 +102,7 @@ function listInstalledSkills(skillsDir: string, enabledSkills: Set<string>): Ski
 
   return entries
     .filter((entry) => entry.isDirectory())
+    .filter((entry) => enabledFilter === undefined || enabledSkills.has(entry.name) === enabledFilter)
     .map((entry) => readSkillSummary(skillsDir, entry.name, enabledSkills))
     .filter((entry): entry is SkillsListEntry => entry !== undefined)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -100,15 +127,17 @@ function readSkillSummary(
     return undefined;
   }
 
+  const mcpConfig = readMcpManifest(mcpPath);
+
   return {
     name,
     enabled: enabledSkills.has(name),
-    description: inferDescription(skillDir, name),
+    description: inferDescription(skillDir, name, mcpConfig),
     updatedAt: stat.mtime.toISOString(),
   };
 }
 
-function inferDescription(skillDir: string, name: string): string {
+function inferDescription(skillDir: string, name: string, mcpConfig: McpConfig | undefined): string {
   const contextPath = join(skillDir, 'context.md');
   const context = readOptionalTextFile(contextPath);
   if (context !== undefined) {
@@ -122,10 +151,7 @@ function inferDescription(skillDir: string, name: string): string {
     }
   }
 
-  const mcpConfig = readJsonFile(join(skillDir, 'mcp.json')) as
-    | { mcpServers?: Record<string, unknown> }
-    | undefined;
-  const serverNames = mcpConfig?.mcpServers ? Object.keys(mcpConfig.mcpServers) : [];
+  const serverNames = mcpConfig ? Object.keys(mcpConfig.mcpServers) : [];
 
   return serverNames.length > 0
     ? `Provides MCP server${serverNames.length === 1 ? '' : 's'}: ${serverNames.join(', ')}`
@@ -153,6 +179,58 @@ function readJsonFile(path: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function readManifestJsonFile(path: string): unknown {
+  if (!existsSync(path)) {
+    return undefined;
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      return undefined;
+    }
+    throw new SkillManifestValidationError(path, 'the file could not be read');
+  }
+
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new SkillManifestValidationError(path, 'invalid JSON');
+  }
+}
+
+function readMcpManifest(path: string): McpConfig | undefined {
+  const raw = readManifestJsonFile(path);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const parsed = McpConfigSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new SkillManifestValidationError(path, 'expected mcpServers to be a record of server definitions');
+  }
+  return parsed.data;
+}
+
+function readToolManifest(path: string): SkillToolManifest | undefined {
+  const raw = readManifestJsonFile(path);
+  if (raw === undefined) {
+    return undefined;
+  }
+
+  const parsed = SkillToolManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new SkillManifestValidationError(path, 'expected an array of tool definitions');
+  }
+  return parsed.data;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error;
 }
 
 function readOptionalTextFile(path: string): string | undefined {

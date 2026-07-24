@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SkillManifestValidationError } from '../adapters/skills-adapter.js';
 import { createSkillsServer } from './skills.js';
 
 describe('Skills Server', () => {
@@ -65,5 +66,26 @@ describe('Skills Server', () => {
     const infoResult = await loadTool.handler({ skillId: 'github' });
     expect(skills.info).toHaveBeenCalledWith('github');
     expect(infoResult.content[0]!.text).toContain('GitHub workflow automation');
+  });
+
+  it('surfaces actionable manifest validation errors from every skills tool', async () => {
+    const validationError = new SkillManifestValidationError('/tmp/broken/mcp.json', 'invalid JSON');
+    const server = createSkillsServer({
+      skills: {
+        list: vi.fn().mockRejectedValue(validationError),
+        info: vi.fn().mockRejectedValue(validationError),
+      },
+    });
+
+    for (const [name, args] of [
+      ['fbeast_skills_list', {}],
+      ['fbeast_skills_discover', { query: 'broken' }],
+      ['fbeast_skills_load', { skillId: 'broken' }],
+    ] as const) {
+      const result = await server.tools.find((tool) => tool.name === name)!.handler(args);
+      expect(result).toMatchObject({ isError: true });
+      expect(result.content[0]!.text).toContain('Invalid skill manifest at /tmp/broken/mcp.json: invalid JSON');
+      expect(result.content[0]!.text).toContain('Repair or reinstall the skill');
+    }
   });
 });

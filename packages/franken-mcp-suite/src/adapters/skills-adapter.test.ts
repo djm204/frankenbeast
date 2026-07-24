@@ -88,6 +88,118 @@ describe('SkillsAdapter filesystem race handling', () => {
     });
   });
 
+  it('rejects malformed mcp.json with actionable file context', async () => {
+    await createSkill('broken');
+    const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
+    await writeFile(manifestPath, '{ malformed');
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).list({})).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: invalid JSON. Repair or reinstall the skill`,
+    );
+  });
+
+  it('validates mcp.json during listing even when context supplies the description', async () => {
+    const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
+    await createSkill('broken', { context: '# Broken skill', mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).list({})).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: expected mcpServers to be a record`,
+    );
+  });
+
+  it('loads a requested healthy skill without validating unrelated sibling manifests', async () => {
+    await createSkill('stable', { context: '# Stable skill' });
+    await createSkill('broken', { mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('stable')).resolves.toMatchObject({
+      name: 'stable',
+      description: 'Stable skill',
+    });
+  });
+
+  it('applies the enabled filter before validating excluded skill manifests', async () => {
+    await createSkill('stable', { context: '# Stable skill' });
+    await createSkill('disabled-broken', { mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).list({ enabled: true })).resolves.toEqual([
+      expect.objectContaining({ name: 'stable', enabled: true }),
+    ]);
+  });
+
+  it('rejects skill IDs that traverse outside the installed skills directory', async () => {
+    const outsideDir = join(root, 'outside');
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(join(outsideDir, 'mcp.json'), JSON.stringify({ mcpServers: { escaped: { command: 'escaped' } } }));
+    await writeFile(join(outsideDir, 'context.md'), '# Escaped skill');
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('../outside')).resolves.toBeUndefined();
+  });
+
+  it('rejects mcp.json that does not match the MCP manifest schema', async () => {
+    const manifestPath = join(root, 'skills', 'broken', 'mcp.json');
+    await createSkill('broken', { mcp: { mcpServers: 'not-an-object' } });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('broken')).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: expected mcpServers to be a record`,
+    );
+  });
+
+  it('accepts commandless remote HTTP MCP server manifests', async () => {
+    await createSkill('remote', {
+      mcp: {
+        mcpServers: {
+          remote: {
+            type: 'streamable-http',
+            url: 'https://example.com/mcp',
+            headers: { Authorization: 'Bearer token' },
+            timeout: 30_000,
+            alwaysLoad: true,
+          },
+        },
+      },
+    });
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('remote')).resolves.toMatchObject({
+      name: 'remote',
+      mcpConfig: {
+        mcpServers: {
+          remote: {
+            type: 'streamable-http',
+            url: 'https://example.com/mcp',
+            timeout: 30_000,
+            alwaysLoad: true,
+          },
+        },
+      },
+    });
+  });
+
+  it('rejects tools.json that does not match the tool manifest schema', async () => {
+    await createSkill('broken');
+    const manifestPath = join(root, 'skills', 'broken', 'tools.json');
+    await writeFile(manifestPath, JSON.stringify({ not: 'an array' }));
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('broken')).rejects.toThrow(
+      `Invalid skill manifest at ${manifestPath}: expected an array of tool definitions`,
+    );
+  });
+
+  it('preserves optional MCP tool metadata in tools.json', async () => {
+    await createSkill('tool-metadata');
+    const tools = [{
+      name: 'search',
+      description: 'Search records',
+      inputSchema: { type: 'object' },
+      title: 'Record Search',
+      outputSchema: { type: 'object' },
+      annotations: { readOnlyHint: true },
+      execution: { taskSupport: 'optional' },
+    }];
+    await writeFile(join(root, 'skills', 'tool-metadata', 'tools.json'), JSON.stringify(tools));
+
+    await expect(createSkillsAdapter(join(root, 'beast.db')).info('tool-metadata')).resolves.toMatchObject({ tools });
+  });
+
   async function createSkill(name: string, options: { context?: string; mcp?: unknown } = {}): Promise<string> {
     const skillDir = join(root, 'skills', name);
     const contextPath = join(skillDir, 'context.md');
