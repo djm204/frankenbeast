@@ -1323,10 +1323,15 @@ describe("createBrainAdapter", () => {
       compactionCandidates: [],
     });
 
-    const report = await brain.memoryRetentionReport({ readScope: "all", maxEntries: 1 });
+    const report = await brain.memoryRetentionReport({
+      readScope: "all",
+      maxEntries: 1,
+      maxScanRows: 25,
+    });
 
     expect(brainInstances[0].memoryRetentionReport).toHaveBeenCalledWith({
       maxEntries: Number.MAX_SAFE_INTEGER,
+      maxScanRows: 25,
     });
     expect(report.entries).toEqual([
       expect.objectContaining({ key: "shared.visible", action: "retain" }),

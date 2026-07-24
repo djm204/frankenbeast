@@ -1560,6 +1560,7 @@ export function createBrainAdapter(
         ...(input.maxEntries !== undefined
           ? { maxEntries: Number.MAX_SAFE_INTEGER }
           : {}),
+        ...(input.maxScanRows === undefined ? {} : { maxScanRows: input.maxScanRows }),
       };
       return filterRetentionReportByScope(
         brain.memoryRetentionReport(reportOptions),
