@@ -35,6 +35,7 @@ describe('BrainRegistry', () => {
       expect(second).not.toBe(first);
       expect(registry.forAgentType('coder')).toBe(second);
       expect(registry.forAgentType('coder', join(root, 'first.db'))).toBe(first);
+      expect(registry.forAgentType('coder')).toBe(first);
     } finally {
       registry.close();
       rmSync(root, { recursive: true, force: true });

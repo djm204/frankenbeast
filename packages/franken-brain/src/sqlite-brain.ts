@@ -6,6 +6,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { resolve as resolvePath } from 'node:path';
 import Database from 'better-sqlite3';
 import type {
@@ -818,6 +819,29 @@ class MemoryCipher {
         decipher.update(Buffer.from(ciphertextB64!, 'base64url')),
         decipher.final(),
       ]).toString('utf8');
+    } catch (error) {
+      throw new MemoryEncryptionWrongKeyError(
+        `Memory encryption key cannot decrypt a persisted payload: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  *decryptBase64UrlChunks(
+    ivB64: string,
+    tagB64: string,
+    chunks: Iterable<string>,
+  ): Generator<Buffer> {
+    try {
+      const decipher = createDecipheriv(
+        MEMORY_ENCRYPTION_ALGORITHM,
+        this.key,
+        Buffer.from(ivB64, 'base64url'),
+      );
+      decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
+      for (const chunk of chunks) {
+        yield decipher.update(Buffer.from(chunk, 'base64url'));
+      }
+      yield decipher.final();
     } catch (error) {
       throw new MemoryEncryptionWrongKeyError(
         `Memory encryption key cannot decrypt a persisted payload: ${error instanceof Error ? error.message : String(error)}`,
@@ -3185,6 +3209,47 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
    * Read an HTTP-safe page while dropping oversized details in SQLite, before
    * JSON parsing can materialize an unbounded payload in the Node process.
    */
+  private scoreOversizedEncryptedDetails(eventId: number | string, summary: string, keywords: readonly string[]): number {
+    const summaryLower = summary.toLowerCase();
+    const matched = new Set(keywords.filter(keyword => summaryLower.includes(keyword)));
+    if (!this.encryption || matched.size === keywords.length) return matched.size;
+
+    const metadata = this.db.prepare(
+      'SELECT substr(details, 1, 96) AS header, length(details) AS total_length FROM episodic_events WHERE id = ?',
+    ).get(eventId) as { header: string | null; total_length: number } | undefined;
+    const headerMatch = metadata?.header?.match(/^enc:v1:([^:]+):([^:]+):/);
+    if (!headerMatch || !metadata) return matched.size;
+    const headerLength = headerMatch[0].length;
+    const encodedLength = metadata.total_length - headerLength;
+    const chunkSize = 64 * 1024;
+    const chunks = function* (db: Database.Database): Generator<string> {
+      for (let offset = 0; offset < encodedLength; offset += chunkSize) {
+        const row = db.prepare('SELECT substr(details, ?, ?) AS chunk FROM episodic_events WHERE id = ?')
+          .get(headerLength + offset + 1, Math.min(chunkSize, encodedLength - offset), eventId) as { chunk: string };
+        yield row.chunk;
+      }
+    };
+    const decoder = new StringDecoder('utf8');
+    const overlapLength = Math.max(...keywords.map(keyword => keyword.length), 1) - 1;
+    let overlap = '';
+    try {
+      for (const plaintext of this.encryption.decryptBase64UrlChunks(headerMatch[1]!, headerMatch[2]!, chunks(this.db))) {
+        const text = (overlap + decoder.write(plaintext)).toLowerCase();
+        for (const keyword of keywords) {
+          if (text.includes(keyword)) matched.add(keyword);
+        }
+        overlap = text.slice(-overlapLength);
+      }
+      const tail = (overlap + decoder.end()).toLowerCase();
+      for (const keyword of keywords) {
+        if (tail.includes(keyword)) matched.add(keyword);
+      }
+    } catch {
+      // A malformed encrypted details field must not break the bounded route.
+    }
+    return matched.size;
+  }
+
   readBoundedPage(options: {
     limit: number;
     offset: number;
@@ -3295,7 +3360,9 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           const searchableEvent = rowToEvent({ ...row, details: row.search_details }, this.encryption);
           const boundedEvent = rowToEvent(row, this.encryption);
           if (!searchableEvent || !boundedEvent) continue;
-          const score = recallEventScore(searchableEvent, keywords);
+          const score = row.details_truncated === 1 && row.search_details === null
+            ? this.scoreOversizedEncryptedDetails(row.id, row.summary, keywords)
+            : recallEventScore(searchableEvent, keywords);
           if (score > 0) {
             matches.push({
               event: {
@@ -3318,7 +3385,15 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         .map(({ event }) => event);
     }
 
-    const searchableDetails = `CASE WHEN json_valid(details) THEN details ELSE '' END`;
+    const searchableDetails = `CASE
+      WHEN json_valid(details)
+       AND NOT (
+         json_type(details, '$.quarantine') = 'object'
+         AND json_extract(details, '$.quarantine.field') = 'details'
+         AND json_extract(details, '$.quarantine.eventId') = id
+         AND json_extract(details, '$.quarantine.reason') = 'invalid JSON'
+       )
+      THEN details ELSE '' END`;
     const scoringCases = keywords.map(() =>
       `(CASE WHEN lower(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END
         + CASE WHEN lower(${searchableDetails}) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,

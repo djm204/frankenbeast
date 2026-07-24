@@ -33,6 +33,7 @@ export interface BeastServicePaths {
   beastLogsDir: string;
   root?: string | undefined;
   skillsDir?: string | undefined;
+  brainDbPath?: string | undefined;
 }
 
 export interface BeastServiceBundle {
@@ -66,7 +67,8 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     const runSnapshot = run?.configSnapshot;
     const agentSnapshot = agent?.initConfig;
     const configuredBrainPath = stringValue(recordValue(runSnapshot, 'brain'), 'dbPath')
-      ?? stringValue(recordValue(agentSnapshot, 'brain'), 'dbPath');
+      ?? stringValue(recordValue(agentSnapshot, 'brain'), 'dbPath')
+      ?? paths.brainDbPath;
     const attempt = run?.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
     const worktreeExecutionCwd = attempt?.executorMetadata?.worktreeExecutionCwd;
     const configuredProjectRoot = stringValue(runSnapshot, 'projectRoot')

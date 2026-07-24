@@ -1421,6 +1421,7 @@ async function runChatCommandIfRequested(
         beastsDb: join(paths.frankenbeastDir, 'beast.db'),
         beastLogsDir: paths.beastLogsDir,
         root,
+        brainDbPath: config.brain?.dbPath,
         skillsDir: typeof skillManager?.getSkillsDir === 'function'
           ? skillManager.getSkillsDir()
           : join(root, 'skills'),

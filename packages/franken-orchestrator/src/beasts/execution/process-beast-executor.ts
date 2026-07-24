@@ -331,6 +331,9 @@ export interface ProcessBeastExecutorOptions {
   runConfigDir?: string;
   runConfigRoot?: string;
   runConfigOwner?: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider;
+  transformRunConfigSnapshot?: (
+    snapshot: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -804,7 +807,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
       mergedSpec.env,
       spawnedSpec.env,
     );
-    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+    const runtimeConfigSnapshot = this.options.transformRunConfigSnapshot
+      ? this.options.transformRunConfigSnapshot(isolatedConfigSnapshot)
+      : isolatedConfigSnapshot;
+    const redactedConfigSnapshot = redactRunConfigSnapshot(runtimeConfigSnapshot, configuredSecrets);
     const serializedRunConfig = JSON.stringify(redactedConfigSnapshot, null, 2);
     const integrityManifest = createRunConfigIntegrityManifest(serializedRunConfig, runConfigIntegritySecret, {
       configPath: this.resolveSpawnedRunConfigPath(spawnedSpec, configFilePath),

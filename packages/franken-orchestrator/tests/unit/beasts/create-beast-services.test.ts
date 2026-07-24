@@ -143,6 +143,7 @@ describe('createBeastServices', () => {
       beastsDb,
       beastLogsDir: join(tempDir, 'logs'),
       root: tempDir,
+      brainDbPath: join(tempDir, 'project-brain.db'),
     });
 
     try {
@@ -156,7 +157,7 @@ describe('createBeastServices', () => {
         },
       });
       expect(services.resolveBrainContext('default-modules')).toEqual({
-        dbPath: join(tempDir, '.fbeast', 'brains', 'default-modules.db'),
+        dbPath: join(tempDir, 'project-brain.db'),
         faculties: {
           planning: true,
           reasoning: true,

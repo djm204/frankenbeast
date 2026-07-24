@@ -137,7 +137,7 @@ describe('EpisodicMemory.recall()', () => {
       encryptedBrain.episodic.record({
         type: 'observation',
         summary: 'outside plaintext bound',
-        details: { marker: 'oversized-search-needle', payload: 'x'.repeat(9_000) },
+        details: { marker: 'oversized-search-needle', payload: 'x'.repeat(1_100_000) },
         createdAt: '2026-03-18T10:31:00Z',
       });
 

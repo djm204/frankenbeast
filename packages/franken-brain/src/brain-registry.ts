@@ -63,7 +63,10 @@ export class BrainRegistry {
     const requestedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
     const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
     const existing = agentBrains?.get(resolvedDbPath);
-    if (existing) return existing;
+    if (existing) {
+      if (dbPath !== undefined) this.preferredDbPaths.set(agentTypeId, resolvedDbPath);
+      return existing;
+    }
     if (dbPath === undefined) {
       mkdirSync(this.brainsDir, { recursive: true });
     }
