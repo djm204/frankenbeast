@@ -133,9 +133,9 @@ for (const lesson of relevantLessons) {
 // shared tokens are keywords, and confidence starts at 0.35 then adds 0.15 per
 // additional occurrence up to 0.95. Re-running consolidation refreshes a pending
 // candidate's evidence and confidence while preserving reviewer-edited pattern
-// fields. Review keys hash the normalized pattern rather than an event row, and
-// semantically matching pending/approved patterns retain their existing key when
-// later evidence changes the representative summary. Rejected keys remain
+// fields. Review keys hash shared normalized keywords rather than an event row;
+// overlapping evidence or semantic matches retain an existing key as a connected
+// cluster evolves or a reviewer rewrites its pattern. Rejected keys remain
 // suppressed, approved lessons are returned only while live provenance matches
 // their durable value. Skill-evolution and planning-lifecycle duplicates stay in
 // their dedicated gates rather than inflating generic lesson occurrence counts.

@@ -944,6 +944,16 @@ describe('SqliteBrain', () => {
 
       expect(brain.learning.relevantLessons('TypeScript workspace build')).toEqual([]);
     });
+
+    it('removes lessons that depend on right-to-forgotten episodic evidence', () => {
+      recordStaleDeclarationFailure('Stale declarations broke build', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('UniqueMarker stale declarations broke the build', '2026-07-24T10:01:00.000Z');
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 10 })).toHaveLength(1);
+
+      brain.rightToForget({ type: 'episodic', query: 'UniqueMarker' });
+
+      expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
   });
 
   describe('working memory', () => {
