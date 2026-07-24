@@ -6170,28 +6170,43 @@ export class SqliteBrain implements IBrain {
     let episodicRows: EpisodicRow[] | undefined;
     if (maxScanRows !== undefined && enforcementScanState?.episodicCursor !== undefined) {
       const cursor = enforcementScanState.episodicCursor;
-      episodicRows = this.db
-        .prepare(
-          `SELECT * FROM episodic_events
-           WHERE created_at > ? OR (created_at = ? AND id > ?)
-           ORDER BY created_at ASC, id ASC LIMIT ?`,
-        )
-        .all(cursor.createdAt, cursor.createdAt, cursor.id, maxScanRows) as EpisodicRow[];
-      if (episodicRows.length < maxScanRows) {
-        const wrappedRows = this.db
-          .prepare(
-            `SELECT * FROM episodic_events
-             WHERE created_at < ? OR (created_at = ? AND id < ?)
-             ORDER BY created_at ASC, id ASC LIMIT ?`,
-          )
-          .all(
-            cursor.createdAt,
-            cursor.createdAt,
-            cursor.id,
-            maxScanRows - episodicRows.length,
-          ) as EpisodicRow[];
-        episodicRows.push(...wrappedRows);
-      }
+      episodicRows = [];
+      const appendKeysetRows = (sql: string, parameters: Array<string | number>): void => {
+        const remaining = maxScanRows - (episodicRows?.length ?? 0);
+        if (remaining < 1) return;
+        const rows = this.db
+          .prepare(sql)
+          .all(...parameters, remaining) as EpisodicRow[];
+        episodicRows?.push(...rows);
+      };
+
+      // Split each side of the composite cursor into indexable ranges. A single OR predicate
+      // makes SQLite seek only by created_at and filter every preceding row in a large tie.
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at = ? AND id > ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt, cursor.id],
+      );
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at > ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt],
+      );
+      // Wrap from the beginning once the rows after the cursor are exhausted.
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at < ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt],
+      );
+      appendKeysetRows(
+        `SELECT * FROM episodic_events
+         WHERE created_at = ? AND id < ?
+         ORDER BY created_at ASC, id ASC LIMIT ?`,
+        [cursor.createdAt, cursor.id],
+      );
     } else if (maxScanRows !== undefined) {
       episodicRows = this.db
         .prepare(`SELECT * FROM episodic_events ORDER BY created_at ASC, id ASC LIMIT ?`)

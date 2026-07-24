@@ -294,6 +294,47 @@ describe('SqliteBrain', () => {
       ]);
     });
 
+    it('uses a composite keyset seek when a retention cursor lands inside a timestamp tie', () => {
+      for (let id = 1; id <= 4; id += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `tied protected audit ${id}`,
+          details: { memoryClass: 'audit_record' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        });
+      }
+
+      brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const originalPrepare = db.prepare.bind(db);
+      const preparedSql: string[] = [];
+      db.prepare = ((sql: string) => {
+        preparedSql.push(sql);
+        return originalPrepare(sql);
+      }) as typeof db.prepare;
+      try {
+        brain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 2,
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      expect(preparedSql).toContainEqual(expect.stringContaining(
+        'WHERE created_at = ? AND id > ?',
+      ));
+      expect(preparedSql).not.toContainEqual(expect.stringContaining(
+        'WHERE created_at > ? OR (created_at = ? AND id > ?)',
+      ));
+    });
+
     it('resumes bounded episodic scans after reopening a scheduled brain', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-cursor-'));
       const dbPath = join(dir, 'brain.db');
