@@ -37,7 +37,7 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | Memory systems (working/episodic/semantic), PII guards |
+| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and the process-local agent-type `BrainRegistry`; planning/reasoning/action/learning faculties are addressing stubs pending adapter work |
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |

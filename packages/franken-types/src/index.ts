@@ -66,6 +66,10 @@ export * from './comms.js';
 // Brain interfaces + types
 export type {
   IBrain,
+  IActionFaculty,
+  ILearningFaculty,
+  IPlanningFaculty,
+  IReasoningFaculty,
   IWorkingMemory,
   IEpisodicMemory,
   IRecoveryMemory,

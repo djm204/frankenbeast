@@ -10,6 +10,10 @@ import { resolve as resolvePath } from 'node:path';
 import Database from 'better-sqlite3';
 import type {
   IBrain,
+  IActionFaculty,
+  ILearningFaculty,
+  IPlanningFaculty,
+  IReasoningFaculty,
   IWorkingMemory,
   IEpisodicMemory,
   IRecoveryMemory,
@@ -5564,6 +5568,22 @@ export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
+  readonly planning: IPlanningFaculty = Object.freeze({
+    kind: 'planning',
+    configured: false,
+  });
+  readonly reasoning: IReasoningFaculty = Object.freeze({
+    kind: 'reasoning',
+    configured: false,
+  });
+  readonly action: IActionFaculty = Object.freeze({
+    kind: 'action',
+    configured: false,
+  });
+  readonly learning: ILearningFaculty = Object.freeze({
+    kind: 'learning',
+    configured: false,
+  });
   readonly memoryReview: SqliteMemoryReviewQueue;
   readonly accessAudit: SqliteMemoryAccessAuditTrail;
 

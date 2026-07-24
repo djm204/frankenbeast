@@ -6,8 +6,40 @@ export interface IBrain {
   readonly working: IWorkingMemory;
   readonly episodic: IEpisodicMemory;
   readonly recovery: IRecoveryMemory;
+  readonly planning: IPlanningFaculty;
+  readonly reasoning: IReasoningFaculty;
+  readonly action: IActionFaculty;
+  readonly learning: ILearningFaculty;
   rightToForget(selector: RightToForgetSelector): RightToForgetReport;
   serialize(options?: BrainSerializeOptions): BrainSnapshot;
+}
+
+/** Foundation for the agent-scoped planner adapter introduced by the Hive Brain roadmap. */
+export interface IPlanningFaculty {
+  readonly kind: 'planning';
+  /** False until a concrete franken-planner adapter is attached. */
+  readonly configured: boolean;
+}
+
+/** Foundation for the agent-scoped critique/reasoning adapter. */
+export interface IReasoningFaculty {
+  readonly kind: 'reasoning';
+  /** False until a concrete franken-critique adapter is attached. */
+  readonly configured: boolean;
+}
+
+/** Foundation for the agent-scoped governor/action adapter. */
+export interface IActionFaculty {
+  readonly kind: 'action';
+  /** False until a concrete franken-governor adapter is attached. */
+  readonly configured: boolean;
+}
+
+/** Foundation for learning that builds on episodic memory and the memory-review queue. */
+export interface ILearningFaculty {
+  readonly kind: 'learning';
+  /** False until the consolidation/query implementation is attached. */
+  readonly configured: boolean;
 }
 
 export interface BrainSerializeOptions {
