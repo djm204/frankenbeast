@@ -131,4 +131,45 @@ describe('TokenBudgetBreaker', () => {
       expect(result.tripped).toBe(false);
     });
   });
+
+  describe('configuration validation (Issue #3666)', () => {
+    it('throws ConfigurationError when tokenBudget is undefined, NaN, or <= 0', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(100));
+
+      await expect(
+        breaker.check(createState(1), createConfig(undefined as unknown as number)),
+      ).rejects.toThrow('tokenBudget must be a finite positive number');
+
+      await expect(
+        breaker.check(createState(1), createConfig(NaN)),
+      ).rejects.toThrow('tokenBudget must be a finite positive number');
+
+      await expect(
+        breaker.check(createState(1), createConfig(0)),
+      ).rejects.toThrow('tokenBudget must be a finite positive number');
+
+      await expect(
+        breaker.check(createState(1), createConfig(-50)),
+      ).rejects.toThrow('tokenBudget must be a finite positive number');
+    });
+
+    it('throws ConfigurationError when costBudgetUsd is specified but is NaN or negative', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(100));
+
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: NaN,
+        }),
+      ).rejects.toThrow('costBudgetUsd must be a finite non-negative number');
+
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: -5,
+        }),
+      ).rejects.toThrow('costBudgetUsd must be a finite non-negative number');
+    });
+  });
 });
+

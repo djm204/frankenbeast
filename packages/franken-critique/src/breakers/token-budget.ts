@@ -1,5 +1,6 @@
 import type { CircuitBreaker, CircuitBreakerResult, LoopState, LoopConfig } from './circuit-breaker.js';
 import type { ObservabilityPort } from '../types/contracts.js';
+import { ConfigurationError } from '../errors/index.js';
 
 export class TokenBudgetBreaker implements CircuitBreaker {
   readonly name = 'token-budget';
@@ -15,7 +16,23 @@ export class TokenBudgetBreaker implements CircuitBreaker {
   }
 
   async check(_state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult> {
+    if (typeof config.tokenBudget !== 'number' || Number.isNaN(config.tokenBudget) || config.tokenBudget <= 0) {
+      throw new ConfigurationError(
+        `tokenBudget must be a finite positive number, got ${config.tokenBudget}`,
+        { context: { tokenBudget: config.tokenBudget } },
+      );
+    }
+
+    if (config.costBudgetUsd !== undefined && (typeof config.costBudgetUsd !== 'number' || Number.isNaN(config.costBudgetUsd) || config.costBudgetUsd < 0)) {
+      throw new ConfigurationError(
+        `costBudgetUsd must be a finite non-negative number, got ${config.costBudgetUsd}`,
+        { context: { costBudgetUsd: config.costBudgetUsd } },
+      );
+    }
+
+
     const spend = await this.observability.getTokenSpend(config.sessionId);
+
 
     // A dollar-denominated budget (e.g. the CLI `--budget <usd>` flag) must be
     // compared against estimated cost, not the raw token count. Use strict
