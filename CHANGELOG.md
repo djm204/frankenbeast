@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.65.0](https://github.com/djm204/frankenbeast/compare/v0.64.1...v0.65.0) (2026-07-24)
+
+
+### Features
+
+* **brain:** add agent-scoped faculty foundation ([#3740](https://github.com/djm204/frankenbeast/issues/3740)) ([a88d1e3](https://github.com/djm204/frankenbeast/commit/a88d1e35042f4cbfd93d725930f16741c69b9b6f))
+* **brain:** expose authenticated read routes ([#3757](https://github.com/djm204/frankenbeast/issues/3757)) ([1b77c79](https://github.com/djm204/frankenbeast/commit/1b77c7937362fa3ee9e1eaad03161120bb853866))
+* **brain:** record critique verdicts as reasoning episodes ([#3742](https://github.com/djm204/frankenbeast/issues/3742)) ([3191a1f](https://github.com/djm204/frankenbeast/commit/3191a1fb164bbff536fc2a72e8e27e83eeb820d7))
+* **brain:** record governor decisions as action episodes ([#3745](https://github.com/djm204/frankenbeast/issues/3745)) ([13b3399](https://github.com/djm204/frankenbeast/commit/13b3399245f01a7e72bc869d9aab40519c6106de))
+* **brain:** wire planning faculty adapter ([#3744](https://github.com/djm204/frankenbeast/issues/3744)) ([a12aa2f](https://github.com/djm204/frankenbeast/commit/a12aa2fe4a3013a2161f275a59646ecbf29d5671))
+
+
+### Bug Fixes
+
+* **brain:** persist per-agent durable state ([#3743](https://github.com/djm204/frankenbeast/issues/3743)) ([fd254cb](https://github.com/djm204/frankenbeast/commit/fd254cb349156902cf5134e897b582cbcb9ba7b2))
+* **deps:** upgrade js-yaml past GHSA-pm4m-ph32-ghv5 ([#3749](https://github.com/djm204/frankenbeast/issues/3749)) ([5c8702c](https://github.com/djm204/frankenbeast/commit/5c8702cfe0e05654f8f8b06fe6b06ec78ab1d6bd))
+* **observer:** bound webhook delivery attempts ([#3709](https://github.com/djm204/frankenbeast/issues/3709)) ([f86e037](https://github.com/djm204/frankenbeast/commit/f86e037f3a19c5271c0f14c17746818aeaebb2b4))
+
+
+### Documentation
+
+* **chat:** define Hive Brain command center ([#3741](https://github.com/djm204/frankenbeast/issues/3741)) ([338c0ef](https://github.com/djm204/frankenbeast/commit/338c0ef6563adb1e0aa90f42e6797aab4373dfdf))
+
 ## [0.64.1](https://github.com/djm204/frankenbeast/compare/v0.64.0...v0.64.1) (2026-07-24)
 
 

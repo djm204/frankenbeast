@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.1](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.0...franken-critique-v0.11.1) (2026-07-24)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.10.4...franken-critique-v0.11.0) (2026-07-23)
 
 

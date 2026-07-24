@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.59.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.58.0...@franken/orchestrator-v0.59.0) (2026-07-24)
+
+
+### Features
+
+* **brain:** expose authenticated read routes ([#3757](https://github.com/djm204/frankenbeast/issues/3757)) ([1b77c79](https://github.com/djm204/frankenbeast/commit/1b77c7937362fa3ee9e1eaad03161120bb853866))
+* **brain:** record critique verdicts as reasoning episodes ([#3742](https://github.com/djm204/frankenbeast/issues/3742)) ([3191a1f](https://github.com/djm204/frankenbeast/commit/3191a1fb164bbff536fc2a72e8e27e83eeb820d7))
+* **brain:** record governor decisions as action episodes ([#3745](https://github.com/djm204/frankenbeast/issues/3745)) ([13b3399](https://github.com/djm204/frankenbeast/commit/13b3399245f01a7e72bc869d9aab40519c6106de))
+* **brain:** wire planning faculty adapter ([#3744](https://github.com/djm204/frankenbeast/issues/3744)) ([a12aa2f](https://github.com/djm204/frankenbeast/commit/a12aa2fe4a3013a2161f275a59646ecbf29d5671))
+
+
+### Bug Fixes
+
+* **brain:** persist per-agent durable state ([#3743](https://github.com/djm204/frankenbeast/issues/3743)) ([fd254cb](https://github.com/djm204/frankenbeast/commit/fd254cb349156902cf5134e897b582cbcb9ba7b2))
+
+
+### Documentation
+
+* **chat:** define Hive Brain command center ([#3741](https://github.com/djm204/frankenbeast/issues/3741)) ([338c0ef](https://github.com/djm204/frankenbeast/commit/338c0ef6563adb1e0aa90f42e6797aab4373dfdf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.11.0 to 0.11.1
+    * @franken/governor bumped from 0.9.0 to 0.9.1
+    * @franken/types bumped from 0.17.0 to 0.18.0
+    * @franken/observer bumped from 0.12.0 to 0.12.1
+    * @franken/planner bumped from 0.4.26 to 0.4.27
+    * @franken/brain bumped from 0.17.0 to 0.18.0
+
 ## [0.58.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.57.2...@franken/orchestrator-v0.58.0) (2026-07-23)
 
 
