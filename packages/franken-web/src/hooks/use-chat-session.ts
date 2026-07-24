@@ -862,11 +862,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
       return;
     }
 
-    socket.send(JSON.stringify({
-      type: 'approval.respond',
-      approved,
-      ...(request ? { request } : {}),
-    }));
+    socket.send(JSON.stringify({ type: 'approval.respond', approved, ...(request ? { request } : {}) }));
     approvalTimeoutRef.current = setTimeout(() => {
       approvalTimeoutRef.current = null;
       reconcileApprovalResponse(sessionId, approvalAttempt, approved);
