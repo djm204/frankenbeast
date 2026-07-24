@@ -22,6 +22,7 @@ import { join, basename, dirname } from 'node:path';
 import { MiddlewareChainFirewallAdapter } from '../adapters/middleware-firewall-adapter.js';
 import { SqliteBrainMemoryAdapter } from '../adapters/brain-memory-adapter.js';
 import { ReasoningFacultyAdapter } from '../adapters/reasoning-faculty-adapter.js';
+import { ActionFacultyAdapter } from '../adapters/action-faculty-adapter.js';
 import { ReflectionHeartbeatAdapter } from '../adapters/reflection-heartbeat-adapter.js';
 import { SkillManagerAdapter } from '../adapters/skill-manager-adapter.js';
 import { AuditTrailObserverAdapter } from '../adapters/audit-observer-adapter.js';
@@ -179,6 +180,17 @@ export function createBeastDeps(
       })
     : undefined;
   if (reasoning) brain.attachReasoningFaculty(reasoning);
+  const actionFaculty = new ActionFacultyAdapter(
+    existingDeps.governor,
+    brain.episodic,
+    clock,
+    (error) => existingDeps.logger.warn(
+      'Failed to record governor action decision in episodic memory',
+      error,
+      'brain.action',
+    ),
+  );
+  brain.attachActionFaculty(actionFaculty);
 
   // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
   const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
@@ -222,7 +234,7 @@ export function createBeastDeps(
     planner: existingDeps.planner,
     observer,
     critique: reasoning ?? existingDeps.critique,
-    governor: existingDeps.governor,
+    governor: actionFaculty,
     heartbeat,
     logger: existingDeps.logger,
     clock,

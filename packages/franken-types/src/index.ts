@@ -67,6 +67,9 @@ export * from './comms.js';
 export type {
   IBrain,
   IActionFaculty,
+  ActionFacultyApprovalRequest,
+  ActionFacultyApprovalOutcome,
+  ActionFacultyApprovalSessionToken,
   ILearningFaculty,
   IPlanningFaculty,
   IReasoningFaculty,

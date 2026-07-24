@@ -5564,6 +5564,20 @@ function normalizeSqliteDbPath(dbPath: string): string {
   return dbPath === ':memory:' ? dbPath : resolvePath(dbPath);
 }
 
+function createUnconfiguredActionFaculty(): IActionFaculty {
+  const faculty = {
+    kind: 'action',
+    configured: false,
+  } as IActionFaculty;
+  Object.defineProperty(faculty, 'requestApproval', {
+    enumerable: false,
+    value: async () => {
+      throw new Error('Action faculty is not configured');
+    },
+  });
+  return Object.freeze(faculty);
+}
+
 export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
@@ -5579,10 +5593,10 @@ export class SqliteBrain implements IBrain {
       throw new Error('Reasoning faculty is not configured');
     },
   });
-  readonly action: IActionFaculty = Object.freeze({
-    kind: 'action',
-    configured: false,
-  });
+  private actionFaculty: IActionFaculty = createUnconfiguredActionFaculty();
+  get action(): IActionFaculty {
+    return this.actionFaculty;
+  }
   readonly learning: ILearningFaculty = Object.freeze({
     kind: 'learning',
     configured: false,
@@ -5605,6 +5619,14 @@ export class SqliteBrain implements IBrain {
   private readonly dbPath: string;
   private readonly encryption: MemoryCipher | undefined;
   private readonly auditRecorder: MemoryAccessAuditRecorder;
+
+  /** Attach the governor-backed action faculty used by orchestrator gating paths. */
+  attachActionFaculty(faculty: IActionFaculty): void {
+    if (faculty.kind !== 'action' || !faculty.configured) {
+      throw new TypeError('action faculty must have kind=action and configured=true');
+    }
+    this.actionFaculty = faculty;
+  }
 
   constructor(
     dbPath: string = ':memory:',

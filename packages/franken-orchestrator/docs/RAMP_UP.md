@@ -35,6 +35,8 @@ The CLI/session layer is where most real package behavior now lives.
   Interview, planning, execution, and issues session flow
 - `src/cli/dep-factory.ts`
   Runtime wiring for providers, observers, skills, issue pipeline, PR creation, and chunk-session stores
+- `src/cli/create-beast-deps.ts`
+  Consolidated module wiring, including `ActionFacultyAdapter`, which keeps the existing governor authoritative while recording approval outcomes in `SqliteBrain.episodic`
 - `src/planning/*`
   Design-doc decomposition, validation, remediation, chunk-file writing
 - `src/issues/*`
