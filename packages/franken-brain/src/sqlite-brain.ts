@@ -3063,9 +3063,12 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
   recentFailures(
     n = 10,
     includeQuarantined = true,
-    excludeCategory?: string,
+    excludeCategory?: string | readonly string[],
   ): EpisodicEvent[] {
     try {
+      const excludedCategories = typeof excludeCategory === 'string'
+        ? [excludeCategory]
+        : excludeCategory ?? [];
       const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
         `SELECT * FROM episodic_events WHERE type = 'failure'
@@ -3078,7 +3081,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         (eventId) => quarantinedEventIds.add(eventId),
         (event) => (
           (includeQuarantined || !isQuarantinedEpisodicDetails(event))
-          && (excludeCategory === undefined || event.details?.category !== excludeCategory)
+          && !excludedCategories.includes(String(event.details?.category ?? ''))
         ),
       );
       this.audit?.({
@@ -5553,7 +5556,7 @@ function normalizeSemanticMemoryToken(token: string): string {
 }
 
 function lessonEventText(event: EpisodicEvent): string {
-  return [event.step, event.summary].filter(Boolean).join(' ');
+  return event.summary;
 }
 
 function clusterSimilarFailureEvents(
@@ -5951,7 +5954,7 @@ export class SqliteBrain implements IBrain {
     }
 
     const events = this.episodic
-      .recentFailures(lookback, false, 'skill-evolution')
+      .recentFailures(lookback, false, ['skill-evolution', 'planning-lifecycle'])
       .sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
       );

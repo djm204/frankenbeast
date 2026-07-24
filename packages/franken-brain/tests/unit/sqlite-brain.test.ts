@@ -848,6 +848,45 @@ describe('SqliteBrain', () => {
       expect(brain.memoryReview.list()[0]?.value).toMatchObject({ occurrenceCount: 3 });
     });
 
+    it('does not duplicate a lesson for a later two-token summary', () => {
+      recordStaleDeclarationFailure('TypeScript workspace build failed after stale declarations were loaded', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('Stale declaration files broke the workspace TypeScript build', '2026-07-24T10:01:00.000Z');
+      const [initial] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      recordStaleDeclarationFailure('Stale declarations', '2026-07-24T10:02:00.000Z');
+
+      brain.learning.consolidate({ threshold: 2, lookback: 10 });
+
+      expect(brain.memoryReview.list()).toHaveLength(1);
+      expect(brain.memoryReview.list()[0]?.key).toBe(initial?.key);
+    });
+
+    it('does not let planning-lifecycle duplicates inflate generic lesson counts', () => {
+      recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('Stale declarations broke the TypeScript workspace build', '2026-07-24T10:01:00.000Z');
+      brain.episodic.record({
+        type: 'failure',
+        step: 'workspace-build',
+        summary: 'Workspace TypeScript build failed because declarations were stale',
+        createdAt: '2026-07-24T10:02:00.000Z',
+        details: { category: 'planning-lifecycle' },
+      });
+
+      expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
+    });
+
+    it('does not cluster unrelated summaries solely because their step labels match', () => {
+      for (const [index, summary] of ['lint failed', 'tests failed', 'docker failed'].entries()) {
+        brain.episodic.record({
+          type: 'failure',
+          step: 'workspace-build',
+          summary,
+          createdAt: `2026-07-24T10:0${index}:00.000Z`,
+        });
+      }
+
+      expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',

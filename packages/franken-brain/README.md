@@ -127,7 +127,8 @@ for (const lesson of relevantLessons) {
 
 // Consolidation is deterministic and local: it lowercases alphanumeric tokens,
 // drops common stop words, applies the package's small synonym/stemming map, and
-// links failures whose Jaccard/containment score crosses similarityThreshold.
+// links summaries whose Jaccard/containment score crosses similarityThreshold;
+// workflow steps remain metadata so lifecycle labels cannot merge root causes.
 // Connected failures form one cluster. The shortest summary is the pattern,
 // shared tokens are keywords, and confidence starts at 0.35 then adds 0.15 per
 // additional occurrence up to 0.95. Re-running consolidation refreshes a pending
@@ -136,7 +137,8 @@ for (const lesson of relevantLessons) {
 // semantically matching pending/approved patterns retain their existing key when
 // later evidence changes the representative summary. Rejected keys remain
 // suppressed, approved lessons are returned only while live provenance matches
-// their durable value, and skill-evolution failures stay in their dedicated gate.
+// their durable value. Skill-evolution and planning-lifecycle duplicates stay in
+// their dedicated gates rather than inflating generic lesson occurrence counts.
 
 // Candidate durable memories stay user-visible until reviewed. They are not
 // written to working memory until approval, and approvals retain provenance.
