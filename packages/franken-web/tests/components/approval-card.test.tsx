@@ -83,6 +83,40 @@ describe('ApprovalCard', () => {
     expect(screen.getByRole('button', { name: /reject/i })).toBeTruthy();
   });
 
+  it('binds the first decision to the rendered approval and suppresses replay', () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+
+    render(
+      <ApprovalCard
+        pending
+        approval={{
+          description: 'Approve deploy',
+          requestedAt: '2026-07-23T20:00:00Z',
+          command: 'npm run deploy',
+          sessionId: 'sess-approval-1',
+        }}
+        onApprove={onApprove}
+        onReject={onReject}
+      />,
+    );
+
+    const approveButton = screen.getByRole('button', { name: /approve/i });
+    fireEvent.click(approveButton);
+    fireEvent.click(approveButton);
+    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
+
+    expect(onApprove).toHaveBeenCalledTimes(1);
+    expect(onApprove).toHaveBeenCalledWith({
+      command: 'npm run deploy',
+      requestedAt: '2026-07-23T20:00:00Z',
+      sessionId: 'sess-approval-1',
+    });
+    expect(onReject).not.toHaveBeenCalled();
+    expect(approveButton.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: /reject/i }).hasAttribute('disabled')).toBe(true);
+  });
+
   it('disables actions while resolving and exposes inline errors for retry', () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();
