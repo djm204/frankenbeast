@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
 import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
@@ -24,6 +24,8 @@ import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { BrainRegistry } from '@franken/brain';
+import type { BrainRouteContext } from '../http/routes/brain-routes.js';
+import type { ModuleConfig } from './types.js';
 
 
 export interface BeastServicePaths {
@@ -31,11 +33,13 @@ export interface BeastServicePaths {
   beastLogsDir: string;
   root?: string | undefined;
   skillsDir?: string | undefined;
+  brainDbPath?: string | undefined;
 }
 
 export interface BeastServiceBundle {
   agents: AgentService;
   brains: BrainRegistry;
+  resolveBrainContext(agentTypeId: string): BrainRouteContext | undefined;
   catalog: BeastCatalogService;
   dispatch: BeastDispatchService;
   runs: BeastRunService;
@@ -52,6 +56,44 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const logStore = new BeastLogStore(paths.beastLogsDir, createBeastLogStoreOptionsFromEnv());
   const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
   const brains = new BrainRegistry(join(projectRoot, '.fbeast', 'brains'));
+  const resolveBrainContext = (agentTypeId: string): BrainRouteContext | undefined => {
+    const run = repository.getLatestRunForDefinition(agentTypeId);
+    const agent = run?.trackedAgentId
+      ? repository.getTrackedAgent(run.trackedAgentId)
+      : run
+        ? undefined
+        : repository.getLatestTrackedAgentForDefinition(agentTypeId);
+    if (!run && !agent) return undefined;
+    const runSnapshot = run?.configSnapshot;
+    const agentSnapshot = agent?.initConfig;
+    const configuredBrainPath = stringValue(recordValue(runSnapshot, 'brain'), 'dbPath')
+      ?? stringValue(recordValue(agentSnapshot, 'brain'), 'dbPath')
+      ?? paths.brainDbPath;
+    const attempt = run?.currentAttemptId ? repository.getAttempt(run.currentAttemptId) : undefined;
+    const worktreeExecutionCwd = attempt?.executorMetadata?.worktreeExecutionCwd;
+    const configuredProjectRoot = stringValue(runSnapshot, 'projectRoot')
+      ?? stringValue(agentSnapshot, 'projectRoot');
+    const runtimeRoot = typeof worktreeExecutionCwd === 'string'
+      ? worktreeExecutionCwd
+      : configuredProjectRoot ?? projectRoot;
+    const dbPath = configuredBrainPath === undefined
+      ? join(projectRoot, '.fbeast', 'brains', `${agentTypeId}.db`)
+      : configuredBrainPath === ':memory:' || isAbsolute(configuredBrainPath)
+        ? configuredBrainPath
+        : resolve(runtimeRoot, configuredBrainPath);
+    const runModules = recordValue(runSnapshot, 'modules') as ModuleConfig | undefined;
+    const agentModules = recordValue(agentSnapshot, 'modules') as ModuleConfig | undefined;
+    const modules = runModules ?? agent?.moduleConfig ?? agentModules;
+    return {
+      dbPath,
+      faculties: {
+        planning: moduleEnabled(modules?.planner, 'FRANKENBEAST_MODULE_PLANNER'),
+        reasoning: moduleEnabled(modules?.critique, 'FRANKENBEAST_MODULE_CRITIQUE'),
+        action: moduleEnabled(modules?.governor, 'FRANKENBEAST_MODULE_GOVERNOR'),
+        learning: false,
+      },
+    };
+  };
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
@@ -118,6 +160,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   return {
     agents: new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests }),
     brains,
+    resolveBrainContext,
     catalog,
     dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, {
       eventBus,
@@ -137,6 +180,25 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       repository.close();
     },
   };
+}
+
+function moduleEnabled(configured: boolean | undefined, environmentVariable: string): boolean {
+  return configured ?? process.env[environmentVariable] !== 'false';
+}
+
+function recordValue(
+  value: Readonly<Record<string, unknown>> | undefined,
+  key: string,
+): Readonly<Record<string, unknown>> | undefined {
+  const candidate = value?.[key];
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+    ? candidate as Readonly<Record<string, unknown>>
+    : undefined;
+}
+
+function stringValue(value: Readonly<Record<string, unknown>> | undefined, key: string): string | undefined {
+  const candidate = value?.[key];
+  return typeof candidate === 'string' && candidate.trim().length > 0 ? candidate : undefined;
 }
 
 function collectTrustedSkillToolManifests(

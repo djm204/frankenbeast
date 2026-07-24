@@ -123,6 +123,46 @@ describe('EpisodicMemory.recall()', () => {
     }
   });
 
+  it('bounds encrypted episodic details by decrypted response size', () => {
+    const encryptedBrain = new SqliteBrain(':memory:', undefined, {
+      encryption: { enabled: true, key: 'episodic-bounds-test-key' },
+    });
+    try {
+      encryptedBrain.episodic.record({
+        type: 'observation',
+        summary: 'within plaintext bound',
+        details: { marker: 'searchable-needle', payload: 'x'.repeat(7_000) },
+        createdAt: '2026-03-18T10:30:00Z',
+      });
+      encryptedBrain.episodic.record({
+        type: 'observation',
+        summary: 'outside plaintext bound',
+        details: { marker: 'oversized-search-needle', payload: 'x'.repeat(1_100_000) },
+        createdAt: '2026-03-18T10:31:00Z',
+      });
+
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'searchable-needle',
+        maxDetailsBytes: 8_192,
+      })[0]?.details).toMatchObject({ marker: 'searchable-needle' });
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        maxDetailsBytes: 8_192,
+      })[0]).toMatchObject({ detailsTruncated: true });
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'oversized-search-needle',
+        maxDetailsBytes: 8_192,
+      })[0]).toMatchObject({ detailsTruncated: true });
+    } finally {
+      encryptedBrain.close();
+    }
+  });
+
   it.each([
     ['C++', 'C++ compiler selected', 'compiler selected'],
     ['C#', 'C# compiler selected', 'compiler selected'],

@@ -22,6 +22,26 @@ describe('BrainRegistry', () => {
     }
   });
 
+  it('preserves existing handles when an agent type moves to another explicit path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-brain-registry-path-change-'));
+    const registry = new BrainRegistry();
+    try {
+      const first = registry.forAgentType('coder', join(root, 'first.db'));
+      first.working.set('first', true);
+      const second = registry.forAgentType('coder', join(root, 'second.db'));
+      second.working.set('second', true);
+
+      expect(first.working.get('first')).toBe(true);
+      expect(second).not.toBe(first);
+      expect(registry.forAgentType('coder')).toBe(second);
+      expect(registry.forAgentType('coder', join(root, 'first.db'))).toBe(first);
+      expect(registry.forAgentType('coder')).toBe(first);
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects identifiers that are ambiguous or unsafe as path components', () => {
     const registry = new BrainRegistry();
 

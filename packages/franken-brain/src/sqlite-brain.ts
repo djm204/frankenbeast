@@ -6,6 +6,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { resolve as resolvePath } from 'node:path';
 import Database from 'better-sqlite3';
 import type {
@@ -562,6 +563,7 @@ export type MemoryAccessAuditOperation =
   | 'episodic.recordLearning'
   | 'episodic.recall'
   | 'episodic.recent'
+  | 'episodic.readBoundedPage'
   | 'episodic.recentFailures'
   | 'episodic.count'
   | 'recovery.checkpoint'
@@ -724,6 +726,16 @@ export class MemoryEncryptionWrongKeyError extends Error {
 const MEMORY_ENCRYPTION_ALGORITHM = 'aes-256-gcm' as const;
 const MEMORY_ENCRYPTION_PREFIX = 'enc:v1:';
 const MEMORY_ENCRYPTION_VERIFIER = 'franken-memory-encryption-verifier:v1';
+
+function encryptedPayloadByteLimit(plaintextBytes: number): number {
+  const base64UrlLength = (bytes: number) => Math.ceil(bytes * 4 / 3);
+  return Buffer.byteLength(MEMORY_ENCRYPTION_PREFIX)
+    + base64UrlLength(12)
+    + 1
+    + base64UrlLength(16)
+    + 1
+    + base64UrlLength(plaintextBytes);
+}
 const MEMORY_STORES = [
   'working_memory',
   'episodic_events',
@@ -807,6 +819,29 @@ class MemoryCipher {
         decipher.update(Buffer.from(ciphertextB64!, 'base64url')),
         decipher.final(),
       ]).toString('utf8');
+    } catch (error) {
+      throw new MemoryEncryptionWrongKeyError(
+        `Memory encryption key cannot decrypt a persisted payload: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  *decryptBase64UrlChunks(
+    ivB64: string,
+    tagB64: string,
+    chunks: Iterable<string>,
+  ): Generator<Buffer> {
+    try {
+      const decipher = createDecipheriv(
+        MEMORY_ENCRYPTION_ALGORITHM,
+        this.key,
+        Buffer.from(ivB64, 'base64url'),
+      );
+      decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
+      for (const chunk of chunks) {
+        yield decipher.update(Buffer.from(chunk, 'base64url'));
+      }
+      yield decipher.final();
     } catch (error) {
       throw new MemoryEncryptionWrongKeyError(
         `Memory encryption key cannot decrypt a persisted payload: ${error instanceof Error ? error.message : String(error)}`,
@@ -2447,6 +2482,27 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return keys;
   }
 
+  /** Read the current durable key set without trusting this process's cached map. */
+  persistedKeys(): string[] {
+    const rows = this.db
+      .prepare(`SELECT key, value FROM working_memory ORDER BY key ASC`)
+      .all() as Array<{ key: string; value: string }>;
+    const keys = rows.flatMap((row) => {
+      const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      validateWorkingMemoryKey(row.key);
+      return isExpiredWorkingMemoryValue(parseHydratedWorkingMemoryValue(row.key, serialized))
+        ? []
+        : [row.key];
+    });
+    this.audit?.({
+      operation: 'working.keys',
+      store: 'working',
+      outcome: 'success',
+      details: { count: keys.length, source: 'persisted' },
+    });
+    return keys;
+  }
+
   private snapshotEntries(options: { expireGuardedEntries?: boolean } = {}): Record<string, unknown> {
     if (options.expireGuardedEntries ?? true) {
       this.expireRuntimeKeysMatchingCurrentGuards();
@@ -3147,6 +3203,223 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       });
       throw error;
     }
+  }
+
+  /**
+   * Read an HTTP-safe page while dropping oversized details in SQLite, before
+   * JSON parsing can materialize an unbounded payload in the Node process.
+   */
+  private scoreOversizedEncryptedDetails(eventId: number | string, summary: string, keywords: readonly string[]): number {
+    const summaryLower = summary.toLowerCase();
+    const matched = new Set(keywords.filter(keyword => summaryLower.includes(keyword)));
+    if (!this.encryption || matched.size === keywords.length) return matched.size;
+
+    const metadata = this.db.prepare(
+      'SELECT substr(details, 1, 96) AS header, length(details) AS total_length FROM episodic_events WHERE id = ?',
+    ).get(eventId) as { header: string | null; total_length: number } | undefined;
+    const headerMatch = metadata?.header?.match(/^enc:v1:([^:]+):([^:]+):/);
+    if (!headerMatch || !metadata) return matched.size;
+    const headerLength = headerMatch[0].length;
+    const encodedLength = metadata.total_length - headerLength;
+    const chunkSize = 64 * 1024;
+    const chunks = function* (db: Database.Database): Generator<string> {
+      for (let offset = 0; offset < encodedLength; offset += chunkSize) {
+        const row = db.prepare('SELECT substr(details, ?, ?) AS chunk FROM episodic_events WHERE id = ?')
+          .get(headerLength + offset + 1, Math.min(chunkSize, encodedLength - offset), eventId) as { chunk: string };
+        yield row.chunk;
+      }
+    };
+    const decoder = new StringDecoder('utf8');
+    const overlapLength = Math.max(...keywords.map(keyword => keyword.length), 1) - 1;
+    let overlap = '';
+    try {
+      for (const plaintext of this.encryption.decryptBase64UrlChunks(headerMatch[1]!, headerMatch[2]!, chunks(this.db))) {
+        const text = (overlap + decoder.write(plaintext)).toLowerCase();
+        for (const keyword of keywords) {
+          if (text.includes(keyword)) matched.add(keyword);
+        }
+        overlap = text.slice(-overlapLength);
+      }
+      const tail = (overlap + decoder.end()).toLowerCase();
+      for (const keyword of keywords) {
+        if (tail.includes(keyword)) matched.add(keyword);
+      }
+    } catch {
+      // A malformed encrypted details field must not break the bounded route.
+    }
+    return matched.size;
+  }
+
+  readBoundedPage(options: {
+    limit: number;
+    offset: number;
+    query?: string;
+    maxDetailsBytes: number;
+  }): Array<EpisodicEvent & { detailsTruncated?: true }> {
+    try {
+      const result = this.readBoundedPageUnchecked(options);
+      this.audit?.({
+        operation: 'episodic.readBoundedPage',
+        store: 'episodic',
+        ...(options.query === undefined ? {} : { query: options.query }),
+        outcome: 'success',
+        details: { limit: options.limit, offset: options.offset, count: result.length },
+      });
+      return result;
+    } catch (error) {
+      this.audit?.({
+        operation: 'episodic.readBoundedPage',
+        store: 'episodic',
+        ...(options.query === undefined ? {} : { query: options.query }),
+        outcome: 'error',
+        details: {
+          limit: options.limit,
+          offset: options.offset,
+          errorName: error instanceof Error ? error.name : 'Error',
+        },
+      });
+      throw error;
+    }
+  }
+
+  private readBoundedPageUnchecked(options: {
+    limit: number;
+    offset: number;
+    query?: string;
+    maxDetailsBytes: number;
+  }): Array<EpisodicEvent & { detailsTruncated?: true }> {
+    const { limit, offset, query, maxDetailsBytes } = options;
+    if (!Number.isSafeInteger(limit) || limit < 1) {
+      throw new RangeError('limit must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new RangeError('offset must be a non-negative safe integer');
+    }
+    if (!Number.isSafeInteger(maxDetailsBytes) || maxDetailsBytes < 0) {
+      throw new RangeError('maxDetailsBytes must be a non-negative safe integer');
+    }
+    const normalizedQuery = query?.trim();
+    const keywords = normalizedQuery ? normalizeRecallKeywords(normalizedQuery) : [];
+    // AES-GCM envelopes are larger than their plaintext. Bound the envelope at
+    // the exact maximum size for an allowed plaintext instead of comparing
+    // base64 ciphertext bytes to the public JSON response limit.
+    const storedDetailsByteLimit = this.encryption
+      ? encryptedPayloadByteLimit(maxDetailsBytes)
+      : maxDetailsBytes;
+    const detailsProjection = `CASE
+      WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) > ? THEN NULL
+      ELSE details
+    END AS details`;
+    const truncatedProjection = `CASE
+      WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) > ? THEN 1
+      ELSE 0
+    END AS details_truncated`;
+    const projectedColumns = `id, type, step, summary, ${detailsProjection}, created_at, schema_version,
+                              ${truncatedProjection}`;
+    const mapRows = (rows: Array<EpisodicRow & { details_truncated: 0 | 1 }>) => rows.flatMap((row) => {
+      const event = rowToEvent(row, this.encryption);
+      if (!event) return [];
+      return [{
+        ...event,
+        ...(row.details_truncated === 1 ? { detailsTruncated: true as const } : {}),
+      }];
+    });
+
+    if (keywords.length === 0) {
+      const rows = this.db.prepare(
+        `SELECT ${projectedColumns}
+           FROM episodic_events
+          ORDER BY created_at DESC, id DESC
+          LIMIT ? OFFSET ?`,
+      ).all(storedDetailsByteLimit, storedDetailsByteLimit, limit, offset) as Array<
+        EpisodicRow & { details_truncated: 0 | 1 }
+      >;
+      return mapRows(rows);
+    }
+
+    if (this.encryption) {
+      const batchSize = 128;
+      const matches: Array<{ event: EpisodicEvent & { detailsTruncated?: true }; score: number }> = [];
+      let rowOffset = 0;
+      while (true) {
+        // Search a separately bounded ciphertext projection so details modestly
+        // larger than the response budget remain searchable without allowing a
+        // corrupted database row to allocate unbounded memory during decrypt.
+        const searchableDetailsByteLimit = encryptedPayloadByteLimit(1024 * 1024);
+        const rows = this.db.prepare(
+          `SELECT ${projectedColumns},
+                  CASE WHEN details IS NOT NULL AND length(CAST(details AS BLOB)) <= ?
+                    THEN details ELSE NULL END AS search_details
+             FROM episodic_events
+            ORDER BY created_at DESC, id DESC
+            LIMIT ? OFFSET ?`,
+        ).all(storedDetailsByteLimit, storedDetailsByteLimit, searchableDetailsByteLimit, batchSize, rowOffset) as Array<
+          EpisodicRow & { details_truncated: 0 | 1; search_details: string | null }
+        >;
+        for (const row of rows) {
+          const searchableEvent = rowToEvent({ ...row, details: row.search_details }, this.encryption);
+          const boundedEvent = rowToEvent(row, this.encryption);
+          if (!searchableEvent || !boundedEvent) continue;
+          const score = row.details_truncated === 1 && row.search_details === null
+            ? this.scoreOversizedEncryptedDetails(row.id, row.summary, keywords)
+            : recallEventScore(searchableEvent, keywords);
+          if (score > 0) {
+            matches.push({
+              event: {
+                ...boundedEvent,
+                ...(row.details_truncated === 1 ? { detailsTruncated: true as const } : {}),
+              },
+              score,
+            });
+          }
+        }
+        if (rows.length < batchSize) break;
+        rowOffset += rows.length;
+      }
+      return matches
+        .sort((a, b) =>
+          b.score - a.score
+          || b.event.createdAt.localeCompare(a.event.createdAt)
+          || Number(b.event.id ?? 0) - Number(a.event.id ?? 0))
+        .slice(offset, offset + limit)
+        .map(({ event }) => event);
+    }
+
+    const searchableDetails = `CASE
+      WHEN json_valid(details)
+       AND NOT (
+         json_type(details, '$.quarantine') = 'object'
+         AND json_extract(details, '$.quarantine.field') = 'details'
+         AND json_extract(details, '$.quarantine.eventId') = id
+         AND json_extract(details, '$.quarantine.reason') = 'invalid JSON'
+       )
+      THEN details ELSE '' END`;
+    const scoringCases = keywords.map(() =>
+      `(CASE WHEN lower(summary) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END
+        + CASE WHEN lower(${searchableDetails}) LIKE ? ESCAPE '\\' THEN 1 ELSE 0 END)`,
+    ).join(' + ');
+    const whereClauses = keywords.map(() =>
+      `(lower(summary) LIKE ? ESCAPE '\\' OR lower(${searchableDetails}) LIKE ? ESCAPE '\\')`,
+    ).join(' OR ');
+    const likeParams = keywords.flatMap((keyword) => {
+      const escaped = `%${escapeLike(keyword)}%`;
+      return [escaped, escaped];
+    });
+    const rows = this.db.prepare(
+      `SELECT ${projectedColumns}, (${scoringCases}) AS relevance_score
+         FROM episodic_events
+        WHERE ${whereClauses}
+        ORDER BY relevance_score DESC, created_at DESC, id DESC
+        LIMIT ? OFFSET ?`,
+    ).all(
+      storedDetailsByteLimit,
+      storedDetailsByteLimit,
+      ...likeParams,
+      ...likeParams,
+      limit,
+      offset,
+    ) as Array<EpisodicRow & { details_truncated: 0 | 1; relevance_score: number }>;
+    return mapRows(rows);
   }
 
   snapshotForHandoff(n = 100, nowMs = Date.now()): EpisodicEvent[] {
