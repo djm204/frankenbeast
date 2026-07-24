@@ -6,6 +6,7 @@
 - [x] Implement the `IActionFaculty` contract, SqliteBrain attachment seam, governor wrapper, and `createBeastDeps` wiring.
 - [x] Update architecture and touched package documentation.
 - [x] Run focused tests, package tests/typecheck/lint, root typecheck/build, and diff checks.
-- [ ] Commit as David Mendez, push, and open one PR with `Closes #3696`.
+- [x] Commit as David Mendez, push, and open one PR with `Closes #3696`.
 - [ ] Complete current-head GitHub Codex review and green CI, then merge under routine policy.
-- [ ] Append reusable lessons and reconcile/complete blocked card `t_2c1c81bf` plus recovery card `t_669ab583`.
+- [x] Append the reusable adapter/wiring lesson to the shared lessons file.
+- [ ] Reconcile/complete blocked card `t_2c1c81bf` plus recovery card `t_669ab583`.
