@@ -70,6 +70,8 @@ export interface BeastDepsConfig {
     recordEpisodes?: boolean;
   };
   action?: {
+    /** Attach the concrete governor as the action faculty. */
+    enabled?: boolean;
     /** Persist governed action decisions. Disable with the memory module. */
     recordEpisodes?: boolean;
   };
@@ -184,18 +186,20 @@ export function createBeastDeps(
       })
     : undefined;
   if (reasoning) brain.attachReasoningFaculty(reasoning);
-  const actionFaculty = new ActionFacultyAdapter(
-    existingDeps.governor,
-    brain.episodic,
-    clock,
-    (error) => existingDeps.logger.warn(
-      'Failed to record governor action decision in episodic memory',
-      error,
-      'brain.action',
-    ),
-    config.action?.recordEpisodes !== false,
-  );
-  brain.attachActionFaculty(actionFaculty);
+  const actionFaculty = config.action?.enabled !== false
+    ? new ActionFacultyAdapter(
+        existingDeps.governor,
+        brain.episodic,
+        clock,
+        (error) => existingDeps.logger.warn(
+          'Failed to record governor action decision in episodic memory',
+          error,
+          'brain.action',
+        ),
+        config.action?.recordEpisodes !== false,
+      )
+    : undefined;
+  if (actionFaculty) brain.attachActionFaculty(actionFaculty);
 
   // Wire ProviderRegistry + MiddlewareChain into heartbeat reflection via IAdapter
   const registryAdapter = new ProviderRegistryIAdapter(registry, middlewareChain);
@@ -239,7 +243,7 @@ export function createBeastDeps(
     planner: existingDeps.planner,
     observer,
     critique: reasoning ?? existingDeps.critique,
-    governor: actionFaculty,
+    governor: actionFaculty ?? existingDeps.governor,
     heartbeat,
     logger: existingDeps.logger,
     clock,

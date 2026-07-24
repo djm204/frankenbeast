@@ -180,4 +180,31 @@ describe('ActionFacultyAdapter', () => {
       deps.sqliteBrain?.close();
     }
   });
+
+  it('leaves the brain action faculty inert when no concrete governor is enabled', () => {
+    const governor: IGovernorModule = {
+      requestApproval: vi.fn(async () => ({ decision: 'approved' as const })),
+    };
+    const deps = createBeastDeps(
+      {
+        providers: [{ name: 'claude', type: 'claude-cli' }],
+        reflection: false,
+        action: { enabled: false },
+      },
+      {
+        planner: makePlanner(),
+        critique: makeCritique(),
+        governor,
+        observer: makeObserver(),
+        logger: makeLogger(),
+      },
+    );
+
+    try {
+      expect(deps.sqliteBrain?.action.configured).toBe(false);
+      expect(deps.governor).toBe(governor);
+    } finally {
+      deps.sqliteBrain?.close();
+    }
+  });
 });
