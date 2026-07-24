@@ -90,6 +90,12 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
 
   // Brain
   const dbPath = resolve(options.paths.frankenbeastDir, 'beast.db');
+  const agentTypeId = typeof options.runConfig?.definitionId === 'string'
+    ? options.runConfig.definitionId
+    : undefined;
+  const brainConfigDir = typeof options.runConfig?.brainConfigDir === 'string'
+    ? options.runConfig.brainConfigDir
+    : resolve(options.paths.root, '.fbeast');
   const egressPolicy = config?.network?.egressPolicy;
 
   return {
@@ -108,9 +114,11 @@ export function bridgeToBeastConfig(options: CliDepOptions, config?: Orchestrato
           ...(config.security.customRules ? { customRules: config.security.customRules } : {}),
         }
       : { profile: securityProfile },
-    brain: {
-      dbPath: config?.brain?.dbPath ?? dbPath,
-    },
+    ...(agentTypeId ? { agentTypeId } : {}),
+    ...(agentTypeId ? { brainConfigDir } : {}),
+    brain: agentTypeId && config?.brain?.dbPath === undefined
+      ? {}
+      : { dbPath: config?.brain?.dbPath ?? dbPath },
     skillsDir: options.skillsDir ?? resolve(options.paths.root, '.fbeast', 'skills'),
     configDir: resolve(options.paths.root, '.fbeast'),
     reflection: true,

@@ -93,6 +93,7 @@ describe('BeastDispatchService', () => {
       dispatchedByUser: 'pfk',
       executionMode: 'process',
     });
+    expect(run.configSnapshot.definitionId).toBe('martin-loop');
     expect(run.configSnapshot.provider).toBe('prod-claude');
     expect(run.configSnapshot.skills).toEqual([]);
     expect(executors.process.start).not.toHaveBeenCalled();
@@ -310,6 +311,7 @@ describe('BeastDispatchService', () => {
     expect(run.dispatchedBy).toBe('dashboard');
     expect(run.configSnapshot).toEqual({
       agentRole: 'coding',
+      definitionId: 'martin-loop',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
@@ -360,6 +362,7 @@ describe('BeastDispatchService', () => {
 
     expect(run.configSnapshot).toEqual({
       agentRole: 'coding',
+      definitionId: 'martin-loop',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
@@ -411,6 +414,7 @@ describe('BeastDispatchService', () => {
 
     expect(run.configSnapshot).toEqual({
       agentRole: 'coding',
+      definitionId: 'martin-loop',
       provider: 'claude',
       objective: 'Implement the dispatch panel',
       chunkDirectory: 'docs/chunks',
