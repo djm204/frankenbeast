@@ -106,8 +106,25 @@ describe('ConversationEngine', () => {
 
     expect(llm.complete).toHaveBeenCalledWith(
       expect.not.stringContaining('Runtime status'),
-      expect.anything(),
+      expect.not.objectContaining({ systemPromptAddendum: expect.anything() }),
     );
+  });
+
+  it('delivers the runtime-status note via systemPromptAddendum, never concatenated onto the prompt', async () => {
+    // Regression test: appending this note to the raw user-turn prompt made
+    // it textually indistinguishable from injected content, and Claude's own
+    // anti-injection training correctly refused to trust it. It must travel
+    // through a real system-prompt channel instead — see docs/adr/040.
+    const llm = mockLlm('Hello!');
+    const engine = new ConversationEngine({ llm, projectName: 'test' });
+
+    await engine.processTurn('hello', [], {
+      priorProviderContext: { provider: 'codex', model: 'codex-mini' },
+    });
+
+    const [prompt, options] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(prompt).not.toContain('Runtime status');
+    expect(options.systemPromptAddendum).toContain('Runtime status from the most recently completed turn: it was served by the "codex" CLI provider.');
   });
 
   it('injects a plain runtime-status note when the prior turn used the configured provider', async () => {
@@ -118,18 +135,10 @@ describe('ConversationEngine', () => {
       priorProviderContext: { provider: 'codex', model: 'codex-mini' },
     });
 
-    expect(llm.complete).toHaveBeenCalledWith(
-      expect.stringContaining('Runtime status from the most recently completed turn: it was served by the "codex" CLI provider.'),
-      expect.anything(),
-    );
-    expect(llm.complete).toHaveBeenCalledWith(
-      expect.stringContaining('The specific underlying model is "codex-mini".'),
-      expect.anything(),
-    );
-    expect(llm.complete).toHaveBeenCalledWith(
-      expect.not.stringContaining('fallback'),
-      expect.anything(),
-    );
+    const [, options] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(options.systemPromptAddendum).toContain('Runtime status from the most recently completed turn: it was served by the "codex" CLI provider.');
+    expect(options.systemPromptAddendum).toContain('The specific underlying model is "codex-mini".');
+    expect(options.systemPromptAddendum).not.toContain('fallback');
   });
 
   it('tells the model not to guess a version when none is known', async () => {
@@ -140,14 +149,9 @@ describe('ConversationEngine', () => {
       priorProviderContext: { provider: 'codex' },
     });
 
-    expect(llm.complete).toHaveBeenCalledWith(
-      expect.stringContaining('not exposed to this session — do not name one'),
-      expect.anything(),
-    );
-    expect(llm.complete).toHaveBeenCalledWith(
-      expect.stringContaining('never state a specific model name or version'),
-      expect.anything(),
-    );
+    const [, options] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(options.systemPromptAddendum).toContain('not exposed to this session — do not name one');
+    expect(options.systemPromptAddendum).toContain('never state a specific model name or version');
   });
 
   it('injects a fallback-aware note when the prior turn actually switched providers', async () => {
@@ -163,12 +167,14 @@ describe('ConversationEngine', () => {
       },
     });
 
-    const [prompt] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(prompt).toContain('That completed turn used an automatic fallback');
-    expect(prompt).toContain('the configured provider "codex" was rate-limited');
-    expect(prompt).toContain('retried against "claude"');
-    expect(prompt).toContain('answer truthfully using these facts');
-    expect(prompt).toContain('do not present this historical status as the provider for the current request');
+    const [prompt, options] = (llm.complete as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(prompt).not.toContain('Runtime status');
+    const note = options.systemPromptAddendum as string;
+    expect(note).toContain('That completed turn used an automatic fallback');
+    expect(note).toContain('the configured provider "codex" was rate-limited');
+    expect(note).toContain('retried against "claude"');
+    expect(note).toContain('answer truthfully using these facts');
+    expect(note).toContain('do not present this historical status as the provider for the current request');
   });
 });
 

@@ -31,6 +31,7 @@ type CliTransformed = {
   requestId?: string | undefined;
   signal?: AbortSignal | undefined;
   timeoutMs?: number | undefined;
+  systemPromptAddendum?: string | undefined;
 };
 
 type ProviderOverride = {
@@ -154,6 +155,7 @@ export class CliLlmAdapter implements IAdapter {
       session_id?: string;
       signal?: AbortSignal;
       timeoutMs?: number;
+      systemPromptAddendum?: string;
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
@@ -172,6 +174,7 @@ export class CliLlmAdapter implements IAdapter {
       ...(req.id ? { requestId: req.id } : {}),
       ...(req.signal ? { signal: req.signal } : {}),
       ...(req.timeoutMs !== undefined ? { timeoutMs: req.timeoutMs } : {}),
+      ...(req.systemPromptAddendum ? { systemPromptAddendum: req.systemPromptAddendum } : {}),
     };
     if (cacheSession) {
       transformed.cacheSession = cacheSession;
@@ -191,6 +194,7 @@ export class CliLlmAdapter implements IAdapter {
       cacheSession,
       signal: callerSignal,
       timeoutMs: requestedTimeoutMs,
+      systemPromptAddendum,
     } = providerRequest as CliTransformed;
     if (chatMode) this.chatCallCount++;
     const providers = normalizeProviderChain(this.provider.name, this.opts.providers);
@@ -234,6 +238,15 @@ export class CliLlmAdapter implements IAdapter {
         attempt++;
       const provider = this.resolveProvider(activeProvider);
       const activeModel = this.resolveModel(activeProvider, model);
+      // Deliver runtime metadata through the provider's real system-prompt
+      // channel when it has one (verified live: Claude Code CLI's
+      // --append-system-prompt survives --continue/--resume and is treated
+      // as authoritative). Providers without an equivalent flag get it
+      // appended to the prompt text instead, preserving prior behavior.
+      const usesSystemPromptChannel = Boolean(systemPromptAddendum) && Boolean(provider.supportsSystemPromptAddendum?.());
+      const effectivePrompt = systemPromptAddendum && !usesSystemPromptChannel
+        ? `${prompt}\n\n${systemPromptAddendum}`
+        : prompt;
       this.opts.onLifecycleEvent?.({ type: 'attempt', provider: activeProvider, attempt });
       if (requestId) {
         const replayRunId = this.resolveReplayRunId(requestId);
@@ -242,7 +255,7 @@ export class CliLlmAdapter implements IAdapter {
           runId: replayRunId,
           provider: activeProvider,
           ...(activeModel ? { model: activeModel } : {}),
-          content: prompt,
+          content: effectivePrompt,
         });
       }
       const activeCommand = this.resolveCommand(activeProvider);
@@ -261,9 +274,10 @@ export class CliLlmAdapter implements IAdapter {
               ? { sessionId: chatMode ? this.resolveProviderSessionId(activeProvider, sessionId, providerSessionContinue) : sessionId }
               : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
+            ...(usesSystemPromptChannel ? { systemPromptAddendum } : {}),
           }),
           env: provider.filterEnv(this.captureEnv()),
-          prompt,
+          prompt: effectivePrompt,
           signal,
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
         });

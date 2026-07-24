@@ -40,6 +40,28 @@ describe('AdapterLlmClient', () => {
     }));
   });
 
+  it('forwards systemPromptAddendum to the adapter request', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await client.complete('prompt', { systemPromptAddendum: 'Runtime status: fallback in effect.' });
+
+    expect(adapter.transformRequest).toHaveBeenCalledWith(expect.objectContaining({
+      systemPromptAddendum: 'Runtime status: fallback in effect.',
+    }));
+  });
+
+  it('omits systemPromptAddendum from the adapter request when not provided', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await client.complete('prompt');
+
+    expect(adapter.transformRequest).toHaveBeenCalledWith(
+      expect.not.objectContaining({ systemPromptAddendum: expect.anything() }),
+    );
+  });
+
   it('wraps adapter execute() failures in AdapterLlmError with the cause attached', async () => {
     const boom = new Error('socket hang up');
     const client = new AdapterLlmClient(

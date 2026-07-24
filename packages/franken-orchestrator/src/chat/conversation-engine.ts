@@ -71,10 +71,13 @@ export function formatProviderTransparencyNote(ctx: ProviderContext): string {
 }
 
 type ContinuationAwareLlmClient = ILlmClient & {
-  complete(prompt: string, options?: { sessionContinue?: boolean; sessionId?: string }): Promise<string>;
+  complete(
+    prompt: string,
+    options?: { sessionContinue?: boolean; sessionId?: string; systemPromptAddendum?: string },
+  ): Promise<string>;
   completeWithUsage?(
     prompt: string,
-    options?: { sessionContinue?: boolean; sessionId?: string },
+    options?: { sessionContinue?: boolean; sessionId?: string; systemPromptAddendum?: string },
   ): Promise<{ text: string; usage?: TokenUsage; providerContext?: ProviderContext }>;
 };
 
@@ -151,18 +154,23 @@ export class ConversationEngine {
         const built = shouldContinue
           ? undefined
           : this.promptBuilder.build([...history, userMessage]);
-        const basePrompt = built ? built.prompt : input;
+        const prompt = built ? built.prompt : input;
         // Based on the last known provider state (available from the prior
         // completed turn, if any) — this turn's own outcome isn't knowable
         // until after the call below, so a fallback happening *right now*
-        // is reported starting next turn, not this one.
+        // is reported starting next turn, not this one. Delivered via
+        // completeOptions.systemPromptAddendum (a real system-prompt channel
+        // on providers that have one) rather than concatenated into the
+        // prompt text: appended to raw user-turn text, it's indistinguishable
+        // from injected content and safety-conscious models correctly refuse
+        // to trust it — see docs/adr/040 "Update" section.
         const transparencyNote = options.priorProviderContext
           ? formatProviderTransparencyNote(options.priorProviderContext)
           : undefined;
-        const prompt = transparencyNote ? `${basePrompt}\n\n${transparencyNote}` : basePrompt;
         const completeOptions = {
           sessionContinue: shouldContinue,
           ...(sessionId ? { sessionId } : {}),
+          ...(transparencyNote ? { systemPromptAddendum: transparencyNote } : {}),
         };
         const { response, usage, providerContext } = typeof this.llm.completeWithUsage === 'function'
           ? await this.llm.completeWithUsage(prompt, completeOptions).then((result) => ({ response: result.text, usage: result.usage, providerContext: result.providerContext }))
