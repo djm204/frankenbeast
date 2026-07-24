@@ -250,7 +250,9 @@ describe("Memory Server", () => {
     expect(auditReportTool.inputSchema.properties.limit.type).toEqual(["string", "number"]);
     const retentionReportTool = server.tools.find(
       (t) => t.name === "fbeast_memory_retention_report",
-    )!;    const rightToForgetTool = server.tools.find(
+    )!;
+    expect(retentionReportTool.inputSchema.properties).toHaveProperty("maxScanRows");
+    const rightToForgetTool = server.tools.find(
       (t) => t.name === "fbeast_memory_right_to_forget",
     )!;
 
@@ -340,6 +342,7 @@ describe("Memory Server", () => {
       now: "2026-07-15T00:00:00.000Z",
       expiryHorizonMs: "60000",
       maxEntries: "5",
+      maxScanRows: "25",
       readScope: "agent",
       agentId: "agent-a",
     });
@@ -349,6 +352,7 @@ describe("Memory Server", () => {
       now: "2026-07-15T00:00:00.000Z",
       expiryHorizonMs: 60000,
       maxEntries: 5,
+      maxScanRows: 25,
     });
     expect(retentionReportResult.content[0]!.text).toContain('"compactionCandidates"');
     const forgetResult = await forgetTool.handler({ key: "adr", agentId: "agent-a" });

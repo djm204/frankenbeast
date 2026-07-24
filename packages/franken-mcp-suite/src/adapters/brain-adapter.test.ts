@@ -2059,7 +2059,7 @@ describe("createBrainAdapter", () => {
       agentId: "agent-retention",
       tool: "fbeast_memory_retention_report",
       operation: "read",
-      targetStore: "working|episodic",
+      targetStore: "working|episodic|checkpoint",
       targetClass: "memory-retention-report",
       decision: "approved",
     });
