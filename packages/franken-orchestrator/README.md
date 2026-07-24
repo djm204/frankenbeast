@@ -158,9 +158,16 @@ its `SqliteBrain`. The adapter remains the `ICritiqueModule` used by planning,
 delegates unchanged to the existing `@franken/critique` evaluator chain, and
 records a compact, queryable verdict decision after each completed review when
 memory is enabled. Disabled critique leaves the faculty inert, and startup
-health probes bypass episode recording. This
-per-run faculty wiring does not implement the future workspace Hive routing in
-ADR-041.
+health probes bypass episode recording.
+
+The same path attaches `ActionFacultyAdapter` to `SqliteBrain.action`. It
+delegates every approval request to the existing governor without changing its
+outcome, then records the request, decision, and reason as a recallable episodic
+event. Approval tokens are returned to the caller but are not copied into the
+episode, and startup health probes do not create episodes.
+
+This per-run faculty wiring does not implement the future workspace Hive routing
+in ADR-041.
 
 ## Package areas
 

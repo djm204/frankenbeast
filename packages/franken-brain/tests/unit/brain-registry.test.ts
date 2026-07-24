@@ -190,6 +190,25 @@ describe('SqliteBrain faculty foundation', () => {
     }
   });
 
+  it('attaches a configured action faculty without replacing the brain', () => {
+    const brain = new SqliteBrain();
+    const faculty = {
+      kind: 'action' as const,
+      configured: true,
+      requestApproval: async () => ({ decision: 'approved' as const }),
+    };
+    try {
+      expect(typeof brain.attachActionFaculty).toBe('function');
+      brain.attachActionFaculty(faculty);
+
+      expect(brain.action).toBe(faculty);
+      expect(brain.working).toBeDefined();
+      expect(brain.episodic).toBeDefined();
+    } finally {
+      brain.close();
+    }
+  });
+
   it('fails closed when the inert reasoning faculty is called', async () => {
     const brain = new SqliteBrain();
     try {

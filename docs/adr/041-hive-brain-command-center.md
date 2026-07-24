@@ -4,7 +4,11 @@
 - **Status:** Accepted
 - **Deciders:** Frankenbeast maintainers
 - **Supersedes:** none
+<<<<<<< HEAD
 - **Related:** ADR-014, issues #3685, #3690, #3695, #3700, #3701, #3702, #3703, and #3704
+=======
+- **Related:** ADR-014, issues #3685, #3690, #3695, #3696, #3700, #3701, #3702, and #3703
+>>>>>>> origin/main
 
 ## Context
 
@@ -21,11 +25,13 @@ central-command chat replaces the existing transport, what a
 `BrainConversation` owns, how it relates to the planned `BrainRegistry`, and
 where Beast dispatch crosses the safety boundary.
 
-The local Beast construction path now has one concrete faculty integration:
-`ReasoningFacultyAdapter` attaches the existing `@franken/critique` chain to a
-run's `SqliteBrain` and records recallable verdict episodes. That agent-scoped,
-per-run wiring does not provide the workspace Hive registry, conversation
-aggregate, or cross-faculty routing decided here.
+The local Beast construction path now has two concrete faculty integrations:
+`ReasoningFacultyAdapter` attaches the existing `@franken/critique` chain and
+records recallable verdict episodes, while `ActionFacultyAdapter` attaches the
+existing governor port, preserves every approval outcome unchanged, and records
+recallable governance-decision episodes without persisting approval tokens.
+That agent-scoped, per-run wiring does not provide the workspace Hive registry,
+conversation aggregate, or cross-faculty routing decided here.
 
 ## Decision
 

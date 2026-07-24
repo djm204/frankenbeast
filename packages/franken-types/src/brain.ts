@@ -84,6 +84,30 @@ export interface IActionFaculty {
   readonly kind: 'action';
   /** False until a concrete franken-governor adapter is attached. */
   readonly configured: boolean;
+  /** Delegate a gating decision to the configured governor without changing its outcome. */
+  requestApproval(request: ActionFacultyApprovalRequest): Promise<ActionFacultyApprovalOutcome>;
+}
+
+export interface ActionFacultyApprovalRequest {
+  readonly taskId: string;
+  readonly summary: string;
+  readonly skillId?: string | undefined;
+  readonly requiresHitl: boolean;
+}
+
+export interface ActionFacultyApprovalSessionToken {
+  readonly tokenId: string;
+  readonly approvalId: string;
+  readonly scope: string;
+  readonly grantedBy: string;
+  readonly grantedAt: Date;
+  readonly expiresAt: Date;
+}
+
+export interface ActionFacultyApprovalOutcome {
+  readonly decision: 'approved' | 'rejected' | 'abort';
+  readonly reason?: string | undefined;
+  readonly token?: ActionFacultyApprovalSessionToken | undefined;
 }
 
 /** Foundation for learning that builds on episodic memory and the memory-review queue. */

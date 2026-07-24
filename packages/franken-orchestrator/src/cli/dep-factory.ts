@@ -818,14 +818,20 @@ async function createGovernanceDeps(
   config: EffectiveCliConfig,
   finalize: () => Promise<void>,
   logger: BeastLogger,
-): Promise<{ governor: IGovernorModule; finalize: () => Promise<void> }> {
-  if (!config.modules.governor) return { governor: stubGovernor, finalize };
+): Promise<{ governor: IGovernorModule; actionEnabled: boolean; finalize: () => Promise<void> }> {
+  if (!config.modules.governor) return { governor: stubGovernor, actionEnabled: false, finalize };
 
   const governorModule = await importOptionalModule<typeof import('@franken/governor')>(
     '@franken/governor',
     logger,
   );
-  if (!governorModule) return { governor: resolveMissingSafetyModule('@franken/governor', stubGovernor, logger), finalize };
+  if (!governorModule) {
+    return {
+      governor: resolveMissingSafetyModule('@franken/governor', stubGovernor, logger),
+      actionEnabled: false,
+      finalize,
+    };
+  }
 
   const { stdin, stdout } = await import('node:process');
   if (!stdin.isTTY) {
@@ -837,6 +843,7 @@ async function createGovernanceDeps(
           ? ('approved' as const)
           : ('rejected' as const),
       }),
+      actionEnabled: true,
       finalize,
     };
   }
@@ -860,6 +867,7 @@ async function createGovernanceDeps(
         gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
         projectId: basename(options.paths.root),
       }),
+      actionEnabled: true,
       finalize,
     };
   }
@@ -881,6 +889,7 @@ async function createGovernanceDeps(
       gateway: gateway as unknown as GovernorPortAdapterDeps['gateway'],
       projectId: basename(options.paths.root),
     }),
+    actionEnabled: true,
     finalize: async () => {
       rl.close();
       await finalize();
@@ -989,6 +998,7 @@ function createConsolidatedDeps(
   executor: CliExecutorDeps,
   critique: ICritiqueModule,
   governor: IGovernorModule,
+  actionEnabled: boolean,
 ): ConsolidatedDeps {
   const runConfigOverrides: import('../deps.js').RunConfigOverrides | undefined =
     config.skills !== undefined
@@ -1003,6 +1013,10 @@ function createConsolidatedDeps(
     reasoning: {
       enabled: config.modules.critique,
       recordEpisodes: config.modules.memory,
+    },
+    action: {
+      enabled: actionEnabled,
+      recordEpisodes: config.modules.memory && actionEnabled,
     },
   };
   const existingDeps = bridgeToExistingDeps({
@@ -1178,6 +1192,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
       executor,
       critique,
       governance.governor,
+      governance.actionEnabled,
     );
     const deps: BeastLoopDeps = {
       ...consolidated,
