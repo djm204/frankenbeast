@@ -3,6 +3,7 @@ import type { BeastServiceBundle } from '../beasts/create-beast-services.js';
 import { requireBeastOperatorAuth } from '../beasts/http/beast-auth.js';
 import { agentRoutes } from './routes/agent-routes.js';
 import { beastRoutes } from './routes/beast-routes.js';
+import { brainRoutes } from './routes/brain-routes.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import {
   BEAST_CONTROL_MAX_BODY_SIZE,
@@ -232,6 +233,12 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     },
   }));
   app.route('/', beastRoutes(routeDeps));
+  app.route('/', brainRoutes({
+    registry: services.brains,
+    operatorToken: options.operatorToken,
+    security,
+    rateLimit,
+  }));
   app.route('/', agentRoutes({
     agents: services.agents,
     dispatch: services.dispatch,

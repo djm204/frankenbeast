@@ -961,6 +961,24 @@ Current beast-control routes:
 | `POST /v1/beasts/events/ticket` | Issue a single-use SSE connection ticket (bearer token required) |
 | `GET /v1/beasts/events/stream` | SSE event stream (ticket-authenticated) |
 
+#### Hive Brain operational reads
+
+The Beast daemon also owns read-only `/v1/brain/*` routes backed by the same
+`BrainRegistry` lifecycle as Beast services. `chat-server` mounts them when it
+owns local services and proxies them when attached to a standalone daemon.
+Every route requires the Beast operator token, unknown ids do not create brain
+databases, responses are bounded, and unexpected storage errors are returned as
+the stable `BRAIN_READ_FAILED` response.
+
+| Route | Purpose and bounds |
+|-------|--------------------|
+| `GET /v1/brain/:agentTypeId` | Summary with at most 100 working-memory keys, episodic count, latest checkpoint time, faculty configuration, and capability availability |
+| `GET /v1/brain/:agentTypeId/episodes?limit=&offset=&query=` | Episodic history or recall search; `limit` defaults to 25 and is capped at 100, `offset` at 1,000, and `query` at 256 characters. Oversized stored step, summary, timestamp, and details fields are truncated or omitted with explicit `*Truncated` markers |
+| `GET /v1/brain/:agentTypeId/lessons` | Incremental lesson capability response; returns `available: false` with an empty collection until consolidated lesson reads are implemented |
+
+See [ADR-041](adr/041-hive-brain-command-center.md) for the command-center and
+registry ownership decision.
+
 ## Communications Gateway (orchestrator comms surface)
 
 Multi-channel external communications with deterministic session mapping (SHA256-based). See [ADR-016](adr/016-external-comms-gateway.md).

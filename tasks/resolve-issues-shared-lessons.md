@@ -524,3 +524,6 @@
 ## 2026-07-24 — Faculty adapters should wrap lifecycle seams
 - Attach faculty adapters in the consolidated dependency factory and reuse the existing planner and execution trace seams; do not reimplement DAG ordering or add a parallel executor. Keep faculty failure episodes recallable by task objective while limiting their details to the error class, preserve established generic traces needed by recovery, suppress fake lifecycle events from health probes, and make additive telemetry best-effort so it cannot replace planner/execution outcomes.
 - Module-disable flags must also disable faculty-owned persistence, optional lifecycle hooks need a caller-side best-effort boundary, and recovery queries must filter telemetry before applying their result limit so lifecycle volume cannot starve diagnostic history.
+
+## 2026-07-24 — Registry-backed operational HTTP reads
+- Read-only routes over durable registries need an existing-only lookup API: never reuse a get-or-create method for an operator-supplied id. Mount the route with the service-owned registry in both standalone and combined modes, proxy it through compatibility gateways, bound every collection/query input and every variable-length row field, and translate storage failures before shared error logging can expose internal paths.

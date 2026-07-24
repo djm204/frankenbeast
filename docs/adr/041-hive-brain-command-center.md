@@ -4,7 +4,11 @@
 - **Status:** Accepted
 - **Deciders:** Frankenbeast maintainers
 - **Supersedes:** none
+<<<<<<< HEAD
+- **Related:** ADR-014, issues #3685, #3690, #3695, #3700, #3701, #3702, #3703, and #3704
+=======
 - **Related:** ADR-014, issues #3685, #3690, #3695, #3696, #3700, #3701, #3702, and #3703
+>>>>>>> origin/main
 
 ## Context
 
@@ -128,6 +132,31 @@ without inventing a separate "conversation brain" lifecycle.
 If a requested faculty is missing or unhealthy, routing fails as a typed,
 visible turn error or falls back to the Hive Brain only when policy explicitly
 allows that fallback. It never dispatches to an unregistered implementation.
+
+### 3a. Expose bounded operational Brain reads through the Beast control plane
+
+The Beast daemon owns the authenticated operational Brain HTTP surface. It uses
+the same process-owned `BrainRegistry` as Beast services and opens only an
+already-existing default agent-type database; an HTTP lookup must never create
+a brain merely because an operator requested an unknown id. `chat-server`
+mounts the same routes when it owns local Beast services and otherwise proxies
+them to the attached daemon.
+
+The initial additive contract is:
+
+- `GET /v1/brain/:agentTypeId` for a bounded summary of working-memory keys,
+  episodic count, recovery checkpoint time, faculty configuration, and explicit
+  capability/lesson availability;
+- `GET /v1/brain/:agentTypeId/episodes` for bounded episodic paging and optional
+  recall query; and
+- `GET /v1/brain/:agentTypeId/lessons` for explicit incremental lesson support.
+  Until consolidated lesson reads exist, this returns an empty collection with
+  `available: false` rather than inventing lesson storage or returning 404.
+
+All three routes require Beast operator authentication. Collection responses
+have fixed maximum limits, invalid identifiers and queries receive typed client
+errors, and storage failures map to a stable error without exposing internal
+database paths or exception text.
 
 ### 4. Migrate without breaking `franken-web`
 

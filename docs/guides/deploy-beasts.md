@@ -12,6 +12,7 @@ The dashboard talks to two local services when run through `frankenbeast network
 - `POST /v1/beasts/agents` creates a tracked dashboard agent from the wizard.
 - Agent actions (`start`, `stop`, `restart`, `resume`, `delete`) control the tracked agent or its linked run.
 - Run detail and logs are read from `/v1/beasts/runs/:runId` and `/v1/beasts/runs/:runId/logs`.
+- Authenticated, bounded agent-brain summaries and episodic history are read from `/v1/brain/:agentTypeId` and `/v1/brain/:agentTypeId/episodes`; lesson availability is reported by `/v1/brain/:agentTypeId/lessons`.
 
 ## Prerequisites
 
@@ -53,9 +54,11 @@ If no daemon is running and `FRANKENBEAST_BEAST_DAEMON_URL` is unset, `chat-serv
 Default bind:
 
 - Beast API: `http://127.0.0.1:4050/v1/beasts/*`
+- Brain read API: `http://127.0.0.1:4050/v1/brain/*`
 - Chat/API gateway: `http://127.0.0.1:3737`
 - Chat WebSocket: `ws://127.0.0.1:3737/v1/chat/ws`
 - Compatibility Beast proxy: `http://127.0.0.1:3737/v1/beasts/*`
+- Compatibility Brain proxy: `http://127.0.0.1:3737/v1/brain/*`
 
 Useful overrides:
 
@@ -72,7 +75,7 @@ If you bind to a non-loopback host, the server refuses to start without an opera
 
 ### Local browser threat model
 
-The local dashboard assumes same-origin browser access through the Vite proxy or a production same-origin frontend. The backend rejects unsafe browser mutations to local control paths (`/v1/chat`, `/v1/beasts`, `/v1/network`, `/v1/comms`, `/api/security`, `/api/skills`, `/api/dashboard`, and `/api/analytics`) when `Origin` / `Sec-Fetch-Site` shows a cross-origin page is trying to drive the controls. Non-browser CLI/API callers should continue to use the operator bearer token or `x-frankenbeast-operator-token`; do not rely on browser cookies or embedded iframes for automation.
+The local dashboard assumes same-origin browser access through the Vite proxy or a production same-origin frontend. The backend rejects unsafe browser mutations to local control paths (`/v1/chat`, `/v1/beasts`, `/v1/brain`, `/v1/network`, `/v1/comms`, `/api/security`, `/api/skills`, `/api/dashboard`, and `/api/analytics`) when `Origin` / `Sec-Fetch-Site` shows a cross-origin page is trying to drive the controls. Non-browser CLI/API callers should continue to use the operator bearer token or `x-frankenbeast-operator-token`; do not rely on browser cookies or embedded iframes for automation.
 
 Control responses also send `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY` by default so the dashboard/control API cannot be clickjacked from another page. If you intentionally front this behind another origin, terminate/proxy it as same-origin instead of relaxing these headers.
 
