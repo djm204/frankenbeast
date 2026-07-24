@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.1](https://github.com/djm204/frankenbeast/compare/v0.64.0...v0.64.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **mcp:** report resumable Codex migration failures ([#3708](https://github.com/djm204/frankenbeast/issues/3708)) ([585ce48](https://github.com/djm204/frankenbeast/commit/585ce4863c8584ff2db1353083193a5d9786c9f8))
+
 ## [0.64.0](https://github.com/djm204/frankenbeast/compare/v0.63.2...v0.64.0) (2026-07-23)
 
 
