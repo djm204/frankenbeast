@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.2](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.10.1...franken-mcp-suite-v0.10.2) (2026-07-24)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+    * @franken/brain bumped from 0.17.0 to 0.18.0
+    * @franken/critique bumped from 0.11.0 to 0.11.1
+    * @franken/governor bumped from 0.9.0 to 0.9.1
+    * @franken/observer bumped from 0.12.0 to 0.12.1
+    * @franken/orchestrator bumped from 0.58.0 to 0.59.0
+    * @franken/planner bumped from 0.4.26 to 0.4.27
+
 ## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.10.0...franken-mcp-suite-v0.10.1) (2026-07-24)
 
 

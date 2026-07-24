@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.12.0...franken-observer-v0.12.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **observer:** bound webhook delivery attempts ([#3709](https://github.com/djm204/frankenbeast/issues/3709)) ([f86e037](https://github.com/djm204/frankenbeast/commit/f86e037f3a19c5271c0f14c17746818aeaebb2b4))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+
 ## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.11.5...franken-observer-v0.12.0) (2026-07-23)
 
 

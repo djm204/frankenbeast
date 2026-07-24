@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.17.0...franken-types-v0.18.0) (2026-07-24)
+
+
+### Features
+
+* **brain:** add agent-scoped faculty foundation ([#3740](https://github.com/djm204/frankenbeast/issues/3740)) ([a88d1e3](https://github.com/djm204/frankenbeast/commit/a88d1e35042f4cbfd93d725930f16741c69b9b6f))
+* **brain:** record critique verdicts as reasoning episodes ([#3742](https://github.com/djm204/frankenbeast/issues/3742)) ([3191a1f](https://github.com/djm204/frankenbeast/commit/3191a1fb164bbff536fc2a72e8e27e83eeb820d7))
+* **brain:** record governor decisions as action episodes ([#3745](https://github.com/djm204/frankenbeast/issues/3745)) ([13b3399](https://github.com/djm204/frankenbeast/commit/13b3399245f01a7e72bc869d9aab40519c6106de))
+* **brain:** wire planning faculty adapter ([#3744](https://github.com/djm204/frankenbeast/issues/3744)) ([a12aa2f](https://github.com/djm204/frankenbeast/commit/a12aa2fe4a3013a2161f275a59646ecbf29d5671))
+
 ## [0.17.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.16.1...franken-types-v0.17.0) (2026-07-23)
 
 

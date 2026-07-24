@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.9.0...franken-governor-v0.9.1) (2026-07-24)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+
 ## [0.9.0](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.8.3...franken-governor-v0.9.0) (2026-07-23)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.10.0...franken-web-v0.10.1) (2026-07-24)
+
+
+### Documentation
+
+* **chat:** define Hive Brain command center ([#3741](https://github.com/djm204/frankenbeast/issues/3741)) ([338c0ef](https://github.com/djm204/frankenbeast/commit/338c0ef6563adb1e0aa90f42e6797aab4373dfdf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.9.2...franken-web-v0.10.0) (2026-07-23)
 
 
