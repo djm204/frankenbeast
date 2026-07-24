@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PendingApproval } from '../lib/api';
-
-export interface ApprovalDecisionScope {
-  sessionId?: string;
-  requestedAt?: string;
-  command?: string;
-}
+import type { ApprovalDecisionRequest, PendingApproval } from '../lib/api';
 
 export interface ApprovalCardProps {
   pending: boolean;
@@ -14,8 +8,8 @@ export interface ApprovalCardProps {
   resolving?: boolean;
   error?: string | null;
   sessionId?: string | null;
-  onApprove: (scope: ApprovalDecisionScope) => void;
-  onReject: (scope: ApprovalDecisionScope) => void;
+  onApprove: (scope: ApprovalDecisionRequest) => void;
+  onReject: (scope: ApprovalDecisionRequest) => void;
 }
 
 function formatRequestedAt(value: string): string {
@@ -70,10 +64,11 @@ export function ApprovalCard({
     approval?.requestedAt ?? null,
     approval?.command ?? null,
   ]);
-  const decisionScope: ApprovalDecisionScope = {
+  const decisionScope: ApprovalDecisionRequest = {
     ...(effectiveSessionId ? { sessionId: effectiveSessionId } : {}),
     ...(approval?.requestedAt ? { requestedAt: approval.requestedAt } : {}),
     ...(approval?.command ? { command: approval.command } : {}),
+    ...(approval?.approvalToken ? { approvalToken: approval.approvalToken } : {}),
   };
   const submittedRequestKeyRef = useRef<string | null>(null);
   const [submittedRequestKey, setSubmittedRequestKey] = useState<string | null>(null);
@@ -87,7 +82,7 @@ export function ApprovalCard({
     }
   }, [error, requestKey]);
 
-  function submitDecision(callback: (scope: ApprovalDecisionScope) => void) {
+  function submitDecision(callback: (scope: ApprovalDecisionRequest) => void) {
     if (resolving || submittedRequestKeyRef.current === requestKey) {
       return;
     }

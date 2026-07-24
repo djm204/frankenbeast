@@ -95,6 +95,7 @@ describe('ApprovalCard', () => {
           requestedAt: '2026-07-23T20:00:00Z',
           command: 'npm run deploy',
           sessionId: 'sess-approval-1',
+          approvalToken: 'approval-token-1',
         }}
         onApprove={onApprove}
         onReject={onReject}
@@ -108,6 +109,7 @@ describe('ApprovalCard', () => {
 
     expect(onApprove).toHaveBeenCalledTimes(1);
     expect(onApprove).toHaveBeenCalledWith({
+      approvalToken: 'approval-token-1',
       command: 'npm run deploy',
       requestedAt: '2026-07-23T20:00:00Z',
       sessionId: 'sess-approval-1',

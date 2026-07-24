@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ChatApiClient,
   ChatApiError,
+  type ApprovalDecisionRequest,
   type PendingApproval,
   type TokenTotals,
   type TranscriptMessage,
@@ -799,7 +800,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     await send(message.content);
   }
 
-  async function approve(approved: boolean): Promise<void> {
+  async function approve(approved: boolean, request?: ApprovalDecisionRequest): Promise<void> {
     const socket = socketRef.current;
     if (!sessionId || approvalResolvingRef.current) {
       return;
@@ -812,7 +813,9 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     setStatus('sending');
     if (!socket || socket.readyState !== 1) {
       try {
-        const approvalResult = await clientRef.current.approve(sessionId, approved);
+        const approvalResult = request
+          ? await clientRef.current.approve(sessionId, approved, request)
+          : await clientRef.current.approve(sessionId, approved);
         const refreshed = await clientRef.current.getSession(sessionId);
         readyRef.current = true;
         setMessages((current) => {
@@ -862,6 +865,7 @@ export function useChatSession(opts: UseChatSessionOptions): UseChatSessionResul
     socket.send(JSON.stringify({
       type: 'approval.respond',
       approved,
+      ...(request ? { request } : {}),
     }));
     approvalTimeoutRef.current = setTimeout(() => {
       approvalTimeoutRef.current = null;

@@ -1233,6 +1233,58 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('rejects a WebSocket decision captured for an older approval request', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    session.state = 'pending_approval';
+    session.pendingApproval = {
+      description: 'deploy staging',
+      requestedAt: '2026-03-09T00:00:00Z',
+      command: 'deploy staging',
+      sessionId: session.id,
+    };
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const execute = vi.fn();
+    const controller = new ChatSocketController({
+      runtime: new ChatRuntime({
+        engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+        turnRunner: new TurnRunner({ execute }),
+      }),
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer, sent } = createPeer();
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: true,
+      request: {
+        sessionId: session.id,
+        requestedAt: '2026-03-08T23:59:00Z',
+        command: 'deploy staging',
+      },
+    }));
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(store.get(session.id)?.pendingApproval).toEqual(session.pendingApproval);
+    expect(sent.map((raw) => JSON.parse(raw) as Record<string, unknown>)).toContainEqual(
+      expect.objectContaining({
+        type: 'turn.error',
+        code: 'APPROVAL_REQUEST_CHANGED',
+      }),
+    );
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('does not execute the same approved action twice for duplicate approval frames', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

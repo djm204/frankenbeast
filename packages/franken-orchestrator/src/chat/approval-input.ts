@@ -1,4 +1,4 @@
-import type { PendingApproval } from '@franken/types';
+import type { ApprovalDecisionRequest, PendingApproval } from '@franken/types';
 
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
 const MAX_PENDING_APPROVAL_COMMAND_LENGTH = 4_096;
@@ -43,4 +43,15 @@ export function approvalRuntimeInput(pendingApproval: PendingApproval | null | u
   }
 
   return `/run ${normalizePendingCommand(pendingApproval.command)}`;
+}
+
+export function approvalDecisionMatches(
+  sessionId: string,
+  pendingApproval: PendingApproval,
+  request: ApprovalDecisionRequest,
+): boolean {
+  return (request.sessionId === undefined || request.sessionId === sessionId)
+    && (request.requestedAt === undefined || request.requestedAt === pendingApproval.requestedAt)
+    && (request.command === undefined || request.command === pendingApproval.command)
+    && (request.approvalToken === undefined || request.approvalToken === pendingApproval.approvalToken);
 }

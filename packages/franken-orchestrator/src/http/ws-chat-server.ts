@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { approvalRuntimeInput, UnsafeApprovalCommandError } from '../chat/approval-input.js';
+import { approvalDecisionMatches, approvalRuntimeInput, UnsafeApprovalCommandError } from '../chat/approval-input.js';
 import {
   FileApprovalAuditLog,
   commandSha256,
@@ -17,7 +17,7 @@ import {
   ChatSocketSessionTicketStore,
   verifyChatSocketRequest,
 } from './ws-chat-auth.js';
-import { ClientSocketEventSchema, type ChatSessionResponse, type ProviderContext, type TokenUsage, deterministicUuid, isoNow } from '@franken/types';
+import { ClientSocketEventSchema, type ApprovalDecisionRequest, type ClientSocketEvent, type ChatSessionResponse, type ProviderContext, type TokenUsage, deterministicUuid, isoNow } from '@franken/types';
 import { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { ChatMutationAdmission, chatClientKey, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 
@@ -35,12 +35,6 @@ interface ConnectionState {
   /** Client opted in (via ?features=usage-stats) to `usage`/`truncated` on completions. */
   supportsUsageStats: boolean;
 }
-
-type ClientSocketEvent =
-  | { type: 'message.send'; clientMessageId: string; content: string; executionMode?: 'process' | 'container' | undefined }
-  | { type: 'approval.respond'; approved: boolean }
-  | { type: 'message.read'; messageId: string }
-  | { type: 'ping' };
 
 type ServerSocketEvent = {
   eventId?: string | undefined;
@@ -396,7 +390,7 @@ export class ChatSocketController {
         if ((session.pendingApproval || session.state === 'pending_approval') && !this.takeChatRateLimit(peer, connection)) {
           return;
         }
-        await this.runWithSessionTurn(peer, session, () => this.handleApproval(peer, session, event.approved));
+        await this.runWithSessionTurn(peer, session, () => this.handleApproval(peer, session, event.approved, event.request));
         return;
       case 'message.read':
         this.emit(peer, {
@@ -599,6 +593,7 @@ export class ChatSocketController {
     peer: ChatSocketPeer,
     session: ChatSession,
     approved: boolean,
+    request?: ApprovalDecisionRequest,
   ): Promise<void> {
     if (!session.pendingApproval) {
       if (session.state === 'pending_approval') {
@@ -633,6 +628,16 @@ export class ChatSocketController {
       this.emit(peer, {
         type: 'turn.approval.resolved',
         approved: session.state !== 'rejected',
+        timestamp: nowIso(),
+      });
+      return;
+    }
+
+    if (request && !approvalDecisionMatches(session.id, session.pendingApproval, request)) {
+      this.emit(peer, {
+        type: 'turn.error',
+        code: 'APPROVAL_REQUEST_CHANGED',
+        message: 'The pending approval changed before this decision was submitted. Review the current request and try again.',
         timestamp: nowIso(),
       });
       return;
