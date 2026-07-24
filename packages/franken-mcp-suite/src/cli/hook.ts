@@ -94,19 +94,7 @@ function containsRawSecretHint(text: string): boolean {
     || CREDENTIAL_URL_HINT.test(text);
 }
 
-function containsOversizedSecretIndicator(text: string): boolean {
-  if (/\bauthorization\b\s*[:=]/i.test(text)
-    || /\\*["']authorization\\*["']\s*,/i.test(text)
-    || /\bbearer\s+\S+/i.test(text)
-    || /--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+\S+/i.test(text)
-    || CREDENTIAL_URL_HINT.test(text)) {
-    return true;
-  }
-
-  const assignmentPattern = /\\*["']?\b([A-Za-z][A-Za-z0-9_-]{0,127})\b\\*["']?\s*[=:]/g;
-  for (const match of text.matchAll(assignmentPattern)) {
-    if (isSensitiveAssignmentKey(match[1]!)) return true;
-  }
+function containsStructuredSecretIndicator(text: string): boolean {
   const tupleKeyPattern = /\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,/g;
   for (const match of text.matchAll(tupleKeyPattern)) {
     if (isSensitiveAssignmentKey(match[1]!)) return true;
@@ -117,6 +105,123 @@ function containsOversizedSecretIndicator(text: string): boolean {
     if (isSensitiveAssignmentKey(match[1]!)) return true;
   }
   return false;
+}
+
+function findClosingMarker(text: string, valueStart: number, openingMarker: string): { start: number; end: number } {
+  const quote = openingMarker.at(-1)!;
+  const structuralSlashCount = openingMarker.length - 1;
+  for (let index = valueStart; index < text.length; index += 1) {
+    if (text[index] !== quote) continue;
+    let slashCount = 0;
+    for (let slashIndex = index - 1; slashIndex >= valueStart && text[slashIndex] === '\\'; slashIndex -= 1) {
+      slashCount += 1;
+    }
+    if (slashCount === structuralSlashCount) return { start: index - slashCount, end: index + 1 };
+  }
+  return { start: text.length, end: text.length };
+}
+
+function redactValuePreservingSubstitutions(value: string): string {
+  const pieces: string[] = [];
+  let cursor = 0;
+  let substitutionStart = value.indexOf('$(');
+  while (substitutionStart >= 0) {
+    let depth = 1;
+    let index = substitutionStart + 2;
+    while (index < value.length && depth > 0) {
+      if (value[index] === '(') depth += 1;
+      else if (value[index] === ')') depth -= 1;
+      index += 1;
+    }
+    if (depth > 0) break;
+    if (substitutionStart > cursor) pieces.push('[REDACTED]');
+    pieces.push(value.slice(substitutionStart, index));
+    cursor = index;
+    substitutionStart = value.indexOf('$(', cursor);
+  }
+  if (cursor < value.length || pieces.length === 0) pieces.push('[REDACTED]');
+  return pieces.join('');
+}
+
+function redactQuotedValues(text: string, valuePattern: RegExp, keyIndex?: number): string {
+  const pieces: string[] = [];
+  let cursor = 0;
+  let match = valuePattern.exec(text);
+  while (match) {
+    const openingMarker = match.at(-1)!;
+    const valueStart = match.index + match[0].length;
+    const closingMarker = findClosingMarker(text, valueStart, openingMarker);
+    if (keyIndex === undefined || isSensitiveAssignmentKey(match[keyIndex]!)) {
+      pieces.push(text.slice(cursor, valueStart), redactValuePreservingSubstitutions(text.slice(valueStart, closingMarker.start)));
+      cursor = closingMarker.start;
+    }
+    valuePattern.lastIndex = closingMarker.end;
+    match = valuePattern.exec(text);
+  }
+  return pieces.length === 0 ? text : pieces.join('') + text.slice(cursor);
+}
+
+function redactLabelledObjectValues(objectText: string): string {
+  return redactQuotedValues(objectText, /(?:\\*["'])value(?:\\*["'])\s*:\s*((?:\\*)["'])/gi);
+}
+
+function redactLabelledObjects(text: string): string {
+  const stack: number[] = [];
+  const candidates: Array<{ start: number; end: number }> = [];
+  let quotedMarker: { quote: string; structuralSlashCount: number } | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if ((stack.length > 0 || quotedMarker) && (character === '"' || character === "'")) {
+      let slashCount = 0;
+      for (let slashIndex = index - 1; slashIndex >= 0 && text[slashIndex] === '\\'; slashIndex -= 1) slashCount += 1;
+      if (!quotedMarker) quotedMarker = { quote: character, structuralSlashCount: slashCount };
+      else if (character === quotedMarker.quote && slashCount === quotedMarker.structuralSlashCount) quotedMarker = undefined;
+      continue;
+    }
+    if (quotedMarker) continue;
+    if (character === '{') stack.push(index);
+    else if (character === '}' && stack.length > 0) {
+      const start = stack.pop()!;
+      const candidate = text.slice(start, index + 1);
+      if (candidate.length <= 8192 && containsStructuredSecretIndicator(candidate)) candidates.push({ start, end: index + 1 });
+    }
+  }
+  const outermost = candidates.filter((candidate) =>
+    !candidates.some((other) => other.start < candidate.start && other.end > candidate.end));
+  return outermost.sort((left, right) => right.start - left.start).reduce(
+    (result, candidate) => result.slice(0, candidate.start)
+      + redactLabelledObjectValues(result.slice(candidate.start, candidate.end))
+      + result.slice(candidate.end),
+    text,
+  );
+}
+
+function redactStructuredSecretsRaw(text: string): string {
+  const tupleRedacted = redactQuotedValues(
+    text,
+    /\[\s*\\*["']([A-Za-z][A-Za-z0-9_-]{0,127})\\*["']\s*,\s*((?:\\*)["'])/g,
+    1,
+  );
+  return redactLabelledObjects(tupleRedacted);
+}
+
+function containsOversizedSecretIndicator(text: string): boolean {
+  if (/\bauthorization\b\s*[:=]/i.test(text)
+    || /\\*["']authorization\\*["']\s*,/i.test(text)
+    || /\bbearer\s+\S+/i.test(text)
+    || CREDENTIAL_URL_HINT.test(text)) {
+    return true;
+  }
+
+  const assignmentPattern = /\\*["']?\b([A-Za-z][A-Za-z0-9_-]{0,127})\b\\*["']?\s*[=:]/g;
+  for (const match of text.matchAll(assignmentPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  const optionPattern = /--([A-Za-z][A-Za-z0-9-]{0,127})\s+/g;
+  for (const match of text.matchAll(optionPattern)) {
+    if (isSensitiveAssignmentKey(match[1]!)) return true;
+  }
+  return containsStructuredSecretIndicator(text);
 }
 
 function redactRawSecrets(text: string, preserveShellCommands = false): string {
@@ -136,15 +241,22 @@ function redactRawSecrets(text: string, preserveShellCommands = false): string {
       .replace(/(\bauthorization\b\s*=\s*)AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+/gi, '$1[REDACTED]')
       .replace(/(\bauthorization\b\s*=\s*)(?:[A-Za-z][A-Za-z0-9_-]*(?:\s+(?![A-Za-z][A-Za-z0-9_-]{0,127}\s*=(?!=))[A-Za-z0-9._~+/-]+=*)+|[A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED]');
 
+  const sensitiveOptionPattern = preserveShellCommands
+    ? /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n;&|<>`$]+)+|(?:Basic|Bearer|Token)\s+[^\s\r\n;&|<>`$]+|(?:\\.|\$\((?:[^()]|\([^()]*\))*\)|\([^()\s]*\)|[^\s\\;&|<>`])+)/gi
+    : /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|AWS4-HMAC-SHA256(?:\s+(?:Credential|SignedHeaders|Signature)=[^\s\r\n&|<>`$]+)+|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi;
+
   return redacted
     .replace(/(\bbearer\s+)[A-Za-z0-9._~+/-]+=*/gi, '$1[REDACTED]')
     .replace(/(\b[A-Za-z][A-Za-z0-9]{0,127}(?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/g, '$1[REDACTED]')
     .replace(/(\b(?:(?:[a-z0-9]+[_-])+(?:password|passwd|pwd|secret|token|key|cookie|credentials?|passphrase|access[_-]?key[_-]?id)|(?:password|passwd|pwd|secret|token|cookie|credentials?|passphrase|api[_-]?key|client[_-]?secret|(?:access|refresh|id)[_-]?token|access[_-]?key(?:[_-]?id)?))\b["']?\s*[=:]\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'[^']*'|(?:\\.|\([^()\s]*\)|[^\s\\;&|<>()$`]|\$(?!\())+)/gi, '$1[REDACTED]')
     .replace(
-      /(--([A-Za-z][A-Za-z0-9-]{0,127})\s+)("(?:\\.|[^"])*"|'[^']*'|(?:Basic|Bearer|Token)\s+\S+|\S+)/gi,
-      (match, prefix: string, flagName: string) => isSensitiveAssignmentKey(flagName)
-        ? `${prefix}[REDACTED]`
-        : match,
+      sensitiveOptionPattern,
+      (match, prefix: string, flagName: string) => {
+        if (!isSensitiveAssignmentKey(flagName)) return match;
+        return preserveShellCommands
+          ? `${prefix}${redactValuePreservingSubstitutions(match.slice(prefix.length))}`
+          : `${prefix}[REDACTED]`;
+      },
     )
     .replace(/(\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:)[^\s@/]+(@)/gi, '$1[REDACTED]$2');
 }
@@ -203,12 +315,20 @@ export function redactSecrets(text: string, preserveShellCommands = false): stri
       const state = { changed: false };
       const redacted = redactJsonSecrets(parsed, state, undefined, preserveShellCommands);
       if (state.changed) return JSON.stringify(redacted);
-      return redactRawSecrets(text, preserveShellCommands);
+      const rawRedacted = redactRawSecrets(text, preserveShellCommands);
+      if (containsStructuredSecretIndicator(text)) {
+        return preserveShellCommands ? redactStructuredSecretsRaw(rawRedacted) : '[REDACTED]';
+      }
+      return rawRedacted;
     }
   } catch {
     // Legacy command contexts are plain text, not JSON.
   }
-  return redactRawSecrets(text, preserveShellCommands);
+  const rawRedacted = redactRawSecrets(text, preserveShellCommands);
+  if (containsStructuredSecretIndicator(text)) {
+    return preserveShellCommands ? redactStructuredSecretsRaw(rawRedacted) : '[REDACTED]';
+  }
+  return rawRedacted;
 }
 
 async function readStdinPayload(): Promise<string> {
