@@ -13,7 +13,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 
 | Package | Role |
 |---------|------|
-| `@franken/brain` | SQLite-backed working memory, episodic recall, recovery checkpoints, serialization/hydration. |
+| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` and additive planning/reasoning/action/learning faculty addressing surface. Faculty adapters and durable agent-type paths are not wired yet. |
 | `@franken/planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
 | `@franken/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
@@ -498,13 +498,17 @@ This diagram shows the logical/target module topology using current package or i
             direction TB
             MEM_ADAPT["Memory adapter ports<br/>Not package exports"]
             MEM_BRAIN["SqliteBrain<br/>Current public API"]
+            MEM_REG["BrainRegistry<br/>Stable instance per agent type"]
             MEM_WORK["Working Memory<br/>In-process key/value"]
             MEM_EPIS["Episodic Memory<br/>SQLite events"]
             MEM_RECOV["Recovery Memory<br/>SQLite checkpoints"]
+            MEM_FAC["Faculty foundations<br/>planning • reasoning<br/>action • learning<br/>(inert until adapters land)"]
+            MEM_REG --> MEM_BRAIN
             MEM_ADAPT --> MEM_BRAIN
             MEM_BRAIN --> MEM_WORK
             MEM_BRAIN --> MEM_EPIS
             MEM_BRAIN --> MEM_RECOV
+            MEM_BRAIN --> MEM_FAC
         end
 
         subgraph "@franken/planner"

@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types.
+Current public API: `SqliteBrain`, `BrainRegistry`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -32,11 +32,20 @@ npm run lint              # eslint src/ tests/
 
 ```typescript
 import {
+  BrainRegistry,
   SqliteBrain,
   calculateMemoryConfidenceDecay,
 } from '@franken/brain';
 
 const brain = new SqliteBrain('.fbeast/beast.db');
+
+// BrainRegistry provides one stable process-local brain per agent type. Its
+// foundation keeps SqliteBrain's existing in-memory default; durable path
+// selection and runtime definitionId wiring are separate follow-up work.
+const registry = new BrainRegistry();
+const coderBrain = registry.forAgentType('coder');
+const sameCoderBrain = registry.forAgentType('coder');
+console.assert(coderBrain === sameCoderBrain);
 
 // Working memory is an in-memory map that flushes during checkpoints.
 brain.working.set('current-goal', 'Refresh docs for current architecture');
@@ -217,6 +226,7 @@ const largerSnapshot = brain.serialize({ episodicLimit: 1_000 });
 brain.close();
 const restored = SqliteBrain.hydrate(snapshot);
 restored.close();
+registry.close();
 ```
 
 `hydrate()` restores exactly the events present in `snapshot.episodic`; it cannot recover events omitted from a partial snapshot. Inspect `metadata.episodicExport.truncated` before hydrating when a complete episodic history is required. Legacy snapshots without `episodicExport` metadata remain accepted.
@@ -278,10 +288,16 @@ SqliteBrain
 ├── working       in-memory key/value store, flushed to SQLite on checkpoint
 ├── memoryReview  SQLite candidate/provenance/suppression queue for consented writes
 ├── episodic      SQLite `episodic_events` table with recent/query/failure recall
-└── recovery      SQLite `checkpoints` table for execution state recovery
+├── recovery      SQLite `checkpoints` table for execution state recovery
+└── faculties     planning/reasoning/action/learning addressing stubs
+
+BrainRegistry
+└── agentTypeId → stable process-local SqliteBrain instance
 ```
 
-The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state.
+The faculty properties are intentionally inert (`configured: false`) until the planner, critique, governor, and learning adapters are implemented. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
+
+The package creates the required SQLite schema in its constructor and enables WAL mode. Use `:memory:` for tests or pass a file path for persistent state. `BrainRegistry` currently creates in-memory brains and validates agent-type IDs as portable path components; it does not choose durable paths or replace current orchestrator construction yet.
 
 ## Memory schema versioning and migrations
 
@@ -309,7 +325,8 @@ Future schema changes should increment `CURRENT_MEMORY_SCHEMA_VERSION`, add a fo
 
 ```text
 src/
-  index.ts          Public barrel export (`SqliteBrain`)
+  index.ts          Public barrel exports (`SqliteBrain`, `BrainRegistry`)
+  brain-registry.ts Process-local stable brain lookup by safe agent-type ID
   sqlite-brain.ts   Working, episodic, recovery, serialize/hydrate implementation
 
 tests/

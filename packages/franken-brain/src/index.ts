@@ -76,3 +76,5 @@ export {
   type MemoryAccessAuditOutcome,
   type MemoryAccessAuditStore,
 } from './sqlite-brain.js';
+
+export { BrainRegistry } from './brain-registry.js';
