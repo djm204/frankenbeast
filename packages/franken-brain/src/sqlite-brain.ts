@@ -5965,15 +5965,26 @@ export class SqliteBrain implements IBrain {
       this.memoryReview
         .list('approved')
         .filter((candidate) => isConsolidatedLesson(candidate.value))
+        .filter((candidate) => this.memoryReview.provenanceFor('working', candidate.key) !== null)
         .map((candidate) => candidate.key),
     );
     const created: LessonConsolidationItem[] = [];
     for (const cluster of clusterSimilarFailureEvents(events, similarityThreshold)) {
       if (cluster.length < threshold) continue;
       const value = consolidatedLesson(cluster);
-      const key = lessonReviewKey(value);
-      const pending = pendingLessons.get(key);
+      let key = lessonReviewKey(value);
+      const pending = pendingLessons.get(key) ?? [...pendingLessons.values()]
+        .map((candidate) => ({
+          candidate,
+          similarity: semanticMemorySimilarity(
+            (candidate.value as ConsolidatedLesson).pattern,
+            value.pattern,
+          ),
+        }))
+        .filter(({ similarity }) => similarity >= similarityThreshold)
+        .sort((left, right) => right.similarity - left.similarity)[0]?.candidate;
       if (pending) {
+        key = pending.key;
         const previous = pending.value as ConsolidatedLesson;
         if (value.occurrenceCount <= previous.occurrenceCount) continue;
         const updated = this.memoryReview.edit(pending.id, {
@@ -5997,11 +6008,25 @@ export class SqliteBrain implements IBrain {
         }
         continue;
       }
-      if (approvedKeys.has(key)) continue;
-      const suppressedReviewKey = this.db
-        .prepare(`SELECT 1 FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ? LIMIT 1`)
-        .get('working', key);
-      if (suppressedReviewKey) continue;
+      const matchingApproved = this.memoryReview
+        .list('approved')
+        .filter((candidate) => isConsolidatedLesson(candidate.value))
+        .filter((candidate) => this.memoryReview.provenanceFor('working', candidate.key) !== null)
+        .some((candidate) => (
+          candidate.key === key
+          || semanticMemorySimilarity(
+            (candidate.value as ConsolidatedLesson).pattern,
+            value.pattern,
+          ) >= similarityThreshold
+        ));
+      if (approvedKeys.has(key) || matchingApproved) continue;
+      const reviewKeys = new Set([
+        key,
+        ...cluster.map((event) => lessonReviewKey({ ...value, pattern: event.summary })),
+      ]);
+      const suppressionLookup = this.db
+        .prepare(`SELECT 1 FROM memory_review_suppressions WHERE target_store = ? AND memory_key = ? LIMIT 1`);
+      if ([...reviewKeys].some((reviewKey) => suppressionLookup.get('working', reviewKey))) continue;
       const candidate = this.memoryReview.propose({
         targetStore: 'working',
         key,
@@ -6039,7 +6064,13 @@ export class SqliteBrain implements IBrain {
     }
 
     return (['pending', 'approved'] as const)
-      .flatMap((status) => this.memoryReview.list(status).map((candidate) => ({ status, candidate })))
+      .flatMap((status) => this.memoryReview
+        .list(status)
+        .filter((candidate) => (
+          status === 'pending'
+          || this.memoryReview.provenanceFor('working', candidate.key) !== null
+        ))
+        .map((candidate) => ({ status, candidate })))
       .filter(({ candidate }) => isConsolidatedLesson(candidate.value))
       .map(({ status, candidate }) => {
         const value = candidate.value as ConsolidatedLesson;

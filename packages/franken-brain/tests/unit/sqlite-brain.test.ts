@@ -835,6 +835,19 @@ describe('SqliteBrain', () => {
       expect(brain.memoryReview.list()[0]?.key).toBe(initial?.key);
     });
 
+    it('keeps the existing lesson key when later evidence becomes the shortest pattern', () => {
+      recordStaleDeclarationFailure('TypeScript workspace build failed after stale declarations were loaded', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('Stale declaration files broke the workspace TypeScript build', '2026-07-24T10:01:00.000Z');
+      const [initial] = brain.learning.consolidate({ threshold: 2, lookback: 10 });
+      recordStaleDeclarationFailure('Stale declaration build failure', '2026-07-24T10:02:00.000Z');
+
+      brain.learning.consolidate({ threshold: 2, lookback: 10 });
+
+      expect(brain.memoryReview.list()).toHaveLength(1);
+      expect(brain.memoryReview.list()[0]?.key).toBe(initial?.key);
+      expect(brain.memoryReview.list()[0]?.value).toMatchObject({ occurrenceCount: 3 });
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',
@@ -879,6 +892,18 @@ describe('SqliteBrain', () => {
 
       expect(brain.learning.consolidate({ threshold: 2, lookback: 10 })).toEqual([]);
       expect(brain.memoryReview.list()).toEqual([]);
+    });
+
+    it('does not return an approved lesson after its durable working value is removed', () => {
+      recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
+      const [candidate] = brain.learning.consolidate({ threshold: 1, lookback: 10 });
+      brain.memoryReview.approve(candidate!.id, { reviewer: 'operator' });
+      expect(brain.learning.relevantLessons('TypeScript workspace build')).toHaveLength(1);
+
+      brain.working.delete(candidate!.key);
+      brain.flush();
+
+      expect(brain.learning.relevantLessons('TypeScript workspace build')).toEqual([]);
     });
   });
 
