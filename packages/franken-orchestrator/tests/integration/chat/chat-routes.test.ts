@@ -1435,6 +1435,57 @@ describe('Chat HTTP Routes', () => {
     expect(session.pendingApproval).toBeNull();
   });
 
+  it('POST /v1/chat/sessions/:id/approve cleans stale Beast context on repeated rejection', async () => {
+    const now = new Date().toISOString();
+    const beastContext = {
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-already-rejected',
+      status: 'interviewing' as const,
+      executionMode: 'process' as const,
+    };
+    const session: ChatSession = {
+      id: 'chat-already-rejected-cleanup',
+      projectId: 'proj',
+      transcript: [],
+      state: 'rejected',
+      pendingApproval: null,
+      beastContext,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const rejectBeastContext = vi.fn();
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: { run: vi.fn(), rejectBeastContext } as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+    });
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: false }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(rejectBeastContext).toHaveBeenCalledOnce();
+    expect(rejectBeastContext).toHaveBeenCalledWith(beastContext);
+    expect(session.beastContext).toBeNull();
+    expect(sessionStore.save).toHaveBeenCalledOnce();
+  });
+
   it('POST /v1/chat/sessions/:id/approve runs the pending command for HTTP fallback approvals', async () => {
     const now = new Date().toISOString();
     const session: ChatSession = {

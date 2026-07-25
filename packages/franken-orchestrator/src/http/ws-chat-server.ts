@@ -633,6 +633,12 @@ export class ChatSocketController {
         });
         return;
       }
+      if (session.state === 'rejected' && session.beastContext) {
+        await this.runtime.rejectBeastContext(session.beastContext);
+        session.beastContext = null;
+        session.updatedAt = nowIso();
+        this.sessionStore.save(session);
+      }
       this.emit(peer, {
         type: 'turn.approval.resolved',
         approved: session.state !== 'rejected',

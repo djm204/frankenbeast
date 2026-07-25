@@ -1587,12 +1587,27 @@ describe('agent routes integration', () => {
       }),
     });
     expect(createRunResponse.status).toBe(201);
+    const createdRun = await createRunResponse.json() as { data: { id: string } };
 
     const rejectResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/reject`, {
       method: 'POST',
       headers,
     });
     expect(rejectResponse.status).toBe(200);
+
+    const runStartResponse = await app.request(`/v1/beasts/runs/${createdRun.data.id}/start`, {
+      method: 'POST',
+      headers,
+    });
+    expect(runStartResponse.status).toBe(409);
+    expect((await runStartResponse.json()).error.code).toBe('TRACKED_AGENT_REJECTED');
+
+    const runRestartResponse = await app.request(`/v1/beasts/runs/${createdRun.data.id}/restart`, {
+      method: 'POST',
+      headers,
+    });
+    expect(runRestartResponse.status).toBe(409);
+    expect((await runRestartResponse.json()).error.code).toBe('TRACKED_AGENT_REJECTED');
 
     const restartResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/restart`, {
       method: 'POST',

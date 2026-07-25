@@ -1910,4 +1910,61 @@ describe('BeastRunService', () => {
     expect(repo.listTrackedAgentEvents(agent.id)).toEqual([]);
     expect(publish).not.toHaveBeenCalled();
   });
+
+  it('stops a run whose tracked agent is rejected while executor start is in flight', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-run-service-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agent = repo.createTrackedAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      status: 'dispatching',
+      createdByUser: 'chat-session:race',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: CODING_POLICY },
+      initConfig: {
+        provider: 'claude',
+        objective: 'Lose the start race',
+        chunkDirectory: 'docs/chunks',
+        ...CODING_POLICY,
+      },
+      createdAt: '2026-07-25T00:00:00.000Z',
+      updatedAt: '2026-07-25T00:00:00.000Z',
+    });
+    const run = repo.createRun({
+      trackedAgentId: agent.id,
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: agent.initConfig,
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:race',
+      createdAt: '2026-07-25T00:00:01.000Z',
+    });
+    const stop = vi.fn(async (runId: string, attemptId: string) => {
+      const attempt = repo.updateAttempt(attemptId, { status: 'stopped', stopReason: 'operator_stop' });
+      repo.updateRun(runId, { status: 'stopped', stopReason: 'operator_stop' });
+      return attempt;
+    });
+    const executors = {
+      process: {
+        start: vi.fn(async (startableRun: { id: string }) => {
+          const attempt = repo.createAttempt(startableRun.id, { status: 'running' });
+          repo.updateRun(startableRun.id, { status: 'running', currentAttemptId: attempt.id });
+          repo.updateTrackedAgent(agent.id, { status: 'rejected' });
+          throw new Error('start failed after rejection');
+        }),
+        stop,
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const runs = new BeastRunService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const result = await runs.start(run.id, 'operator');
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(result.status).toBe('stopped');
+    expect(repo.getTrackedAgent(agent.id)?.status).toBe('rejected');
+  });
 });

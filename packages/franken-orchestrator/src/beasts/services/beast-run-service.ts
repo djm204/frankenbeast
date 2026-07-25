@@ -24,6 +24,7 @@ import {
   type ToolPolicyDenial,
   type ToolPolicyValidationContext,
 } from './role-tool-manifest.js';
+import { RejectedTrackedAgentError } from '../errors.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
@@ -200,6 +201,7 @@ export class BeastRunService {
   async start(runId: string, _actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     let run = this.requireRun(runId);
+    this.assertTrackedAgentNotRejected(run);
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const rebuiltConfig = this.rebuildFailedTrackedRunConfig(run, definition);
     this.assertRoleToolManifestAllows(run, rebuiltConfig ?? run.configSnapshot);
@@ -212,6 +214,21 @@ export class BeastRunService {
     try {
       await this.executorFor(run).start(run, definition);
       let updated = this.requireRun(runId);
+      if (updated.trackedAgentId) {
+        const currentTrackedAgent = this.repository.getTrackedAgent(updated.trackedAgentId);
+        if (currentTrackedAgent?.status === 'rejected') {
+          if (updated.currentAttemptId) {
+            await this.executorFor(updated).stop(updated.id, updated.currentAttemptId);
+          } else {
+            this.repository.updateRun(updated.id, {
+              status: 'stopped',
+              finishedAt: isoNow(),
+              stopReason: 'interview_rejected',
+            });
+          }
+          return this.requireRun(updated.id);
+        }
+      }
       if (
         updated.status === 'running'
         && (updated.finishedAt !== undefined || updated.stopReason !== undefined || updated.latestExitCode !== undefined)
@@ -225,6 +242,22 @@ export class BeastRunService {
       this.syncTrackedAgent(updated);
       return updated;
     } catch {
+      const rejectedRun = this.repository.getRun(run.id);
+      const rejectedAgent = rejectedRun?.trackedAgentId
+        ? this.repository.getTrackedAgent(rejectedRun.trackedAgentId)
+        : undefined;
+      if (rejectedRun && rejectedAgent?.status === 'rejected') {
+        if (rejectedRun.currentAttemptId) {
+          await this.executorFor(rejectedRun).stop(rejectedRun.id, rejectedRun.currentAttemptId);
+        } else {
+          this.repository.updateRun(rejectedRun.id, {
+            status: 'stopped',
+            finishedAt: isoNow(),
+            stopReason: 'interview_rejected',
+          });
+        }
+        return this.requireRun(rejectedRun.id);
+      }
       const errorMessage = SAFE_DISPATCH_FAILURE_MESSAGE;
       const currentRun = this.repository.getRun(run.id);
       if (
@@ -454,6 +487,14 @@ export class BeastRunService {
     return run;
   }
 
+  private assertTrackedAgentNotRejected(run: BeastRun): void {
+    if (!run.trackedAgentId) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (trackedAgent?.status === 'rejected') {
+      throw new RejectedTrackedAgentError(trackedAgent.id);
+    }
+  }
+
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
     const definition = this.catalog.getDefinition(definitionId);
     if (!definition) {
@@ -625,7 +666,7 @@ export class BeastRunService {
     }
     const trackedAgentId: string = run.trackedAgentId;
     const trackedAgent = this.repository.getTrackedAgent(trackedAgentId);
-    if (!trackedAgent || trackedAgent.status === 'deleted') {
+    if (!trackedAgent || trackedAgent.status === 'deleted' || trackedAgent.status === 'rejected') {
       return;
     }
 

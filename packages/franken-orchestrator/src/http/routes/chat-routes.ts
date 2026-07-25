@@ -466,6 +466,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return withChatMutationAdmission(c, id, async (session) => {
       if (!session.pendingApproval) {
         if (session.state === 'approved' || session.state === 'rejected') {
+          if (session.state === 'rejected' && session.beastContext) {
+            await runtime.rejectBeastContext?.(session.beastContext);
+            session.beastContext = null;
+            session.updatedAt = isoNow();
+            sessionStore.save(session);
+          }
           return c.json({
             data: {
               id: session.id,

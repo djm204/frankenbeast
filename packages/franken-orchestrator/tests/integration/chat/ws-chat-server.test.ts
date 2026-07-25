@@ -1418,6 +1418,48 @@ describe('ws chat server', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('cleans stale Beast context on repeated WebSocket rejection', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const store = new FileSessionStore(TMP);
+    const session = store.create('proj');
+    const beastContext = {
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-already-rejected',
+      status: 'interviewing' as const,
+      executionMode: 'process' as const,
+    };
+    session.state = 'rejected';
+    session.pendingApproval = null;
+    session.beastContext = beastContext;
+    store.save(session);
+    const secret = createSessionTokenSecret();
+    const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
+    const rejectBeastContext = vi.fn();
+    const controller = new ChatSocketController({
+      runtime: { run: vi.fn(), rejectBeastContext } as never,
+      sessionStore: store,
+      tokenSecret: secret,
+    });
+    const { peer } = createPeer();
+
+    expect(controller.connect(peer, {
+      origin: null,
+      sessionId: session.id,
+      token,
+    }).ok).toBe(true);
+
+    await expect(controller.receive(peer, JSON.stringify({
+      type: 'approval.respond',
+      approved: false,
+    }))).resolves.toBeUndefined();
+
+    expect(rejectBeastContext).toHaveBeenCalledOnce();
+    expect(rejectBeastContext).toHaveBeenCalledWith(beastContext);
+    expect(store.get(session.id)?.beastContext).toBeNull();
+
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
   it('records a failed execution and consumes approval when approved execution throws', async () => {
     mkdirSync(TMP, { recursive: true });
     const store = new FileSessionStore(TMP);

@@ -4,7 +4,11 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
 import { InMemoryRateLimiter, requireBeastRateLimit, type BeastRateLimitOptions } from '../../beasts/http/beast-rate-limit.js';
-import { UnknownBeastDefinitionError, UnknownTrackedAgentError } from '../../beasts/errors.js';
+import {
+  RejectedTrackedAgentError,
+  UnknownBeastDefinitionError,
+  UnknownTrackedAgentError,
+} from '../../beasts/errors.js';
 import { InvalidBeastInterviewAnswerError } from '../../beasts/interview-answers.js';
 import { BeastCatalogService } from '../../beasts/services/beast-catalog-service.js';
 import { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
@@ -171,6 +175,17 @@ function throwAgentToolPolicyError(error: unknown): void {
   }
 }
 
+function throwRejectedTrackedAgentError(error: unknown): void {
+  if (error instanceof RejectedTrackedAgentError) {
+    throw new HttpError(
+      409,
+      'TRACKED_AGENT_REJECTED',
+      error.message,
+      { agentId: error.agentId },
+    );
+  }
+}
+
 class InterviewSessionNotFoundHttpError extends HttpError {
   constructor(sessionId: string) {
     super(404, 'INTERVIEW_SESSION_NOT_FOUND', `Beast interview session '${sessionId}' was not found`);
@@ -181,6 +196,7 @@ function throwKnownRunError(runId: string, error: unknown): never {
   if (error instanceof MaintenanceModeError) {
     throw new HttpError(423, 'MAINTENANCE_MODE_ACTIVE', error.message, { maintenance: error.state });
   }
+  throwRejectedTrackedAgentError(error);
   throwAgentToolPolicyError(error);
   throwCapacityReservationError(error);
   if (error instanceof UnknownBeastRunError) {
@@ -433,6 +449,7 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
           }
         }
       }
+      throwRejectedTrackedAgentError(error);
       throwAgentToolPolicyError(error);
       if (error instanceof ZodError) {
         throw new HttpError(
