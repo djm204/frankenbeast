@@ -136,12 +136,17 @@ packages/franken-orchestrator/src/
   bounds each scan with `maxScanRows`, and always preserves the newest usable
   checkpoint. The v1 order is policy priority
   then oldest-first; it does not perform lessons-aware or semantic pruning.
-- **Hive Brain central-command chat is an accepted design, not implemented runtime behavior.**
+- **Hive Brain conversation persistence is implemented; routing and dispatch remain follow-ups.**
   [ADR-041](../adr/041-hive-brain-command-center.md)
-  (`docs/adr/041-hive-brain-command-center.md`) keeps the existing REST and
-  `/v1/chat/ws` browser contract, defines `BrainConversation` as durable
-  transcript/routing/approval state bound to the planned `BrainRegistry`, and
-  requires every Beast launch to reuse the existing governed dispatch path.
+  (`docs/adr/041-hive-brain-command-center.md`) now has a versioned
+  `BrainConversation`, `SqliteBrainConversationRepository`, and
+  `BrainRegistry.forWorkspaceHive()` persistence seam. The additive
+  `BrainConversationSessionStore` is the standalone server default for newly
+  bound `local-operator` browser sessions, while injected stores and unbound
+  legacy session files remain unchanged. Bound sessions share one conversation
+  mutation-admission key. The existing REST and
+  `/v1/chat/ws` browser contract remains in place; #3702/#3703 still own runtime
+  Hive routing and governed dispatch integration.
   Do not add a second socket protocol or dispatch directly from a brain/faculty.
 - **Brain dashboard inspection is implemented and remains read-only.** The
   overview panel reads one explicit existing agent-type id through bounded

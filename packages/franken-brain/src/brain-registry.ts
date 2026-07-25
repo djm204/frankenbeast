@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
-import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { hiveMindAgentTypeNamespace } from './hive-mind-store.js';
@@ -30,6 +30,25 @@ function assertSafeAgentTypeId(agentTypeId: string): void {
   }
 }
 
+function assertWorkspaceId(workspaceId: string): void {
+  if (typeof workspaceId !== 'string' || workspaceId.length === 0) {
+    throw new RangeError('workspaceId must be a non-empty identifier');
+  }
+}
+
+function agentTypeKey(agentTypeId: string): string {
+  return `agent-type:${agentTypeId}`;
+}
+
+function workspaceHiveKey(workspaceId: string): string {
+  return `workspace-hive:${workspaceId}`;
+}
+
+function workspaceHiveFilename(workspaceId: string): string {
+  const filenameHash = createHash('sha256').update(workspaceId).digest('hex');
+  return `${filenameHash}.db`;
+}
+
 /**
  * Process-local owner of one durable brain instance per agent type.
  *
@@ -49,9 +68,10 @@ export class BrainRegistry {
 
   forAgentType(agentTypeId: string, dbPath?: string): SqliteBrain {
     assertSafeAgentTypeId(agentTypeId);
+    const registryKey = agentTypeKey(agentTypeId);
 
-    const agentBrains = this.brains.get(agentTypeId);
-    const preferredDbPath = this.preferredDbPaths.get(agentTypeId);
+    const agentBrains = this.brains.get(registryKey);
+    const preferredDbPath = this.preferredDbPaths.get(registryKey);
     if (dbPath === undefined && preferredDbPath) {
       const preferred = agentBrains?.get(preferredDbPath);
       if (preferred) return preferred;
@@ -70,13 +90,14 @@ export class BrainRegistry {
     const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
     const existing = agentBrains?.get(resolvedDbPath);
     if (existing) {
-      if (dbPath !== undefined) this.preferredDbPaths.set(agentTypeId, resolvedDbPath);
+      if (dbPath !== undefined) this.preferredDbPaths.set(registryKey, resolvedDbPath);
       return existing;
     }
     if (dbPath === undefined) {
       mkdirSync(this.brainsDir, { recursive: true });
     }
     const brain = new SqliteBrain(resolvedDbPath, undefined, {
+      conversationWorkspaceId: null,
       hiveMind: {
         dbPath: resolvedDbPath === ':memory:' ? ':memory:' : this.hiveDbPath,
         namespace: hiveMindAgentTypeNamespace(agentTypeId),
@@ -85,17 +106,76 @@ export class BrainRegistry {
     });
     const paths = agentBrains ?? new Map<string, SqliteBrain>();
     paths.set(resolvedDbPath, brain);
-    this.brains.set(agentTypeId, paths);
-    this.preferredDbPaths.set(agentTypeId, resolvedDbPath);
+    this.brains.set(registryKey, paths);
+    this.preferredDbPaths.set(registryKey, resolvedDbPath);
     return brain;
+  }
+
+  /** Return one stable workspace-scoped Hive brain in a namespace disjoint from agent types. */
+  forWorkspaceHive(workspaceId: string, dbPath?: string): SqliteBrain {
+    assertWorkspaceId(workspaceId);
+    const registryKey = workspaceHiveKey(workspaceId);
+    const workspaceBrains = this.brains.get(registryKey);
+    const preferredDbPath = this.preferredDbPaths.get(registryKey);
+    if (dbPath === undefined && preferredDbPath) {
+      const preferred = workspaceBrains?.get(preferredDbPath);
+      if (preferred) return preferred;
+    }
+
+    const workspaceBrainsDir = join(this.brainsDir, 'workspaces');
+    const requestedDbPath = dbPath ?? join(workspaceBrainsDir, workspaceHiveFilename(workspaceId));
+    const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
+    const existing = workspaceBrains?.get(resolvedDbPath);
+    if (existing) {
+      if (dbPath !== undefined) this.preferredDbPaths.set(registryKey, resolvedDbPath);
+      return existing;
+    }
+    if (dbPath === undefined) {
+      mkdirSync(workspaceBrainsDir, { recursive: true, mode: 0o700 });
+      if (process.platform !== 'win32') chmodSync(workspaceBrainsDir, 0o700);
+    }
+
+    const brain = new SqliteBrain(resolvedDbPath, undefined, {
+      conversationWorkspaceId: workspaceId,
+    });
+    const paths = workspaceBrains ?? new Map<string, SqliteBrain>();
+    paths.set(resolvedDbPath, brain);
+    this.brains.set(registryKey, paths);
+    this.preferredDbPaths.set(registryKey, resolvedDbPath);
+    return brain;
+  }
+
+  /** Return an existing workspace Hive brain without creating an unknown database. */
+  getWorkspaceHive(workspaceId: string, dbPath?: string): SqliteBrain | undefined {
+    assertWorkspaceId(workspaceId);
+    const registryKey = workspaceHiveKey(workspaceId);
+    const workspaceBrains = this.brains.get(registryKey);
+    const preferredDbPath = this.preferredDbPaths.get(registryKey);
+    if (dbPath === undefined && preferredDbPath) {
+      const preferred = workspaceBrains?.get(preferredDbPath);
+      if (preferred) return preferred;
+    }
+
+    if (dbPath !== undefined) {
+      const resolvedDbPath = dbPath === ':memory:' ? dbPath : resolve(dbPath);
+      const existing = workspaceBrains?.get(resolvedDbPath);
+      if (existing) return existing;
+      if (dbPath === ':memory:' || !existsSync(resolvedDbPath)) return undefined;
+      return this.forWorkspaceHive(workspaceId, resolvedDbPath);
+    }
+
+    const defaultPath = join(this.brainsDir, 'workspaces', workspaceHiveFilename(workspaceId));
+    if (!existsSync(defaultPath)) return undefined;
+    return this.forWorkspaceHive(workspaceId);
   }
 
   /** Return an existing agent brain without creating an unknown database. */
   getAgentType(agentTypeId: string, dbPath?: string): SqliteBrain | undefined {
     assertSafeAgentTypeId(agentTypeId);
+    const registryKey = agentTypeKey(agentTypeId);
 
-    const agentBrains = this.brains.get(agentTypeId);
-    const preferredDbPath = this.preferredDbPaths.get(agentTypeId);
+    const agentBrains = this.brains.get(registryKey);
+    const preferredDbPath = this.preferredDbPaths.get(registryKey);
     if (dbPath === undefined && preferredDbPath) {
       const preferred = agentBrains?.get(preferredDbPath);
       if (preferred) return preferred;

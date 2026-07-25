@@ -141,12 +141,16 @@ Each criterion reports `pass` only when matching evidence is present in working 
 ## Hive Brain central-command chat contract
 
 [`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md)
-defines the accepted, not-yet-implemented Hive Brain chat architecture. The
-existing REST session routes and `/v1/chat/ws` remain the browser transport. A
-future `BrainConversation` compatibility repository will provide the current
-`ISessionStore` projection while binding browser sessions to the unique
-user/workspace command-center conversation, workspace Hive Brain, and optional
-registered faculty. Explicit legacy agent/run sessions remain supported.
+defines the accepted Hive Brain chat architecture. The versioned
+`BrainConversation` and workspace-scoped SQLite repository now exist, and
+`BrainConversationSessionStore` provides an additive `ISessionStore`
+compatibility projection. The standalone chat server uses it by default for
+newly bound `local-operator` sessions; injected stores and unbound legacy
+per-session records remain valid. Bound sessions share one conversation
+mutation-admission key across REST and WebSocket turns. The existing REST
+session routes and `/v1/chat/ws` remain
+the browser transport; #3702 and #3703 still own runtime query/routing and
+governed dispatch wiring.
 
 The dispatch invariant is unchanged: transport -> `ChatRuntime` ->
 `BeastDispatchPort` -> `BeastDispatchService` -> the normal Beast executor and

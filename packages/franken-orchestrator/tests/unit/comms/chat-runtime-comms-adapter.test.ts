@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatRuntimeResult, ChatRuntimeState } from '../../../src/chat/runtime.js';
 import { ChatRuntimeCommsAdapter } from '../../../src/comms/core/chat-runtime-comms-adapter.js';
 import { InMemoryRateLimiter } from '../../../src/beasts/http/beast-rate-limit.js';
+import { ChatMutationAdmission } from '../../../src/http/chat-rate-limit.js';
 
 function mockRuntime() {
   return {
@@ -78,6 +79,77 @@ describe('ChatRuntimeCommsAdapter', () => {
       'new-sess',
       expect.objectContaining({ channelType: 'slack' }),
     );
+  });
+
+  it('scopes the same channel session to the authenticated external principal', async () => {
+    adapter = new ChatRuntimeCommsAdapter(runtime as any, store as any, {
+      scopeSessionId: (input) => `${input.sessionId}:${input.externalUserId}`,
+    });
+
+    await adapter.processInbound({
+      sessionId: 'shared-channel',
+      channelType: 'slack',
+      text: 'from user one',
+      externalUserId: 'U123',
+    });
+    await adapter.processInbound({
+      sessionId: 'shared-channel',
+      channelType: 'slack',
+      text: 'from user two',
+      externalUserId: 'U456',
+    });
+
+    expect(store.create).toHaveBeenNthCalledWith(1, 'shared-channel:U123', expect.any(Object));
+    expect(store.create).toHaveBeenNthCalledWith(2, 'shared-channel:U456', expect.any(Object));
+    expect(runtime.run).toHaveBeenNthCalledWith(
+      1,
+      'from user one',
+      expect.objectContaining({ sessionId: 'shared-channel:U123' }),
+    );
+    expect(runtime.run).toHaveBeenNthCalledWith(
+      2,
+      'from user two',
+      expect.objectContaining({ sessionId: 'shared-channel:U456' }),
+    );
+  });
+
+  it('serializes overlapping turns under the canonical mutation key', async () => {
+    let activeRuns = 0;
+    let maxActiveRuns = 0;
+    runtime.run.mockImplementation(async () => {
+      activeRuns += 1;
+      maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      activeRuns -= 1;
+      return {
+        displayMessages: [{ kind: 'reply' as const, content: 'serialized' }],
+        events: [],
+        pendingApproval: false,
+        state: 'active',
+        tier: null,
+        transcript: [],
+      };
+    });
+    const admission = new ChatMutationAdmission(
+      new InMemoryRateLimiter({ windowMs: 60_000, max: 10 }),
+    );
+    adapter = new ChatRuntimeCommsAdapter(runtime as any, store as any, {
+      mutationAdmission: admission,
+      mutationKey: () => 'canonical-conversation',
+    });
+    const inbound = {
+      sessionId: 'shared-session',
+      channelType: 'discord' as const,
+      externalUserId: 'U123',
+    };
+
+    await Promise.all([
+      adapter.processInbound({ ...inbound, text: 'first' }),
+      adapter.processInbound({ ...inbound, text: 'second' }),
+    ]);
+
+    expect(maxActiveRuns).toBe(1);
+    expect(runtime.run).toHaveBeenCalledTimes(2);
   });
 
   it('loads existing session from store', async () => {

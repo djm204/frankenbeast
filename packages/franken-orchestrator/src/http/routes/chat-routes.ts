@@ -171,7 +171,8 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
 
-    return admission.runExclusive(sessionId, async () => run(getSessionOrThrow(sessionStore, sessionId)));
+    const mutationKey = sessionStore.mutationKey?.(sessionId) ?? sessionId;
+    return admission.runExclusive(mutationKey, async () => run(getSessionOrThrow(sessionStore, sessionId)));
   }
 
   function approvalRequester(c: Context): string {

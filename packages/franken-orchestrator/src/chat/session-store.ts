@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
 import { isoNow, now as deterministicNow } from '@franken/types';
+import type { BrainConversation, BrainRegistry } from '@franken/brain';
 import { atomicWriteFileSync } from '../session/atomic-file.js';
 
 const MAX_CHAT_SESSION_ID_LENGTH = 128;
@@ -31,6 +32,7 @@ export interface ISessionStore {
   save(session: ChatSession): void;
   list(): string[];
   listSessions(projectId?: string): ChatSession[];
+  mutationKey?(sessionId: string): string;
   listCorruptions?(projectId?: string): CorruptChatSessionFile[];
   delete(id: string): void;
 }
@@ -258,5 +260,278 @@ export class FileSessionStore implements ISessionStore {
     } catch {
       return undefined;
     }
+  }
+}
+
+/**
+ * Compatibility store that keeps legacy session files as transport bindings
+ * while a workspace BrainConversation is the canonical state for new sessions.
+ */
+const PENDING_BRAIN_CONVERSATION_BINDING = '__pending_brain_conversation_binding__';
+
+export class BrainConversationSessionStore implements ISessionStore {
+  constructor(
+    private readonly legacyStore: ISessionStore,
+    private readonly brainRegistry: BrainRegistry,
+    private readonly subjectId: string | ((session: ChatSession) => string),
+  ) {}
+
+  private subjectFor(session: ChatSession): string {
+    return typeof this.subjectId === 'function' ? this.subjectId(session) : this.subjectId;
+  }
+
+  mutationKey(sessionId: string): string {
+    const legacy = this.legacyStore.get(sessionId);
+    if (!legacy) return sessionId;
+    if (legacy.conversationId === undefined) return sessionId;
+    const brain = this.brainRegistry.getWorkspaceHive(legacy.projectId);
+    return brain?.conversations.getConversationIdForSession(sessionId) ?? sessionId;
+  }
+
+  create(projectId: string): ChatSession {
+    const binding = this.legacyStore.create(projectId);
+    try {
+      const brain = this.brainRegistry.forWorkspaceHive(projectId);
+      const conversation = brain.conversations.resolveOrCreateAndBind(
+        projectId,
+        this.subjectFor(binding),
+        binding.id,
+      );
+      const projected = this.project(binding, conversation);
+      this.repairProjection(binding.id, projected, brain);
+      return projected;
+    } catch (error) {
+      try {
+        this.legacyStore.delete(binding.id);
+      } catch {
+        // The unbound legacy record remains readable if compensating cleanup fails.
+      }
+      throw error;
+    }
+  }
+
+  get(id: string): ChatSession | undefined {
+    const binding = this.legacyStore.get(id);
+    if (!binding) return undefined;
+    const publicBinding = binding.conversationId === PENDING_BRAIN_CONVERSATION_BINDING
+      ? { ...binding, conversationId: undefined }
+      : binding;
+    if (binding.conversationId === undefined) return publicBinding;
+    const brain = this.brainRegistry.getWorkspaceHive(binding.projectId);
+    if (!brain) return publicBinding;
+    const conversationId = brain.conversations.getConversationIdForSession(id);
+    if (!conversationId) return publicBinding;
+    const conversation = brain.conversations.get(conversationId);
+    if (!conversation) {
+      throw new Error(`BrainConversation binding ${id} references missing conversation ${conversationId}`);
+    }
+    if (binding.conversationId === PENDING_BRAIN_CONVERSATION_BINDING) {
+      const canonical = this.mergeAdoptedSession(publicBinding, conversation);
+      brain.conversations.saveBound(id, canonical);
+      const projected = this.project(publicBinding, canonical);
+      this.repairProjection(id, projected, brain);
+      return projected;
+    }
+    const projected = this.project(binding, conversation);
+    if (brain.conversations.isProjectionPending(id)) {
+      this.repairProjection(id, projected, brain);
+    }
+    return projected;
+  }
+
+  save(session: ChatSession): void {
+    const binding = this.legacyStore.get(session.id);
+    let brain = this.brainRegistry.getWorkspaceHive(session.projectId);
+    const conversationId = brain?.conversations.getConversationIdForSession(session.id);
+    const adoptionPending = binding?.conversationId === PENDING_BRAIN_CONVERSATION_BINDING;
+    if (binding && !adoptionPending && (!brain || !conversationId)) {
+      this.legacyStore.save({ ...session, conversationId: undefined });
+      return;
+    }
+    if (adoptionPending || !brain || !conversationId) {
+      // External transports can supply an id without first creating a legacy
+      // record. Persist a reserved adoption locator before the canonical commit
+      // so a failed compatibility projection remains discoverable and repairable.
+      // The locator also distinguishes retryable adoption from genuine legacy
+      // sessions, which remain legacy-only on subsequent saves.
+      const hadLegacyBinding = binding !== undefined;
+      this.legacyStore.save({
+        ...session,
+        conversationId: PENDING_BRAIN_CONVERSATION_BINDING,
+      });
+      try {
+        brain = this.brainRegistry.forWorkspaceHive(session.projectId);
+        const conversation = brain.conversations.resolveOrCreateAndBind(
+          session.projectId,
+          this.subjectFor(session),
+          session.id,
+        );
+        const canonical = this.mergeAdoptedSession(session, conversation);
+        brain.conversations.saveBound(session.id, canonical);
+        this.repairProjection(session.id, this.project(session, canonical), brain);
+        return;
+      } catch (error) {
+        try {
+          brain?.conversations.unbindSession(session.id);
+        } catch {
+          // The pending locator forces the next save back through adoption even
+          // when the canonical binding could not be compensated.
+        }
+        if (!hadLegacyBinding) {
+          try {
+            this.legacyStore.delete(session.id);
+          } catch {
+            // The next save retries adoption instead of treating this locator
+            // as permanently legacy-only.
+          }
+        }
+        throw error;
+      }
+    }
+    const conversation = brain.conversations.get(conversationId);
+    if (!conversation) {
+      throw new Error(`BrainConversation binding ${session.id} references missing conversation ${conversationId}`);
+    }
+    const canonical = this.toConversation(session, conversation);
+    brain.conversations.saveBound(session.id, canonical);
+    this.repairProjection(session.id, this.project(session, canonical), brain);
+  }
+
+  list(): string[] {
+    return this.legacyStore.list();
+  }
+
+  listSessions(projectId?: string): ChatSession[] {
+    return this.list()
+      .map((id) => this.get(id))
+      .filter((session): session is ChatSession => session !== undefined)
+      .filter((session) => projectId === undefined || session.projectId === projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  listCorruptions(projectId?: string): CorruptChatSessionFile[] {
+    return this.legacyStore.listCorruptions?.(projectId) ?? [];
+  }
+
+  delete(id: string): void {
+    const binding = this.legacyStore.get(id);
+    if (!binding) return;
+    this.brainRegistry
+      .getWorkspaceHive(binding.projectId)
+      ?.conversations.unbindSession(id);
+    this.legacyStore.delete(id);
+  }
+
+  private project(binding: ChatSession, conversation: BrainConversation): ChatSession {
+    return {
+      id: binding.id,
+      conversationId: conversation.id,
+      projectId: binding.projectId,
+      transcript: conversation.transcript,
+      state: conversation.state,
+      pendingApproval: conversation.pendingApproval,
+      beastContext: conversation.beastContext,
+      providerContext: conversation.providerContext,
+      routingMetadata: conversation.routingMetadata,
+      tokenTotals: conversation.tokenTotals,
+      costUsd: conversation.costUsd,
+      createdAt: binding.createdAt,
+      updatedAt: conversation.updatedAt,
+    };
+  }
+
+  private repairProjection(
+    sessionId: string,
+    projection: ChatSession,
+    brain: ReturnType<BrainRegistry['forWorkspaceHive']>,
+  ): void {
+    try {
+      this.legacyStore.save(projection);
+      brain.conversations.markProjectionComplete(sessionId);
+    } catch {
+      // Canonical state and the pending marker committed together. A later read retries this projection.
+    }
+  }
+
+  private toConversation(session: ChatSession, existing: BrainConversation): BrainConversation {
+    return {
+      ...existing,
+      transcript: session.transcript,
+      state: session.state,
+      pendingApproval: session.pendingApproval ?? null,
+      beastContext: session.beastContext ?? null,
+      providerContext: session.providerContext ?? null,
+      routingMetadata: session.routingMetadata ?? {},
+      tokenTotals: session.tokenTotals,
+      costUsd: session.costUsd,
+      updatedAt: session.updatedAt,
+    };
+  }
+
+  private mergeAdoptedSession(
+    session: ChatSession,
+    existing: BrainConversation,
+  ): BrainConversation {
+    const existingMessageKeys = new Set(existing.transcript.map(message => (
+      message.id ?? JSON.stringify(message)
+    )));
+    const hasTranscriptOverlap = session.transcript.some(message => (
+      existingMessageKeys.has(message.id ?? JSON.stringify(message))
+    ));
+    const seenMessages = new Set(existingMessageKeys);
+    const appendedMessages = session.transcript.filter(message => {
+      const key = message.id ?? JSON.stringify(message);
+      if (seenMessages.has(key)) return false;
+      seenMessages.add(key);
+      return true;
+    });
+    const canonicalHasApproval = existing.pendingApproval !== null;
+    const hasIncomingUsage = session.costUsd !== 0
+      || session.tokenTotals.cheap !== 0
+      || session.tokenTotals.premiumReasoning !== 0
+      || session.tokenTotals.premiumExecution !== 0;
+    const hasPartialOverlap = hasTranscriptOverlap && appendedMessages.length > 0;
+    if (hasPartialOverlap && hasIncomingUsage) {
+      throw new Error(
+        `Cannot safely merge aggregate usage for partially overlapping session ${session.id}`,
+      );
+    }
+    const fullyOverlappingTranscript = hasTranscriptOverlap && appendedMessages.length === 0;
+
+    return this.toConversation({
+      ...session,
+      transcript: [...existing.transcript, ...appendedMessages],
+      state: canonicalHasApproval ? existing.state : session.state,
+      pendingApproval: existing.pendingApproval ?? session.pendingApproval ?? null,
+      beastContext: existing.beastContext ?? session.beastContext ?? null,
+      providerContext: existing.providerContext ?? session.providerContext ?? null,
+      routingMetadata: {
+        ...existing.routingMetadata,
+        ...session.routingMetadata,
+      },
+      tokenTotals: fullyOverlappingTranscript
+        ? {
+            cheap: Math.max(existing.tokenTotals.cheap, session.tokenTotals.cheap),
+            premiumReasoning: Math.max(
+              existing.tokenTotals.premiumReasoning,
+              session.tokenTotals.premiumReasoning,
+            ),
+            premiumExecution: Math.max(
+              existing.tokenTotals.premiumExecution,
+              session.tokenTotals.premiumExecution,
+            ),
+          }
+        : {
+            cheap: existing.tokenTotals.cheap + session.tokenTotals.cheap,
+            premiumReasoning:
+              existing.tokenTotals.premiumReasoning + session.tokenTotals.premiumReasoning,
+            premiumExecution:
+              existing.tokenTotals.premiumExecution + session.tokenTotals.premiumExecution,
+          },
+      costUsd: fullyOverlappingTranscript
+        ? Math.max(existing.costUsd, session.costUsd)
+        : existing.costUsd + session.costUsd,
+      updatedAt: existing.updatedAt > session.updatedAt ? existing.updatedAt : session.updatedAt,
+    }, existing);
   }
 }

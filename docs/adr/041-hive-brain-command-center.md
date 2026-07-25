@@ -256,12 +256,15 @@ client state.
 
 ## Implementation boundaries
 
-This ADR is documentation only. Runtime work remains split as follows:
+The decision remains split across implementation issues. **#3701 is implemented**
+with the versioned entity, workspace-scoped repository, session-binding
+compatibility projection, migration coverage, and fail-closed persistence tests:
 
-- **#3701 — entity and persistence:** add versioned `BrainConversation` schemas,
+- **#3701 — entity and persistence (implemented):** versioned `BrainConversation` schemas,
   uniqueness for `(workspaceId, subjectId)`, Hive-Brain-backed repository,
   supervised-agent/summary state, compatibility projection/binding migration,
-  atomicity, corruption, and restart tests.
+  physical workspace/agent database separation, shared conversation admission,
+  standalone-server composition, atomicity, corruption, and restart tests.
 - **#3702 — hive-aware query/routing:** resolve the workspace Hive Brain and
   optional faculty from `BrainRegistry`, record routing metadata, and expose
   additive typed API fields without changing v1 transport behavior.
@@ -269,9 +272,9 @@ This ADR is documentation only. Runtime work remains split as follows:
   `BeastDispatchPort`/`BeastDispatchService`, preserving governor/HITL, auth,
   admission, audit, capacity, and idempotency behavior.
 
-Those issues remain blocked until this decision is merged. Issue #3685 must
-provide the registry contract before #3701 or #3702 can bind persisted foreign
-keys to it.
+The persistence layer does not activate Hive-aware query routing or dispatch.
+Those remain #3702 and #3703 and must reuse the existing admission, governor,
+audit, and Beast executor paths.
 
 The agent-scoped planning faculty adapter is now implemented independently of
 this command-center routing work: consolidated Beast dependencies attach the

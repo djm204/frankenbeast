@@ -47,6 +47,7 @@ describe('issue #3700 Hive Brain central-command chat decision', () => {
     expect(adr).toContain('does not expose a direct');
     expect(adr.replaceAll('\n', ' ')).toContain('independent dual writes are forbidden');
     expect(adr).toContain('It may not start a process/container');
-    expect(adr).toContain('Those issues remain blocked until this decision is merged.');
+    expect(adr).toContain('- **Status:** Accepted');
+    expect(adr).toContain('The decision remains split across implementation issues.');
   });
 });

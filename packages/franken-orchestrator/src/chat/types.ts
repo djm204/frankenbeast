@@ -11,6 +11,7 @@ import type {
   PendingApproval,
   TranscriptMessage,
 } from '@franken/types';
+import { z } from 'zod';
 
 // --- Const enums ---
 
@@ -48,6 +49,7 @@ export type { ChatBeastContext, TranscriptMessage };
 export { ChatBeastContextSchema, TranscriptMessageSchema, TokenTotalsSchema };
 
 export const ChatSessionSchema = ChatSessionResponseSchema.extend({
+  conversationId: z.string().min(1).optional(),
   pendingApproval: PendingApprovalSchema.extend({
     approvalToken: PendingApprovalSchema.shape.description.optional(),
     requester: PendingApprovalSchema.shape.description.optional(),
@@ -63,5 +65,6 @@ export type ExtendedPendingApproval = PendingApproval & {
 };
 
 export type ChatSession = Omit<ChatSessionResponse, 'pendingApproval'> & {
+  conversationId?: string | undefined;
   pendingApproval?: ExtendedPendingApproval | null | undefined;
 };
