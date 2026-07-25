@@ -1,0 +1,76 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js';
+import { CompactionMetrics } from './compaction-metrics.js';
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('CompactionMetrics', () => {
+  it('persists and queries a session compaction record through SQLite', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-metrics-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+
+    await metrics.record({
+      sessionId: 'chunk-session-1',
+      runId: 'run-1',
+      generation: 1,
+      triggerReason: 'threshold',
+      tokensBefore: 900,
+      tokensAfter: 120,
+      timestamp: 1_750_000_000_000,
+    });
+
+    await expect(metrics.query('chunk-session-1')).resolves.toEqual([
+      {
+        sessionId: 'chunk-session-1',
+        runId: 'run-1',
+        generation: 1,
+        triggerReason: 'threshold',
+        tokensBefore: 900,
+        tokensAfter: 120,
+        timestamp: 1_750_000_000_000,
+      },
+    ]);
+
+    await adapter.close();
+  });
+
+  it('calculates a windowed compaction rate without hydrating event payloads', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-rate-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+    const now = 1_750_000_000_000;
+
+    for (const [generation, timestamp] of [[1, now - 3_600_001], [2, now - 1_000], [3, now]] as const) {
+      await metrics.record({
+        sessionId: 'chunk-session-rate',
+        runId: 'run-rate',
+        generation,
+        triggerReason: 'threshold',
+        tokensBefore: 900,
+        tokensAfter: 120,
+        timestamp,
+      });
+    }
+
+    await expect(metrics.compactionRate('chunk-session-rate', 3_600_000, now)).resolves.toEqual({
+      count: 2,
+      windowMs: 3_600_000,
+      perHour: 2,
+      latestAt: now,
+    });
+
+    await adapter.close();
+  });
+});

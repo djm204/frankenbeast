@@ -6,8 +6,9 @@ import {
   DEFAULT_PRICING,
   TraceContext,
   SpanLifecycle,
+  CompactionMetrics,
 } from '@franken/observer';
-import type { Trace, Span } from '@franken/observer';
+import type { CompactionEventAdapter, Trace, Span } from '@franken/observer';
 import { makeTokenSpend, isoNow } from '@franken/types';
 import type { IObserverModule, SpanHandle, TokenSpendData } from '../deps.js';
 import type { ContextWindowUsage, ObserverDeps } from '../skills/cli-skill-executor.js';
@@ -15,7 +16,11 @@ import type { ReplayContentStoreLike, ReplayRecord, ReplayRecordKind } from '../
 
 export interface CliObserverBridgeConfig {
   budgetLimitUsd: number;
+  sessionId?: string | undefined;
   replayStore?: ReplayContentStoreLike | undefined;
+  compactionAdapter?: (CompactionEventAdapter & {
+    close?: (() => void | Promise<void>) | undefined;
+  }) | undefined;
 }
 
 interface ReplayCaptureRecord {
@@ -56,6 +61,8 @@ export class CliObserverBridge implements IObserverModule {
   private readonly breaker: CircuitBreaker;
   private readonly loopDet: LoopDetector;
   private readonly replayStore?: ReplayContentStoreLike | undefined;
+  private readonly compactionMetrics?: CompactionMetrics | undefined;
+  private readonly compactionAdapter?: CliObserverBridgeConfig['compactionAdapter'];
   private readonly replayManifest: ReplayRecord[] = [];
   private trace: Trace | undefined;
   private activeSessionId: string | undefined;
@@ -66,6 +73,11 @@ export class CliObserverBridge implements IObserverModule {
     this.breaker = new CircuitBreaker({ limitUsd: config.budgetLimitUsd });
     this.loopDet = new LoopDetector();
     this.replayStore = config.replayStore;
+    this.activeSessionId = config.sessionId;
+    this.compactionAdapter = config.compactionAdapter;
+    this.compactionMetrics = config.compactionAdapter
+      ? new CompactionMetrics(config.compactionAdapter)
+      : undefined;
   }
 
   startTrace(sessionId: string): void {
@@ -188,6 +200,21 @@ export class CliObserverBridge implements IObserverModule {
 
   getReplayManifest(): readonly ReplayRecord[] {
     return [...this.replayManifest];
+  }
+
+  async recordCompaction(event: Omit<import('@franken/observer').CompactionEvent, 'runId'>): Promise<void> {
+    if (!this.compactionMetrics) return;
+    if (!this.activeSessionId) {
+      throw new Error('No active observer session for compaction telemetry. Call startTrace() first.');
+    }
+    await this.compactionMetrics.record({
+      ...event,
+      runId: this.activeSessionId,
+    });
+  }
+
+  async close(): Promise<void> {
+    await this.compactionAdapter?.close?.();
   }
 
   private requireTrace(): Trace {

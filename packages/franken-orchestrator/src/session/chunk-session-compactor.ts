@@ -1,8 +1,21 @@
 import { createChunkTranscriptEntry, type ChunkSession, type ChunkTranscriptEntry } from './chunk-session.js';
 import { isoNow } from '@franken/types';
 
+export type ChunkCompactionTriggerReason = 'threshold' | 'manual';
+
+export interface ChunkCompactionObservation {
+  readonly sessionId: string;
+  readonly generation: number;
+  readonly triggerReason: ChunkCompactionTriggerReason;
+  readonly tokensBefore: number;
+  readonly tokensAfter: number;
+  readonly timestamp: number;
+}
+
 export interface ChunkSessionCompactorDeps {
   summarize(prompt: string): Promise<string>;
+  measureCompactedTokens?: ((session: ChunkSession) => number) | undefined;
+  onCompaction?: ((event: ChunkCompactionObservation) => Promise<void>) | undefined;
 }
 
 export class ChunkSessionCompactor {
@@ -21,13 +34,16 @@ export class ChunkSessionCompactor {
     ].join('\n\n');
   }
 
-  async compact(session: ChunkSession): Promise<ChunkSession> {
+  async compact(
+    session: ChunkSession,
+    triggerReason: ChunkCompactionTriggerReason = 'manual',
+  ): Promise<ChunkSession> {
     const summary = await this.deps.summarize(this.buildCompactionPrompt(session));
     const now = isoNow();
     const retained = this.retainCriticalTranscript(session.transcript);
     const compactionEntry = createChunkTranscriptEntry('compaction_summary', summary);
 
-    return {
+    const compacted: ChunkSession = {
       ...session,
       compactionGeneration: session.compactionGeneration + 1,
       transcript: [...retained, compactionEntry],
@@ -45,6 +61,19 @@ export class ChunkSessionCompactor {
       },
       updatedAt: now,
     };
+
+    if (this.deps.onCompaction) {
+      await this.deps.onCompaction({
+        sessionId: compacted.sessionId,
+        generation: compacted.compactionGeneration,
+        triggerReason,
+        tokensBefore: session.contextWindow.usedTokens,
+        tokensAfter: this.deps.measureCompactedTokens?.(compacted) ?? compacted.contextWindow.usedTokens,
+        timestamp: Date.parse(now),
+      });
+    }
+
+    return compacted;
   }
 
   private retainCriticalTranscript(entries: readonly ChunkTranscriptEntry[]): ChunkTranscriptEntry[] {

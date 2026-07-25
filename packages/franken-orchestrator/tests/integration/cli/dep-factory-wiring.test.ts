@@ -17,6 +17,7 @@ import { SqliteBrain } from '@franken/brain';
 import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
 import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
+import { CompactionMetrics, SQLiteAdapter } from '@franken/observer';
 
 function createTempPaths(): ProjectPaths {
   const root = join(tmpdir(), `dep-factory-wiring-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -91,6 +92,39 @@ describe('dep-factory wiring integration', () => {
     });
 
     expect(isPlainOutput()).toBe(true);
+    await finalize();
+  });
+
+  it('wires compaction telemetry to the canonical traces database', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+
+    const { observerBridge, finalize } = await createCliDeps({
+      paths,
+      baseBranch: 'main',
+      budget: 1.0,
+      provider: 'claude',
+      noPr: true,
+      verbose: false,
+      reset: false,
+      runSessionId: 'run-wiring',
+    });
+
+    await observerBridge.recordCompaction({
+      sessionId: 'chunk-wiring',
+      generation: 1,
+      triggerReason: 'threshold',
+      tokensBefore: 900,
+      tokensAfter: 120,
+      timestamp: 1_750_000_000_000,
+    });
+
+    const reader = new SQLiteAdapter(paths.tracesDb, { useWorkerThread: false });
+    const metrics = new CompactionMetrics(reader);
+    await expect(metrics.query('chunk-wiring')).resolves.toEqual([
+      expect.objectContaining({ runId: 'run-wiring' }),
+    ]);
+    await reader.close();
     await finalize();
   });
 

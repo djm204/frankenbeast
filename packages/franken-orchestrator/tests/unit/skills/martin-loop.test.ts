@@ -12,6 +12,8 @@ import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-sessio
 import { ChunkSessionRenderer } from '../../../src/session/chunk-session-renderer.js';
 import { ChunkSessionCompactor } from '../../../src/session/chunk-session-compactor.js';
 import { createChunkSession, createChunkTranscriptEntry } from '../../../src/session/chunk-session.js';
+import { CliObserverBridge } from '../../../src/adapters/cli-observer-bridge.js';
+import { CompactionMetrics, SQLiteAdapter } from '@franken/observer';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -861,6 +863,57 @@ describe('MartinLoop', () => {
     expect(snapshotStore.list('demo-plan', '01_demo')).toHaveLength(1);
     const stored = sessionStore.load('demo-plan', '01_demo');
     expect(stored?.transcript.some((entry) => entry.kind === 'compaction_summary')).toBe(true);
+  });
+
+  it('persists threshold compaction telemetry through the observer bridge', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-compact-observer-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(join(root, 'sessions'));
+    const snapshotStore = new FileChunkSessionSnapshotStore(join(root, 'snapshots'));
+    const adapter = new SQLiteAdapter(join(root, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+    const bridge = new CliObserverBridge({ budgetLimitUsd: 1, compactionAdapter: adapter });
+    bridge.startTrace('run-threshold');
+
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({
+      planName: 'telemetry-plan',
+      taskId: 'impl:telemetry',
+      chunkId: 'telemetry',
+      sessionStore,
+      snapshotStore,
+      renderer: new ChunkSessionRenderer(),
+      compactor: new ChunkSessionCompactor({
+        summarize: async () => 'Compacted summary',
+        measureCompactedTokens: () => 120,
+        onCompaction: event => bridge.recordCompaction(event),
+      }),
+      contextUsage: () => ({
+        usedTokens: 900,
+        maxTokens: 1000,
+        usageRatio: 0.9,
+        threshold: 0.85,
+        shouldCompact: true,
+      }),
+      maxIterations: 1,
+    }));
+
+    const stored = sessionStore.load('telemetry-plan', 'telemetry', 'impl:telemetry');
+    expect(stored).toBeDefined();
+    await expect(metrics.query(stored!.sessionId)).resolves.toEqual([
+      expect.objectContaining({
+        sessionId: stored!.sessionId,
+        runId: 'run-threshold',
+        generation: 1,
+        triggerReason: 'threshold',
+        tokensBefore: 900,
+        tokensAfter: 120,
+      }),
+    ]);
+
+    await bridge.close();
   });
 
   it('falls back to replay when provider changes after a failure', async () => {

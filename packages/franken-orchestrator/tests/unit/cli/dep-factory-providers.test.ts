@@ -68,6 +68,7 @@ vi.mock('../../../src/adapters/cli-observer-bridge.js', () => ({
     this.getActiveSessionId = vi.fn(() => undefined);
     this.recordReplay = vi.fn();
     this.getReplayManifest = vi.fn(() => [...mockBridgeReplayManifest]);
+    this.close = vi.fn(async () => {});
     this.observerDeps = observerDepsMocks.enabled;
     this.disabledObserverDeps = observerDepsMocks.disabled;
   }),

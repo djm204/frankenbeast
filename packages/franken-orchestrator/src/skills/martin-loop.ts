@@ -811,7 +811,7 @@ export class MartinLoop {
       config.snapshotStore.writeSnapshot(nextSession, 'pre-compaction');
       config.sessionStore?.save(nextSession);
       try {
-        nextSession = await config.compactor.compact(nextSession);
+        nextSession = await config.compactor.compact(nextSession, 'threshold');
       } catch (error) {
         if (config.abortSignal?.aborted || isAbortError(error)) {
           restorePreviousSession();

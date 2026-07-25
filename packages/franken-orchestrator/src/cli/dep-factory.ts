@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
-import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
+import { AuditTrailStore, SQLiteAdapter, type ReplayRecord } from '@franken/observer';
 import { BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -525,8 +525,13 @@ async function createObserverDeps(
   });
   const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
-  const observerBridge = new CliObserverBridge({ budgetLimitUsd: config.budget, replayStore });
   const runSessionId = options.runSessionId ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
+  const observerBridge = new CliObserverBridge({
+    budgetLimitUsd: config.budget,
+    sessionId: runSessionId,
+    replayStore,
+    compactionAdapter: new SQLiteAdapter(options.paths.tracesDb),
+  });
   if (config.enableTracing) {
     observerBridge.startTrace(runSessionId);
   }
@@ -973,6 +978,16 @@ function createCliExecutorDeps(
           });
           return response.trim();
         },
+        measureCompactedTokens: (session) => {
+          const providerName = session.activeProvider ?? session.contextWindow.provider;
+          const rendered = stack.chunkSessionRenderer.render(session, stack.registry.get(providerName));
+          return observer.observerBridge.estimateContextWindow({
+            renderedPrompt: rendered.prompt,
+            provider: providerName,
+            maxTokens: session.contextWindow.maxTokens,
+          }).usedTokens;
+        },
+        onCompaction: event => observer.observerBridge.recordCompaction(event),
       }),
       contextUsage: (prompt: string, provider: string, maxTokens: number) =>
         observer.observerBridge.estimateContextWindow({
@@ -1148,6 +1163,7 @@ function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<voi
     if (observer.traceViewerHandle) {
       await observer.traceViewerHandle.stop();
     }
+    await observer.observerBridge.close();
   };
 }
 
