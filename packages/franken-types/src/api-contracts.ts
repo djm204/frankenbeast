@@ -252,6 +252,7 @@ export const TRACKED_AGENT_STATUSES = [
   'completed',
   'failed',
   'stopped',
+  'rejected',
   'deleted',
 ] as const;
 

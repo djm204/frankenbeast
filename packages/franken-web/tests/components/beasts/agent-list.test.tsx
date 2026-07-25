@@ -128,6 +128,7 @@ describe('AgentList', () => {
       'completed',
       'failed',
       'stopped',
+      'rejected',
       'deleted',
     ]);
 

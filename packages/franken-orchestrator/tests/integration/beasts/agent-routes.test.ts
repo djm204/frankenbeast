@@ -1493,6 +1493,129 @@ describe('agent routes integration', () => {
     expectEventsToIncludeTypes(detail.data.events, ['agent.stop.requested']);
   });
 
+  it('terminally rejects initializing tracked agents denied during interview', async () => {
+    const { app } = createStandaloneAgentApp();
+    const operatorToken = TEST_SUPER_SECRET_OPERATOR_TOKEN;
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+
+    const createResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'design-interview',
+        initAction: {
+          kind: 'design-interview',
+          command: '/interview',
+          config: { goal: 'Reject from chat', ...DOCS_POLICY },
+          chatSessionId: 'sess-rejected',
+        },
+        initConfig: { goal: 'Reject from chat', ...DOCS_POLICY },
+        chatSessionId: 'sess-rejected',
+      }),
+    });
+    const created = await createResponse.json() as { data: { id: string } };
+
+    const rejectResponse = await app.request(`/v1/beasts/agents/${created.data.id}/reject`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+
+    expect(rejectResponse.status).toBe(200);
+    const rejected = await rejectResponse.json() as { data: { id: string; status: string } };
+    expect(rejected.data).toMatchObject({ id: created.data.id, status: 'rejected' });
+
+    const restartResponse = await app.request(`/v1/beasts/agents/${created.data.id}/restart`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    expect(restartResponse.status).toBe(409);
+
+    const detailResponse = await app.request(`/v1/beasts/agents/${created.data.id}`, {
+      headers: {
+        authorization: `Bearer ${operatorToken}`,
+      },
+    });
+    const detail = await detailResponse.json() as { data: { events: AgentEvent[] } };
+    expectEventsToIncludeTypes(detail.data.events, ['agent.interview.rejected']);
+  });
+
+  it('does not restart a rejected tracked agent with a linked run', async () => {
+    const { app, operatorToken } = createIntegratedBeastApp();
+    const headers = {
+      authorization: `Bearer ${operatorToken}`,
+      'content-type': 'application/json',
+    };
+    const config = {
+      provider: 'claude',
+      objective: 'Reject after linking',
+      chunkDirectory: 'docs/chunks',
+      ...CODING_POLICY,
+    };
+
+    const createAgentResponse = await app.request('/v1/beasts/agents', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        initAction: {
+          kind: 'martin-loop',
+          command: 'martin-loop',
+          config,
+        },
+        initConfig: config,
+        autoDispatch: false,
+      }),
+    });
+    const createdAgent = await createAgentResponse.json() as { data: { id: string } };
+
+    const createRunResponse = await app.request('/v1/beasts/runs', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        definitionId: 'martin-loop',
+        trackedAgentId: createdAgent.data.id,
+        config,
+        executionMode: 'process',
+        startNow: true,
+      }),
+    });
+    expect(createRunResponse.status).toBe(201);
+    const createdRun = await createRunResponse.json() as { data: { id: string } };
+
+    const rejectResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/reject`, {
+      method: 'POST',
+      headers,
+    });
+    expect(rejectResponse.status).toBe(200);
+
+    const runStartResponse = await app.request(`/v1/beasts/runs/${createdRun.data.id}/start`, {
+      method: 'POST',
+      headers,
+    });
+    expect(runStartResponse.status).toBe(409);
+    expect((await runStartResponse.json()).error.code).toBe('TRACKED_AGENT_REJECTED');
+
+    const runRestartResponse = await app.request(`/v1/beasts/runs/${createdRun.data.id}/restart`, {
+      method: 'POST',
+      headers,
+    });
+    expect(runRestartResponse.status).toBe(409);
+    expect((await runRestartResponse.json()).error.code).toBe('TRACKED_AGENT_REJECTED');
+
+    const restartResponse = await app.request(`/v1/beasts/agents/${createdAgent.data.id}/restart`, {
+      method: 'POST',
+      headers,
+    });
+    expect(restartResponse.status).toBe(409);
+  });
+
   it('starts and restarts stopped tracked agents through agent-specific endpoints', async () => {
     const { app, operatorToken } = createIntegratedBeastApp();
     const headers = {

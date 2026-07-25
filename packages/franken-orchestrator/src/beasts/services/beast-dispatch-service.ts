@@ -7,7 +7,7 @@ import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
-import { UnknownBeastDefinitionError } from '../errors.js';
+import { RejectedTrackedAgentError, UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
 import { BrainConfigSchema } from '../../config/orchestrator-config.js';
 import {
@@ -245,6 +245,9 @@ export class BeastDispatchService {
     const trackedAgent = request.trackedAgentId
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
+    if (trackedAgent?.status === 'rejected') {
+      throw new RejectedTrackedAgentError(trackedAgent.id);
+    }
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const directRunPolicyConfig = trackedAgent
       ? {}
@@ -279,7 +282,10 @@ export class BeastDispatchService {
     const linkedAt = new Date(wallClockNow()).toISOString();
     const run = this.repository.transaction(() => {
       if (request.trackedAgentId) {
-        this.repository.requireTrackedAgent(request.trackedAgentId);
+        const currentTrackedAgent = this.repository.requireTrackedAgent(request.trackedAgentId);
+        if (currentTrackedAgent.status === 'rejected') {
+          throw new RejectedTrackedAgentError(currentTrackedAgent.id);
+        }
         this.assertTrackedAgentCapacity(request.trackedAgentId, {
           ...request.config,
           ...configSnapshot,
@@ -345,6 +351,23 @@ export class BeastDispatchService {
     this.metrics.recordRunCreated(run.definitionId, run.dispatchedBy);
 
     if (request.startNow) {
+      if (run.trackedAgentId) {
+        const currentTrackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+        if (currentTrackedAgent?.status === 'rejected') {
+          const rejectedAt = new Date(wallClockNow()).toISOString();
+          this.repository.updateRun(run.id, {
+            status: 'stopped',
+            finishedAt: rejectedAt,
+            stopReason: 'interview_rejected',
+          });
+          this.repository.appendEvent(run.id, {
+            type: 'run.stopped',
+            payload: { stopReason: 'interview_rejected' },
+            createdAt: rejectedAt,
+          });
+          throw new RejectedTrackedAgentError(currentTrackedAgent.id);
+        }
+      }
       try {
         const startableRun = this.repository.getRun(run.id);
         if (!startableRun) {
@@ -358,6 +381,21 @@ export class BeastDispatchService {
         const updated = this.repository.getRun(startableRun.id);
         if (!updated) {
           throw new Error(`Beast run disappeared after start: ${startableRun.id}`);
+        }
+        if (updated.trackedAgentId) {
+          const currentTrackedAgent = this.repository.getTrackedAgent(updated.trackedAgentId);
+          if (currentTrackedAgent?.status === 'rejected') {
+            if (updated.currentAttemptId) {
+              await this.executorFor(executionMode).stop(updated.id, updated.currentAttemptId);
+            } else {
+              this.repository.updateRun(updated.id, {
+                status: 'stopped',
+                finishedAt: new Date(wallClockNow()).toISOString(),
+                stopReason: 'interview_rejected',
+              });
+            }
+            return this.repository.getRun(updated.id) ?? updated;
+          }
         }
         if (updated.trackedAgentId) {
           const agentStatus = updated.status === 'running'
@@ -394,6 +432,25 @@ export class BeastDispatchService {
         }
         return updated;
       } catch {
+        const rejectedRun = this.repository.getRun(run.id);
+        const rejectedAgent = rejectedRun?.trackedAgentId
+          ? this.repository.getTrackedAgent(rejectedRun.trackedAgentId)
+          : undefined;
+        if (rejectedRun && rejectedAgent?.status === 'rejected') {
+          if (rejectedRun.currentAttemptId) {
+            await this.executorFor(rejectedRun.executionMode).stop(
+              rejectedRun.id,
+              rejectedRun.currentAttemptId,
+            );
+          } else {
+            this.repository.updateRun(rejectedRun.id, {
+              status: 'stopped',
+              finishedAt: new Date(wallClockNow()).toISOString(),
+              stopReason: 'interview_rejected',
+            });
+          }
+          return this.repository.getRun(rejectedRun.id) ?? rejectedRun;
+        }
         const failedAt = new Date(wallClockNow()).toISOString();
         const currentRun = this.repository.getRun(run.id);
         const executorRecordedSpawnFailure = currentRun?.status === 'failed'

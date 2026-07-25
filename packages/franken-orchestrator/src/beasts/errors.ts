@@ -21,3 +21,12 @@ export class DeletedTrackedAgentError extends Error {
     super(`Tracked agent '${agentId}' has been deleted`);
   }
 }
+
+export class RejectedTrackedAgentError extends Error {
+  constructor(
+    public readonly agentId: string,
+  ) {
+    super(`Tracked agent '${agentId}' was rejected and cannot be dispatched`);
+    this.name = 'RejectedTrackedAgentError';
+  }
+}

@@ -24,6 +24,7 @@ import {
   type ToolPolicyDenial,
   type ToolPolicyValidationContext,
 } from './role-tool-manifest.js';
+import { RejectedTrackedAgentError } from '../errors.js';
 
 export interface BeastRunServiceOptions {
   eventBus?: BeastEventBus;
@@ -200,6 +201,7 @@ export class BeastRunService {
   async start(runId: string, _actor: string): Promise<BeastRun> {
     this.serviceOptions.maintenance?.assertDispatchAllowed();
     let run = this.requireRun(runId);
+    this.assertTrackedAgentNotRejected(run);
     const definition = this.getDefinitionOrThrow(run.definitionId);
     const rebuiltConfig = this.rebuildFailedTrackedRunConfig(run, definition);
     this.assertRoleToolManifestAllows(run, rebuiltConfig ?? run.configSnapshot);
@@ -212,6 +214,21 @@ export class BeastRunService {
     try {
       await this.executorFor(run).start(run, definition);
       let updated = this.requireRun(runId);
+      if (updated.trackedAgentId) {
+        const currentTrackedAgent = this.repository.getTrackedAgent(updated.trackedAgentId);
+        if (currentTrackedAgent?.status === 'rejected') {
+          if (updated.currentAttemptId) {
+            await this.executorFor(updated).stop(updated.id, updated.currentAttemptId);
+          } else {
+            this.repository.updateRun(updated.id, {
+              status: 'stopped',
+              finishedAt: isoNow(),
+              stopReason: 'interview_rejected',
+            });
+          }
+          return this.requireRun(updated.id);
+        }
+      }
       if (
         updated.status === 'running'
         && (updated.finishedAt !== undefined || updated.stopReason !== undefined || updated.latestExitCode !== undefined)
@@ -225,6 +242,22 @@ export class BeastRunService {
       this.syncTrackedAgent(updated);
       return updated;
     } catch {
+      const rejectedRun = this.repository.getRun(run.id);
+      const rejectedAgent = rejectedRun?.trackedAgentId
+        ? this.repository.getTrackedAgent(rejectedRun.trackedAgentId)
+        : undefined;
+      if (rejectedRun && rejectedAgent?.status === 'rejected') {
+        if (rejectedRun.currentAttemptId) {
+          await this.executorFor(rejectedRun).stop(rejectedRun.id, rejectedRun.currentAttemptId);
+        } else {
+          this.repository.updateRun(rejectedRun.id, {
+            status: 'stopped',
+            finishedAt: isoNow(),
+            stopReason: 'interview_rejected',
+          });
+        }
+        return this.requireRun(rejectedRun.id);
+      }
       const errorMessage = SAFE_DISPATCH_FAILURE_MESSAGE;
       const currentRun = this.repository.getRun(run.id);
       if (
@@ -265,7 +298,7 @@ export class BeastRunService {
           const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [];
           if (normalizedRun.trackedAgentId) {
             const trackedAgent = this.repository.getTrackedAgent(normalizedRun.trackedAgentId);
-            if (trackedAgent && trackedAgent.status !== 'deleted') {
+            if (trackedAgent && trackedAgent.status !== 'deleted' && trackedAgent.status !== 'rejected') {
               const failedEvent = {
                 level: 'error' as const,
                 type: 'agent.dispatch.failed',
@@ -330,7 +363,7 @@ export class BeastRunService {
         ];
         if (updatedRun.trackedAgentId) {
           const trackedAgent = this.repository.getTrackedAgent(updatedRun.trackedAgentId);
-          if (trackedAgent && trackedAgent.status !== 'deleted') {
+          if (trackedAgent && trackedAgent.status !== 'deleted' && trackedAgent.status !== 'rejected') {
             this.repository.updateTrackedAgent(updatedRun.trackedAgentId, {
               status: 'failed',
               dispatchRunId: updatedRun.id,
@@ -452,6 +485,14 @@ export class BeastRunService {
     }
     this.getDefinitionOrThrow(run.definitionId);
     return run;
+  }
+
+  private assertTrackedAgentNotRejected(run: BeastRun): void {
+    if (!run.trackedAgentId) return;
+    const trackedAgent = this.repository.getTrackedAgent(run.trackedAgentId);
+    if (trackedAgent?.status === 'rejected') {
+      throw new RejectedTrackedAgentError(trackedAgent.id);
+    }
   }
 
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
@@ -593,6 +634,9 @@ export class BeastRunService {
       const currentRun = this.requireRun(run.id);
       const currentTrackedAgent = this.repository.getTrackedAgent(run.trackedAgentId!);
       if (!currentTrackedAgent || currentTrackedAgent.status === 'deleted') return currentRun;
+      if (currentTrackedAgent.status === 'rejected') {
+        throw new RejectedTrackedAgentError(currentTrackedAgent.id);
+      }
 
       this.assertTrackedAgentCapacity(currentRun, configSnapshot ?? currentRun.configSnapshot);
       if (currentTrackedAgent.status === 'dispatching' && currentTrackedAgent.dispatchRunId === currentRun.id) {
@@ -624,11 +668,6 @@ export class BeastRunService {
       return;
     }
     const trackedAgentId: string = run.trackedAgentId;
-    const trackedAgent = this.repository.getTrackedAgent(trackedAgentId);
-    if (!trackedAgent || trackedAgent.status === 'deleted') {
-      return;
-    }
-
     const status = run.status === 'running'
       ? 'running'
       : run.status === 'pending_approval'
@@ -639,13 +678,17 @@ export class BeastRunService {
             ? 'failed'
             : 'stopped';
 
-    // Skip all writes if status hasn't changed (full idempotency — prevents duplicate SSE, DB events, AND redundant updateTrackedAgent writes)
-    if (trackedAgent.status === status) {
-      return;
-    }
-
     const updatedAt = isoNow();
     const publications = this.repository.transaction(() => {
+      const trackedAgent = this.repository.getTrackedAgent(trackedAgentId);
+      if (!trackedAgent || trackedAgent.status === 'deleted' || trackedAgent.status === 'rejected') {
+        return [];
+      }
+      // Re-read and compare inside the write transaction so a concurrent
+      // rejection cannot be overwritten by a stale run-status snapshot.
+      if (trackedAgent.status === status) {
+        return [];
+      }
       this.repository.updateTrackedAgent(trackedAgentId, {
         status,
         dispatchRunId: run.id,

@@ -110,6 +110,35 @@ describe('BeastDaemonDispatchAdapter', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('aborts daemon interviews and terminally rejects their tracked agent', async () => {
+    const fetchMock = vi.fn(async (_url: URL | RequestInfo, _init?: RequestInit) => Response.json({ data: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const adapter = new BeastDaemonDispatchAdapter({
+      baseUrl: 'http://127.0.0.1:4050',
+      operatorToken: TEST_DAEMON_TOKEN,
+    });
+
+    await (adapter as unknown as { reject(context: {
+      agentId: string;
+      definitionId: string;
+      interviewSessionId: string;
+      status: 'interviewing';
+    }): Promise<void> }).reject({
+      agentId: 'agent-1',
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-1',
+      status: 'interviewing',
+    });
+
+    expect(fetchMock.mock.calls.map(([url, init]) => ({
+      method: init?.method,
+      url: url.toString(),
+    }))).toEqual([
+      { method: 'POST', url: 'http://127.0.0.1:4050/v1/beasts/interviews/interview-1/abort' },
+      { method: 'POST', url: 'http://127.0.0.1:4050/v1/beasts/agents/agent-1/reject' },
+    ]);
+  });
+
   it('returns maintenance guidance when daemon dispatch is paused', async () => {
     const context = {
       agentId: 'agent-1',
