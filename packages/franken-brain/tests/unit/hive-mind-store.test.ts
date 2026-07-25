@@ -754,6 +754,54 @@ describe('HiveMindStore', () => {
     }
   });
 
+  it('purges legacy publications when a durable publisher ID predates the shared marker', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-marker-upgrade-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    const durableDbPath = join(brainsDir, 'coder.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    try {
+      mkdirSync(brainsDir, { recursive: true });
+      const legacyBrain = new SqliteBrain(durableDbPath);
+      legacyBrain.close();
+      const brainDb = new Database(durableDbPath);
+      brainDb.exec(`
+        CREATE TABLE brain_registry_metadata (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      `);
+      brainDb.prepare(`
+        INSERT INTO brain_registry_metadata (key, value) VALUES ('hive-publisher-id', ?)
+      `).run('durable-id-created-before-shared-marker');
+      brainDb.close();
+
+      const publisher = new HiveMindStore(hiveDbPath);
+      publisher.publish(namespace, 'legacy-process-random-publisher', {
+        kind: 'episode',
+        event: {
+          type: 'failure',
+          summary: 'legacy publication predates the shared migration marker',
+          createdAt: '2026-07-25T10:00:00.000Z',
+        },
+      });
+      publisher.close();
+
+      const registry = new BrainRegistry(brainsDir, hiveDbPath);
+      registry.forAgentType('coder', durableDbPath);
+      registry.close();
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace)).toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('serializes legacy migration across concurrent durable brain initialization', async () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-concurrent-migration-'));
     const brainsDir = join(root, 'brains');

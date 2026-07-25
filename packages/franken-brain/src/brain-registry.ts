@@ -38,7 +38,7 @@ function durablePublisherId(
       try {
         const hiveStore = new HiveMindStore(hiveDbPath);
         try {
-          hiveStore.completeLegacyPublisherMigration(namespace, false);
+          hiveStore.completeLegacyPublisherMigration(namespace, true);
         } finally {
           hiveStore.close();
         }
