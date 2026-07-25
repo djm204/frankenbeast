@@ -13,11 +13,20 @@ Last audited: 2026-07-25T18:15:52Z against `origin/main` at
 
 ## Closure gate
 
-A row is terminal only when its issue is closed by exactly one merged PR, that
-merge is present on `origin/main`, all required checks on the PR head succeeded,
-Codex has clean evidence for that exact head, and all Codex review threads are
-resolved. Every implementation PR includes architecture, onboarding, package,
-ADR, or task-progress documentation evidence in its changed files.
+A row is terminal only when its issue is closed by exactly one implementation
+PR, that merge is present on `origin/main`, all required checks on the reviewed
+head succeeded, Codex has clean evidence for that exact head, and all Codex
+review threads are resolved. Every implementation PR includes architecture,
+onboarding, package, ADR, or task-progress documentation evidence in its changed
+files.
+
+If a violation is discovered only after the implementation PR merged, the
+historical head cannot be changed. A scoped remediation PR may then satisfy the
+gate without becoming a second issue-closing implementation PR only when it
+links the original issue and PR, fixes or explicitly dispositions every finding,
+passes required checks, receives current-head Codex-clean evidence, has zero
+unresolved Codex threads, and its merge is present on `origin/main`. The row must
+name that remediation PR before changing to `pass`.
 
 | Issue | PR | On `origin/main` | Required checks | Current-head Codex clean | Unresolved Codex threads | Gate |
 | --- | --- | --- | --- | --- | ---: | --- |
@@ -62,6 +71,6 @@ reported complete while those findings remain unresolved.
 
 - [ ] Repair or disposition every unresolved Codex finding on PRs #3744 and #3775 in follow-up PRs because the original PRs are merged.
 - [ ] Establish fresh current-head Codex-clean evidence for every row marked blocked.
-- [ ] Obtain green replacement verification for the failed `build-test-lint (1337)` gate on #3744 through a scoped follow-up.
+- [ ] Obtain a green, current-head remediation chain for the failed `build-test-lint (1337)` gate on #3744 through a scoped follow-up.
 - [ ] Re-audit live checks, Codex comments/reactions, and fully paginated review threads.
 - [ ] Close tracking parents only after every listed child passes the closure gate.
