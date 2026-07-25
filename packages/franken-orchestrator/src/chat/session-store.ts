@@ -273,12 +273,17 @@ export class BrainConversationSessionStore implements ISessionStore {
   constructor(
     private readonly legacyStore: ISessionStore,
     private readonly brainRegistry: BrainRegistry,
-    private readonly subjectId: string,
+    private readonly subjectId: string | ((session: ChatSession) => string),
   ) {}
+
+  private subjectFor(session: ChatSession): string {
+    return typeof this.subjectId === 'function' ? this.subjectId(session) : this.subjectId;
+  }
 
   mutationKey(sessionId: string): string {
     const legacy = this.legacyStore.get(sessionId);
     if (!legacy) return sessionId;
+    if (legacy.conversationId === undefined) return sessionId;
     const brain = this.brainRegistry.getWorkspaceHive(legacy.projectId);
     return brain?.conversations.getConversationIdForSession(sessionId) ?? sessionId;
   }
@@ -289,7 +294,7 @@ export class BrainConversationSessionStore implements ISessionStore {
       const brain = this.brainRegistry.forWorkspaceHive(projectId);
       const conversation = brain.conversations.resolveOrCreateAndBind(
         projectId,
-        this.subjectId,
+        this.subjectFor(binding),
         binding.id,
       );
       const projected = this.project(binding, conversation);
@@ -311,6 +316,7 @@ export class BrainConversationSessionStore implements ISessionStore {
     const publicBinding = binding.conversationId === PENDING_BRAIN_CONVERSATION_BINDING
       ? { ...binding, conversationId: undefined }
       : binding;
+    if (binding.conversationId === undefined) return publicBinding;
     const brain = this.brainRegistry.getWorkspaceHive(binding.projectId);
     if (!brain) return publicBinding;
     const conversationId = brain.conversations.getConversationIdForSession(id);
@@ -318,6 +324,13 @@ export class BrainConversationSessionStore implements ISessionStore {
     const conversation = brain.conversations.get(conversationId);
     if (!conversation) {
       throw new Error(`BrainConversation binding ${id} references missing conversation ${conversationId}`);
+    }
+    if (binding.conversationId === PENDING_BRAIN_CONVERSATION_BINDING) {
+      const canonical = this.mergeAdoptedSession(publicBinding, conversation);
+      brain.conversations.saveBound(id, canonical);
+      const projected = this.project(publicBinding, canonical);
+      this.repairProjection(id, projected, brain);
+      return projected;
     }
     const projected = this.project(binding, conversation);
     if (brain.conversations.isProjectionPending(id)) {
@@ -350,7 +363,7 @@ export class BrainConversationSessionStore implements ISessionStore {
         brain = this.brainRegistry.forWorkspaceHive(session.projectId);
         const conversation = brain.conversations.resolveOrCreateAndBind(
           session.projectId,
-          this.subjectId,
+          this.subjectFor(session),
           session.id,
         );
         const canonical = this.mergeAdoptedSession(session, conversation);

@@ -28,6 +28,7 @@ vi.mock('../../../src/http/ws-chat-server.js', () => ({
 
 import { startChatServer } from '../../../src/http/chat-server.js';
 import { createChatApp } from '../../../src/http/chat-app.js';
+import { hashChatRateLimitPrincipal } from '../../../src/http/chat-rate-limit.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 import type { ChatServerHandle } from '../../../src/http/chat-server.js';
@@ -373,8 +374,10 @@ describe('startChatServer comms pass-through', () => {
       metadata: { externalChannelId: 'C123', externalThreadId: '171234.000100' },
     });
 
-    expect(await readdir(sessionStoreDir)).toEqual(['slack%2Fteam%2Fthread.json']);
-    const stored = handle.sessionStore.get('slack%2Fteam%2Fthread') as { routingMetadata?: Record<string, unknown> } | undefined;
+    const scopedId = `slack/team/thread:${hashChatRateLimitPrincipal('slack:user:U123')}`;
+    const storedId = `comms:${encodeURIComponent(scopedId)}`;
+    expect(await readdir(sessionStoreDir)).toEqual([`${storedId}.json`]);
+    const stored = handle.sessionStore.get(storedId) as { routingMetadata?: Record<string, unknown> } | undefined;
     expect(stored?.routingMetadata).toEqual(expect.objectContaining({
       channelId: 'C123',
       threadTs: '171234.000100',
@@ -382,7 +385,7 @@ describe('startChatServer comms pass-through', () => {
     expect(handle.sessionStore.get('slack/team/thread')).toBeUndefined();
   });
 
-  it('loads legacy encoded comms sessions before creating a shared chat session', async () => {
+  it('does not expose a legacy shared comms session to a newly authenticated principal', async () => {
     const sessionStoreDir = await mkdtemp(join(tmpdir(), 'chat-server-comms-legacy-'));
     tempDirs.push(sessionStoreDir);
     await mkdir(join(sessionStoreDir, 'comms'));
@@ -412,11 +415,28 @@ describe('startChatServer comms pass-through', () => {
       externalUserId: 'U123',
     });
 
-    const stored = handle.sessionStore.get('slack%2Fteam%2Fthread') as { routingMetadata?: Record<string, unknown>; transcript?: unknown[] } | undefined;
-    expect(stored?.routingMetadata).toEqual(expect.objectContaining({ channelId: 'C-legacy', threadTs: '123.456' }));
-    expect(stored?.transcript).toEqual(expect.arrayContaining([
+    const scopedId = `slack/team/thread:${hashChatRateLimitPrincipal('slack:user:U123')}`;
+    const storedId = `comms:${encodeURIComponent(scopedId)}`;
+    const stored = handle.sessionStore.get(storedId) as {
+      pendingApproval?: unknown;
+      routingMetadata?: Record<string, unknown>;
+      transcript?: Array<{ content?: string }>;
+    } | undefined;
+    expect(stored).toBeDefined();
+    expect(stored?.pendingApproval).toBeNull();
+    expect(stored?.routingMetadata).not.toEqual(expect.objectContaining({
+      channelId: 'C-legacy',
+      threadTs: '123.456',
+    }));
+    expect(stored?.transcript).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ content: 'approval pending' }),
     ]));
+    expect(JSON.parse(await readFile(
+      join(sessionStoreDir, 'comms', `${encodeURIComponent('slack/team/thread')}.json`),
+      'utf-8',
+    ))).toEqual(expect.objectContaining({
+      pendingApproval: expect.objectContaining({ description: 'legacy approval' }),
+    }));
   });
 
   it('does not pass commsConfig or commsRuntime when not provided', async () => {

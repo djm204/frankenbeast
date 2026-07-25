@@ -9,6 +9,6 @@
 - [x] Update architecture, onboarding/package documentation, and ADR implementation status where applicable.
 - [x] Run focused package tests and repository typecheck, lint, build, and relevant docs tests.
 - [x] Self-review the diff for scope, compatibility, persistence safety, and test quality; address independent findings for file permissions, comms adoption, and projection journaling.
-- [ ] Commit with the required identity, push, and open one PR with `Closes #3701`.
-- [ ] Drive CI and current-head Codex review to clean with zero unresolved Codex threads.
+- [x] Commit with the required identity, push, and open one PR with `Closes #3701`.
+- [ ] Drive CI and current-head Codex review to clean with zero unresolved Codex threads. (Fifth/final round returned two P1 plus three correctness findings; fixes are locally verified and await approval-routed push/thread resolution.)
 - [ ] Merge the green/clean PR, verify issue closure, post root evidence, and append reusable shared lessons.

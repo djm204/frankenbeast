@@ -386,7 +386,11 @@ describe('BrainConversationSessionStore', () => {
     const session = {
       id: 'comms:discord:channel-1',
       projectId: 'project-1',
-      transcript: [],
+      transcript: [{
+        role: 'user' as const,
+        content: 'Recover this turn from the pending locator',
+        timestamp: now,
+      }],
       state: 'active' as const,
       tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
       costUsd: 0,
@@ -399,9 +403,11 @@ describe('BrainConversationSessionStore', () => {
     try {
       expect(() => store.save(session)).toThrow('simulated canonical failure');
       expect(legacy.get(session.id)).toBeDefined();
-      expect(store.get(session.id)?.conversationId).not.toBe(
+      const recovered = store.get(session.id);
+      expect(recovered?.conversationId).not.toBe(
         '__pending_brain_conversation_binding__',
       );
+      expect(recovered?.transcript).toEqual(session.transcript);
 
       expect(() => store.save(session)).not.toThrow();
       expect(brain.conversations.getConversationIdForSession(session.id)).toBeDefined();
@@ -437,6 +443,25 @@ describe('BrainConversationSessionStore', () => {
         'project-1',
         'local-operator',
       )).toBeUndefined();
+    } finally {
+      registry.close();
+    }
+  });
+
+  it('does not open a Hive when reading a definitely unbound legacy session', () => {
+    const root = tempRoot();
+    const legacy = new FileSessionStore(join(root, 'sessions'));
+    const existing = legacy.create('project-1');
+    const registry = new BrainRegistry(join(root, 'brains'));
+    const openHive = vi.spyOn(registry, 'getWorkspaceHive').mockImplementation(() => {
+      throw new Error('unsupported Hive schema');
+    });
+
+    try {
+      const store = new BrainConversationSessionStore(legacy, registry, 'local-operator');
+      expect(store.get(existing.id)).toEqual(existing);
+      expect(store.mutationKey(existing.id)).toBe(existing.id);
+      expect(openHive).not.toHaveBeenCalled();
     } finally {
       registry.close();
     }

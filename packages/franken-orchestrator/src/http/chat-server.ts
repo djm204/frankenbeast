@@ -12,6 +12,7 @@ import {
 } from '../chat/session-store.js';
 import { FileApprovalAuditLog } from '../chat/approval-audit-log.js';
 import type { ChatSession } from '../chat/types.js';
+import { Transcript } from '../chat/transcript.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
 import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
@@ -33,7 +34,7 @@ import { localPlaintextOrSecureEndpoint, localPlaintextOrSecureWebSocketUrl } fr
 import { closeHttpServer, handleHonoHttpRequest } from './http-server-utils.js';
 import { resolveSecurityConfig, type SecurityConfig } from '../middleware/security-profiles.js';
 import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket.js';
-import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
+import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, hashChatRateLimitPrincipal, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { isoNow } from '@franken/types';
 
@@ -114,23 +115,32 @@ export function resolveChatServerSessionStore(
   return new BrainConversationSessionStore(
     new FileSessionStore(options.sessionStoreDir),
     options.brainRegistry,
-    'local-operator',
+    (session) => session.id.startsWith('comms:') ? `external:${session.id}` : 'local-operator',
   );
 }
 
-function createCommsRuntimeAdapter(
+export function createCommsRuntimeAdapter(
   runtime: ChatRuntimeBundle['runtime'],
   sessionStore: ISessionStore,
   sessionStoreDir: string,
   projectName: string,
   chatRateLimiter?: InMemoryRateLimiter,
+  chatMutationAdmission?: ChatMutationAdmission,
 ): CommsRuntimePort {
-  const toStoredSessionId = (id: string): string => encodeURIComponent(id);
+  const toStoredSessionId = (id: string): string => `comms:${encodeURIComponent(id)}`;
+  const toLegacySessionId = (id: string): string => id.replace(/:[a-f0-9]{24}$/, '');
   return new ChatRuntimeCommsAdapter(runtime, {
     load: async (id) => {
       const session = sessionStore.get(toStoredSessionId(id)) as ChatSessionWithRouting | undefined;
       if (!session) {
-        const legacy = await loadLegacyCommsSession(sessionStoreDir, id);
+        const legacyId = toLegacySessionId(id);
+        // Principal-scoped comms sessions must not import an older shared file:
+        // that file has no authenticated-principal binding and may contain another
+        // channel user's transcript or approval state.
+        if (legacyId !== id) {
+          return null;
+        }
+        const legacy = await loadLegacyCommsSession(sessionStoreDir, legacyId);
         if (!legacy) {
           return null;
         }
@@ -190,7 +200,9 @@ function createCommsRuntimeAdapter(
         projectId: typeof data.projectId === 'string' ? data.projectId : (existing?.projectId ?? projectName),
         transcript: Array.isArray(data.transcript) ? data.transcript as ChatSession['transcript'] : (existing?.transcript ?? []),
         state: typeof data.state === 'string' ? data.state : (existing?.state ?? 'active'),
-        tokenTotals: existing?.tokenTotals ?? { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+        tokenTotals: Array.isArray(data.transcript)
+          ? Transcript.fromMessages(data.transcript as ChatSession['transcript']).tokensByTier()
+          : existing?.tokenTotals ?? { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
         costUsd: existing?.costUsd ?? 0,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
@@ -206,7 +218,23 @@ function createCommsRuntimeAdapter(
       };
       sessionStore.save(session);
     },
-  }, { ...(chatRateLimiter ? { chatRateLimiter } : {}) });
+  }, {
+    ...(chatRateLimiter ? { chatRateLimiter } : {}),
+    ...(chatMutationAdmission
+      ? {
+          mutationAdmission: chatMutationAdmission,
+          mutationKey: (id: string) => (
+            sessionStore.mutationKey?.(toStoredSessionId(id)) ?? toStoredSessionId(id)
+          ),
+        }
+      : {}),
+    scopeSessionId: (input) => {
+      const principal = input.externalUserId === 'system'
+        ? `${input.channelType}:session:${input.sessionId}`
+        : `${input.channelType}:user:${input.externalUserId}`;
+      return `${input.sessionId}:${hashChatRateLimitPrincipal(principal)}`;
+    },
+  });
 }
 
 function enabledSignedExternalWebhookChannels(commsConfig: CommsConfig | undefined): string[] {
@@ -327,7 +355,14 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   });
   const commsRuntime = options.commsRuntime
     ?? (options.commsConfig
-      ? createCommsRuntimeAdapter(runtime.runtime, sessionStore, options.sessionStoreDir, options.projectName, chatRateLimiter)
+      ? createCommsRuntimeAdapter(
+          runtime.runtime,
+          sessionStore,
+          options.sessionStoreDir,
+          options.projectName,
+          chatRateLimiter,
+          chatMutationAdmission,
+        )
       : undefined);
   const chatStreamTicketStore = effectiveOperatorToken
     ? (() => {
