@@ -23,6 +23,8 @@ const MAX_AGENT_ROWS_SCANNED = 1_000;
 const AGENT_SCAN_PAGE_SIZE = 100;
 const MAX_HIVE_ENTRIES_SCANNED_PER_TYPE = 100;
 const MAX_SUBJECT_ID_BYTES = 256;
+const MAX_RESPONSE_TIMESTAMP_CHARS = 64;
+const UNKNOWN_OBSERVATION_TIME = '1970-01-01T00:00:00.000Z';
 const ACTIVE_STATUSES = new Set([
   'initializing',
   'awaiting_approval',
@@ -43,17 +45,20 @@ export function workspaceHiveId(projectRoot: string): string {
 }
 
 function latestTimestamp(...values: Array<string | undefined>): string | undefined {
-  return values
+  const latest = values
     .filter((value): value is string => value !== undefined)
-    .map((value) => ({ value, time: Date.parse(value) }))
+    .map((value) => ({ time: Date.parse(value) }))
     .filter((entry) => Number.isFinite(entry.time))
-    .sort((a, b) => b.time - a.time)[0]?.value;
+    .sort((a, b) => b.time - a.time)[0];
+  return latest ? new Date(latest.time).toISOString() : undefined;
 }
 
 function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
   const encoded = Buffer.from(value);
   if (encoded.byteLength <= maxBytes) return { value, truncated: false };
-  return { value: encoded.subarray(0, maxBytes).toString('utf8'), truncated: true };
+  let end = maxBytes;
+  while (end > 0 && (encoded[end]! & 0xc0) === 0x80) end -= 1;
+  return { value: encoded.subarray(0, end).toString('utf8'), truncated: true };
 }
 
 function mapActivity(entry: HiveMindEntry): HiveRecentActivity {
@@ -80,14 +85,15 @@ function mapAgent(
     && run.definitionId === agent.definitionId
     ? run
     : undefined;
-  const lastObservedAt = reconciledRun
+  const observedAt = reconciledRun
     ? latestTimestamp(
       reconciledRun.lastHeartbeatAt,
       reconciledRun.finishedAt,
       reconciledRun.startedAt,
       reconciledRun.createdAt,
-    ) ?? reconciledRun.createdAt
-    : latestTimestamp(agent.updatedAt, agent.createdAt) ?? agent.updatedAt;
+    )
+    : latestTimestamp(agent.updatedAt, agent.createdAt);
+  const lastObservedAt = observedAt ?? UNKNOWN_OBSERVATION_TIME;
   const observedMs = Date.parse(lastObservedAt);
   const status = reconciledRun?.status ?? agent.status;
   let observation: HiveAgentStatus['observation'] = 'current';
@@ -99,7 +105,8 @@ function mapAgent(
     observation = 'unavailable';
     errorCode = 'LINKED_RUN_MISMATCH';
   } else if (
-    !Number.isFinite(observedMs)
+    !observedAt
+    || !Number.isFinite(observedMs)
     || observedMs - nowMs > HIVE_STATUS_FUTURE_TOLERANCE_MS
   ) {
     observation = 'unavailable';
@@ -167,12 +174,16 @@ export class HiveStatusQuery {
 
     const selected = this.readAgents(options.subjectId, limit);
     const now = this.now();
+    const linkedRuns = new Map<string, BeastRun | undefined>(selected.agents.map((agent) => [
+      agent.id,
+      agent.dispatchRunId ? this.readLinkedRun(agent.dispatchRunId) : undefined,
+    ]));
     const agentStatuses = selected.agents.map((agent) => mapAgent(
       agent,
-      agent.dispatchRunId ? this.readLinkedRun(agent.dispatchRunId) : undefined,
+      linkedRuns.get(agent.id),
       now.getTime(),
     ));
-    const hive = this.readActivity(selected.agents, selected.attribution, limit);
+    const hive = this.readActivity(selected.agents, selected.attribution, linkedRuns, limit);
     const partial = selected.scanIncomplete
       || hive.status !== 'available'
       || agentStatuses.some((agent) => agent.observation !== 'current');
@@ -262,6 +273,7 @@ export class HiveStatusQuery {
   private readActivity(
     agents: readonly TrackedAgent[],
     attribution: ReadonlyMap<string, 'unique' | 'ambiguous' | 'incomplete'>,
+    linkedRuns: ReadonlyMap<string, BeastRun | undefined>,
     limit: number,
   ): {
     activity: HiveRecentActivity[];
@@ -286,6 +298,12 @@ export class HiveStatusQuery {
             kind: 'episode',
             limit: MAX_HIVE_ENTRIES_SCANNED_PER_TYPE,
           });
+          if (entries.some((entry) => (
+            entry.publishedAt.length > MAX_RESPONSE_TIMESTAMP_CHARS
+            || !Number.isFinite(Date.parse(entry.publishedAt))
+          ))) {
+            throw new Error('Hive activity contains an invalid publishedAt timestamp');
+          }
           successfulReads += 1;
         } catch {
           failedReads += 1;
@@ -293,10 +311,19 @@ export class HiveStatusQuery {
         }
         entriesByAgentType.set(agent.definitionId, entries);
       }
-      const publisherIds = new Set([agent.id, agent.dispatchRunId].filter((id): id is string => Boolean(id)));
+      const linkedRun = linkedRuns.get(agent.id);
+      const trustedRunId = agent.dispatchRunId
+        && linkedRun?.trackedAgentId === agent.id
+        && linkedRun.definitionId === agent.definitionId
+        ? agent.dispatchRunId
+        : undefined;
+      const publisherIds = new Set([agent.id, trustedRunId].filter((id): id is string => Boolean(id)));
       const attributed = entries.find((entry) => publisherIds.has(entry.publisherId));
       const attributionState = attribution.get(agent.definitionId);
-      const latest = attributed ?? (attributionState === 'unique' ? entries[0] : undefined);
+      const typeLevel = attributionState === 'unique'
+        ? entries.find((entry) => entry.publisherId !== agent.dispatchRunId || Boolean(trustedRunId))
+        : undefined;
+      const latest = attributed ?? typeLevel;
       if (!attributed && entries.length > 0 && attributionState !== 'unique') {
         status = 'partial';
         errorCodes.add(attributionState === 'incomplete'

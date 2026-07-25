@@ -96,6 +96,24 @@ describe('HiveStatusQuery', () => {
     });
   });
 
+  it('truncates activity summaries at a complete UTF-8 boundary', () => {
+    const { agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: `${'a'.repeat(1_023)}😀tail`,
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+
+    const activity = query.query({ subjectId: 'operator' }).recentActivity[0];
+    expect(activity?.truncated).toBe(true);
+    expect(activity?.summary).not.toContain('�');
+    expect(Buffer.byteLength(activity?.summary ?? '')).toBeLessThanOrEqual(1_024);
+  });
+
   it('marks an old active status stale and keeps it visible when hive reads fail', () => {
     const { agents, hive, query } = createHarness('2026-07-25T11:00:00.000Z');
     const coder = createAgent(agents, 'coder', 'operator');
@@ -130,6 +148,55 @@ describe('HiveStatusQuery', () => {
         observation: 'unavailable',
         errorCode: 'INVALID_OBSERVATION_TIME',
       }],
+    });
+  });
+
+  it('normalizes an overlong parseable observation timestamp', () => {
+    const { root, agents, hive } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    const overlong = `July 25, 2026 11:59:00 UTC${' '.repeat(50)}`;
+    const linkedAgents = {
+      listAgentPage: () => ({
+        agents: [{ ...coder, createdAt: overlong, updatedAt: overlong }],
+        rowsScanned: 1,
+      }),
+    } as unknown as AgentService;
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      linkedAgents,
+      NO_RUNS,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+
+    expect(query.query({ subjectId: 'operator' }).agents[0]).toMatchObject({
+      lastObservedAt: '2026-07-25T11:59:00.000Z',
+      observation: 'current',
+    });
+  });
+
+  it('bounds an invalid overlong observation timestamp without throwing', () => {
+    const { root, agents, hive } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    const invalid = 'not-a-timestamp'.repeat(10);
+    const linkedAgents = {
+      listAgentPage: () => ({
+        agents: [{ ...coder, createdAt: invalid, updatedAt: invalid }],
+        rowsScanned: 1,
+      }),
+    } as unknown as AgentService;
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      linkedAgents,
+      NO_RUNS,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+
+    expect(query.query({ subjectId: 'operator' }).agents[0]).toMatchObject({
+      lastObservedAt: '1970-01-01T00:00:00.000Z',
+      observation: 'unavailable',
+      errorCode: 'INVALID_OBSERVATION_TIME',
     });
   });
 
@@ -198,6 +265,43 @@ describe('HiveStatusQuery', () => {
       observation: 'unavailable',
       errorCode: 'LINKED_RUN_MISMATCH',
     });
+  });
+
+  it('does not attribute activity published by a mismatched linked run', () => {
+    const { root, agents, hive } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    const linkedAgents = {
+      listAgentPage: () => ({
+        agents: [{ ...coder, dispatchRunId: 'run-1' }],
+        rowsScanned: 1,
+      }),
+    } as unknown as AgentService;
+    const runs = {
+      getRun: () => ({
+        id: 'run-1',
+        trackedAgentId: 'another-agent',
+        definitionId: 'reviewer',
+        status: 'running',
+        createdAt: '2026-07-25T11:59:00.000Z',
+      }),
+    } as unknown as BeastRunService;
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'run-1', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Activity owned by another agent',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      linkedAgents,
+      runs,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+
+    expect(query.query({ subjectId: 'operator' }).recentActivity).toEqual([]);
   });
 
   it('degrades a corrupt linked run to an unavailable agent observation', () => {
@@ -300,6 +404,41 @@ describe('HiveStatusQuery', () => {
     expect(query.query({ subjectId: 'operator' })).toMatchObject({
       status: 'partial',
       recentActivity: [{ summary: 'Reviewer activity remains readable' }],
+      meta: { hive: { status: 'partial' } },
+    });
+  });
+
+  it('degrades an overlong hive timestamp while retaining readable namespaces', () => {
+    const { agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    createAgent(agents, 'reviewer', 'operator');
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'coder-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Malformed coder activity',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+    hive.publish(hiveMindAgentTypeNamespace('reviewer'), 'reviewer-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Readable reviewer activity',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+    const recent = hive.recent.bind(hive);
+    vi.spyOn(hive, 'recent').mockImplementation((namespace, options) => {
+      const entries = recent(namespace, options);
+      return namespace === hiveMindAgentTypeNamespace('coder')
+        ? entries.map((entry) => ({ ...entry, publishedAt: 'x'.repeat(65) }))
+        : entries;
+    });
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      recentActivity: [{ summary: 'Readable reviewer activity' }],
       meta: { hive: { status: 'partial' } },
     });
   });
