@@ -287,6 +287,15 @@ describe('brain routes integration', () => {
         status: 'pending',
       }),
     ]);
+
+    const availabilityResponse = await createApp(registry).request('/v1/brain/reviewer/lessons', {
+      headers: authorizedHeaders(),
+    });
+    expect(availabilityResponse.status).toBe(200);
+    expect(await availabilityResponse.json()).toMatchObject({
+      data: [],
+      meta: { available: true, facultyConfigured: true },
+    });
   });
 
   it('does not create a database for unknown or invalid agent types', async () => {

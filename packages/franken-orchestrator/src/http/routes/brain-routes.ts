@@ -33,7 +33,7 @@ const EpisodeQuerySchema = z.object({
 }).strict();
 
 const LessonQuerySchema = z.object({
-  query: z.string().trim().min(1).max(MAX_LESSON_QUERY_LENGTH),
+  query: z.string().trim().min(1).max(MAX_LESSON_QUERY_LENGTH).optional(),
   limit: z.coerce.number().int().min(1).max(MAX_LESSON_LIMIT).default(DEFAULT_LESSON_LIMIT),
 }).strict();
 
@@ -211,7 +211,9 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
     const facultyConfigured = context?.faculties?.learning ?? brain.learning.configured;
     const query = facultyConfigured ? parseLessonQuery(c) : undefined;
     return c.json({
-      data: query ? brain.learning.relevantLessons(query.query, { limit: query.limit }) : [],
+      data: query?.query
+        ? brain.learning.relevantLessons(query.query, { limit: query.limit })
+        : [],
       meta: {
         available: facultyConfigured,
         facultyConfigured,

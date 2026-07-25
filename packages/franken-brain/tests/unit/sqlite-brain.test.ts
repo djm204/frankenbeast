@@ -1087,8 +1087,72 @@ describe('SqliteBrain', () => {
       const fullList = vi.spyOn(brain.memoryReview, 'list');
 
       expect(brain.learning.consolidate({ threshold: 1, lookback: 10 })).toHaveLength(1);
+      const kindList = vi.spyOn(brain.memoryReview, 'listByKind');
       expect(brain.learning.relevantLessons('TypeScript workspace build')).toHaveLength(1);
+      expect(kindList).toHaveBeenCalledTimes(2);
+      expect(kindList.mock.calls.every(([, , options]) => options?.limit !== undefined)).toBe(true);
       expect(fullList).not.toHaveBeenCalled();
+    });
+
+    it('preserves never-store lineage when later evidence evolves the lesson key', () => {
+      recordStaleDeclarationFailure(
+        'TypeScript stale declarations broke workspace build',
+        '2026-07-24T10:00:00.000Z',
+      );
+      recordStaleDeclarationFailure(
+        'Workspace build broke from TypeScript stale declarations',
+        '2026-07-24T10:01:00.000Z',
+      );
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+      brain.memoryReview.neverStore(candidate!.id, { reviewer: 'operator' });
+
+      recordStaleDeclarationFailure(
+        'NewToken TypeScript stale declarations broke workspace build again',
+        '2026-07-24T10:02:00.000Z',
+      );
+      recordStaleDeclarationFailure(
+        'NewToken workspace build broke from TypeScript stale declarations',
+        '2026-07-24T10:03:00.000Z',
+      );
+
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 2 })).toEqual([]);
+      expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
+
+    it('retires every approved lesson absorbed by a bridging revision', () => {
+      for (const [summary, createdAt] of [
+        ['AlphaOnlyMarker parser timeout crash', '2026-07-24T10:00:00.000Z'],
+        ['AlphaOnlyMarker parser timeout crash', '2026-07-24T10:01:00.000Z'],
+        ['OmegaOnlyMarker cache mismatch overflow', '2026-07-24T10:02:00.000Z'],
+        ['OmegaOnlyMarker cache mismatch overflow', '2026-07-24T10:03:00.000Z'],
+      ] as const) {
+        recordStaleDeclarationFailure(summary, createdAt);
+      }
+      const initial = brain.learning.consolidate({
+        threshold: 2,
+        lookback: 10,
+        similarityThreshold: 0.5,
+      });
+      expect(initial).toHaveLength(2);
+      for (const candidate of initial) brain.memoryReview.approve(candidate.id);
+
+      recordStaleDeclarationFailure(
+        'AlphaOnlyMarker parser timeout crash OmegaOnlyMarker cache mismatch overflow',
+        '2026-07-24T10:04:00.000Z',
+      );
+      const [revision] = brain.learning.consolidate({
+        threshold: 2,
+        lookback: 10,
+        similarityThreshold: 0.5,
+      });
+      expect(revision).toBeDefined();
+      brain.memoryReview.resolveConflict(revision!.id, {
+        resolution: 'replace_existing',
+        reviewer: 'operator',
+      });
+
+      expect(brain.learning.relevantLessons('OmegaOnlyMarker cache mismatch overflow'))
+        .toEqual([expect.objectContaining({ key: revision!.key, status: 'approved' })]);
     });
 
     it('does not re-propose a rejected lesson when later evidence changes its value', () => {
