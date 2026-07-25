@@ -291,6 +291,23 @@ describe('dep-factory provider wiring', () => {
     }
   });
 
+  it('keeps compaction telemetry initialization failures best-effort', async () => {
+    const { createBestEffortCompactionAdapter } = await import('../../../src/cli/dep-factory.js');
+    const warn = vi.fn();
+
+    const adapter = createBestEffortCompactionAdapter(
+      '/readonly/traces.db',
+      warn,
+      () => { throw new Error('database is locked'); },
+    );
+
+    expect(adapter).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Compaction telemetry disabled: database is locked'),
+      'dep-factory',
+    );
+  });
+
   it('throws descriptive error for unknown provider name', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({ provider: 'unknown-provider' });

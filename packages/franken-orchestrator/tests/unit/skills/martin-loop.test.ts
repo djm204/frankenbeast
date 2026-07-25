@@ -934,6 +934,7 @@ describe('MartinLoop', () => {
       renderer: new ChunkSessionRenderer(),
       compactor: new ChunkSessionCompactor({
         summarize: async () => 'Compacted summary',
+        measureSessionTokens: () => 0,
         onCompaction: async () => { throw new Error('traces database is locked'); },
       }),
       contextUsage: () => ({
@@ -976,6 +977,7 @@ describe('MartinLoop', () => {
           abortController.abort('cancelled after compaction summary');
           return 'Compacted summary';
         },
+        measureSessionTokens: () => 0,
         onCompaction,
       }),
       contextUsage: () => ({

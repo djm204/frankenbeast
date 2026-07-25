@@ -21,7 +21,7 @@ export interface CompactionEventQuery {
 export interface CompactionEventAdapter {
   recordCompaction(event: CompactionEvent): Promise<void>
   queryCompactions(query: CompactionEventQuery): Promise<CompactionEvent[]>
-  aggregateCompactions(query: { sessionId: string; since: number }): Promise<{
+  aggregateCompactions(query: { sessionId: string; since: number; before: number }): Promise<{
     count: number
     latestAt: number | null
   }>
@@ -61,6 +61,7 @@ export class CompactionMetrics {
     const aggregate = await this.adapter.aggregateCompactions({
       sessionId,
       since: now - windowMs,
+      before: now,
     })
     return {
       count: aggregate.count,

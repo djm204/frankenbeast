@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js';
 import { CompactionMetrics } from './compaction-metrics.js';
+import { TraceContext } from './core/TraceContext.js';
 
 const tempDirs: string[] = [];
 
@@ -52,7 +53,7 @@ describe('CompactionMetrics', () => {
     const metrics = new CompactionMetrics(adapter);
     const now = 1_750_000_000_000;
 
-    for (const [generation, timestamp] of [[1, now - 3_600_001], [2, now - 1_000], [3, now]] as const) {
+    for (const [generation, timestamp] of [[1, now - 3_600_001], [2, now - 1_000], [3, now], [4, now + 1]] as const) {
       await metrics.record({
         sessionId: 'chunk-session-rate',
         runId: 'run-rate',
@@ -71,6 +72,29 @@ describe('CompactionMetrics', () => {
       latestAt: now,
     });
 
+    await adapter.close();
+  });
+
+  it('removes compaction telemetry when its retained trace run is deleted', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-retention-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+    const trace = TraceContext.createTrace('retained run');
+    await adapter.flush(trace);
+    await metrics.record({
+      sessionId: 'chunk-session-retention',
+      runId: trace.id,
+      generation: 1,
+      triggerReason: 'threshold',
+      tokensBefore: 900,
+      tokensAfter: 120,
+      timestamp: 1_750_000_000_000,
+    });
+
+    await adapter.deleteTrace(trace.id);
+
+    await expect(metrics.query('chunk-session-retention')).resolves.toEqual([]);
     await adapter.close();
   });
 });

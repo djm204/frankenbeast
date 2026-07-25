@@ -24,3 +24,7 @@
 - Scope audit: branch is based directly on `origin/main`; no TokenCounter, CostCalculator, provider, Hive Brain, Brain Vitals API/UI, or #3727 cache-accounting changes are present.
 - Codex round 1 findings addressed with RED→GREEN coverage: telemetry is emitted only after canonical-session persistence, SQLite failures are best-effort, and before/after token estimates measure the same appended transcript boundary.
 - Codex round 2 findings addressed with RED→GREEN coverage: adapter shutdown is best-effort, event timestamps use the same wall clock as rate windows, and `compactAndRecord()` provides an explicit persisted manual-compaction path.
+- Codex round 3 findings addressed with RED→GREEN coverage: rate windows have an upper bound, trace deletion removes run compaction rows, telemetry requires post-compaction token measurement, and SQLite telemetry initialization is best-effort.
+- Final focused observer verification: 22/22 passed; focused orchestrator verification: 56/56 passed.
+- Final package verification: observer 902/902 passed; orchestrator 4,506/4,506 passed after adding required token-measurement fixtures to two existing Martin-loop telemetry tests.
+- Final root `npm run lint`, `npm run typecheck`, and `npm run build`: passed (pre-existing lint warnings only).

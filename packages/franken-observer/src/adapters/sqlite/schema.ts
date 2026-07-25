@@ -82,6 +82,7 @@ export const SELECT_TRACE_SUMMARIES = `
 `
 
 export const DELETE_SPANS_BY_TRACE = `DELETE FROM spans WHERE traceId = ?`
+export const DELETE_COMPACTIONS_BY_RUN = `DELETE FROM compaction_events WHERE runId = ?`
 export const DELETE_TRACE = `DELETE FROM traces WHERE id = ?`
 
 export const UPSERT_COMPACTION_EVENT = `
@@ -108,5 +109,5 @@ export const SELECT_COMPACTION_EVENTS = `
 export const SELECT_COMPACTION_AGGREGATE = `
   SELECT COUNT(*) AS count, MAX(timestamp) AS latestAt
   FROM compaction_events
-  WHERE sessionId = @sessionId AND timestamp >= @since
+  WHERE sessionId = @sessionId AND timestamp >= @since AND timestamp <= @before
 `

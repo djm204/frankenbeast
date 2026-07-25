@@ -19,7 +19,11 @@ export interface ChunkSessionCompactorDeps {
 }
 
 export class ChunkSessionCompactor {
-  constructor(private readonly deps: ChunkSessionCompactorDeps) {}
+  constructor(private readonly deps: ChunkSessionCompactorDeps) {
+    if (deps.onCompaction !== undefined && deps.measureSessionTokens === undefined) {
+      throw new Error('measureSessionTokens is required when onCompaction is configured');
+    }
+  }
 
   buildCompactionPrompt(session: ChunkSession): string {
     const transcript = session.transcript
@@ -72,8 +76,8 @@ export class ChunkSessionCompactor {
       sessionId: compacted.sessionId,
       generation: compacted.compactionGeneration,
       triggerReason,
-      tokensBefore: this.deps.measureSessionTokens?.(previous) ?? previous.contextWindow.usedTokens,
-      tokensAfter: this.deps.measureSessionTokens?.(compacted) ?? compacted.contextWindow.usedTokens,
+      tokensBefore: this.deps.measureSessionTokens!(previous),
+      tokensAfter: this.deps.measureSessionTokens!(compacted),
       timestamp: wallClockNow(),
     });
   }

@@ -17,6 +17,7 @@ import {
   SELECT_ALL_TRACE_IDS,
   SELECT_TRACE_SUMMARIES,
   DELETE_SPANS_BY_TRACE,
+  DELETE_COMPACTIONS_BY_RUN,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
@@ -197,9 +198,11 @@ function execute(operation, payload) {
       return db.prepare(sql.selectTraceSummaries).all()
     case 'deleteTrace': {
       const deleteSpans = db.prepare(sql.deleteSpansByTrace)
+      const deleteCompactions = db.prepare(sql.deleteCompactionsByRun)
       const deleteTrace = db.prepare(sql.deleteTrace)
       db.transaction((traceId) => {
         deleteSpans.run(traceId)
+        deleteCompactions.run(traceId)
         deleteTrace.run(traceId)
       })(payload.traceId)
       return undefined
@@ -282,6 +285,7 @@ class SQLiteWorkerClient {
             selectAllTraceIds: SELECT_ALL_TRACE_IDS,
             selectTraceSummaries: SELECT_TRACE_SUMMARIES,
             deleteSpansByTrace: DELETE_SPANS_BY_TRACE,
+            deleteCompactionsByRun: DELETE_COMPACTIONS_BY_RUN,
             deleteTrace: DELETE_TRACE,
             upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
             selectCompactionEvents: SELECT_COMPACTION_EVENTS,
@@ -892,9 +896,11 @@ export class SQLiteAdapter implements ExportAdapter {
     } else {
       await this.withSqliteLockRetry('delete trace transaction', () => {
         const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
+        const deleteCompactions = this.db.prepare(DELETE_COMPACTIONS_BY_RUN)
         const deleteTrace = this.db.prepare(DELETE_TRACE)
         const transaction = this.db.transaction((id: string) => {
           deleteSpans.run(id)
+          deleteCompactions.run(id)
           deleteTrace.run(id)
         })
 
@@ -940,7 +946,7 @@ export class SQLiteAdapter implements ExportAdapter {
     })
   }
 
-  async aggregateCompactions(query: { sessionId: string; since: number }): Promise<{
+  async aggregateCompactions(query: { sessionId: string; since: number; before: number }): Promise<{
     count: number
     latestAt: number | null
   }> {

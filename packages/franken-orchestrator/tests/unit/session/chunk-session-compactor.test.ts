@@ -3,6 +3,13 @@ import { ChunkSessionCompactor } from '../../../src/session/chunk-session-compac
 import { createChunkSession } from '../../../src/session/chunk-session.js';
 
 describe('ChunkSessionCompactor', () => {
+  it('requires token measurement whenever compaction telemetry is enabled', () => {
+    expect(() => new ChunkSessionCompactor({
+      summarize: async () => 'Compacted summary',
+      onCompaction: async () => undefined,
+    })).toThrow('measureSessionTokens is required when onCompaction is configured');
+  });
+
   it('replaces old transcript entries with a compaction summary and increments generation', async () => {
     const compactor = new ChunkSessionCompactor({
       summarize: async () => 'Summary: files touched and remaining objective.',
@@ -67,6 +74,7 @@ describe('ChunkSessionCompactor', () => {
     const compactor = new ChunkSessionCompactor({
       summarize: async () => 'Compacted summary',
       onCompaction,
+      measureSessionTokens: () => 0,
     });
     const session = createChunkSession({
       planName: 'clock-plan',
@@ -101,6 +109,7 @@ describe('ChunkSessionCompactor', () => {
     const compactor = new ChunkSessionCompactor({
       summarize: async () => 'Compacted summary',
       onCompaction,
+      measureSessionTokens: () => 0,
     });
     const session = createChunkSession({
       planName: 'manual-plan',

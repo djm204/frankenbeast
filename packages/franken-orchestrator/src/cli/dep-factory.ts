@@ -460,6 +460,24 @@ type CleanupWarningLogger = Pick<BeastLogger, 'warn'> | ((message: string, scope
 
 type SessionArtifactRemover = (targetPath: string) => void;
 
+export function createBestEffortCompactionAdapter(
+  databasePath: string,
+  warn: CleanupWarningLogger,
+  createAdapter: (path: string) => SQLiteAdapter = path => new SQLiteAdapter(path),
+): SQLiteAdapter | undefined {
+  try {
+    return createAdapter(databasePath);
+  } catch (error) {
+    const message = `Compaction telemetry disabled: ${errorMessage(error)}`;
+    if (typeof warn === 'function') {
+      warn(message, 'dep-factory');
+    } else {
+      warn.warn(message, 'dep-factory');
+    }
+    return undefined;
+  }
+}
+
 function warnSessionArtifactCleanupFailure(
   artifactPath: string,
   error: unknown,
@@ -530,7 +548,7 @@ async function createObserverDeps(
     budgetLimitUsd: config.budget,
     sessionId: runSessionId,
     replayStore,
-    compactionAdapter: new SQLiteAdapter(options.paths.tracesDb),
+    compactionAdapter: createBestEffortCompactionAdapter(options.paths.tracesDb, logger),
   });
   if (config.enableTracing) {
     observerBridge.startTrace(runSessionId);
