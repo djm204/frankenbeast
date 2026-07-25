@@ -27,6 +27,17 @@ export interface DispatchTrackedAgentRequest {
   readonly executionMode?: BeastExecutionMode | undefined;
 }
 
+export function rejectInterviewAgent(agents: AgentService, agentId: string): TrackedAgent {
+  const rejected = agents.updateAgent(agentId, { status: 'rejected' });
+  agents.appendEvent(agentId, {
+    level: 'info',
+    type: 'agent.interview.rejected',
+    message: 'Rejected tracked agent after its chat interview was denied',
+    payload: {},
+  });
+  return rejected;
+}
+
 export class AgentInitService {
   constructor(
     private readonly agents: AgentService,
@@ -128,5 +139,13 @@ export class AgentInitService {
       }
       throw error;
     }
+  }
+
+  abortAgent(agentId: string): TrackedAgent {
+    const agent = this.agents.getMutableAgent(agentId);
+    if (agent.status !== 'initializing') {
+      return agent;
+    }
+    return rejectInterviewAgent(this.agents, agentId);
   }
 }

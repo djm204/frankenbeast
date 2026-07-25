@@ -24,6 +24,28 @@ const objectivePrompt: BeastInterviewPrompt = {
 };
 
 describe('ChatBeastDispatchAdapter', () => {
+  it('aborts the interview and stops its initializing agent when chat rejects it', async () => {
+    const abort = vi.fn();
+    const abortAgent = vi.fn();
+    const adapter = new ChatBeastDispatchAdapter({
+      catalog: {} as BeastCatalogService,
+      interviews: { abort } as unknown as BeastInterviewService,
+      dispatch: {} as BeastDispatchService,
+      agentInit: { abortAgent } as unknown as AgentInitService,
+    });
+    const context = {
+      agentId: 'agent-1',
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-1',
+      status: 'interviewing' as const,
+    };
+
+    await (adapter as unknown as { reject(value: typeof context): Promise<void> }).reject(context);
+
+    expect(abort).toHaveBeenCalledWith('interview-1');
+    expect(abortAgent).toHaveBeenCalledWith('agent-1');
+  });
+
   it('starts a persisted interview when chat asks to spawn a beast', async () => {
     const createChatInitAgent = vi.fn(() => ({
       id: 'agent-1',

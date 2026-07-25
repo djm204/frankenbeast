@@ -1112,6 +1112,26 @@ describe('beast routes', () => {
     expect(answered.data.session.currentPrompt.key).toBe('objective');
   });
 
+  it('aborts an active interview through the daemon control API', async () => {
+    const { app, operatorToken } = createBeastApp();
+    const headers = { authorization: 'Bearer ' + operatorToken };
+    const startResponse = await app.request('/v1/beasts/interviews/martin-loop/start', {
+      method: 'POST',
+      headers,
+    });
+    const started = await startResponse.json() as { data: { id: string } };
+
+    const response = await app.request(`/v1/beasts/interviews/${started.data.id}/abort`, {
+      method: 'POST',
+      headers,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { id: started.data.id, status: 'aborted' },
+    });
+  });
+
   it('returns a structured 400 for invalid option-backed interview answers', async () => {
     const { app, operatorToken } = createBeastApp();
     const headers = {

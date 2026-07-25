@@ -8,6 +8,7 @@ import { MaintenanceModeError, type MaintenanceModeService } from '../../beasts/
 import type { AgentService } from '../../beasts/services/agent-service.js';
 import { AgentToolPolicyError } from '../../beasts/services/role-tool-manifest.js';
 import type { BeastDispatchService } from '../../beasts/services/beast-dispatch-service.js';
+import { rejectInterviewAgent } from '../../beasts/services/agent-init-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../beasts/services/dispatch-failure-message.js';
 import type { BeastRunService } from '../../beasts/services/beast-run-service.js';
 import {
@@ -562,10 +563,37 @@ export function agentRoutes(deps: AgentRoutesDeps): Hono {
     }
   });
 
+  app.post('/v1/beasts/agents/:agentId/reject', async (c) => {
+    const agentId = c.req.param('agentId');
+    try {
+      const agent = getMutableAgent(deps, agentId);
+      if (agent.dispatchRunId) {
+        await deps.runs.stop(agent.dispatchRunId, 'operator');
+      }
+      return c.json({ data: redactAgentIfNeeded(rejectInterviewAgent(deps.agents, agentId), deps) });
+    } catch (error) {
+      if (error instanceof UnknownTrackedAgentError) {
+        throw new HttpError(
+          404,
+          'TRACKED_AGENT_NOT_FOUND',
+          `Tracked agent '${agentId}' was not found`,
+        );
+      }
+      throw error;
+    }
+  });
+
   app.post('/v1/beasts/agents/:agentId/restart', async (c) => {
     const agentId = c.req.param('agentId');
     try {
       const agent = getMutableAgent(deps, agentId);
+      if (agent.status === 'rejected') {
+        throw new HttpError(
+          409,
+          'TRACKED_AGENT_NOT_STARTABLE',
+          `Tracked agent '${agentId}' was rejected and cannot restart`,
+        );
+      }
       if (agent.dispatchRunId) {
         const existingRun = deps.runs.getRun(agent.dispatchRunId);
         const run = shouldDispatchFreshRunForModuleConfig(agent, existingRun)

@@ -159,9 +159,10 @@ compatibility projection. The standalone chat server uses it by default for
 newly bound `local-operator` sessions; injected stores and unbound legacy
 per-session records remain valid. Bound sessions share one conversation
 mutation-admission key across REST and WebSocket turns. The existing REST
-session routes and `/v1/chat/ws` remain
-the browser transport. The read-only #3702 status-query slice is implemented;
-#3703 still owns governed dispatch wiring.
+session routes and `/v1/chat/ws` remain the browser transport. No existing REST
+or WebSocket chat API contract changed. #3703's governed dispatch boundary and
+the read-only #3702 status-query slice are implemented; runtime Hive
+query/faculty routing remains follow-up work.
 
 The package exports `HiveStatusQuery`, a read-only query module for "what are my
 agents doing" turns that do not provide an `agentId`. A query is bound to one
@@ -177,7 +178,10 @@ mutate chat state, create agents, or dispatch work.
 The dispatch invariant is unchanged: transport -> `ChatRuntime` ->
 `BeastDispatchPort` -> `BeastDispatchService` -> the normal Beast executor and
 governor/HITL policy. Brain/faculty code must not create runs in storage or
-start process/container executors directly.
+start process/container executors directly. `BrainConversationSessionStore`
+projects canonical `pending_approval` state into every bound transport session,
+so pending or denied work cannot be resumed through a sibling browser binding;
+the executor's `pending_approval` run status is surfaced unchanged.
 
 The current local Beast construction path attaches `ReasoningFacultyAdapter` to
 its `SqliteBrain`. The adapter remains the `ICritiqueModule` used by planning,

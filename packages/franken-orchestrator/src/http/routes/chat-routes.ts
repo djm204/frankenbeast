@@ -466,6 +466,12 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
     return withChatMutationAdmission(c, id, async (session) => {
       if (!session.pendingApproval) {
         if (session.state === 'approved' || session.state === 'rejected') {
+          if (session.state === 'rejected' && session.beastContext) {
+            await runtime.rejectBeastContext?.(session.beastContext);
+            session.beastContext = null;
+            session.updatedAt = isoNow();
+            sessionStore.save(session);
+          }
           return c.json({
             data: {
               id: session.id,
@@ -477,8 +483,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         }
 
         if (session.state === 'pending_approval' && !approved) {
+          await runtime.rejectBeastContext?.(session.beastContext);
           session.state = 'rejected';
           session.pendingApproval = null;
+          session.beastContext = null;
           session.updatedAt = isoNow();
           sessionStore.save(session);
 
@@ -523,8 +531,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         }
         if (await hasConsumedApproval(session, runtimeInput)) {
           await recordApprovalReplay(session, runtimeInput, 'approval was already consumed', approvalRequester(c));
+          await runtime.rejectBeastContext?.(session.beastContext);
           session.pendingApproval = null;
           session.state = 'rejected';
+          session.beastContext = null;
           session.updatedAt = isoNow();
           sessionStore.save(session);
           return c.json({
@@ -586,8 +596,10 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         await recordApprovalDecision(session, 'denied', 'human', {
           requester: approvalRequester(c),
         });
+        await runtime.rejectBeastContext?.(session.beastContext);
         session.state = 'rejected';
         session.pendingApproval = null;
+        session.beastContext = null;
       }
       session.updatedAt = isoNow();
       sessionStore.save(session);

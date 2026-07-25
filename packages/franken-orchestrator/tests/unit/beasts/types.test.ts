@@ -43,7 +43,7 @@ describe('beast types', () => {
   it('supports the tracked agent init lifecycle statuses', () => {
     const statuses: TrackedAgentStatus[] = [...TRACKED_AGENT_STATUSES];
 
-    expect(statuses).toHaveLength(8);
+    expect(statuses).toHaveLength(9);
     expect(statuses).toEqual([
       'initializing',
       'awaiting_approval',
@@ -52,6 +52,7 @@ describe('beast types', () => {
       'completed',
       'failed',
       'stopped',
+      'rejected',
       'deleted',
     ]);
   });

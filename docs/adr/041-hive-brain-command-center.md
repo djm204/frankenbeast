@@ -220,13 +220,23 @@ governor/HITL decisions remain authoritative. A denial, unavailable dependency,
 unsafe approval payload, or policy error fails closed and is persisted/emitted
 using the current chat and Beast failure contracts.
 
-The current code proves the shared structural seam but does not expose a direct
-`IGovernorModule` call inside `BeastDispatchService.createRun`. Therefore #3703
-must first characterize the old per-session path with the required denied/
-unapproved integration test. If that test exposes a missing governor decision,
-the fix belongs once in this shared adapter/service/execution seam so both old
-and brain-conversation callers fail identically; adding a brain-only gate or
-claiming the service is already gated without evidence is not acceptable.
+#3703 is implemented through the shared structural seam. The
+`BrainConversationSessionStore` remains a persistence projection: central
+command turns still enter `ChatRuntime`, the existing `BeastDispatchPort`, and
+`BeastDispatchService.createRun`; no Brain repository or faculty starts an
+executor. The integration proof alternates two transport sessions bound to one
+canonical conversation, invokes the real `BeastLoop` executor seam with a
+rejecting HITL governor, and verifies the governor request is recorded, the
+protected skill is not executed, and the denied run fails. It then independently
+exercises the normal chat-level canonical `pending_approval` gate. That gate
+blocks the sibling session before a second service call and projects denial to
+both bindings. Beast
+run approval remains owned by the existing governor/executor rather than the chat
+approval endpoint. This is the same chat approval gate
+and Beast service/execution path used by legacy per-session callers, not a
+Brain-only governor. No existing REST or WebSocket chat API contract changed.
+`BeastDispatchService.createRun` does not expose a direct `IGovernorModule` call;
+the established governor boundary remains inside the selected Beast executor.
 
 `dispatchedBy = "chat"`, the conversation/session correlation ids, selected
 `brainKey`/`facultyId`, and routing reason must be retained as audit metadata.

@@ -132,9 +132,11 @@ export class ChatRuntime {
 
     if (state.pendingApproval && command !== '/approve' && command !== '/reject' && !isApprovedReplay) {
       if (trimmed.toLowerCase().startsWith('action rejected by user:')) {
-        return this.result({ ...state, pendingApproval: false }, [
+        await this.rejectPendingBeast(state);
+        return this.result({ ...state, pendingApproval: false, beastContext: null }, [
           { kind: 'approval', content: 'Rejected.' },
         ], {
+          beastContext: null,
           state: 'rejected',
         });
       }
@@ -236,21 +238,38 @@ export class ChatRuntime {
         ], {
           state: state.pendingApproval ? 'approved' : 'active',
         });
-      case '/reject':
+      case '/reject': {
+        if (state.pendingApproval) {
+          await this.rejectPendingBeast(state);
+        }
+        const beastContext = state.pendingApproval ? null : state.beastContext;
         return this.result({
           ...state,
           pendingApproval: false,
+          beastContext,
         }, [
           {
             kind: state.pendingApproval ? 'approval' : 'status',
             content: state.pendingApproval ? 'Rejected.' : 'Nothing pending.',
           },
         ], {
+          beastContext,
           state: state.pendingApproval ? 'rejected' : 'active',
         });
+      }
       default:
         return this.result(state, []);
     }
+  }
+
+  async rejectBeastContext(context: ChatBeastContext | null | undefined): Promise<void> {
+    if (context && this.beastDispatchAdapter) {
+      await this.beastDispatchAdapter.reject(context);
+    }
+  }
+
+  private async rejectPendingBeast(state: ChatRuntimeState): Promise<void> {
+    await this.rejectBeastContext(state.beastContext);
   }
 
   private async runTurn(

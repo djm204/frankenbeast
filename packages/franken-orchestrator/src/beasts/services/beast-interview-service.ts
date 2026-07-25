@@ -22,6 +22,13 @@ export class UnknownBeastInterviewSessionError extends Error {
   }
 }
 
+export class AbortedBeastInterviewSessionError extends Error {
+  constructor(public readonly sessionId: string) {
+    super(`Beast interview session is aborted: ${sessionId}`);
+    this.name = 'AbortedBeastInterviewSessionError';
+  }
+}
+
 export class BeastInterviewService {
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -47,6 +54,7 @@ export class BeastInterviewService {
     if (!session) {
       throw new UnknownBeastInterviewSessionError(sessionId);
     }
+    this.assertNotAborted(session);
 
     const definition = this.getDefinitionOrThrow(session.definitionId);
     const prompt = currentPrompt(definition, session.answers);
@@ -70,6 +78,7 @@ export class BeastInterviewService {
     if (!session) {
       throw new UnknownBeastInterviewSessionError(sessionId);
     }
+    this.assertNotAborted(session);
 
     const definition = this.getDefinitionOrThrow(session.definitionId);
     const prompt = currentPrompt(definition, session.answers);
@@ -108,6 +117,26 @@ export class BeastInterviewService {
       currentPrompt: nextPrompt,
       complete: false,
     };
+  }
+
+  abort(sessionId: string): BeastInterviewSession {
+    const session = this.repository.getInterviewSession(sessionId);
+    if (!session) {
+      throw new UnknownBeastInterviewSessionError(sessionId);
+    }
+    if (session.status !== 'active') {
+      return session;
+    }
+    return this.repository.updateInterviewSession(sessionId, {
+      status: 'aborted',
+      updatedAt: isoNow(),
+    });
+  }
+
+  private assertNotAborted(session: BeastInterviewSession): void {
+    if (session.status === 'aborted') {
+      throw new AbortedBeastInterviewSessionError(session.id);
+    }
   }
 
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {

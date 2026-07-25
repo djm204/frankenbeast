@@ -604,8 +604,10 @@ export class ChatSocketController {
     if (!session.pendingApproval) {
       if (session.state === 'pending_approval') {
         if (!approved) {
+          await this.runtime.rejectBeastContext(session.beastContext);
           session.pendingApproval = null;
           session.state = 'rejected';
+          session.beastContext = null;
           session.updatedAt = nowIso();
           this.sessionStore.save(session);
           this.emit(peer, {
@@ -631,6 +633,12 @@ export class ChatSocketController {
         });
         return;
       }
+      if (session.state === 'rejected' && session.beastContext) {
+        await this.runtime.rejectBeastContext(session.beastContext);
+        session.beastContext = null;
+        session.updatedAt = nowIso();
+        this.sessionStore.save(session);
+      }
       this.emit(peer, {
         type: 'turn.approval.resolved',
         approved: session.state !== 'rejected',
@@ -643,8 +651,10 @@ export class ChatSocketController {
       await this.recordApprovalDecision(session, 'denied', 'human', {
         requester: connectionRequester(peer, this.connections),
       });
+      await this.runtime.rejectBeastContext(session.beastContext);
       session.pendingApproval = null;
       session.state = 'rejected';
+      session.beastContext = null;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       this.emit(peer, {
@@ -699,8 +709,10 @@ export class ChatSocketController {
     try {
       approvalConsumed = await this.hasConsumedApproval(session, runtimeInput);
     } catch {
+      await this.runtime.rejectBeastContext(session.beastContext);
       session.pendingApproval = null;
       session.state = 'rejected';
+      session.beastContext = null;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       const timestamp = nowIso();
@@ -719,8 +731,10 @@ export class ChatSocketController {
     }
     if (approvalConsumed) {
       await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
+      await this.runtime.rejectBeastContext(session.beastContext);
       session.pendingApproval = null;
       session.state = 'rejected';
+      session.beastContext = null;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       const timestamp = nowIso();

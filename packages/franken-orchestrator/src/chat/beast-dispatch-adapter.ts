@@ -41,6 +41,15 @@ const BEAST_NOUNS = /\b(beast|frankenbeast|agent|worker)\b/i;
 export class ChatBeastDispatchAdapter {
   constructor(private readonly options: ChatBeastDispatchAdapterOptions) {}
 
+  async reject(context: ChatBeastContext): Promise<void> {
+    if (context.interviewSessionId) {
+      this.options.interviews.abort(context.interviewSessionId);
+    }
+    if (context.agentId) {
+      this.options.agentInit.abortAgent(context.agentId);
+    }
+  }
+
   async handle(input: string, state: ChatBeastDispatchState): Promise<ChatBeastDispatchResult | null> {
     const activeContext = state.beastContext && state.executionMode
       ? { ...state.beastContext, executionMode: state.executionMode }

@@ -19,11 +19,18 @@ import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { ContainerBeastExecutor } from '../../../src/beasts/execution/container-beast-executor.js';
 import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-policy.js';
+import type { BeastExecutor } from '../../../src/beasts/execution/beast-executor.js';
 import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 import { MAX_CHAT_MESSAGE_CONTENT_LENGTH } from '@franken/types';
+import { BrainRegistry } from '@franken/brain';
+import {
+  BrainConversationSessionStore,
+  FileSessionStore,
+} from '../../../src/chat/session-store.js';
 
 import { testCredential } from '../../support/test-credentials.js';
+import { createTestOrchestrator } from '../../helpers/test-orchestrator-factory.js';
 
 const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -552,6 +559,190 @@ describe('Chat HTTP Routes', () => {
       expect.objectContaining({ command: 'docker' }),
       expect.any(Object),
     );
+  });
+
+  it('routes a shared BrainConversation through BeastDispatchService without bypassing pending approval', async () => {
+    const repository = new SQLiteBeastRepository(join(TMP, 'brain-dispatch-beasts.db'));
+    const logStore = new BeastLogStore(join(TMP, 'brain-dispatch-logs'));
+    const catalog = new BeastCatalogService();
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repository);
+    const eventBus = new BeastEventBus();
+    const interviews = new BeastInterviewService(repository, catalog);
+    const governedExecution = createTestOrchestrator({
+      planner: {
+        planFactory: () => ({
+          tasks: [{
+            id: 'task-1',
+            objective: 'Write governed output',
+            requiredSkills: ['file-write'],
+            dependsOn: [],
+          }],
+        }),
+      },
+      governor: { defaultDecision: 'rejected' },
+    });
+    const governorGatedExecutor = {
+      start: vi.fn(async (run: Parameters<BeastExecutor['start']>[0]) => (
+        governedExecution.loop.run({
+          projectId: 'proj',
+          userInput: 'Write governed output',
+        }).then((result) => {
+          expect(result.taskResults).toEqual([
+            expect.objectContaining({ status: 'skipped' }),
+          ]);
+          return repository.createAttempt(run.id, {
+            status: 'failed',
+            startedAt: '2026-07-25T00:00:00.000Z',
+            executorMetadata: { backend: 'governor-gated-test' },
+          });
+        })
+      )),
+      stop: vi.fn(async () => { throw new Error('not used'); }),
+      kill: vi.fn(async () => { throw new Error('not used'); }),
+    };
+    const dispatch = new BeastDispatchService(
+      repository,
+      catalog,
+      { process: governorGatedExecutor, container: governorGatedExecutor },
+      metrics,
+      logStore,
+      { eventBus },
+    );
+    const createRun = vi.spyOn(dispatch, 'createRun');
+    const registry = new BrainRegistry(join(TMP, 'brain-dispatch-registry'));
+    const sessionStore = new BrainConversationSessionStore(
+      new FileSessionStore(join(TMP, 'brain-dispatch-sessions')),
+      registry,
+      'local-operator',
+    );
+
+    try {
+      app = createChatApp({
+        sessionStore,
+        llm: { complete: llmComplete },
+        projectName: 'test-project',
+        beastControl: {
+          catalog,
+          dispatch,
+          runs: new BeastRunService(
+            repository,
+            catalog,
+            { process: governorGatedExecutor, container: governorGatedExecutor },
+            metrics,
+            logStore,
+          ),
+          interviews,
+          agents,
+          metrics,
+          security: new TransportSecurityService(),
+          operatorToken: TEST_OPERATOR_TOKEN,
+          eventBus,
+          ticketStore: new SseConnectionTicketStore(),
+          rateLimit: { windowMs: 60_000, max: 50 },
+        },
+      });
+
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        authorization: `Bearer ${TEST_OPERATOR_TOKEN}`,
+      };
+      const createSession = async () => {
+        const response = await app.request('/v1/chat/sessions', {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ projectId: 'proj' }),
+        });
+        expect(response.status).toBe(201);
+        return (await response.json()).data as ChatSession;
+      };
+      const first = await createSession();
+      const second = await createSession();
+      const send = async (sessionId: string, content: string) => app.request(
+        `/v1/chat/sessions/${sessionId}/messages`,
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ content }),
+        },
+      );
+
+      expect((await send(first.id, 'spawn a martin beast')).status).toBe(200);
+      expect((await send(second.id, 'claude')).status).toBe(200);
+      expect((await send(first.id, 'Ship governed Brain dispatch')).status).toBe(200);
+      const dispatchResponse = await send(second.id, 'docs/chunks');
+      expect(dispatchResponse.status).toBe(200);
+      await expect(dispatchResponse.json()).resolves.toMatchObject({
+        data: {
+          outcome: {
+            content: expect.stringContaining('Status: failed'),
+          },
+        },
+      });
+
+      expect(createRun).toHaveBeenCalledOnce();
+      expect(governorGatedExecutor.start).toHaveBeenCalledOnce();
+      expect(governedExecution.ports.governor.requests).toHaveLength(1);
+      expect(governedExecution.ports.skills.executions).toHaveLength(0);
+      expect(repository.listRuns()).toEqual([
+        expect.objectContaining({
+          dispatchedBy: 'chat',
+          dispatchedByUser: `chat-session:${second.id}`,
+          status: 'failed',
+        }),
+      ]);
+
+      const canonical = sessionStore.get(first.id);
+      expect(canonical?.conversationId).toBe(sessionStore.get(second.id)?.conversationId);
+      if (!canonical) throw new Error('expected canonical chat session');
+      // Beast-run approval remains governor-owned. Exercise the chat-level
+      // approval gate separately to prove a sibling binding cannot bypass it.
+      const pendingInterview = interviews.start('martin-loop');
+      interviews.answer(pendingInterview.id, 'claude');
+      interviews.answer(pendingInterview.id, 'Attempt bypass');
+      canonical.state = 'pending_approval';
+      canonical.pendingApproval = {
+        description: 'Governor approval required before another dispatch',
+        requestedAt: '2026-07-25T00:01:00.000Z',
+        command: 'frankenbeast run --plan-dir docs/chunks',
+        risk: 'high',
+      };
+      canonical.beastContext = {
+        definitionId: 'martin-loop',
+        interviewSessionId: pendingInterview.id,
+        status: 'interviewing',
+        executionMode: 'process',
+      };
+      sessionStore.save(canonical);
+
+      const blocked = await send(second.id, 'docs/chunks');
+      expect(blocked.status).toBe(409);
+      await expect(blocked.json()).resolves.toMatchObject({
+        error: { code: 'APPROVAL_PENDING' },
+      });
+      expect(createRun).toHaveBeenCalledOnce();
+      expect(governorGatedExecutor.start).toHaveBeenCalledOnce();
+
+      const denied = await app.request(`/v1/chat/sessions/${second.id}/approve`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ approved: false }),
+      });
+      expect(denied.status).toBe(200);
+      await expect(denied.json()).resolves.toMatchObject({
+        data: { approved: false, state: 'rejected', pendingApproval: null },
+      });
+      expect(sessionStore.get(first.id)?.state).toBe('rejected');
+      expect(() => interviews.resume(pendingInterview.id)).toThrow(/aborted/);
+      expect(createRun).toHaveBeenCalledOnce();
+
+      const afterDenial = await send(first.id, 'docs/chunks');
+      expect(afterDenial.status).toBe(200);
+      expect(createRun).toHaveBeenCalledOnce();
+      expect(sessionStore.get(second.id)?.beastContext).toBeNull();
+    } finally {
+      registry.close();
+    }
   });
 
   it('uses the default LLM-backed executor for code-request turns', async () => {
@@ -1242,6 +1433,57 @@ describe('Chat HTTP Routes', () => {
     expect(sessionStore.save).toHaveBeenCalledOnce();
     expect(session.state).toBe('rejected');
     expect(session.pendingApproval).toBeNull();
+  });
+
+  it('POST /v1/chat/sessions/:id/approve cleans stale Beast context on repeated rejection', async () => {
+    const now = new Date().toISOString();
+    const beastContext = {
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-already-rejected',
+      status: 'interviewing' as const,
+      executionMode: 'process' as const,
+    };
+    const session: ChatSession = {
+      id: 'chat-already-rejected-cleanup',
+      projectId: 'proj',
+      transcript: [],
+      state: 'rejected',
+      pendingApproval: null,
+      beastContext,
+      tokenTotals: { cheap: 0, premiumReasoning: 0, premiumExecution: 0 },
+      costUsd: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const sessionStore = {
+      create: vi.fn(),
+      get: vi.fn(() => session),
+      save: vi.fn((updated: ChatSession) => Object.assign(session, updated)),
+      list: vi.fn(() => [session.id]),
+      listSessions: vi.fn(() => [session]),
+      delete: vi.fn(),
+    };
+    const rejectBeastContext = vi.fn();
+
+    app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: { run: vi.fn(), rejectBeastContext } as never,
+      turnRunner: {} as never,
+      sessionTokenSecret: ['test', 'http', 'fixture'].join('-'),
+    });
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approved: false }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(rejectBeastContext).toHaveBeenCalledOnce();
+    expect(rejectBeastContext).toHaveBeenCalledWith(beastContext);
+    expect(session.beastContext).toBeNull();
+    expect(sessionStore.save).toHaveBeenCalledOnce();
   });
 
   it('POST /v1/chat/sessions/:id/approve runs the pending command for HTTP fallback approvals', async () => {

@@ -14,6 +14,7 @@ import { CapacityReservationPolicy } from '../../../src/beasts/services/capacity
 import { MaintenanceModeError, MaintenanceModeService } from '../../../src/beasts/services/maintenance-mode-service.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 import { AgentToolPolicyError } from '../../../src/beasts/services/role-tool-manifest.js';
+import { RejectedTrackedAgentError } from '../../../src/beasts/errors.js';
 
 describe('BeastDispatchService', () => {
   let workDir: string | undefined;
@@ -98,6 +99,137 @@ describe('BeastDispatchService', () => {
     expect(run.configSnapshot.skills).toEqual([]);
     expect(executors.process.start).not.toHaveBeenCalled();
     expect(repo.listRuns()).toHaveLength(1);
+  });
+
+  it('rejects delayed dispatch for an agent whose interview was denied', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const agents = new AgentService(repo, () => '2026-07-25T00:00:00.000Z');
+    const policy = {
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:denied',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: policy, chatSessionId: 'denied' },
+      initConfig: policy,
+      chatSessionId: 'denied',
+    });
+    agents.updateAgent(agent.id, { status: 'rejected' });
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: { provider: 'claude', objective: 'Must not run', chunkDirectory: 'docs/chunks' },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:denied',
+      startNow: true,
+    })).rejects.toBeInstanceOf(RejectedTrackedAgentError);
+    expect(repo.listRuns()).toHaveLength(0);
+    expect(executors.process.start).not.toHaveBeenCalled();
+  });
+
+  it('does not start a linked run when interview rejection wins before executor start', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const executors = {
+      process: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const agents = new AgentService(repo, () => '2026-07-25T00:00:00.000Z');
+    const policy = {
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:race',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: policy, chatSessionId: 'race' },
+      initConfig: policy,
+      chatSessionId: 'race',
+    });
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    await expect(dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: { provider: 'claude', objective: 'Must lose race', chunkDirectory: 'docs/chunks' },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:race',
+      startNow: true,
+      onRunCreated: () => agents.updateAgent(agent.id, { status: 'rejected' }),
+    })).rejects.toBeInstanceOf(RejectedTrackedAgentError);
+
+    expect(executors.process.start).not.toHaveBeenCalled();
+    expect(agents.getAgent(agent.id).status).toBe('rejected');
+    expect(repo.listRuns()).toEqual([expect.objectContaining({ status: 'stopped' })]);
+  });
+
+  it('stops an in-flight linked run without overwriting interview rejection', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-dispatch-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    const metrics = new PrometheusBeastMetrics();
+    const agents = new AgentService(repo, () => '2026-07-25T00:00:00.000Z');
+    const policy = {
+      agentRole: 'coding',
+      requestedTools: ['read_file', 'search_files', 'write_file', 'patch', 'terminal', 'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment'],
+      skills: [],
+    };
+    const agent = agents.createAgent({
+      definitionId: 'martin-loop',
+      source: 'chat',
+      createdByUser: 'chat-session:in-flight',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: policy, chatSessionId: 'in-flight' },
+      initConfig: policy,
+      chatSessionId: 'in-flight',
+    });
+    const stop = vi.fn(async (runId: string, attemptId: string) => {
+      const attempt = repo.updateAttempt(attemptId, { status: 'stopped', stopReason: 'operator_stop' });
+      repo.updateRun(runId, { status: 'stopped', stopReason: 'operator_stop' });
+      return attempt;
+    });
+    const executors = {
+      process: {
+        start: vi.fn(async (run: { id: string }) => {
+          const attempt = repo.createAttempt(run.id, { status: 'running' });
+          repo.updateRun(run.id, { status: 'running', currentAttemptId: attempt.id });
+          agents.updateAgent(agent.id, { status: 'rejected' });
+          throw new Error('spawn callback failed after rejection');
+        }),
+        stop,
+        kill: vi.fn(),
+      },
+      container: { start: vi.fn(), stop: vi.fn(), kill: vi.fn() },
+    };
+    const dispatch = new BeastDispatchService(repo, new BeastCatalogService(), executors, metrics, logs);
+
+    const run = await dispatch.createRun({
+      definitionId: 'martin-loop',
+      trackedAgentId: agent.id,
+      config: { provider: 'claude', objective: 'Stop after race', chunkDirectory: 'docs/chunks' },
+      dispatchedBy: 'chat',
+      dispatchedByUser: 'chat-session:in-flight',
+      startNow: true,
+    });
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(run.status).toBe('stopped');
+    expect(agents.getAgent(agent.id).status).toBe('rejected');
   });
 
   it('does not widen explicit direct-run manifest aliases with workflow defaults', async () => {
