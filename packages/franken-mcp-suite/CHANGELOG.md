@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.10.1...franken-mcp-suite-v0.11.0) (2026-07-25)
+
+
+### Features
+
+* **brain:** enforce bounded memory retention ([#3746](https://github.com/djm204/frankenbeast/issues/3746)) ([7191686](https://github.com/djm204/frankenbeast/commit/7191686571052f548431256eaaa4d8bb823097c0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+    * @franken/brain bumped from 0.17.0 to 0.18.0
+    * @franken/critique bumped from 0.11.0 to 0.11.1
+    * @franken/governor bumped from 0.9.0 to 0.9.1
+    * @franken/observer bumped from 0.12.0 to 0.12.1
+    * @franken/orchestrator bumped from 0.58.0 to 0.59.0
+    * @franken/planner bumped from 0.4.26 to 0.4.27
+
 ## [0.10.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.10.0...franken-mcp-suite-v0.10.1) (2026-07-24)
 
 

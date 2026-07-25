@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.18.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.17.0...@franken/brain-v0.18.0) (2026-07-25)
+
+
+### Features
+
+* **brain:** add agent-scoped faculty foundation ([#3740](https://github.com/djm204/frankenbeast/issues/3740)) ([a88d1e3](https://github.com/djm204/frankenbeast/commit/a88d1e35042f4cbfd93d725930f16741c69b9b6f))
+* **brain:** add shared hive mind store ([#3775](https://github.com/djm204/frankenbeast/issues/3775)) ([fb61107](https://github.com/djm204/frankenbeast/commit/fb611078254384968c916940d351ceac172816c9))
+* **brain:** consolidate repeated failure lessons ([#3760](https://github.com/djm204/frankenbeast/issues/3760)) ([5b25224](https://github.com/djm204/frankenbeast/commit/5b252241cfd8e6fc0b97b4bed64e79a343f0bd4b))
+* **brain:** consult lessons from faculties ([#3771](https://github.com/djm204/frankenbeast/issues/3771)) ([1053380](https://github.com/djm204/frankenbeast/commit/1053380d6a3bed1f378feb339df840710785505b))
+* **brain:** enforce bounded memory retention ([#3746](https://github.com/djm204/frankenbeast/issues/3746)) ([7191686](https://github.com/djm204/frankenbeast/commit/7191686571052f548431256eaaa4d8bb823097c0))
+* **brain:** expose authenticated read routes ([#3757](https://github.com/djm204/frankenbeast/issues/3757)) ([1b77c79](https://github.com/djm204/frankenbeast/commit/1b77c7937362fa3ee9e1eaad03161120bb853866))
+* **brain:** persist workspace conversations ([#3772](https://github.com/djm204/frankenbeast/issues/3772)) ([fe70635](https://github.com/djm204/frankenbeast/commit/fe70635f4a32f1236299183fdc5c7b7b3f651108))
+* **brain:** record critique verdicts as reasoning episodes ([#3742](https://github.com/djm204/frankenbeast/issues/3742)) ([3191a1f](https://github.com/djm204/frankenbeast/commit/3191a1fb164bbff536fc2a72e8e27e83eeb820d7))
+* **brain:** record governor decisions as action episodes ([#3745](https://github.com/djm204/frankenbeast/issues/3745)) ([13b3399](https://github.com/djm204/frankenbeast/commit/13b3399245f01a7e72bc869d9aab40519c6106de))
+* **brain:** wire planning faculty adapter ([#3744](https://github.com/djm204/frankenbeast/issues/3744)) ([a12aa2f](https://github.com/djm204/frankenbeast/commit/a12aa2fe4a3013a2161f275a59646ecbf29d5671))
+
+
+### Bug Fixes
+
+* **brain:** harden lesson consolidation follow-up ([#3767](https://github.com/djm204/frankenbeast/issues/3767)) ([c7636c3](https://github.com/djm204/frankenbeast/commit/c7636c346eaacc1cf3cb94d9b00e8af19615f862))
+* **brain:** harden persisted brain inspection ([#3763](https://github.com/djm204/frankenbeast/issues/3763)) ([3e7cb36](https://github.com/djm204/frankenbeast/commit/3e7cb36a48fa225272d622cceb6408e3e5513507))
+* **brain:** persist per-agent durable state ([#3743](https://github.com/djm204/frankenbeast/issues/3743)) ([fd254cb](https://github.com/djm204/frankenbeast/commit/fd254cb349156902cf5134e897b582cbcb9ba7b2))
+
+
+### Documentation
+
+* **chat:** define Hive Brain command center ([#3741](https://github.com/djm204/frankenbeast/issues/3741)) ([338c0ef](https://github.com/djm204/frankenbeast/commit/338c0ef6563adb1e0aa90f42e6797aab4373dfdf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+
 ## [0.17.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.16.2...@franken/brain-v0.17.0) (2026-07-23)
 
 
