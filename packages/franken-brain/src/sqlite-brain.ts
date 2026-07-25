@@ -31,6 +31,7 @@ import type {
   LessonConsolidationOptions,
   RelevantLessonsOptions,
   ConsolidatedLesson,
+  LessonReplacement,
   LessonConsolidationItem,
   RelevantLesson,
 } from '@franken/types';
@@ -234,6 +235,8 @@ export interface MemoryCandidate extends MemoryCandidateProposal {
   status: MemoryCandidateStatus;
   suppressionReason?: MemorySuppressionReason;
   mergeSuggestions?: MemoryMergeSuggestion[];
+  /** Approved lessons that approval of this candidate will retire. */
+  replaces?: readonly LessonReplacement[];
   createdAt: string;
   updatedAt: string;
   decidedAt?: string;
@@ -868,6 +871,14 @@ class MemoryCipher {
 
   verifier(): string {
     return this.encrypt(MEMORY_ENCRYPTION_VERIFIER);
+  }
+
+  fingerprint(namespace: string, value: string): string {
+    return createHmac('sha256', this.key)
+      .update(namespace, 'utf8')
+      .update('\0', 'utf8')
+      .update(value, 'utf8')
+      .digest('hex');
   }
 }
 
@@ -3124,6 +3135,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     n = 10,
     includeQuarantined = true,
     excludeCategory?: string | readonly string[],
+    rawScanLimit?: number,
   ): EpisodicEvent[] {
     try {
       const excludedCategories = typeof excludeCategory === 'string'
@@ -3143,6 +3155,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           (includeQuarantined || !isQuarantinedEpisodicDetails(event))
           && !excludedCategories.includes(String(event.details?.category ?? ''))
         ),
+        rawScanLimit,
       );
       this.audit?.({
         operation: 'episodic.recentFailures',
@@ -3791,6 +3804,7 @@ export class SqliteMemoryReviewQueue {
     private dbPath: string,
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
+    private expireWorkingKeys?: (keys: readonly string[]) => void,
   ) {
     this.backfillCandidateKinds();
   }
@@ -3844,7 +3858,7 @@ export class SqliteMemoryReviewQueue {
             ? JSON.stringify(candidate.value.evidenceEventIds)
             : null,
           isConsolidatedLesson(candidate.value)
-            ? JSON.stringify(lessonSuppressionTokens(candidate.value))
+            ? JSON.stringify(lessonSuppressionTokens(candidate.value, this.encryption))
             : null,
           normalizeMemorySourceType(candidate.sourceType, candidate.source),
           this.encodeSourceId(candidate.sourceId, candidate.source),
@@ -3919,12 +3933,12 @@ export class SqliteMemoryReviewQueue {
   listByKind(
     status: MemoryCandidateStatus,
     kind: string,
-    options: { limit?: number } = {},
+    options: { limit?: number; offset?: number } = {},
   ): MemoryCandidate[] {
-    const limitClause = options.limit === undefined ? '' : ' LIMIT ?';
+    const limitClause = options.limit === undefined ? '' : ' LIMIT ? OFFSET ?';
     const params = options.limit === undefined
       ? [status, kind]
-      : [status, kind, options.limit];
+      : [status, kind, options.limit, options.offset ?? 0];
     const rows = this.db
       .prepare(
         `SELECT * FROM memory_review_candidates
@@ -4012,7 +4026,7 @@ export class SqliteMemoryReviewQueue {
               ? JSON.stringify(updated.value.evidenceEventIds)
               : null,
             isConsolidatedLesson(updated.value)
-              ? JSON.stringify(lessonSuppressionTokens(updated.value))
+              ? JSON.stringify(lessonSuppressionTokens(updated.value, this.encryption))
               : null,
             normalizeMemorySourceType(updated.sourceType, updated.source),
             this.encodeSourceId(updated.sourceId, updated.source),
@@ -4214,6 +4228,7 @@ export class SqliteMemoryReviewQueue {
     if (retiredLessonKeys.length > 0) {
       for (const key of retiredLessonKeys) this.working.delete(key);
       this.working.flushToDb();
+      this.expireWorkingKeys?.(retiredLessonKeys);
     }
     const result = approvedCandidate ?? this.requireCandidate(id);
     return result;
@@ -5721,6 +5736,9 @@ export class SqliteMemoryReviewQueue {
       ...(row.decided_at ? { decidedAt: row.decided_at } : {}),
       ...(row.reviewer ? { reviewer: this.decodeText(row.reviewer) } : {}),
       ...(row.note ? { note: this.decodeText(row.note) } : {}),
+      ...(parseLessonReplacementKeys(row.lesson_replaces_keys).length > 0
+        ? { replaces: parseLessonReplacementKeys(row.lesson_replaces_keys) }
+        : {}),
     };
   }
 
@@ -5767,11 +5785,20 @@ export class SqliteMemoryReviewQueue {
 
   private backfillCandidateKinds(): void {
     const rows = this.db.prepare(
-      `SELECT id, value FROM memory_review_candidates
+      `SELECT id, value, candidate_kind, lesson_evidence_ids, lesson_suppression_tokens
+         FROM memory_review_candidates
        WHERE candidate_kind IS NULL
           OR (candidate_kind = 'consolidated-lesson'
-              AND (lesson_evidence_ids IS NULL OR lesson_suppression_tokens IS NULL))`,
-    ).all() as Array<{ id: string; value: string }>;
+              AND (${this.encryption
+                ? '1 = 1'
+                : 'lesson_evidence_ids IS NULL OR lesson_suppression_tokens IS NULL'}))`,
+    ).all() as Array<{
+      id: string;
+      value: string;
+      candidate_kind: string | null;
+      lesson_evidence_ids: string | null;
+      lesson_suppression_tokens: string | null;
+    }>;
     if (rows.length === 0) return;
     const update = this.db.prepare(
       `UPDATE memory_review_candidates
@@ -5779,18 +5806,30 @@ export class SqliteMemoryReviewQueue {
     );
     const backfill = this.db.transaction(() => {
       for (const row of rows) {
-        let kind = 'other';
-        let evidenceIds: string | null = null;
-        let suppressionTokens: string | null = null;
+        let kind = row.candidate_kind ?? 'other';
+        let evidenceIds = row.lesson_evidence_ids;
+        let suppressionTokens = row.lesson_suppression_tokens;
+        let decodedLesson = false;
         try {
           const value = this.decodeValue(row.value);
           if (isConsolidatedLesson(value)) {
+            decodedLesson = true;
             kind = 'consolidated-lesson';
             evidenceIds = JSON.stringify(value.evidenceEventIds);
-            suppressionTokens = JSON.stringify(lessonSuppressionTokens(value));
+            suppressionTokens = JSON.stringify(lessonSuppressionTokens(value, this.encryption));
+          } else if (row.candidate_kind === null) {
+            kind = 'other';
+            evidenceIds = null;
+            suppressionTokens = null;
           }
         } catch {
           // Leave malformed legacy payload handling to the normal review read path.
+        }
+        if (!decodedLesson && kind === 'consolidated-lesson' && this.encryption) {
+          suppressionTokens = JSON.stringify(migrateEncryptedLessonSuppressionTokens(
+            suppressionTokens,
+            this.encryption,
+          ));
         }
         update.run(kind, evidenceIds, suppressionTokens, row.id);
       }
@@ -5908,6 +5947,9 @@ const SEMANTIC_MEMORY_SYNONYMS = new Map([
 ]);
 
 function semanticMemorySimilarity(left: unknown, right: unknown): number {
+  const leftText = normalizedSemanticMemoryText(left);
+  const rightText = normalizedSemanticMemoryText(right);
+  if (leftText.length > 0 && leftText === rightText) return 1;
   const leftTokens = semanticMemoryTokens(left);
   const rightTokens = semanticMemoryTokens(right);
   if (leftTokens.size < 3 || rightTokens.size < 3) return 0;
@@ -5949,13 +5991,21 @@ function decodeAgentWorkingKeyScope(key: string): string | undefined {
 }
 
 function semanticMemoryTokens(value: unknown): Set<string> {
-  const text = semanticMemoryText(canonicalMemoryValue(value)).toLowerCase();
-  const tokens = text.match(/[a-z0-9]+/g) ?? [];
+  const text = normalizedSemanticMemoryText(value);
+  const tokens = text.match(/[\p{L}\p{N}]+/gu) ?? [];
   return new Set(
     tokens
       .map(normalizeSemanticMemoryToken)
       .filter((token) => token.length >= 3 && !SEMANTIC_MEMORY_STOP_WORDS.has(token)),
   );
+}
+
+function normalizedSemanticMemoryText(value: unknown): string {
+  return semanticMemoryText(canonicalMemoryValue(value))
+    .normalize('NFKC')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
 function semanticMemoryText(value: unknown): string {
@@ -6053,6 +6103,7 @@ function lessonReviewKey(lesson: ConsolidatedLesson): string {
   const signature = createHash('sha256')
     .update(JSON.stringify({
       tokens: identityTokens,
+      context: [...(lesson.searchTerms ?? semanticMemoryTokens(lesson.pattern))].sort(),
     }))
     .digest('hex');
   return `lesson.review.${signature.slice(0, 16)}`;
@@ -6131,20 +6182,41 @@ function parseLessonSuppressionTokens(value: string | null | undefined): string[
   try {
     const parsed = JSON.parse(value) as unknown;
     return Array.isArray(parsed)
-      ? parsed.filter((token): token is string => /^[a-f0-9]{64}$/.test(token))
+      ? parsed.filter((token): token is string => /^(?:h[01]:)?[a-f0-9]{64}$/.test(token))
       : [];
   } catch {
     return [];
   }
 }
 
-function lessonSuppressionTokens(lesson: ConsolidatedLesson): string[] {
+function lessonSuppressionTokens(
+  lesson: ConsolidatedLesson,
+  encryption?: MemoryCipher,
+): string[] {
   return [...semanticMemoryTokens([
     lesson.pattern,
     ...lesson.keywords,
     ...(lesson.searchTerms ?? []),
   ])]
-    .map((token) => createHash('sha256').update(token).digest('hex'))
+    .flatMap((token) => {
+      const dictionaryHash = createHash('sha256').update(token).digest('hex');
+      if (!encryption) return [dictionaryHash];
+      return [
+        `h1:${encryption.fingerprint('lesson-suppression-token:v1', token)}`,
+        `h0:${encryption.fingerprint('lesson-suppression-token-sha256:v1', dictionaryHash)}`,
+      ];
+    })
+    .sort();
+}
+
+function migrateEncryptedLessonSuppressionTokens(
+  storedTokens: string | null,
+  encryption: MemoryCipher,
+): string[] {
+  return parseLessonSuppressionTokens(storedTokens)
+    .map((token) => token.startsWith('h0:') || token.startsWith('h1:')
+      ? token
+      : `h0:${encryption.fingerprint('lesson-suppression-token-sha256:v1', token)}`)
     .sort();
 }
 
@@ -6345,6 +6417,7 @@ export class SqliteBrain implements IBrain {
       this.dbPath,
       encryption,
       (event) => this.auditRecorder(event),
+      (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
     );
     SqliteBrain.registerLiveBrain(this.dbPath, this);
   }
@@ -6463,7 +6536,7 @@ export class SqliteBrain implements IBrain {
 
     const consolidate = this.db.transaction(() => {
     const events = this.episodic
-      .recentFailures(lookback, false, ['skill-evolution', 'planning-lifecycle'])
+      .recentFailures(lookback, false, ['skill-evolution', 'planning-lifecycle'], lookback)
       .sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
       );
@@ -6479,6 +6552,10 @@ export class SqliteBrain implements IBrain {
     const suppressedLessons = (['rejected', 'suppressed'] as const)
       .flatMap((status) => this.memoryReview.listByKind(status, 'consolidated-lesson'))
       .filter((candidate) => isConsolidatedLesson(candidate.value));
+    const suppressedLessonLineage = suppressedLessons.map((candidate) => ({
+      candidate,
+      tokens: new Set(this.memoryReview.lessonSuppressionTokens(candidate.id)),
+    }));
     const neverStoredLessonEvidence = this.memoryReview
       .listByKind('never_store', 'consolidated-lesson')
       .map((candidate) => ({
@@ -6490,7 +6567,7 @@ export class SqliteBrain implements IBrain {
       if (cluster.length < threshold) continue;
       const value = consolidatedLesson(cluster);
       const evidenceIds = new Set(value.evidenceEventIds);
-      const suppressionTokens = new Set(lessonSuppressionTokens(value));
+      const suppressionTokens = new Set(lessonSuppressionTokens(value, this.encryption));
       if (neverStoredLessonEvidence.some((lineage) => (
         [...evidenceIds].some((id) => lineage.evidence.has(id))
         || lessonSuppressionSimilarity(lineage.tokens, suppressionTokens) >= similarityThreshold
@@ -6509,8 +6586,8 @@ export class SqliteBrain implements IBrain {
             value.pattern,
           ),
         }))
-        .filter(({ exactKey, sharesEvidence, similarity }) =>
-          exactKey || sharesEvidence || similarity >= similarityThreshold)
+        .filter(({ sharesEvidence, similarity }) =>
+          sharesEvidence || similarity >= similarityThreshold)
         .sort((left, right) => Number(right.exactKey) - Number(left.exactKey)
           || Number(right.sharesEvidence) - Number(left.sharesEvidence)
           || right.similarity - left.similarity
@@ -6581,13 +6658,14 @@ export class SqliteBrain implements IBrain {
         }
         continue;
       }
-      const matchingSuppressed = suppressedLessons.some((candidate) => (
+      const matchingSuppressed = suppressedLessonLineage.some(({ candidate, tokens }) => (
         candidate.key === key
         || (candidate.value as ConsolidatedLesson).evidenceEventIds.some((id) => evidenceIds.has(id))
         || semanticMemorySimilarity(
           (candidate.value as ConsolidatedLesson).pattern,
           value.pattern,
         ) >= similarityThreshold
+        || lessonSuppressionSimilarity(tokens, suppressionTokens) >= similarityThreshold
       ));
       if (matchingSuppressed) continue;
       const matchingApproved = approvedLessons
@@ -6601,8 +6679,8 @@ export class SqliteBrain implements IBrain {
             value.pattern,
           ),
         }))
-        .filter(({ exactKey, sharesEvidence, similarity }) =>
-          exactKey || sharesEvidence || similarity >= similarityThreshold)
+        .filter(({ sharesEvidence, similarity }) =>
+          sharesEvidence || similarity >= similarityThreshold)
         .sort((left, right) => Number(right.exactKey) - Number(left.exactKey)
           || Number(right.sharesEvidence) - Number(left.sharesEvidence)
           || right.similarity - left.similarity
@@ -6636,7 +6714,7 @@ export class SqliteBrain implements IBrain {
           lastSeenAt: [...mergedApprovedLessons.map((lesson) => lesson.lastSeenAt), value.lastSeenAt]
             .sort().at(-1)!,
         };
-        const candidate = this.memoryReview.propose({
+        let candidate = this.memoryReview.propose({
           targetStore: 'working',
           key: approved.key,
           value: revisedValue,
@@ -6648,18 +6726,26 @@ export class SqliteBrain implements IBrain {
           reason: `${mergedOccurrenceCount} similar failure episodes formed an expanded lesson revision for review.`,
         });
         if (candidate.status === 'pending') {
+          const replacements = matchingApproved.slice(1).map(({ candidate: matched }) => ({
+            key: matched.key,
+            candidateId: matched.id,
+          }));
           this.memoryReview.setLessonReplacementKeys(
             candidate.id,
-            matchingApproved.slice(1).map(({ candidate: matched }) => ({
-              key: matched.key,
-              candidateId: matched.id,
-            })),
+            replacements,
             LESSON_LINEAGE_EDIT_TOKEN,
           );
+          if (replacements.length > 0) candidate = { ...candidate, replaces: replacements };
         }
         if (candidate.status === 'pending' && isConsolidatedLesson(candidate.value)) {
           pendingLessons.push(candidate);
-          created.push({ id: candidate.id, key: candidate.key, status: 'pending', value: candidate.value });
+          created.push({
+            id: candidate.id,
+            key: candidate.key,
+            status: 'pending',
+            value: candidate.value,
+            ...(candidate.replaces ? { replaces: candidate.replaces } : {}),
+          });
         }
         continue;
       }
@@ -6712,26 +6798,43 @@ export class SqliteBrain implements IBrain {
       throw new RangeError('Relevant lesson minConfidence must be between 0 and 1');
     }
 
-    const scanLimit = Math.min(1_000, Math.max(100, limit * 20));
-    const lessons = (['pending', 'approved'] as const)
-      .flatMap((status) => this.memoryReview
-        .listByKind(status, 'consolidated-lesson', { limit: scanLimit })
-        .filter((candidate) => (
-          status === 'pending'
-          || this.memoryReview.provenanceFor('working', candidate.key)?.candidateId === candidate.id
-        ))
-        .map((candidate) => ({ status, candidate })))
-      .filter(({ candidate }) => isConsolidatedLesson(candidate.value))
-      .map(({ status, candidate }) => {
-        const value = candidate.value as ConsolidatedLesson;
-        return {
-          ...value,
-          key: candidate.key,
+    const pageSize = Math.max(100, limit * 20);
+    const relevantLessonsForStatus = (status: 'pending' | 'approved'): RelevantLesson[] => {
+      const lessons: RelevantLesson[] = [];
+      const matchedKeys = new Set<string>();
+      for (let offset = 0; ; offset += pageSize) {
+        const page = this.memoryReview.listByKind(
           status,
-          relevance: lessonRelevance(normalizedQuery, value),
-        } satisfies RelevantLesson;
-      })
-      .filter((lesson) => lesson.relevance > 0 && lesson.confidence >= minConfidence)
+          'consolidated-lesson',
+          { limit: pageSize, offset },
+        );
+        for (const candidate of page) {
+          if (
+            status === 'approved'
+            && this.memoryReview.provenanceFor('working', candidate.key)?.candidateId !== candidate.id
+          ) {
+            continue;
+          }
+          if (!isConsolidatedLesson(candidate.value) || matchedKeys.has(candidate.key)) continue;
+          const value = candidate.value;
+          const lesson = {
+            ...value,
+            confidence: candidate.confidence,
+            key: candidate.key,
+            status,
+            relevance: lessonRelevance(normalizedQuery, value),
+          } satisfies RelevantLesson;
+          if (lesson.relevance <= 0 || lesson.confidence < minConfidence) continue;
+          lessons.push(lesson);
+          matchedKeys.add(candidate.key);
+          if (lessons.length >= limit) return lessons;
+        }
+        if (page.length < pageSize) break;
+      }
+      return lessons;
+    };
+    const lessons = (['pending', 'approved'] as const)
+      .flatMap((status) => relevantLessonsForStatus(status))
       .sort((left, right) =>
         right.relevance - left.relevance
         || right.confidence - left.confidence
@@ -9601,6 +9704,7 @@ function collectRowsToEvents(
   encryption?: MemoryCipher,
   reportCorruptDetails?: CorruptEpisodicDetailsReporter,
   includeEvent?: (event: EpisodicEvent) => boolean,
+  rawScanLimit = Number.POSITIVE_INFINITY,
 ): EpisodicEvent[] {
   if (limit === 0) {
     return [];
@@ -9613,8 +9717,10 @@ function collectRowsToEvents(
       ? CORRUPT_JSON_SCAN_BATCH_SIZE
       : Math.max(CORRUPT_JSON_SCAN_BATCH_SIZE, limit * 2);
 
-  for (let offset = 0; events.length < target; offset += batchSize) {
-    const rows = fetchRows(batchSize, offset);
+  let offset = 0;
+  while (events.length < target && offset < rawScanLimit) {
+    const fetchLimit = Math.min(batchSize, rawScanLimit - offset);
+    const rows = fetchRows(fetchLimit, offset);
     for (const row of rows) {
       const event = rowToEvent(row, encryption, reportCorruptDetails);
       if (includeEvent?.(event) ?? true) {
@@ -9624,7 +9730,8 @@ function collectRowsToEvents(
         }
       }
     }
-    if (rows.length < batchSize) {
+    offset += rows.length;
+    if (rows.length < fetchLimit) {
       break;
     }
   }

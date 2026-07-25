@@ -148,11 +148,18 @@ export interface ConsolidatedLesson {
   readonly lastSeenAt: string;
 }
 
+export interface LessonReplacement {
+  readonly key: string;
+  readonly candidateId: string;
+}
+
 export interface LessonConsolidationItem {
   readonly id: string;
   readonly key: string;
   readonly status: 'pending';
   readonly value: ConsolidatedLesson;
+  /** Approved lessons that this candidate will retire when approved. */
+  readonly replaces?: readonly LessonReplacement[];
 }
 
 export interface RelevantLesson extends ConsolidatedLesson {

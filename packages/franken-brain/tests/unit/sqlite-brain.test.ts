@@ -1037,6 +1037,54 @@ describe('SqliteBrain', () => {
       expect(brain.learning.consolidate({ threshold: 2, lookback: 10 })).toEqual([]);
     });
 
+    it('bounds lesson consolidation by raw failure rows before category filtering', () => {
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed with stale declarations',
+        '2026-07-24T10:00:00.000Z',
+      );
+      for (const [index, category] of ['skill-evolution', 'planning-lifecycle'].entries()) {
+        brain.episodic.record({
+          type: 'failure',
+          step: 'excluded-signal',
+          summary: `Excluded failure ${index}`,
+          details: { category },
+          createdAt: `2026-07-24T10:0${index + 1}:00.000Z`,
+        });
+      }
+
+      expect(brain.learning.consolidate({ threshold: 1, lookback: 2 })).toEqual([]);
+    });
+
+    it('keeps disconnected same-key lesson clusters separate without semantic evidence', () => {
+      for (const [index, summary] of [
+        'common shared anchor alpha pairone',
+        'common shared anchor alpha bridge',
+        'common shared anchor bridge tail',
+        'common shared anchor beta pairtwo',
+        'common shared anchor beta relay',
+        'common shared anchor relay finish',
+      ].entries()) {
+        recordStaleDeclarationFailure(summary, `2026-07-24T10:0${index}:00.000Z`);
+      }
+
+      const lessons = brain.learning.consolidate({
+        threshold: 3,
+        lookback: 10,
+        similarityThreshold: 0.5,
+      });
+
+      expect(lessons).toHaveLength(2);
+      expect(lessons.map((lesson) => lesson.value.occurrenceCount)).toEqual([3, 3]);
+    });
+
+    it('consolidates and retrieves identical non-ASCII failure text', () => {
+      recordStaleDeclarationFailure('型宣言の読み込みに失敗しました', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('型宣言の読み込みに失敗しました', '2026-07-24T10:01:00.000Z');
+
+      expect(brain.learning.consolidate({ threshold: 2, lookback: 2 })).toHaveLength(1);
+      expect(brain.learning.relevantLessons('型宣言の読み込みに失敗しました')).toHaveLength(1);
+    });
+
     it('preserves reviewer-authored pattern fields when refreshing evidence', () => {
       recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
       recordStaleDeclarationFailure('Stale declarations broke the TypeScript workspace build', '2026-07-24T10:01:00.000Z');
@@ -1146,6 +1194,15 @@ describe('SqliteBrain', () => {
         similarityThreshold: 0.5,
       });
       expect(revision).toBeDefined();
+      expect(revision).toMatchObject({
+        replaces: [expect.objectContaining({
+          key: expect.stringMatching(/^lesson\.review\./),
+          candidateId: expect.stringMatching(/^memcand_/),
+        })],
+      });
+      expect(brain.memoryReview.list('pending')[0]).toMatchObject({
+        replaces: revision!.replaces,
+      });
       brain.memoryReview.resolveConflict(revision!.id, {
         resolution: 'replace_existing',
         reviewer: 'operator',
@@ -1218,6 +1275,231 @@ describe('SqliteBrain', () => {
 
       expect(brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.25 })).toEqual([]);
       expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
+
+    it('uses rejected lesson token lineage after the representative and key evolve', () => {
+      for (const [index, summary] of [
+        'common shared anchor alpha pairone',
+        'common shared anchor alpha bridge',
+        'common shared anchor bridge tail',
+      ].entries()) {
+        recordStaleDeclarationFailure(summary, `2026-07-24T10:0${index}:00.000Z`);
+      }
+      const [rejected] = brain.learning.consolidate({
+        threshold: 3,
+        lookback: 3,
+        similarityThreshold: 0.5,
+      });
+      brain.memoryReview.reject(rejected!.id, { reviewer: 'operator' });
+
+      for (const [index, summary] of [
+        'bridge tail pairone common xmarker',
+        'bridge tail pairone common shared',
+        'bridge tail pairone shared anchor',
+      ].entries()) {
+        recordStaleDeclarationFailure(summary, `2026-07-24T10:0${index + 3}:00.000Z`);
+      }
+
+      expect(brain.learning.consolidate({
+        threshold: 3,
+        lookback: 3,
+        similarityThreshold: 0.5,
+      })).toEqual([]);
+      expect(brain.memoryReview.list('pending')).toEqual([]);
+    });
+
+    it('preserves encrypted never-store lesson lineage across restart', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encrypted-never-store-lesson-'));
+      const dbPath = join(dir, 'brain.db');
+      const options = {
+        encryption: { enabled: true, key: 'encrypted-never-store-lesson-key' },
+      } as const;
+      let encrypted: SqliteBrain | undefined;
+      try {
+        encrypted = new SqliteBrain(dbPath, undefined, options);
+        for (const [index, summary] of [
+          'common shared anchor alpha pairone',
+          'common shared anchor alpha bridge',
+          'common shared anchor bridge tail',
+        ].entries()) {
+          encrypted.episodic.record({
+            type: 'failure',
+            step: 'build',
+            summary,
+            createdAt: `2026-07-24T10:0${index}:00.000Z`,
+          });
+        }
+        const [candidate] = encrypted.learning.consolidate({
+          threshold: 3,
+          lookback: 3,
+          similarityThreshold: 0.5,
+        });
+        encrypted.memoryReview.neverStore(candidate!.id);
+        const lineageBeforeRestart = encrypted.memoryReview.lessonSuppressionTokens(candidate!.id);
+        expect(lineageBeforeRestart.length).toBeGreaterThan(0);
+        encrypted.close();
+
+        encrypted = new SqliteBrain(dbPath, undefined, options);
+        expect(encrypted.memoryReview.lessonSuppressionTokens(candidate!.id)).toEqual(lineageBeforeRestart);
+        for (const [index, summary] of [
+          'bridge tail pairone common xmarker',
+          'bridge tail pairone common shared',
+          'bridge tail pairone shared anchor',
+        ].entries()) {
+          encrypted.episodic.record({
+            type: 'failure',
+            step: 'build',
+            summary,
+            createdAt: `2026-07-24T10:0${index + 3}:00.000Z`,
+          });
+        }
+
+        expect(encrypted.learning.consolidate({
+          threshold: 3,
+          lookback: 3,
+          similarityThreshold: 0.5,
+        })).toEqual([]);
+      } finally {
+        encrypted?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('finds an older relevant lesson beyond the first bounded review page', () => {
+      const lesson = (pattern: string, evidenceEventId: number) => ({
+        kind: 'consolidated-lesson' as const,
+        pattern,
+        keywords: pattern.toLowerCase().split(' '),
+        searchTerms: pattern.toLowerCase().split(' '),
+        occurrenceCount: 1,
+        confidence: 0.35,
+        evidenceEventIds: [evidenceEventId],
+        firstSeenAt: '2026-07-24T10:00:00.000Z',
+        lastSeenAt: '2026-07-24T10:00:00.000Z',
+      });
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'lesson.review.older-needle',
+        value: lesson('NeedleMarker exact lesson', 1),
+        source: 'test',
+        confidence: 0.35,
+        reason: 'Older exact lesson',
+      });
+      for (let index = 0; index < 200; index += 1) {
+        brain.memoryReview.propose({
+          targetStore: 'working',
+          key: `lesson.review.unrelated-${index}`,
+          value: lesson(`UnrelatedMarker${index} filler lesson`, index + 2),
+          source: 'test',
+          confidence: 0.35,
+          reason: 'Newer unrelated lesson',
+        });
+      }
+
+      expect(brain.learning.relevantLessons('NeedleMarker exact')).toEqual([
+        expect.objectContaining({ key: 'lesson.review.older-needle' }),
+      ]);
+      expect(brain.learning.relevantLessons('NeedleMarker', { limit: 1 })[0]?.pattern)
+        .toBe('NeedleMarker exact lesson');
+    });
+
+    it('stops paging each lesson status after satisfying the requested limit', () => {
+      const base = brain.memoryReview.propose({
+          targetStore: 'working',
+          key: 'lesson.review.page-base',
+          value: {
+            kind: 'consolidated-lesson',
+            pattern: 'shared matching lesson',
+            keywords: ['shared', 'matching', 'lesson'],
+            searchTerms: ['shared', 'matching', 'lesson'],
+            occurrenceCount: 1,
+            evidenceEventIds: [1],
+            firstSeenAt: '2026-07-24T10:00:00.000Z',
+            lastSeenAt: '2026-07-24T10:00:00.000Z',
+            confidence: 0.35,
+          },
+          source: 'learning:failure-consolidation',
+          sourceType: 'inferred',
+          confidence: 0.35,
+          reason: 'page-bound fixture',
+        });
+        const candidates = Array.from({ length: 150 }, (_, index) => ({
+          ...base,
+          id: `${base.id}-${index}`,
+          key: `${base.key}-${index}`,
+        }));
+        const listByKind = vi.spyOn(brain.memoryReview, 'listByKind').mockImplementation(
+          (status, _kind, options = {}) => status === 'pending'
+            ? candidates.slice(options.offset ?? 0, (options.offset ?? 0) + (options.limit ?? candidates.length))
+            : [],
+        );
+
+        expect(brain.learning.relevantLessons('shared', { limit: 1 })).toHaveLength(1);
+        expect(listByKind).toHaveBeenCalledTimes(2);
+        expect(listByKind).not.toHaveBeenCalledWith(
+          'pending',
+          'consolidated-lesson',
+          expect.objectContaining({ offset: 100 }),
+        );
+      });
+
+    it('uses reviewer-edited candidate confidence for lesson retrieval', () => {
+      for (let index = 0; index < 3; index += 1) {
+        recordStaleDeclarationFailure(
+          'TypeScript workspace build failed with stale declarations',
+          `2026-07-24T10:0${index}:00.000Z`,
+        );
+      }
+      const [candidate] = brain.learning.consolidate({ threshold: 3, lookback: 3 });
+      brain.memoryReview.edit(candidate!.id, { confidence: 0.2 });
+
+      expect(brain.learning.relevantLessons(
+        'TypeScript workspace build',
+        { minConfidence: 0.5 },
+      )).toEqual([]);
+      expect(brain.learning.relevantLessons('TypeScript workspace build')[0]?.confidence).toBe(0.2);
+    });
+
+    it('invalidates absorbed lesson keys in every live brain instance', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-live-lesson-retirement-'));
+      const dbPath = join(dir, 'brain.db');
+      let writer: SqliteBrain | undefined;
+      let stale: SqliteBrain | undefined;
+      try {
+        writer = new SqliteBrain(dbPath);
+        for (const [summary, createdAt] of [
+          ['AlphaOnlyMarker parser timeout crash', '2026-07-24T10:00:00.000Z'],
+          ['AlphaOnlyMarker parser timeout crash', '2026-07-24T10:01:00.000Z'],
+          ['OmegaOnlyMarker cache mismatch overflow', '2026-07-24T10:02:00.000Z'],
+          ['OmegaOnlyMarker cache mismatch overflow', '2026-07-24T10:03:00.000Z'],
+        ] as const) {
+          writer.episodic.record({ type: 'failure', step: 'build', summary, createdAt });
+        }
+        const initial = writer.learning.consolidate({ threshold: 2, lookback: 10 });
+        for (const candidate of initial) writer.memoryReview.approve(candidate.id);
+        stale = new SqliteBrain(dbPath);
+        expect(initial.every((candidate) => stale!.working.has(candidate.key))).toBe(true);
+
+        writer.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'AlphaOnlyMarker parser timeout crash OmegaOnlyMarker cache mismatch overflow',
+          createdAt: '2026-07-24T10:04:00.000Z',
+        });
+        const [revision] = writer.learning.consolidate({
+          threshold: 2,
+          lookback: 10,
+          similarityThreshold: 0.5,
+        });
+        writer.memoryReview.resolveConflict(revision!.id, { resolution: 'replace_existing' });
+        const retired = initial.find((candidate) => candidate.key !== revision!.key)!;
+
+        expect(stale.working.get(retired.key)).toBeUndefined();
+      } finally {
+        stale?.close();
+        writer?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('does not return an approved lesson after its durable working value is removed', () => {
@@ -6035,6 +6317,36 @@ describe('SqliteBrain', () => {
       enabled: true,
       key: 'correct horse battery staple',
     } as const;
+
+    it('keys encrypted lesson token fingerprints instead of storing dictionary hashes', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encrypted-lesson-tokens-'));
+      const dbPath = join(dir, 'brain.db');
+      try {
+        const encrypted = new SqliteBrain(dbPath, undefined, { encryption });
+        encrypted.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'SecretProjectMarker build failed repeatedly',
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        encrypted.learning.consolidate({ threshold: 1, lookback: 1 });
+        encrypted.close();
+
+        const raw = new Database(dbPath, { readonly: true });
+        const row = raw.prepare(
+          `SELECT lesson_suppression_tokens AS tokens
+             FROM memory_review_candidates
+            WHERE candidate_kind = 'consolidated-lesson'`,
+        ).get() as { tokens: string };
+        raw.close();
+        const tokens = JSON.parse(row.tokens) as string[];
+        const dictionaryHash = createHash('sha256').update('secretprojectmarker').digest('hex');
+
+        expect(tokens).not.toContain(dictionaryHash);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
 
     it('encrypts persisted working, episodic, and checkpoint payloads while preserving runtime roundtrip', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encrypted-'));
