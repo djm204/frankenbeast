@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +8,94 @@ import { describe, expect, it } from 'vitest';
 import { BrainRegistry, SqliteBrain } from '../../src/index.js';
 
 describe('BrainRegistry', () => {
+  it('returns a stable workspace Hive brain without colliding with an agent type', () => {
+    const registry = new BrainRegistry();
+
+    try {
+      const hive = registry.forWorkspaceHive('workspace-1', ':memory:');
+
+      expect(registry.forWorkspaceHive('workspace-1', ':memory:')).toBe(hive);
+      expect(registry.forAgentType('workspace-1', ':memory:')).not.toBe(hive);
+    } finally {
+      registry.close();
+    }
+  });
+
+  it('restricts workspace brain directories and SQLite files to the current user', () => {
+    if (process.platform === 'win32') return;
+    const dir = mkdtempSync(join(tmpdir(), 'brain-registry-permissions-'));
+    const registry = new BrainRegistry(dir);
+    try {
+      registry
+        .forWorkspaceHive('secret-workspace')
+        .conversations.resolveOrCreate('secret-workspace', 'operator');
+      const workspaceDir = join(dir, 'workspaces');
+      const dbPath = join(
+        workspaceDir,
+        `${createHash('sha256').update('secret-workspace').digest('hex')}.db`,
+      );
+
+      expect(statSync(workspaceDir).mode & 0o777).toBe(0o700);
+      expect(statSync(dbPath).mode & 0o777).toBe(0o600);
+      for (const suffix of ['-wal', '-shm']) {
+        const sidecar = `${dbPath}${suffix}`;
+        if (existsSync(sidecar)) expect(statSync(sidecar).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      registry.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('enforces the workspace scope and disables conversations on agent-type brains', () => {
+    const registry = new BrainRegistry();
+
+    try {
+      const hive = registry.forWorkspaceHive('workspace-1', ':memory:');
+
+      expect(() => hive.conversations.resolveOrCreate('workspace-2', 'operator-1')).toThrow(
+        'workspace-2 does not match this Hive brain workspace workspace-1',
+      );
+      expect(() => registry.forAgentType('coder', ':memory:').conversations).toThrow(
+        'BrainConversation persistence is only available on workspace Hive brains',
+      );
+    } finally {
+      registry.close();
+    }
+  });
+
+  it('hashes every previously accepted non-empty project identifier', () => {
+    const registry = new BrainRegistry();
+
+    try {
+      for (const workspaceId of [' workspace ', 'workspace\0one', 'w'.repeat(1_025)]) {
+        expect(registry.forWorkspaceHive(workspaceId, ':memory:')).toBeDefined();
+      }
+    } finally {
+      registry.close();
+    }
+  });
+
+  it('keeps default workspace databases physically separate from colliding agent filenames', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'brain-registry-workspace-path-'));
+    const registry = new BrainRegistry(dir);
+
+    try {
+      const workspaceId = 'workspace-1';
+      const digest = createHash('sha256').update(workspaceId).digest('hex');
+      const collidingAgentTypeId = `workspace-hive-${digest}`;
+
+      registry.forWorkspaceHive(workspaceId);
+      registry.forAgentType(collidingAgentTypeId);
+
+      expect(existsSync(join(dir, 'workspaces', `${digest}.db`))).toBe(true);
+      expect(existsSync(join(dir, `${collidingAgentTypeId}.db`))).toBe(true);
+    } finally {
+      registry.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('returns one stable brain per agent type within the registry', () => {
     const registry = new BrainRegistry();
 

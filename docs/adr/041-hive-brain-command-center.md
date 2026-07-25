@@ -161,6 +161,16 @@ configuration from the summary, and can search lessons by topic. The browser
 does not receive the operator token, fabricate unavailable state, or add a
 parallel command-center chat transport.
 
+The local `frankenbeast brain show <agentTypeId>` and `frankenbeast brain
+lessons <agentTypeId>` commands provide the corresponding bounded operator
+inspection surface for persisted default agent-type databases. They follow the
+existing direct-local CLI pattern rather than bypassing HTTP authentication:
+local filesystem access is the authority, while remote `/v1/brain/*` requests
+still require the Beast operator token. The CLI validates the same portable
+agent-type identifiers, never creates an unknown brain during inspection,
+reports unavailable lesson faculties explicitly, and caps human/JSON output at
+100 working-memory keys and 10 lesson candidates.
+
 ### 4. Migrate without breaking `franken-web`
 
 Existing `ChatSession` JSON records remain valid lower-level sessions. Migration
@@ -256,13 +266,16 @@ client state.
 
 ## Implementation boundaries
 
-Runtime work remains split as follows:
+The decision remains split across implementation issues. **#3701 is implemented**
+with the versioned entity, workspace-scoped repository, session-binding
+compatibility projection, migration coverage, and fail-closed persistence tests:
 
-- **#3701 — entity and persistence:** add versioned `BrainConversation` schemas,
+- **#3701 — entity and persistence (implemented):** versioned `BrainConversation` schemas,
   uniqueness for `(workspaceId, subjectId)`, Hive-Brain-backed repository,
   supervised-agent/summary state, compatibility projection/binding migration,
-  atomicity, corruption, and restart tests.
-- **#3702 — hive-aware query/routing:** `HiveStatusQuery` implements the
+  physical workspace/agent database separation, shared conversation admission,
+  standalone-server composition, atomicity, corruption, and restart tests.
+- **#3702 — hive-aware query/routing (read-only query implemented):** `HiveStatusQuery` implements the
   read-only query slice without changing dispatch behavior. It binds one
   project-root workspace, filters a bounded tracked-agent scan by subject,
   enriches authoritative status with bounded, safely attributable hive
@@ -274,8 +287,10 @@ Runtime work remains split as follows:
   `BeastDispatchPort`/`BeastDispatchService`, preserving governor/HITL, auth,
   admission, audit, capacity, and idempotency behavior.
 
-The registry and #3702 query slice are implemented. The remaining entity and
-dispatch work must continue to preserve the boundaries above.
+The registry, conversation persistence, and #3702 read-only query slice are
+implemented. Future conversation routing and #3703 dispatch work must continue
+to preserve the boundaries above and reuse the existing admission, governor,
+audit, and Beast executor paths.
 
 The agent-scoped planning faculty adapter is now implemented independently of
 this command-center routing work: consolidated Beast dependencies attach the

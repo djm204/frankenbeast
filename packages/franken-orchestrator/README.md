@@ -46,7 +46,18 @@ frankenbeast dr dead-letter-list .fbeast/dead-letter-actions.json
 frankenbeast dr dead-letter-replay-dry-run .fbeast/dead-letter-actions.json <entry-id>
 frankenbeast chat-server
 frankenbeast beasts-daemon
+frankenbeast brain show <agent-type-id>
+frankenbeast brain lessons <agent-type-id> --json
 ```
+
+Brain inspection is local and read-only. `brain show` reports at most 100
+working-memory keys plus aggregate episodic, recovery, faculty, capability, and
+lesson-availability state. `brain lessons` reports at most 10 real pending or
+approved consolidated lesson candidates. Both commands open only an existing
+`.fbeast/brains/<agentTypeId>.db`; invalid or unknown identifiers fail instead
+of creating state. Because this follows the CLI's direct-local inspection
+pattern, no daemon token is required; the equivalent `/v1/brain/*` HTTP routes
+remain operator-token authenticated.
 
 For local development from the monorepo, build and link the CLI from the root:
 
@@ -141,12 +152,16 @@ Each criterion reports `pass` only when matching evidence is present in working 
 ## Hive Brain central-command chat contract
 
 [`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md)
-defines the accepted Hive Brain chat architecture. The
-existing REST session routes and `/v1/chat/ws` remain the browser transport. A
-future `BrainConversation` compatibility repository will provide the current
-`ISessionStore` projection while binding browser sessions to the unique
-user/workspace command-center conversation, workspace Hive Brain, and optional
-registered faculty. Explicit legacy agent/run sessions remain supported.
+defines the accepted Hive Brain chat architecture. The versioned
+`BrainConversation` and workspace-scoped SQLite repository now exist, and
+`BrainConversationSessionStore` provides an additive `ISessionStore`
+compatibility projection. The standalone chat server uses it by default for
+newly bound `local-operator` sessions; injected stores and unbound legacy
+per-session records remain valid. Bound sessions share one conversation
+mutation-admission key across REST and WebSocket turns. The existing REST
+session routes and `/v1/chat/ws` remain
+the browser transport. The read-only #3702 status-query slice is implemented;
+#3703 still owns governed dispatch wiring.
 
 The package exports `HiveStatusQuery`, a read-only query module for "what are my
 agents doing" turns that do not provide an `agentId`. A query is bound to one
@@ -177,8 +192,9 @@ outcome, then records the request, decision, and reason as a recallable episodic
 event. Approval tokens are returned to the caller but are not copied into the
 episode, and startup health probes do not create episodes.
 
-This per-run faculty wiring and the read-only `HiveStatusQuery` do not implement
-`BrainConversation` persistence or future workspace dispatch routing in ADR-041.
+This per-run faculty wiring and the read-only `HiveStatusQuery` do not replace
+`BrainConversation` persistence or implement future workspace dispatch routing
+in ADR-041.
 
 ## Package areas
 

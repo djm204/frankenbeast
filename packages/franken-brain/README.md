@@ -1,6 +1,6 @@
 # @franken/brain — MOD-03: Memory Systems
 
-Current public API: `SqliteBrain`, `BrainRegistry`, `SqliteMemoryReviewQueue`, `SqliteMemoryAccessAuditTrail`, `WorkingMemoryLimitError`, `UnsupportedMemorySchemaVersionError`, memory-encryption error classes, `MemoryConfidenceDecayError`, `DEFAULT_WORKING_MEMORY_LIMITS`, `DEFAULT_MEMORY_CONFIDENCE_HALF_LIFE_MS`, `CURRENT_MEMORY_SCHEMA_VERSION`, `calculateMemoryConfidenceDecay`, `memoryRetentionPolicies`, `compareMemoryRetentionCompactionCandidates`, and the `WorkingMemoryLimits`, `SqliteBrainOptions`, `MemoryRetentionReport`, `MemoryRetentionEnforcementOptions`, `MemoryRetentionEnforcementResult`, `MemoryCandidateProposal`, `MemoryCandidate`, `MemoryCandidateEdit`, `MemoryCandidateStatus`, `MemoryReviewDecisionOptions`, `MemoryProvenanceRecord`, `MemoryAccessAuditEvent`, `MemoryAccessAuditListOptions`, `MemoryAccessAuditOperation`, `MemoryAccessAuditOutcome`, `MemoryAccessAuditStore`, `MemorySchemaMetadata`, `MemorySchemaStoreMetadata`, `MemorySchemaMigrationOptions`, `MemorySchemaMigrationOperation`, `MemorySchemaMigrationResult`, `MemoryEncryptionOptions`, `MemoryEncryptionMetadata`, `MemoryEncryptionMigrationOptions`, `MemoryEncryptionMigrationResult`, `MemoryConfidenceDecayOptions`, and `MemoryConfidenceDecayResult` types. `SqliteBrain#attachReasoningFaculty()` and `SqliteBrain#attachActionFaculty()` replace their inert faculty markers with configured adapters without replacing the brain or its memory stores.
+Current public API includes `SqliteBrain`, `BrainRegistry`, `SqliteBrainConversationRepository`, the versioned `BrainConversation` schema/type, memory stores and migration helpers, and planning/reasoning/action/learning faculty surfaces. `SqliteBrain#attachReasoningFaculty()` and `SqliteBrain#attachActionFaculty()` replace their inert faculty markers with configured adapters without replacing the brain or its memory stores.
 
 `@franken/brain` provides SQLite-backed working memory, episodic event recall, and recovery checkpoints for the Frankenbeast runtime. Older design docs described a `MemoryOrchestrator` with ChromaDB-backed semantic memory and PII-decorator stores; those classes are not exported by the current package.
 
@@ -46,6 +46,11 @@ const registry = new BrainRegistry();
 const coderBrain = registry.forAgentType('coder');
 const sameCoderBrain = registry.forAgentType('coder');
 console.assert(coderBrain === sameCoderBrain);
+
+// Workspace Hive brains use a disjoint hashed path namespace. One canonical
+// conversation is resolved per workspace and authenticated subject.
+const hive = registry.forWorkspaceHive('workspace-1');
+const conversation = hive.conversations.resolveOrCreate('workspace-1', 'operator-1');
 
 // Working memory is an in-memory map that flushes during checkpoints.
 brain.working.set('current-goal', 'Refresh docs for current architecture');
@@ -350,11 +355,13 @@ SqliteBrain
 ├── memoryReview  SQLite candidate/provenance/suppression queue for consented writes
 ├── episodic      SQLite `episodic_events` table with recent/query/failure recall
 ├── recovery      SQLite `checkpoints` table for execution state recovery
+├── conversations `SqliteBrainConversationRepository` for versioned aggregates/bindings
 └── faculties     learning consolidation plus attachable planning/reasoning/action faculties
 
 BrainRegistry
-├── agentTypeId → stable `.fbeast/brains/<agentTypeId>.db` SqliteBrain instance
-└── same-type agents → shared `.fbeast/hive/hive.db` HiveMindStore namespace
+├── `forAgentType(agentTypeId)` → stable `.fbeast/brains/<agentTypeId>.db` brain
+│   └── same-type agents → shared `.fbeast/hive/hive.db` HiveMindStore namespace
+└── `forWorkspaceHive(workspaceId)` → stable workspace Hive brain with conversations
 ```
 
 The learning faculty is built into `SqliteBrain`: `consolidate()` performs a bounded O(n²) connected-component pass over recent failure episodes using normalized-token similarity, then proposes threshold-crossing patterns through `memoryReview`; `relevantLessons()` searches pending and approved patterns and reports occurrence-derived confidence. The heuristic requires at least three shared meaningful tokens for multi-event clustering, so paraphrases with little lexical overlap require a future embedding-backed implementation. Single occurrences are 0.35 confidence, each additional occurrence adds 0.15, and confidence caps at 0.95.
@@ -363,20 +370,22 @@ The orchestrator's local CLI attaches configured planning, reasoning, and action
 
 The package creates the required SQLite schemas in their constructors and enables WAL mode with a 5-second busy timeout. `BrainRegistry` validates agent-type IDs as portable path components and defaults each one to `.fbeast/brains/<agentTypeId>.db`; `forAgentType(id, ':memory:')` remains the explicit ephemeral opt-out. Durable registry brains also bind to `.fbeast/hive/hive.db` under the enforced `agent-type:<id>` namespace. High-confidence consolidated lessons and significant failure/negative-decision episodes publish immediately; review rejection/never-store and right-to-forget remove matching entries owned by that brain. `relevantLessons()` merges a bounded peer scan with local results and labels each result `source: 'local' | 'peer'`. `HiveMindStore.poll(namespace, { sinceId, limit })` is the public incremental API (default 100, maximum 1,000 rows); each namespace retains at most 10,000 rows by default, and newest-entry reads can filter by kind before their bound. Callers poll at their own lifecycle boundary, so there is no background timer or socket cost. The literal `global` namespace is a separate explicit opt-in and is never read by an agent-type lookup automatically. Hive publishing is disabled when local memory encryption is enabled, preventing plaintext copies of encrypted memory. Encrypted DR backups include `.fbeast/hive/`. Spawned Beast runtime config carries the canonical catalog `definitionId` into orchestrator dependency construction, so repeated runs of one agent type reopen the same database while different definitions remain isolated. An explicit `brain.dbPath` still overrides the registry default. The repository ignores the entire `.fbeast/` state tree, including hive databases and SQLite WAL/SHM sidecars.
 
-## Planned Hive Brain registry relationship
+## Hive Brain registry relationship
 
 The accepted central-command design is documented in
 [`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md).
-Issue #3685's planned `BrainRegistry.forAgentType(id)` remains the agent-type
-lookup. Hive work extends the same registry additively with a disjoint
-`forWorkspaceHive(workspaceId)` key namespace. One `BrainConversation` per
+`BrainRegistry.forAgentType(id)` remains the agent-type lookup. Hive work extends
+the same registry additively with a disjoint
+`forWorkspaceHive(workspaceId)` key namespace and physically separate
+`.fbeast/brains/workspaces/<sha256>.db` files. One `BrainConversation` per
 user/workspace is persisted through that workspace Hive Brain and owns
 transcript, routing, approval, supervised-agent associations, and resumable turn
 state; it is not a second registry entry per browser session.
 
-This section describes a target contract, not a current export. Do not add
-`BrainRegistry` or `BrainConversation` to examples until their implementation
-issues land with public exports and tests.
+`SqliteBrainConversationRepository` persists the aggregate and chat-session
+binding metadata in one SQLite transaction. Its schema is additive when an older
+brain database opens, rejects future versions, and fails closed on corrupt
+records. Runtime routing and dispatch integration remain #3702 and #3703.
 
 ## Memory schema versioning and migrations
 

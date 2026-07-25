@@ -186,6 +186,11 @@ describe('state schema migration smoke tests', () => {
         phase: 'migration',
         step: 1,
       });
+      expect(brain.conversations.resolveOrCreate('legacy-workspace', 'local-operator')).toMatchObject({
+        workspaceId: 'legacy-workspace',
+        subjectId: 'local-operator',
+        brainKey: 'workspace-hive:legacy-workspace',
+      });
       expect(brain.getMemorySchemaMetadata().stores).toEqual(
         storeNames.map((store) => ({
           store,

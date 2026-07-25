@@ -44,6 +44,7 @@ describe('web/API contracts', () => {
   it('validates chat session DTOs consumed by the web client', () => {
     const session = ChatSessionResponseSchema.parse({
       id: 'sess-1',
+      conversationId: 'brain-conversation-1',
       projectId: 'proj-1',
       transcript: [{ role: 'user', content: 'hello', timestamp: '2026-03-09T00:00:00.000Z' }],
       state: 'active',
@@ -54,6 +55,7 @@ describe('web/API contracts', () => {
     });
 
     expect('socketToken' in session).toBe(false);
+    expect(session.conversationId).toBe('brain-conversation-1');
     expect(session.transcript[0]?.role).toBe('user');
   });
 

@@ -124,6 +124,7 @@ packages/franken-orchestrator/src/
   - `sanitizeChatOutput()` strips raw web search JSON and REMINDER instruction blocks from Claude CLI output
   - `chat-runtime-factory.ts` wires the engine, runtime, and turn runner from config
 - `frankenbeast beasts-daemon` — standalone Beast control plane (default port `4050`) that owns `/v1/beasts/*`, `/v1/beasts/agents/*`, SSE tickets/events, run persistence/logs, PID-file stale detection, and graceful child-run shutdown. PID file: `.frankenbeast/beasts-daemon.pid`.
+- `frankenbeast brain show <agentTypeId>` and `frankenbeast brain lessons <agentTypeId>` — bounded, read-only inspection of an existing local `.fbeast/brains/<agentTypeId>.db`; add `--json` for the machine-readable form. These local commands follow the existing direct CLI pattern and therefore do not use daemon bearer auth; remote HTTP reads still require the Beast operator token. Unsafe or unknown identifiers fail without creating a database.
 - `frankenbeast chat-server` — HTTP + WebSocket server for franken-web dashboard:
   - `startChatServer()` binds TCP, wires auth (session tokens), session persistence, and WebSocket attachment
   - In managed/default dashboard flows it is a chat/control gateway client of `beasts-daemon`; it proxies `/v1/beasts/*` only after operator auth.
@@ -136,19 +137,22 @@ packages/franken-orchestrator/src/
   bounds each scan with `maxScanRows`, and always preserves the newest usable
   checkpoint. The v1 order is policy priority
   then oldest-first; it does not perform lessons-aware or semantic pruning.
-- **Hive Brain central-command chat is an accepted design with a read-only status-query slice.**
+- **Hive Brain conversation persistence and its read-only status query are implemented; dispatch remains a follow-up.**
   [ADR-041](../adr/041-hive-brain-command-center.md)
-  (`docs/adr/041-hive-brain-command-center.md`) keeps the existing REST and
-  `/v1/chat/ws` browser contract, defines `BrainConversation` as durable
-  transcript/routing/approval state bound to `BrainRegistry`, and
-  requires every Beast launch to reuse the existing governed dispatch path.
-  `HiveStatusQuery` already provides the bounded workspace/subject cross-agent
-  read model for trusted server-side callers: tracked-agent state remains
-  authoritative, safely attributable hive episodes add recent activity, and
-  stale/ambiguous/unavailable data is explicit. It is intentionally not an HTTP
-  route until transport authentication can derive subject identity. It does not
-  implement `BrainConversation`, add a second socket protocol, or dispatch
-  directly from a brain/faculty.
+  (`docs/adr/041-hive-brain-command-center.md`) now has a versioned
+  `BrainConversation`, `SqliteBrainConversationRepository`, and
+  `BrainRegistry.forWorkspaceHive()` persistence seam. The additive
+  `BrainConversationSessionStore` is the standalone server default for newly
+  bound `local-operator` browser sessions, while injected stores and unbound
+  legacy session files remain unchanged. Bound sessions share one conversation
+  mutation-admission key. The existing REST and `/v1/chat/ws` browser contract
+  remains in place. `HiveStatusQuery` provides the bounded workspace/subject
+  cross-agent read model for trusted server-side callers: tracked-agent state
+  remains authoritative, safely attributable hive episodes add recent activity,
+  and stale/ambiguous/unavailable data is explicit. It is intentionally not an
+  HTTP route until transport authentication can derive subject identity. #3703
+  still owns governed dispatch integration; do not add a second socket protocol
+  or dispatch directly from a brain/faculty.
 - **Brain dashboard inspection is implemented and remains read-only.** The
   overview panel reads one explicit existing agent-type id through bounded
   `/v1/brain/*` routes, displays memory and faculty configuration, and searches

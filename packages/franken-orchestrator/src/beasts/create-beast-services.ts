@@ -53,45 +53,69 @@ export interface BeastServiceBundle {
   dispose(): void;
 }
 
+type BrainContextRepository = Pick<
+  SQLiteBeastRepository,
+  | 'getLatestEstablishedRunForDefinition'
+  | 'getTrackedAgent'
+  | 'getLatestTrackedAgentForDefinition'
+>;
+
+export interface PersistedBrainContextOptions {
+  projectRoot: string;
+  brainDbPath?: string | undefined;
+}
+
+/** Resolve persisted brain path and process-local faculty flags without starting Beast services. */
+export function resolvePersistedBrainContext(
+  repository: BrainContextRepository,
+  agentTypeId: string,
+  options: PersistedBrainContextOptions,
+): BrainRouteContext | undefined {
+  const projectRoot = resolve(options.projectRoot);
+  const run = repository.getLatestEstablishedRunForDefinition(agentTypeId, { recoverCorruptJson: true });
+  const agent = run?.trackedAgentId
+    ? repository.getTrackedAgent(run.trackedAgentId, { recoverCorruptJson: true })
+    : run
+      ? undefined
+      : repository.getLatestTrackedAgentForDefinition(agentTypeId, { recoverCorruptJson: true });
+  if (!run && !agent) return undefined;
+  const runSnapshot = run?.configSnapshot;
+  const agentSnapshot = agent?.initConfig;
+  const configuredBrainPath = stringValue(recordValue(runSnapshot, 'brain'), 'dbPath')
+    ?? stringValue(recordValue(agentSnapshot, 'brain'), 'dbPath')
+    ?? options.brainDbPath;
+  const configuredProjectRoot = stringValue(runSnapshot, 'projectRoot')
+    ?? stringValue(agentSnapshot, 'projectRoot');
+  const stableRoot = configuredProjectRoot ?? projectRoot;
+  const dbPath = configuredBrainPath === undefined
+    ? join(projectRoot, '.fbeast', 'brains', `${agentTypeId}.db`)
+    : configuredBrainPath === ':memory:' || isAbsolute(configuredBrainPath)
+      ? configuredBrainPath
+      : resolve(stableRoot, configuredBrainPath);
+  const runModules = recordValue(runSnapshot, 'modules') as ModuleConfig | undefined;
+  const agentModules = recordValue(agentSnapshot, 'modules') as ModuleConfig | undefined;
+  const modules = runModules ?? agent?.moduleConfig ?? agentModules;
+  return {
+    dbPath,
+    faculties: {
+      planning: moduleEnabled(modules?.planner, 'FRANKENBEAST_MODULE_PLANNER'),
+      reasoning: moduleEnabled(modules?.critique, 'FRANKENBEAST_MODULE_CRITIQUE'),
+      action: moduleEnabled(modules?.governor, 'FRANKENBEAST_MODULE_GOVERNOR'),
+      learning: true,
+    },
+  };
+}
+
 export function createBeastServices(paths: BeastServicePaths): BeastServiceBundle {
   const repository = new SQLiteBeastRepository(paths.beastsDb);
   const logStore = new BeastLogStore(paths.beastLogsDir, createBeastLogStoreOptionsFromEnv());
   const projectRoot = resolve(paths.root ?? process.env.FBEAST_ROOT ?? process.cwd());
   const brains = new BrainRegistry(join(projectRoot, '.fbeast', 'brains'));
-  const resolveBrainContext = (agentTypeId: string): BrainRouteContext | undefined => {
-    const run = repository.getLatestEstablishedRunForDefinition(agentTypeId, { recoverCorruptJson: true });
-    const agent = run?.trackedAgentId
-      ? repository.getTrackedAgent(run.trackedAgentId, { recoverCorruptJson: true })
-      : run
-        ? undefined
-        : repository.getLatestTrackedAgentForDefinition(agentTypeId, { recoverCorruptJson: true });
-    if (!run && !agent) return undefined;
-    const runSnapshot = run?.configSnapshot;
-    const agentSnapshot = agent?.initConfig;
-    const configuredBrainPath = stringValue(recordValue(runSnapshot, 'brain'), 'dbPath')
-      ?? stringValue(recordValue(agentSnapshot, 'brain'), 'dbPath')
-      ?? paths.brainDbPath;
-    const configuredProjectRoot = stringValue(runSnapshot, 'projectRoot')
-      ?? stringValue(agentSnapshot, 'projectRoot');
-    const stableRoot = configuredProjectRoot ?? projectRoot;
-    const dbPath = configuredBrainPath === undefined
-      ? join(projectRoot, '.fbeast', 'brains', `${agentTypeId}.db`)
-      : configuredBrainPath === ':memory:' || isAbsolute(configuredBrainPath)
-        ? configuredBrainPath
-        : resolve(stableRoot, configuredBrainPath);
-    const runModules = recordValue(runSnapshot, 'modules') as ModuleConfig | undefined;
-    const agentModules = recordValue(agentSnapshot, 'modules') as ModuleConfig | undefined;
-    const modules = runModules ?? agent?.moduleConfig ?? agentModules;
-    return {
-      dbPath,
-      faculties: {
-        planning: moduleEnabled(modules?.planner, 'FRANKENBEAST_MODULE_PLANNER'),
-        reasoning: moduleEnabled(modules?.critique, 'FRANKENBEAST_MODULE_CRITIQUE'),
-        action: moduleEnabled(modules?.governor, 'FRANKENBEAST_MODULE_GOVERNOR'),
-        learning: true,
-      },
-    };
-  };
+  const resolveBrainContext = (agentTypeId: string): BrainRouteContext | undefined =>
+    resolvePersistedBrainContext(repository, agentTypeId, {
+      projectRoot,
+      ...(paths.brainDbPath === undefined ? {} : { brainDbPath: paths.brainDbPath }),
+    });
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();

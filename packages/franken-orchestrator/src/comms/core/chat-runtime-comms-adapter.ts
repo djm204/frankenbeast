@@ -28,6 +28,11 @@ export interface CommsSession {
 
 export interface ChatRuntimeCommsAdapterOptions {
   chatRateLimiter?: InMemoryRateLimiter;
+  mutationAdmission?: {
+    runExclusive<T>(sessionId: string, run: () => Promise<T>): Promise<T>;
+  };
+  mutationKey?: (sessionId: string) => string;
+  scopeSessionId?: (input: CommsInboundInput) => string;
 }
 
 function normalizeRoutingMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -57,11 +62,10 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
   async processInbound(
     input: CommsInboundInput,
   ): Promise<CommsInboundResult> {
-    let session = await this.sessionStore.load(input.sessionId);
-    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session?.routingMetadata);
     const principal = input.externalUserId === 'system'
       ? `${input.channelType}:session:${input.sessionId}`
       : `${input.channelType}:user:${input.externalUserId}`;
+    const initialRoutingMetadata = normalizeRoutingMetadata(input.metadata);
 
     if (this.options.chatRateLimiter && !this.options.chatRateLimiter.take(chatClientKey({
       action: 'message',
@@ -70,13 +74,32 @@ export class ChatRuntimeCommsAdapter implements CommsRuntimePort {
       return {
         text: 'Rate limit exceeded. Please wait before sending another chat message.',
         status: 'reply',
-        ...(routingMetadata ? { metadata: routingMetadata } : {}),
+        ...(initialRoutingMetadata ? { metadata: initialRoutingMetadata } : {}),
       };
     }
+
+    const scopedSessionId = this.options.scopeSessionId?.(input) ?? input.sessionId;
+    const run = () => this.processScopedInbound({ ...input, sessionId: scopedSessionId });
+    const mutationAdmission = this.options.mutationAdmission;
+    if (mutationAdmission) {
+      return mutationAdmission.runExclusive(
+        this.options.mutationKey?.(scopedSessionId) ?? scopedSessionId,
+        run,
+      );
+    }
+    return run();
+  }
+
+  private async processScopedInbound(
+    input: CommsInboundInput,
+  ): Promise<CommsInboundResult> {
+    let session = await this.sessionStore.load(input.sessionId);
+    const routingMetadata = normalizeRoutingMetadata(input.metadata ?? session?.routingMetadata);
 
     if (!session) {
       session = await this.sessionStore.create(input.sessionId, {
         channelType: input.channelType,
+        externalUserId: input.externalUserId,
       });
     }
 

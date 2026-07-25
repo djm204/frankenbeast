@@ -6,9 +6,20 @@
 - Reconcile a linked run's tracked-agent id and definition before using its state, and derive run freshness only from run timestamps. Optional hive-store open/read failures must degrade the status query, not prevent unrelated Beast services from starting.
 - Bound physical rows scanned, not only successfully decoded agents, and deduplicate type-level hive entries when several same-type agents share one subject. Keep tracked-agent/run status authoritative when hive reads fail.
 
+## 2026-07-25 — Read-only brain inspection must snapshot context and sanitize persisted output
+- Resolve persisted brain paths and faculty flags from a snapshot of the Beast repository before opening the brain snapshot. If both contexts share one SQLite file, reuse the same backup so inspection cannot combine different live moments; always use an explicit fixed snapshot filename so a valid 255-byte agent id never becomes an invalid derived filename.
+- Treat every persisted string as untrusted output: truncate on complete UTF-8 code-point boundaries, bound timestamps and lesson fields independently, escape C0/C1 plus Unicode format/display controls in human output, and map storage/snapshot failures to stable operator errors without leaking paths or SQLite internals.
+
 ## 2026-07-25 — Faculty lesson consultation must stay bounded before lookup
 - Apply input caps while iterating plan objectives, before `map()`/`join()` or redaction; truncating only after concatenation still allows adversarial plans to cause unbounded synchronous work. Skip query construction entirely when episode recording and lesson consultation are disabled.
 - Keep automatic consolidation off the planning/reasoning/action return path and coalesce pending triggers per learning port. Persist stable lesson keys—not full lesson text—in consultation telemetry so the consulted set stays observable without duplicating reviewed memory content.
+
+## 2026-07-25 — Canonical workspace conversations over legacy session projections
+- Keep workspace Hive brains in a registry namespace disjoint from agent-type brains, and hash externally sourced workspace IDs for filenames rather than weakening the existing portable agent-type path contract.
+- Commit the canonical conversation aggregate and session-binding metadata in one SQLite transaction. Treat legacy session files as a repairable compatibility projection, leave unbound records unchanged, and use non-creating lookups on reads so inspecting old sessions does not materialize empty Hive databases.
+- Check durable schema metadata before additive DDL. Future-version rejection is not fail-closed if startup creates current tables or indexes before reporting the incompatible version.
+- When one canonical aggregate has multiple transport bindings, every canonical write must journal all projections as pending; repairing only the active binding makes stale rollback files look clean. Adopt externally assigned comms session IDs on first save instead of treating them as legacy-only records.
+- Conversation databases can contain transcripts and approval execution metadata. Create workspace directories as `0700`, force SQLite databases and sidecars to `0600`, and test the effective POSIX modes rather than relying on the process umask.
 
 ## 2026-07-25 — Retention enforcement must preserve upstream invariants
 - Retention deletion must honor producer-side lifecycle windows such as learning cooldowns, not only the generic memory-class TTL. Validate persisted cooldown metadata before classifying an expired learning row as a compaction candidate.
