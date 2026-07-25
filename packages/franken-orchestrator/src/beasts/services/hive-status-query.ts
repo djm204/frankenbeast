@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { hiveMindAgentTypeNamespace, type HiveMindEntry, type HiveMindStore } from '@franken/brain';
 import {
   HiveStatusResponseSchema,
+  isoNow,
   type HiveAgentStatus,
   type HiveRecentActivity,
   type HiveStatusResponse,
@@ -151,7 +152,7 @@ export class HiveStatusQuery {
     private readonly agents: AgentService,
     private readonly runs: BeastRunService,
     private readonly hiveMind: HiveMindStore,
-    private readonly now: () => Date = () => new Date(),
+    private readonly now: () => Date = () => new Date(isoNow()),
     private readonly hiveAvailable = true,
   ) {}
 

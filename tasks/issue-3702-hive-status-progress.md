@@ -14,3 +14,7 @@
 - [x] Run focused and full quality gates and inspect the diff.
 - [x] Create the local remediation commit as David Mendez.
 - [x] Record the immutable push command on dedicated Approval Cop gate `t_c2c37d35`, then block for review/publication.
+- [x] Reproduce the seeded-CI `current` versus `partial` failure from PR head `52cc6d0bc`.
+- [x] Align Hive status generation with the shared deterministic clock and pass focused plus full orchestrator tests under `FRANKENBEAST_SEED=1337`.
+- [x] Run final full quality gates and prepare the CI correction for a David Mendez commit.
+- [ ] Route the correction's immutable push through dedicated Approval Cop, then complete current-head CI/Codex closeout within the five-review cap.
