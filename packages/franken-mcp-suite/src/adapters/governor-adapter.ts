@@ -1129,7 +1129,8 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
     async budgetStatus() {
       const rows = store.db.prepare(`
         SELECT model, prompt_tokens, completion_tokens,
-               cache_read_tokens, cache_creation_tokens, cost_usd, cost_source
+               cache_read_tokens, cache_creation_tokens, cache_creation_1h_tokens,
+               cost_usd, cost_source
         FROM cost_ledger
       `).all() as Array<{
         model: string;
@@ -1137,6 +1138,7 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
         completion_tokens: number;
         cache_read_tokens: number;
         cache_creation_tokens: number;
+        cache_creation_1h_tokens: number;
         cost_usd: number;
         cost_source: string;
       }>;
@@ -1152,6 +1154,7 @@ export function createGovernorAdapter(dbPath: string, configPath?: string): Gove
               completionTokens: row.completion_tokens,
               cacheReadTokens: row.cache_read_tokens,
               cacheCreationTokens: row.cache_creation_tokens,
+              cacheCreation1hTokens: row.cache_creation_1h_tokens,
             })
           : row.cost_usd;
         const current = grouped.get(row.model) ?? { model: row.model, costUsd: 0 };

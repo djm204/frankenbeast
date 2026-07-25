@@ -102,6 +102,7 @@ describe('ObserverPortAdapter', () => {
       completionTokens: 5,
       cacheReadTokens: 8,
       cacheCreationTokens: 2,
+      cacheCreation1hTokens: 1,
       model: 'claude-sonnet-4-6',
     });
 
@@ -117,6 +118,7 @@ describe('ObserverPortAdapter', () => {
       completionTokens: 5,
       cacheReadTokens: 8,
       cacheCreationTokens: 2,
+      cacheCreation1hTokens: 1,
     });
   });
 

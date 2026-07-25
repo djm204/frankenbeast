@@ -117,12 +117,23 @@ export class ObserverPortAdapter implements IObserverModule {
       const completionTokens = tokenCountFromMetadata(span.metadata.completionTokens, 'completionTokens', span.id);
       const hasCacheReadTokens = typeof span.metadata.cacheReadTokens === 'number';
       const hasCacheCreationTokens = typeof span.metadata.cacheCreationTokens === 'number';
+      const hasCacheCreation1hTokens = typeof span.metadata.cacheCreation1hTokens === 'number';
       const cacheReadTokens = tokenCountFromMetadata(span.metadata.cacheReadTokens, 'cacheReadTokens', span.id);
       const cacheCreationTokens = tokenCountFromMetadata(
         span.metadata.cacheCreationTokens,
         'cacheCreationTokens',
         span.id,
       );
+      const cacheCreation1hTokens = tokenCountFromMetadata(
+        span.metadata.cacheCreation1hTokens,
+        'cacheCreation1hTokens',
+        span.id,
+      );
+      if (cacheCreation1hTokens > cacheCreationTokens) {
+        throw new RangeError(
+          `ObserverPortAdapter: span ${span.id} cacheCreation1hTokens must not exceed cacheCreationTokens`,
+        );
+      }
       inputTokens += promptTokens + cacheReadTokens + cacheCreationTokens;
       outputTokens += completionTokens;
 
@@ -137,6 +148,7 @@ export class ObserverPortAdapter implements IObserverModule {
           completionTokens,
           ...(hasCacheReadTokens ? { cacheReadTokens } : {}),
           ...(hasCacheCreationTokens ? { cacheCreationTokens } : {}),
+          ...(hasCacheCreation1hTokens ? { cacheCreation1hTokens } : {}),
         });
       }
     }

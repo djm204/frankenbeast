@@ -1162,6 +1162,26 @@ describe('GovernorAdapter', () => {
     });
   });
 
+  it('reprices one-hour cache creation in zero-cost ledger rows', async () => {
+    const dbPath = tracked(tmpDbPath());
+    const governor = createGovernorAdapter(dbPath);
+
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO cost_ledger (
+        session_id, model, prompt_tokens, completion_tokens,
+        cache_creation_tokens, cache_creation_1h_tokens, cost_usd
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('sess-one-hour', 'claude-sonnet-4-6', 0, 0, 1_000_000, 400_000, 0);
+    db.close();
+
+    await expect(governor.budgetStatus()).resolves.toEqual({
+      totalSpendUsd: 4.65,
+      byModel: [{ model: 'claude-sonnet-4-6', costUsd: 4.65 }],
+    });
+  });
+
   it('reprices zero-cost rows before grouping budget status by model', async () => {
     const dbPath = tracked(tmpDbPath());
     const governor = createGovernorAdapter(dbPath);
