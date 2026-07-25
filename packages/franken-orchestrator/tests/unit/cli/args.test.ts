@@ -121,6 +121,26 @@ describe('parseArgs', () => {
     expect(args.beastAction).toBe('catalog');
   });
 
+  it('parses bounded brain inspection commands and JSON output', () => {
+    const show = parseArgs(['brain', 'show', 'coder']);
+    expect(show.subcommand).toBe('brain');
+    expect(show.brainAction).toBe('show');
+    expect(show.brainTarget).toBe('coder');
+
+    const lessons = parseArgs(['brain', 'lessons', 'reviewer', '--json']);
+    expect(lessons.subcommand).toBe('brain');
+    expect(lessons.brainAction).toBe('lessons');
+    expect(lessons.brainTarget).toBe('reviewer');
+    expect(lessons.json).toBe(true);
+  });
+
+  it('rejects unknown brain actions and extra targets', () => {
+    expect(() => parseArgs(['brain', 'mutate', 'coder'])).toThrow('Unknown brain action: mutate');
+    expect(() => parseArgs(['brain', 'show', 'coder', 'extra'])).toThrow(
+      "Unexpected argument 'extra' for brain command",
+    );
+  });
+
   it('parses beasts spawn target', () => {
     const args = parseArgs(['beasts', 'spawn', 'martin-loop']);
     expect(args.subcommand).toBe('beasts');

@@ -13,6 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { handleBeastCommand } from './beast-cli.js';
+import { createBrainInspectionHandle, handleBrainCommand } from './brain-cli.js';
 import { handleInitCommand } from './init-command.js';
 import { handleSkillCommand } from './skill-cli.js';
 import { handleSecurityCommand } from './security-cli.js';
@@ -1587,8 +1588,10 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const suppressBanner = args.subcommand === 'network'
-    && (args.networkAction === 'credentials' || (args.networkAction === 'health' && args.json));
+  const suppressBanner = (
+    args.subcommand === 'network'
+    && (args.networkAction === 'credentials' || (args.networkAction === 'health' && args.json))
+  ) || (args.subcommand === 'brain' && args.json);
   if (!suppressBanner && process.env.FRANKENBEAST_NETWORK_MANAGED !== '1') {
     printLine(await renderBanner(root));
   }
@@ -1610,6 +1613,27 @@ export async function main(): Promise<void> {
       ? undefined
       : (resumeTarget?.planName ?? implicitPlanName)));
   const paths = getProjectPaths(root, planName);
+  if (args.subcommand === 'brain') {
+    if (!args.brainAction || !args.brainTarget) {
+      throw new Error('Usage: frankenbeast brain <show|lessons> <agentTypeId> [--json]');
+    }
+    const inspection = await createBrainInspectionHandle(
+      join(paths.frankenbeastDir, 'brains'),
+      args.brainTarget,
+    );
+    try {
+      await handleBrainCommand({
+        action: args.brainAction,
+        target: args.brainTarget,
+        json: args.json,
+        registry: inspection.registry,
+        print: printLine,
+      });
+    } finally {
+      await inspection.dispose();
+    }
+    return;
+  }
   let config: OrchestratorConfig;
   let configLoadFallback = false;
   try {

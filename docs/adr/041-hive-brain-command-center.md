@@ -161,6 +161,16 @@ configuration from the summary, and can search lessons by topic. The browser
 does not receive the operator token, fabricate unavailable state, or add a
 parallel command-center chat transport.
 
+The local `frankenbeast brain show <agentTypeId>` and `frankenbeast brain
+lessons <agentTypeId>` commands provide the corresponding bounded operator
+inspection surface for persisted default agent-type databases. They follow the
+existing direct-local CLI pattern rather than bypassing HTTP authentication:
+local filesystem access is the authority, while remote `/v1/brain/*` requests
+still require the Beast operator token. The CLI validates the same portable
+agent-type identifiers, never creates an unknown brain during inspection,
+reports unavailable lesson faculties explicitly, and caps human/JSON output at
+100 working-memory keys and 10 lesson candidates.
+
 ### 4. Migrate without breaking `franken-web`
 
 Existing `ChatSession` JSON records remain valid lower-level sessions. Migration

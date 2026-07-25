@@ -124,6 +124,7 @@ packages/franken-orchestrator/src/
   - `sanitizeChatOutput()` strips raw web search JSON and REMINDER instruction blocks from Claude CLI output
   - `chat-runtime-factory.ts` wires the engine, runtime, and turn runner from config
 - `frankenbeast beasts-daemon` — standalone Beast control plane (default port `4050`) that owns `/v1/beasts/*`, `/v1/beasts/agents/*`, SSE tickets/events, run persistence/logs, PID-file stale detection, and graceful child-run shutdown. PID file: `.frankenbeast/beasts-daemon.pid`.
+- `frankenbeast brain show <agentTypeId>` and `frankenbeast brain lessons <agentTypeId>` — bounded, read-only inspection of an existing local `.fbeast/brains/<agentTypeId>.db`; add `--json` for the machine-readable form. These local commands follow the existing direct CLI pattern and therefore do not use daemon bearer auth; remote HTTP reads still require the Beast operator token. Unsafe or unknown identifiers fail without creating a database.
 - `frankenbeast chat-server` — HTTP + WebSocket server for franken-web dashboard:
   - `startChatServer()` binds TCP, wires auth (session tokens), session persistence, and WebSocket attachment
   - In managed/default dashboard flows it is a chat/control gateway client of `beasts-daemon`; it proxies `/v1/beasts/*` only after operator auth.

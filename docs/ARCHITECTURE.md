@@ -19,7 +19,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
 | `@franken/governor` | HITL trigger evaluation, approval gateway/channels, audit recording, HMAC/session-token helpers. |
 | `@franken/types` | Shared type definitions and runtime Zod schemas. |
-| `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
+| `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. Its read-only `brain show` and `brain lessons` CLI commands inspect existing local agent-type databases with bounded human or JSON output; unknown or unsafe identifiers never create brain state. |
 | `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
 | `@franken/web` | React dashboard for chat, tracked Beast agents, read-only per-agent-type Brain faculty/lesson inspection, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
