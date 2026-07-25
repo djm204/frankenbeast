@@ -267,6 +267,8 @@ export class FileSessionStore implements ISessionStore {
  * Compatibility store that keeps legacy session files as transport bindings
  * while a workspace BrainConversation is the canonical state for new sessions.
  */
+const PENDING_BRAIN_CONVERSATION_BINDING = '__pending_brain_conversation_binding__';
+
 export class BrainConversationSessionStore implements ISessionStore {
   constructor(
     private readonly legacyStore: ISessionStore,
@@ -306,10 +308,13 @@ export class BrainConversationSessionStore implements ISessionStore {
   get(id: string): ChatSession | undefined {
     const binding = this.legacyStore.get(id);
     if (!binding) return undefined;
+    const publicBinding = binding.conversationId === PENDING_BRAIN_CONVERSATION_BINDING
+      ? { ...binding, conversationId: undefined }
+      : binding;
     const brain = this.brainRegistry.getWorkspaceHive(binding.projectId);
-    if (!brain) return binding;
+    if (!brain) return publicBinding;
     const conversationId = brain.conversations.getConversationIdForSession(id);
-    if (!conversationId) return binding;
+    if (!conversationId) return publicBinding;
     const conversation = brain.conversations.get(conversationId);
     if (!conversation) {
       throw new Error(`BrainConversation binding ${id} references missing conversation ${conversationId}`);
@@ -325,24 +330,48 @@ export class BrainConversationSessionStore implements ISessionStore {
     const binding = this.legacyStore.get(session.id);
     let brain = this.brainRegistry.getWorkspaceHive(session.projectId);
     const conversationId = brain?.conversations.getConversationIdForSession(session.id);
-    if (binding && (!brain || !conversationId)) {
-      this.legacyStore.save(session);
+    const adoptionPending = binding?.conversationId === PENDING_BRAIN_CONVERSATION_BINDING;
+    if (binding && !adoptionPending && (!brain || !conversationId)) {
+      this.legacyStore.save({ ...session, conversationId: undefined });
       return;
     }
-    if (!brain || !conversationId) {
-      brain = this.brainRegistry.forWorkspaceHive(session.projectId);
-      const conversation = brain.conversations.resolveOrCreateAndBind(
-        session.projectId,
-        this.subjectId,
-        session.id,
-      );
+    if (adoptionPending || !brain || !conversationId) {
+      // External transports can supply an id without first creating a legacy
+      // record. Persist a reserved adoption locator before the canonical commit
+      // so a failed compatibility projection remains discoverable and repairable.
+      // The locator also distinguishes retryable adoption from genuine legacy
+      // sessions, which remain legacy-only on subsequent saves.
+      const hadLegacyBinding = binding !== undefined;
+      this.legacyStore.save({
+        ...session,
+        conversationId: PENDING_BRAIN_CONVERSATION_BINDING,
+      });
       try {
-        const canonical = this.toConversation(session, conversation);
+        brain = this.brainRegistry.forWorkspaceHive(session.projectId);
+        const conversation = brain.conversations.resolveOrCreateAndBind(
+          session.projectId,
+          this.subjectId,
+          session.id,
+        );
+        const canonical = this.mergeAdoptedSession(session, conversation);
         brain.conversations.saveBound(session.id, canonical);
         this.repairProjection(session.id, this.project(session, canonical), brain);
         return;
       } catch (error) {
-        brain.conversations.unbindSession(session.id);
+        try {
+          brain?.conversations.unbindSession(session.id);
+        } catch {
+          // The pending locator forces the next save back through adoption even
+          // when the canonical binding could not be compensated.
+        }
+        if (!hadLegacyBinding) {
+          try {
+            this.legacyStore.delete(session.id);
+          } catch {
+            // The next save retries adoption instead of treating this locator
+            // as permanently legacy-only.
+          }
+        }
         throw error;
       }
     }
@@ -424,5 +453,72 @@ export class BrainConversationSessionStore implements ISessionStore {
       costUsd: session.costUsd,
       updatedAt: session.updatedAt,
     };
+  }
+
+  private mergeAdoptedSession(
+    session: ChatSession,
+    existing: BrainConversation,
+  ): BrainConversation {
+    const existingMessageKeys = new Set(existing.transcript.map(message => (
+      message.id ?? JSON.stringify(message)
+    )));
+    const hasTranscriptOverlap = session.transcript.some(message => (
+      existingMessageKeys.has(message.id ?? JSON.stringify(message))
+    ));
+    const seenMessages = new Set(existingMessageKeys);
+    const appendedMessages = session.transcript.filter(message => {
+      const key = message.id ?? JSON.stringify(message);
+      if (seenMessages.has(key)) return false;
+      seenMessages.add(key);
+      return true;
+    });
+    const canonicalHasApproval = existing.pendingApproval !== null;
+    const hasIncomingUsage = session.costUsd !== 0
+      || session.tokenTotals.cheap !== 0
+      || session.tokenTotals.premiumReasoning !== 0
+      || session.tokenTotals.premiumExecution !== 0;
+    const hasPartialOverlap = hasTranscriptOverlap && appendedMessages.length > 0;
+    if (hasPartialOverlap && hasIncomingUsage) {
+      throw new Error(
+        `Cannot safely merge aggregate usage for partially overlapping session ${session.id}`,
+      );
+    }
+    const fullyOverlappingTranscript = hasTranscriptOverlap && appendedMessages.length === 0;
+
+    return this.toConversation({
+      ...session,
+      transcript: [...existing.transcript, ...appendedMessages],
+      state: canonicalHasApproval ? existing.state : session.state,
+      pendingApproval: existing.pendingApproval ?? session.pendingApproval ?? null,
+      beastContext: existing.beastContext ?? session.beastContext ?? null,
+      providerContext: existing.providerContext ?? session.providerContext ?? null,
+      routingMetadata: {
+        ...existing.routingMetadata,
+        ...session.routingMetadata,
+      },
+      tokenTotals: fullyOverlappingTranscript
+        ? {
+            cheap: Math.max(existing.tokenTotals.cheap, session.tokenTotals.cheap),
+            premiumReasoning: Math.max(
+              existing.tokenTotals.premiumReasoning,
+              session.tokenTotals.premiumReasoning,
+            ),
+            premiumExecution: Math.max(
+              existing.tokenTotals.premiumExecution,
+              session.tokenTotals.premiumExecution,
+            ),
+          }
+        : {
+            cheap: existing.tokenTotals.cheap + session.tokenTotals.cheap,
+            premiumReasoning:
+              existing.tokenTotals.premiumReasoning + session.tokenTotals.premiumReasoning,
+            premiumExecution:
+              existing.tokenTotals.premiumExecution + session.tokenTotals.premiumExecution,
+          },
+      costUsd: fullyOverlappingTranscript
+        ? Math.max(existing.costUsd, session.costUsd)
+        : existing.costUsd + session.costUsd,
+      updatedAt: existing.updatedAt > session.updatedAt ? existing.updatedAt : session.updatedAt,
+    }, existing);
   }
 }

@@ -69,6 +69,7 @@ export type ProviderContext = z.infer<typeof ProviderContextSchema>;
 
 export const ChatSessionResponseSchema = z.object({
   id: z.string(),
+  conversationId: z.string().min(1).optional(),
   projectId: z.string(),
   transcript: z.array(TranscriptMessageSchema),
   state: z.string(),
