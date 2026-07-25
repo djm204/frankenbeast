@@ -477,6 +477,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         }
 
         if (session.state === 'pending_approval' && !approved) {
+          await runtime.rejectBeastContext?.(session.beastContext);
           session.state = 'rejected';
           session.pendingApproval = null;
           session.beastContext = null;
@@ -524,6 +525,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         }
         if (await hasConsumedApproval(session, runtimeInput)) {
           await recordApprovalReplay(session, runtimeInput, 'approval was already consumed', approvalRequester(c));
+          await runtime.rejectBeastContext?.(session.beastContext);
           session.pendingApproval = null;
           session.state = 'rejected';
           session.beastContext = null;
@@ -588,6 +590,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         await recordApprovalDecision(session, 'denied', 'human', {
           requester: approvalRequester(c),
         });
+        await runtime.rejectBeastContext?.(session.beastContext);
         session.state = 'rejected';
         session.pendingApproval = null;
         session.beastContext = null;

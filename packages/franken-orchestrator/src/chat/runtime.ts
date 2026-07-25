@@ -262,10 +262,14 @@ export class ChatRuntime {
     }
   }
 
-  private async rejectPendingBeast(state: ChatRuntimeState): Promise<void> {
-    if (state.beastContext && this.beastDispatchAdapter) {
-      await this.beastDispatchAdapter.reject(state.beastContext);
+  async rejectBeastContext(context: ChatBeastContext | null | undefined): Promise<void> {
+    if (context && this.beastDispatchAdapter) {
+      await this.beastDispatchAdapter.reject(context);
     }
+  }
+
+  private async rejectPendingBeast(state: ChatRuntimeState): Promise<void> {
+    await this.rejectBeastContext(state.beastContext);
   }
 
   private async runTurn(

@@ -604,6 +604,7 @@ export class ChatSocketController {
     if (!session.pendingApproval) {
       if (session.state === 'pending_approval') {
         if (!approved) {
+          await this.runtime.rejectBeastContext(session.beastContext);
           session.pendingApproval = null;
           session.state = 'rejected';
           session.beastContext = null;
@@ -644,6 +645,7 @@ export class ChatSocketController {
       await this.recordApprovalDecision(session, 'denied', 'human', {
         requester: connectionRequester(peer, this.connections),
       });
+      await this.runtime.rejectBeastContext(session.beastContext);
       session.pendingApproval = null;
       session.state = 'rejected';
       session.beastContext = null;
@@ -701,6 +703,7 @@ export class ChatSocketController {
     try {
       approvalConsumed = await this.hasConsumedApproval(session, runtimeInput);
     } catch {
+      await this.runtime.rejectBeastContext(session.beastContext);
       session.pendingApproval = null;
       session.state = 'rejected';
       session.beastContext = null;
@@ -722,6 +725,7 @@ export class ChatSocketController {
     }
     if (approvalConsumed) {
       await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
+      await this.runtime.rejectBeastContext(session.beastContext);
       session.pendingApproval = null;
       session.state = 'rejected';
       session.beastContext = null;

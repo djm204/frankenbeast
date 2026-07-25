@@ -72,7 +72,7 @@ describe('AgentInitService', () => {
     expect(agents.getAgent(agent.id).status).toBe('initializing');
   });
 
-  it('stops an initializing chat agent when its interview is rejected', async () => {
+  it('makes an initializing chat agent terminal when its interview is rejected', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
     const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
@@ -88,7 +88,7 @@ describe('AgentInitService', () => {
     init.abortAgent(agent.id);
 
     const detail = agents.getAgentDetail(agent.id);
-    expect(detail.agent.status).toBe('stopped');
+    expect(detail.agent.status).toBe('rejected');
     expect(detail.events.map((event) => event.type)).toContain('agent.interview.rejected');
   });
 

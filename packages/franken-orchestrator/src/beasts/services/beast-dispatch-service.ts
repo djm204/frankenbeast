@@ -7,7 +7,7 @@ import type { BeastMetrics } from '../telemetry/beast-metrics.js';
 import { BeastCatalogService } from './beast-catalog-service.js';
 import { wallClockNow } from '@franken/types';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from './dispatch-failure-message.js';
-import { UnknownBeastDefinitionError } from '../errors.js';
+import { RejectedTrackedAgentError, UnknownBeastDefinitionError } from '../errors.js';
 import { GitConfigSchema, LlmConfigSchema, PromptConfigSchema } from '../../cli/run-config-loader.js';
 import { BrainConfigSchema } from '../../config/orchestrator-config.js';
 import {
@@ -245,6 +245,9 @@ export class BeastDispatchService {
     const trackedAgent = request.trackedAgentId
       ? this.repository.requireTrackedAgent(request.trackedAgentId)
       : undefined;
+    if (trackedAgent?.status === 'rejected') {
+      throw new RejectedTrackedAgentError(trackedAgent.id);
+    }
     const moduleConfig = request.moduleConfig ?? this.resolveAgentModuleConfig(request.trackedAgentId);
     const directRunPolicyConfig = trackedAgent
       ? {}

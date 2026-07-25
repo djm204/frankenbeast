@@ -83,6 +83,18 @@ describe('BeastInterviewService', () => {
     });
   });
 
+  it('does not resume or answer an aborted interview', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beast-interview-'));
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const service = new BeastInterviewService(repo, new BeastCatalogService());
+    const started = service.start('martin-loop');
+    service.abort(started.id);
+
+    expect(() => service.resume(started.id)).toThrow(/aborted/);
+    expect(() => service.answer(started.id, 'claude')).toThrow(/aborted/);
+    expect(repo.getInterviewSession(started.id)?.status).toBe('aborted');
+  });
+
   it('accepts valid option-backed Martin Loop provider answers', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beast-interview-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -733,6 +733,7 @@ describe('Chat HTTP Routes', () => {
         data: { approved: false, state: 'rejected', pendingApproval: null },
       });
       expect(sessionStore.get(first.id)?.state).toBe('rejected');
+      expect(() => interviews.resume(pendingInterview.id)).toThrow(/aborted/);
       expect(createRun).toHaveBeenCalledOnce();
 
       const afterDenial = await send(first.id, 'docs/chunks');

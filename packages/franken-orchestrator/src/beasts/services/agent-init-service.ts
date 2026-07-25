@@ -135,13 +135,13 @@ export class AgentInitService {
     if (agent.status !== 'initializing') {
       return agent;
     }
-    const stopped = this.agents.updateAgent(agentId, { status: 'stopped' });
+    const rejected = this.agents.updateAgent(agentId, { status: 'rejected' });
     this.agents.appendEvent(agentId, {
       level: 'info',
       type: 'agent.interview.rejected',
-      message: 'Stopped tracked agent after its chat interview was rejected',
+      message: 'Rejected tracked agent after its chat interview was denied',
       payload: {},
     });
-    return stopped;
+    return rejected;
   }
 }
