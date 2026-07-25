@@ -21,7 +21,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 | `@franken/types` | Shared type definitions and runtime Zod schemas. |
 | `@franken/orchestrator` | Beast Loop, CLI, issue runner, provider registry, middleware, chat/network/comms/security/skills/dashboard/analytics HTTP routes. |
 | `@franken/mcp-suite` | `fbeast` CLI, MCP servers, hooks, proxy server, shared `.fbeast/beast.db`, Beast-mode activation shim. |
-| `@franken/web` | React dashboard for chat, tracked Beast agents, network controls, analytics/cost/safety views. |
+| `@franken/web` | React dashboard for chat, tracked Beast agents, read-only per-agent-type Brain faculty/lesson inspection, network controls, analytics/cost/safety views. |
 | `@franken/live-bench` | Live CLI benchmark tooling. |
 
 Earlier standalone package surfaces from the pre-consolidation architecture have been absorbed mostly into `@franken/orchestrator` or `@franken/mcp-suite`. The ten-package table above is the authoritative current workspace inventory.
@@ -1023,7 +1023,7 @@ the stable `BRAIN_READ_FAILED` response.
 |-------|--------------------|
 | `GET /v1/brain/:agentTypeId` | Summary with at most 100 working-memory keys, episodic count, latest checkpoint time, faculty configuration, and capability availability |
 | `GET /v1/brain/:agentTypeId/episodes?limit=&offset=&query=` | Episodic history or recall search; `limit` defaults to 25 and is capped at 100, `offset` at 1,000, and `query` at 256 characters. Oversized stored step, summary, timestamp, and details fields are truncated or omitted with explicit `*Truncated` markers |
-| `GET /v1/brain/:agentTypeId/lessons` | Incremental lesson capability response; returns `available: false` with an empty collection until consolidated lesson reads are implemented |
+| `GET /v1/brain/:agentTypeId/lessons?query=&limit=` | Lesson availability plus bounded relevance search. Without `query` the route returns no rows rather than presenting an unfiltered collection as a recent feed; `limit` defaults to 10 and is capped at 100 |
 
 See [ADR-041](adr/041-hive-brain-command-center.md) for the command-center and
 registry ownership decision.
@@ -1078,7 +1078,7 @@ flowchart TD
 
 ## Web Dashboard (franken-web)
 
-React-based development tool for chat, tracked-agent launch/detail flows, configuration, and metrics visualization. Lives in `packages/franken-web/`, connects to `frankenbeast chat-server` via WebSocket, and uses authenticated Beast control HTTP routes for operator actions. Not published to npm; private monorepo package for local development.
+React-based development tool for chat, tracked-agent launch/detail flows, configuration, and metrics visualization. The overview includes a read-only Brain panel that accepts an explicit agent-type id, reads the bounded `/v1/brain/:agentTypeId` summary, shows memory plus planning/reasoning/action/learning configuration, and searches persisted lessons by topic through the bounded lesson route. It does not invent an agent-type list or claim an unfiltered recent lesson feed that the API does not provide. Lives in `packages/franken-web/`, connects to `frankenbeast chat-server` via WebSocket, and uses authenticated Beast control HTTP routes through the same-origin server/BFF boundary. Not published to npm; private monorepo package for local development.
 
 ## Secret Store
 

@@ -8,7 +8,7 @@ A React-based single-page application (SPA) that provides a browser control plan
 
 ## Current Functionality
 
-- **Overview Dashboard**: Skills, security profile, and provider controls sourced from the dashboard API.
+- **Overview Dashboard**: Skills, security profile, provider controls, and read-only per-agent-type Brain faculty/lesson inspection sourced from the dashboard and `/v1/brain/*` APIs.
 - **Live Chat**: Real-time interaction via the orchestrator chat server and chat WebSocket/session APIs.
 - **Tracked Beast Agents**: Launch, inspect, edit, and control long-running tracked-agent workflows and their linked Beast runs.
 - **Network Controls**: Service status, logs, and editable network configuration.
@@ -29,7 +29,7 @@ Start with these files when changing the dashboard:
 - `app.tsx`: Creates `ChatShell` with the resolved same-origin base URL, project id, and package version.
 - `components/chat-shell.tsx`: Main dashboard shell, route/tab definitions, shared client construction, chat transcript/composer wiring, and page routing.
 - `hooks/use-chat-session.ts`: Chat WebSocket and session state management for the live operator console.
-- `pages/dashboard-page.tsx`: Overview route for skills, security, and providers via `components/skills/*`, `components/security/*`, and `components/providers/*`.
+- `pages/dashboard-page.tsx`: Overview route for skills, security, providers, and the read-only Brain panel via `components/skills/*`, `components/security/*`, `components/providers/*`, and `components/brain/*`.
 - `pages/beasts-page.tsx`: Tracked Beast agent list/detail/launch surface; related wizard, panels, logs, and agent controls live under `components/beasts/*`.
 - `pages/network-page.tsx`: Network status, service actions, logs, and network config editor wiring via the network components.
 - `pages/analytics-page.tsx`: Analytics route for observer/governor/security/cost telemetry.
@@ -37,7 +37,7 @@ Start with these files when changing the dashboard:
 - `lib/beast-api.ts`: Typed client and types for `/v1/beasts/*` tracked-agent and Beast run routes.
 - `lib/network-api.ts`: Typed client and types for `/v1/network/*` service and config routes.
 - `lib/analytics-api.ts`: Typed client and types for analytics/telemetry routes.
-- `lib/dashboard-api.ts`: Typed client and types for overview dashboard snapshots and mutations.
+- `lib/dashboard-api.ts`: Typed client and types for overview dashboard snapshots/mutations plus bounded read-only `/v1/brain/*` summary and lesson-query calls.
 - `lib/resolve-base-url.ts`: Runtime base URL resolver; current browser code should prefer same-origin paths over browser-readable backend URLs.
 
 ## Local Development Workflow
@@ -71,6 +71,12 @@ FRANKENBEAST_BEAST_OPERATOR_TOKEN=<token-from-frankenbeast-init>
 ```
 
 The Vite server reads that value only for same-origin proxy requests. Browser clients should continue calling same-origin `/api/*` and `/v1/*` paths without receiving a long-lived bearer token.
+
+For Brain-panel verification, use an agent-type id whose durable database already
+exists under the backend project root. The panel does not enumerate or create
+brains: unknown ids display the backend `BRAIN_NOT_FOUND` error. Lesson reads are
+topic searches; the current API deliberately does not expose an unfiltered
+recent lesson feed.
 
 ## Build & Test
 
