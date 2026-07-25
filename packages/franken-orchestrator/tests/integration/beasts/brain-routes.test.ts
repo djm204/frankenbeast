@@ -96,14 +96,14 @@ describe('brain routes integration', () => {
           planning: { configured: false },
           reasoning: { configured: false },
           action: { configured: false },
-          learning: { configured: false },
+          learning: { configured: true },
         },
         capabilities: {
           memoryReview: true,
           retentionReporting: true,
           recordLearning: true,
         },
-        lessons: { available: false, count: null },
+        lessons: { available: true, count: null },
       },
     });
   });
@@ -254,22 +254,47 @@ describe('brain routes integration', () => {
     });
   });
 
-  it('reports lesson consolidation as unavailable until the learning faculty provides it', async () => {
+  it('reports and serves built-in lesson consolidation consistently across brain routes', async () => {
     const { registry } = createRegistry();
-    registry.forAgentType('reviewer');
-
-    const response = await createApp(registry).request('/v1/brain/reviewer/lessons', {
-      headers: authorizedHeaders(),
+    const brain = registry.forAgentType('reviewer');
+    brain.episodic.record({
+      type: 'failure',
+      summary: 'Stale declarations broke the workspace build',
+      createdAt: '2026-07-24T10:00:00.000Z',
     });
+    brain.episodic.record({
+      type: 'failure',
+      summary: 'Workspace build failed because declarations were stale',
+      createdAt: '2026-07-24T10:01:00.000Z',
+    });
+    brain.learning.consolidate({ threshold: 2 });
+
+    const response = await createApp(registry).request(
+      '/v1/brain/reviewer/lessons?query=stale%20workspace%20build',
+      { headers: authorizedHeaders() },
+    );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    const body = await response.json() as { data: Array<Record<string, unknown>>; meta: Record<string, unknown> };
+    expect(body.meta).toEqual({
+      available: true,
+      facultyConfigured: true,
+    });
+    expect(body.data).toEqual([
+      expect.objectContaining({
+        kind: 'consolidated-lesson',
+        occurrenceCount: 2,
+        status: 'pending',
+      }),
+    ]);
+
+    const availabilityResponse = await createApp(registry).request('/v1/brain/reviewer/lessons', {
+      headers: authorizedHeaders(),
+    });
+    expect(availabilityResponse.status).toBe(200);
+    expect(await availabilityResponse.json()).toMatchObject({
       data: [],
-      meta: {
-        available: false,
-        facultyConfigured: false,
-        reason: 'Consolidated lessons are not available until the learning faculty is configured',
-      },
+      meta: { available: true, facultyConfigured: true },
     });
   });
 
