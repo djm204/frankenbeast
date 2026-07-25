@@ -298,7 +298,7 @@ export class BeastRunService {
           const pendingPublications: Array<Omit<BeastSseEvent, 'id'>> = [];
           if (normalizedRun.trackedAgentId) {
             const trackedAgent = this.repository.getTrackedAgent(normalizedRun.trackedAgentId);
-            if (trackedAgent && trackedAgent.status !== 'deleted') {
+            if (trackedAgent && trackedAgent.status !== 'deleted' && trackedAgent.status !== 'rejected') {
               const failedEvent = {
                 level: 'error' as const,
                 type: 'agent.dispatch.failed',
@@ -363,7 +363,7 @@ export class BeastRunService {
         ];
         if (updatedRun.trackedAgentId) {
           const trackedAgent = this.repository.getTrackedAgent(updatedRun.trackedAgentId);
-          if (trackedAgent && trackedAgent.status !== 'deleted') {
+          if (trackedAgent && trackedAgent.status !== 'deleted' && trackedAgent.status !== 'rejected') {
             this.repository.updateTrackedAgent(updatedRun.trackedAgentId, {
               status: 'failed',
               dispatchRunId: updatedRun.id,
@@ -634,6 +634,9 @@ export class BeastRunService {
       const currentRun = this.requireRun(run.id);
       const currentTrackedAgent = this.repository.getTrackedAgent(run.trackedAgentId!);
       if (!currentTrackedAgent || currentTrackedAgent.status === 'deleted') return currentRun;
+      if (currentTrackedAgent.status === 'rejected') {
+        throw new RejectedTrackedAgentError(currentTrackedAgent.id);
+      }
 
       this.assertTrackedAgentCapacity(currentRun, configSnapshot ?? currentRun.configSnapshot);
       if (currentTrackedAgent.status === 'dispatching' && currentTrackedAgent.dispatchRunId === currentRun.id) {
@@ -665,11 +668,6 @@ export class BeastRunService {
       return;
     }
     const trackedAgentId: string = run.trackedAgentId;
-    const trackedAgent = this.repository.getTrackedAgent(trackedAgentId);
-    if (!trackedAgent || trackedAgent.status === 'deleted' || trackedAgent.status === 'rejected') {
-      return;
-    }
-
     const status = run.status === 'running'
       ? 'running'
       : run.status === 'pending_approval'
@@ -680,13 +678,17 @@ export class BeastRunService {
             ? 'failed'
             : 'stopped';
 
-    // Skip all writes if status hasn't changed (full idempotency — prevents duplicate SSE, DB events, AND redundant updateTrackedAgent writes)
-    if (trackedAgent.status === status) {
-      return;
-    }
-
     const updatedAt = isoNow();
     const publications = this.repository.transaction(() => {
+      const trackedAgent = this.repository.getTrackedAgent(trackedAgentId);
+      if (!trackedAgent || trackedAgent.status === 'deleted' || trackedAgent.status === 'rejected') {
+        return [];
+      }
+      // Re-read and compare inside the write transaction so a concurrent
+      // rejection cannot be overwritten by a stale run-status snapshot.
+      if (trackedAgent.status === status) {
+        return [];
+      }
       this.repository.updateTrackedAgent(trackedAgentId, {
         status,
         dispatchRunId: run.id,
