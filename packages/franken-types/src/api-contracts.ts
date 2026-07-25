@@ -8,6 +8,56 @@ export interface ApiErrorEnvelope {
   error: { code: string; message: string; details?: unknown };
 }
 
+export const HiveAgentStatusSchema = z.object({
+  agentId: z.string().min(1).max(256),
+  agentTypeId: z.string().min(1).max(256),
+  status: z.string().min(1).max(128),
+  runId: z.string().min(1).max(256).optional(),
+  lastObservedAt: z.string().min(1).max(64),
+  observation: z.enum(['current', 'stale', 'unavailable']),
+  summary: z.string().max(2_048),
+  errorCode: z.enum([
+    'LINKED_RUN_NOT_FOUND',
+    'LINKED_RUN_MISMATCH',
+    'INVALID_OBSERVATION_TIME',
+  ]).optional(),
+});
+export type HiveAgentStatus = z.infer<typeof HiveAgentStatusSchema>;
+
+export const HiveRecentActivitySchema = z.object({
+  agentTypeId: z.string().min(1).max(256),
+  publisherId: z.string().min(1).max(256),
+  kind: z.enum(['episode', 'lesson']),
+  summary: z.string().max(1_024),
+  publishedAt: z.string().min(1).max(64),
+  truncated: z.literal(true).optional(),
+});
+export type HiveRecentActivity = z.infer<typeof HiveRecentActivitySchema>;
+
+export const HiveStatusResponseSchema = z.object({
+  workspaceId: z.string().min(1).max(128),
+  subjectId: z.string().min(1).max(256),
+  generatedAt: z.string().min(1).max(64),
+  status: z.enum(['current', 'partial']),
+  summary: z.string().max(2_048),
+  agents: z.array(HiveAgentStatusSchema).max(100),
+  recentActivity: z.array(HiveRecentActivitySchema).max(100),
+  meta: z.object({
+    limit: z.number().int().min(1).max(100),
+    totalAgents: z.number().int().min(0).max(100).nullable(),
+    truncated: z.boolean(),
+    staleAfterMs: z.number().int().positive(),
+    hive: z.object({
+      status: z.enum(['available', 'partial', 'unavailable']),
+      errorCodes: z.array(z.enum([
+        'ATTRIBUTION_AMBIGUOUS',
+        'ATTRIBUTION_INCOMPLETE',
+      ])).max(2).optional(),
+    }),
+  }),
+});
+export type HiveStatusResponse = z.infer<typeof HiveStatusResponseSchema>;
+
 export const PendingApprovalSchema = z.object({
   description: z.string(),
   requestedAt: z.string(),

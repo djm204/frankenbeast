@@ -141,12 +141,23 @@ Each criterion reports `pass` only when matching evidence is present in working 
 ## Hive Brain central-command chat contract
 
 [`docs/adr/041-hive-brain-command-center.md`](../../docs/adr/041-hive-brain-command-center.md)
-defines the accepted, not-yet-implemented Hive Brain chat architecture. The
+defines the accepted Hive Brain chat architecture. The
 existing REST session routes and `/v1/chat/ws` remain the browser transport. A
 future `BrainConversation` compatibility repository will provide the current
 `ISessionStore` projection while binding browser sessions to the unique
 user/workspace command-center conversation, workspace Hive Brain, and optional
 registered faculty. Explicit legacy agent/run sessions remain supported.
+
+The package exports `HiveStatusQuery`, a read-only query module for "what are my
+agents doing" turns that do not provide an `agentId`. A query is bound to one
+project-root workspace, requires a server-derived subject id, scans at most
+1,000 tracked rows, returns at most 100 matching non-deleted agents, and enriches
+authoritative status with safely attributable episodes from the real workspace
+`HiveMindStore`. Old active states are marked stale; ambiguous attribution,
+missing linked runs, and hive read failures remain explicit rather than being
+presented as current. The module is not mounted as an HTTP route because the
+shared operator credential does not establish a subject principal. It does not
+mutate chat state, create agents, or dispatch work.
 
 The dispatch invariant is unchanged: transport -> `ChatRuntime` ->
 `BeastDispatchPort` -> `BeastDispatchService` -> the normal Beast executor and
@@ -166,8 +177,8 @@ outcome, then records the request, decision, and reason as a recallable episodic
 event. Approval tokens are returned to the caller but are not copied into the
 episode, and startup health probes do not create episodes.
 
-This per-run faculty wiring does not implement the future workspace Hive routing
-in ADR-041.
+This per-run faculty wiring and the read-only `HiveStatusQuery` do not implement
+`BrainConversation` persistence or future workspace dispatch routing in ADR-041.
 
 ## Package areas
 

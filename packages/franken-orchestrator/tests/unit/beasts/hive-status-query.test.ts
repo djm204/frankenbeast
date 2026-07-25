@@ -1,0 +1,320 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { HiveMindStore, hiveMindAgentTypeNamespace } from '@franken/brain';
+import Database from 'better-sqlite3';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
+import { AgentService } from '../../../src/beasts/services/agent-service.js';
+import type { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
+import {
+  HiveStatusQuery,
+  HIVE_STATUS_STALE_AFTER_MS,
+  workspaceHiveId,
+} from '../../../src/beasts/services/hive-status-query.js';
+
+const NO_RUNS = { getRun: () => undefined } as unknown as BeastRunService;
+
+function createAgent(agents: AgentService, definitionId: string, subjectId: string) {
+  return agents.createAgent({
+    definitionId,
+    source: 'chat',
+    createdByUser: subjectId,
+    initAction: { kind: 'martin-loop', command: definitionId, config: {} },
+    initConfig: {
+      agentRole: 'coding',
+      requestedTools: [
+        'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+        'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+      ],
+      skills: [],
+    },
+  });
+}
+
+describe('HiveStatusQuery', () => {
+  const roots: string[] = [];
+  const closeables: Array<{ close(): void }> = [];
+
+  afterEach(() => {
+    for (const closeable of closeables.splice(0).reverse()) closeable.close();
+    for (const root of roots.splice(0).reverse()) rmSync(root, { recursive: true, force: true });
+  });
+
+  function createHarness(agentNow = '2026-07-25T11:59:00.000Z') {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-status-query-'));
+    roots.push(root);
+    const dbPath = join(root, '.fbeast', 'beast.db');
+    const repository = new SQLiteBeastRepository(dbPath);
+    const hive = new HiveMindStore(join(root, '.fbeast', 'hive', 'hive.db'));
+    closeables.push(repository, hive);
+    const agents = new AgentService(repository, () => agentNow);
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      agents,
+      NO_RUNS,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+    return { root, dbPath, agents, hive, query };
+  }
+
+  it('summarizes one tracked agent from real agent and hive stores', () => {
+    const { agents, hive, query } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    agents.updateAgent(coder.id, { status: 'running' });
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Implementing the status query',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      subjectId: 'operator',
+      status: 'current',
+      summary: '1 agent found in this workspace.',
+      agents: [{
+        agentId: coder.id,
+        agentTypeId: 'coder',
+        status: 'running',
+        observation: 'current',
+      }],
+      recentActivity: [{
+        agentTypeId: 'coder',
+        kind: 'episode',
+        summary: 'Implementing the status query',
+      }],
+      meta: { totalAgents: 1, truncated: false, hive: { status: 'available' } },
+    });
+  });
+
+  it('marks an old active status stale and keeps it visible when hive reads fail', () => {
+    const { agents, hive, query } = createHarness('2026-07-25T11:00:00.000Z');
+    const coder = createAgent(agents, 'coder', 'operator');
+    agents.updateAgent(coder.id, { status: 'running' });
+    hive.close();
+    closeables.splice(closeables.indexOf(hive), 1);
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      agents: [{
+        agentId: coder.id,
+        status: 'running',
+        observation: 'stale',
+      }],
+      recentActivity: [],
+      meta: {
+        staleAfterMs: HIVE_STATUS_STALE_AFTER_MS,
+        hive: { status: 'unavailable' },
+      },
+    });
+  });
+
+  it('marks an old pending-approval run stale using the run status vocabulary', () => {
+    const { root, agents, hive } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    const linkedAgents = {
+      listAgentPage: () => ({
+        agents: [{ ...coder, status: 'awaiting_approval', dispatchRunId: 'run-1' }],
+        rowsScanned: 1,
+      }),
+    } as unknown as AgentService;
+    const runs = {
+      getRun: () => ({
+        id: 'run-1',
+        trackedAgentId: coder.id,
+        definitionId: 'coder',
+        status: 'pending_approval',
+        createdAt: '2026-07-25T11:00:00.000Z',
+        startedAt: '2026-07-25T11:00:00.000Z',
+        lastHeartbeatAt: '2026-07-25T11:00:00.000Z',
+      }),
+    } as unknown as BeastRunService;
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      linkedAgents,
+      runs,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+
+    expect(query.query({ subjectId: 'operator' }).agents[0]).toMatchObject({
+      status: 'pending_approval',
+      observation: 'stale',
+    });
+  });
+
+  it('does not expose status from a linked run owned by another agent', () => {
+    const { root, agents, hive } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    const linkedAgents = {
+      listAgentPage: () => ({
+        agents: [{ ...coder, dispatchRunId: 'run-1' }],
+        rowsScanned: 1,
+      }),
+    } as unknown as AgentService;
+    const runs = {
+      getRun: () => ({
+        id: 'run-1',
+        trackedAgentId: 'another-agent',
+        definitionId: 'reviewer',
+        status: 'failed',
+        createdAt: '2026-07-25T11:59:00.000Z',
+      }),
+    } as unknown as BeastRunService;
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      linkedAgents,
+      runs,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+
+    expect(query.query({ subjectId: 'operator' }).agents[0]).toMatchObject({
+      status: 'initializing',
+      observation: 'unavailable',
+      errorCode: 'LINKED_RUN_MISMATCH',
+    });
+  });
+
+  it('filters by subject and reports bounded truncation', () => {
+    const { agents, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    createAgent(agents, 'reviewer', 'operator');
+    createAgent(agents, 'planner', 'another-operator');
+
+    const result = query.query({ subjectId: 'operator', limit: 1 });
+
+    expect(result.agents).toHaveLength(1);
+    expect(result.agents[0]?.agentTypeId).not.toBe('planner');
+    expect(result.meta).toMatchObject({ limit: 1, totalAgents: null, truncated: true });
+    expect(result.summary).toContain('more agents omitted');
+  });
+
+  it('omits hive activity when an agent-type namespace is shared by subjects', () => {
+    const { agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    createAgent(agents, 'coder', 'another-operator');
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Could belong to either subject',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      recentActivity: [],
+      meta: {
+        hive: {
+          status: 'partial',
+          errorCodes: ['ATTRIBUTION_AMBIGUOUS'],
+        },
+      },
+    });
+  });
+
+  it('does not attribute type-level activity past a deleted agent from another subject', () => {
+    const { agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    const deleted = createAgent(agents, 'coder', 'another-operator');
+    agents.updateAgent(deleted.id, { status: 'completed' });
+    agents.softDeleteAgent(deleted.id);
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Could belong to the deleted agent',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      recentActivity: [],
+      meta: {
+        hive: {
+          status: 'partial',
+          errorCodes: ['ATTRIBUTION_AMBIGUOUS'],
+        },
+      },
+    });
+  });
+
+  it('does not duplicate type-level activity for multiple agents owned by one subject', () => {
+    const { agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    createAgent(agents, 'coder', 'operator');
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Shared coder activity',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+
+    expect(query.query({ subjectId: 'operator' }).recentActivity).toEqual([
+      expect.objectContaining({ summary: 'Shared coder activity' }),
+    ]);
+  });
+
+  it('isolates separate workspace stores', () => {
+    const first = createHarness();
+    const second = createHarness();
+    createAgent(first.agents, 'coder', 'operator');
+    first.hive.publish(hiveMindAgentTypeNamespace('coder'), 'unrelated-publisher', {
+      kind: 'episode',
+      event: { type: 'observation', summary: 'First workspace only', createdAt: '2026-07-25T11:59:30.000Z' },
+    });
+
+    expect(second.query.query({ subjectId: 'operator' })).toMatchObject({
+      agents: [],
+      recentActivity: [],
+      meta: { totalAgents: 0, truncated: false },
+    });
+    expect(first.query.query({ subjectId: 'operator' }).workspaceId)
+      .not.toBe(second.query.query({ subjectId: 'operator' }).workspaceId);
+  });
+
+  it('rejects unbounded or unidentified queries before reading stores', () => {
+    const { query } = createHarness();
+    expect(() => query.query({ subjectId: 'operator', limit: 101 })).toThrow(/limit/i);
+    expect(() => query.query({ subjectId: '' })).toThrow(/subjectId/i);
+    expect(() => query.query({ subjectId: 'x'.repeat(257) })).toThrow(/subjectId/i);
+  });
+
+  it('counts corrupt physical rows toward the 1,000-row scan bound', () => {
+    const { dbPath, agents, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    const db = new Database(dbPath);
+    closeables.push(db);
+    const insert = db.prepare(`
+      INSERT INTO tracked_agents (
+        id, definition_id, source, status, created_by_user,
+        init_action, init_config, created_at, updated_at
+      ) VALUES (?, 'planner', 'chat', 'initializing', 'other-user', '{}', '{', ?, ?)
+    `);
+    db.transaction(() => {
+      for (let index = 0; index < 1_001; index += 1) {
+        const timestamp = `2026-07-26T00:${String(Math.floor(index / 60) % 60).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`;
+        insert.run(`corrupt-${String(index).padStart(4, '0')}`, timestamp, timestamp);
+      }
+    })();
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = query.query({ subjectId: 'operator', limit: 100 });
+
+    expect(result.agents).toEqual([]);
+    expect(result.meta.truncated).toBe(true);
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+});

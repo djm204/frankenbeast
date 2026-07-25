@@ -271,6 +271,8 @@ export interface TrackedAgentPageOptions extends CorruptJsonRecoveryOptions {
 
 export interface TrackedAgentPage {
   readonly agents: TrackedAgent[];
+  /** Physical rows decoded or skipped while advancing this page's cursor. */
+  readonly rowsScanned: number;
   readonly nextCursor?: string | undefined;
 }
 
@@ -839,6 +841,7 @@ export class SQLiteBeastRepository {
     const lastRow = pageRows.at(-1);
     return {
       agents,
+      rowsScanned: pageRows.length,
       ...(rows.length > options.limit && lastRow ? {
         nextCursor: encodeTrackedAgentCursor({
           version: 1,

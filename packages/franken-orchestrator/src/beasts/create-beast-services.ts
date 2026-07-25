@@ -21,9 +21,10 @@ import { AgentService } from './services/agent-service.js';
 import { CapacityReservationPolicy, type CapacityReservationRule } from './services/capacity-reservation-policy.js';
 import { BeastRunService } from './services/beast-run-service.js';
 import { MaintenanceModeService } from './services/maintenance-mode-service.js';
+import { HiveStatusQuery, workspaceHiveId } from './services/hive-status-query.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
-import { BrainRegistry } from '@franken/brain';
+import { BrainRegistry, HiveMindStore } from '@franken/brain';
 import type { BrainRouteContext } from '../http/routes/brain-routes.js';
 import type { ModuleConfig } from './types.js';
 
@@ -39,6 +40,7 @@ export interface BeastServicePaths {
 export interface BeastServiceBundle {
   agents: AgentService;
   brains: BrainRegistry;
+  hiveStatus: HiveStatusQuery;
   resolveBrainContext(agentTypeId: string): BrainRouteContext | undefined;
   catalog: BeastCatalogService;
   dispatch: BeastDispatchService;
@@ -152,10 +154,28 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     maintenance,
     trustedSkillToolManifests,
   });
+  const agents = new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests });
+  let hiveAvailable = true;
+  let hiveMind: HiveMindStore;
+  try {
+    hiveMind = new HiveMindStore(join(projectRoot, '.fbeast', 'hive', 'hive.db'));
+  } catch {
+    hiveAvailable = false;
+    hiveMind = new HiveMindStore(':memory:');
+  }
+  const hiveStatus = new HiveStatusQuery(
+    workspaceHiveId(projectRoot),
+    agents,
+    runService,
+    hiveMind,
+    undefined,
+    hiveAvailable,
+  );
 
   return {
-    agents: new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests }),
+    agents,
     brains,
+    hiveStatus,
     resolveBrainContext,
     catalog,
     dispatch: new BeastDispatchService(repository, catalog, executors, metrics, logStore, {
@@ -171,6 +191,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     eventBus,
     ticketStore,
     dispose: () => {
+      hiveStatus.close();
       brains.close();
       ticketStore.destroy();
       repository.close();

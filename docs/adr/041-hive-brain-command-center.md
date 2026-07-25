@@ -256,22 +256,26 @@ client state.
 
 ## Implementation boundaries
 
-This ADR is documentation only. Runtime work remains split as follows:
+Runtime work remains split as follows:
 
 - **#3701 — entity and persistence:** add versioned `BrainConversation` schemas,
   uniqueness for `(workspaceId, subjectId)`, Hive-Brain-backed repository,
   supervised-agent/summary state, compatibility projection/binding migration,
   atomicity, corruption, and restart tests.
-- **#3702 — hive-aware query/routing:** resolve the workspace Hive Brain and
-  optional faculty from `BrainRegistry`, record routing metadata, and expose
-  additive typed API fields without changing v1 transport behavior.
+- **#3702 — hive-aware query/routing:** `HiveStatusQuery` implements the
+  read-only query slice without changing dispatch behavior. It binds one
+  project-root workspace, filters a bounded tracked-agent scan by subject,
+  enriches authoritative status with bounded, safely attributable hive
+  episodes, and reports stale, ambiguous, unreconciled, or unavailable state
+  explicitly. The package exports the module but does not expose caller-selected
+  subject identity over HTTP; conversation routing metadata and server-derived
+  identity remain owned by #3701 rather than being duplicated here.
 - **#3703 — dispatch integration:** feed routed Beast requests through
   `BeastDispatchPort`/`BeastDispatchService`, preserving governor/HITL, auth,
   admission, audit, capacity, and idempotency behavior.
 
-Those issues remain blocked until this decision is merged. Issue #3685 must
-provide the registry contract before #3701 or #3702 can bind persisted foreign
-keys to it.
+The registry and #3702 query slice are implemented. The remaining entity and
+dispatch work must continue to preserve the boundaries above.
 
 The agent-scoped planning faculty adapter is now implemented independently of
 this command-center routing work: consolidated Beast dependencies attach the

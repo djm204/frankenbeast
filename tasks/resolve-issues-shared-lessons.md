@@ -1,5 +1,11 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Cross-agent hive activity needs explicit attribution truth
+- A workspace-wide status query may use agent-type hive activity for a subject only when the bounded tracked-agent scan proves that type belongs to one subject, or when the publisher id matches that subject's tracked agent/run directly. If the scan is incomplete or the type is shared, omit generic activity and expose a stable partial/error marker instead of guessing ownership.
+- Count soft-deleted agents when proving agent-type ownership; persisted hive episodes can outlive the tracked-agent row's active lifecycle.
+- Reconcile a linked run's tracked-agent id and definition before using its state, and derive run freshness only from run timestamps. Optional hive-store open/read failures must degrade the status query, not prevent unrelated Beast services from starting.
+- Bound physical rows scanned, not only successfully decoded agents, and deduplicate type-level hive entries when several same-type agents share one subject. Keep tracked-agent/run status authoritative when hive reads fail.
+
 ## 2026-07-25 — Faculty lesson consultation must stay bounded before lookup
 - Apply input caps while iterating plan objectives, before `map()`/`join()` or redaction; truncating only after concatenation still allows adversarial plans to cause unbounded synchronous work. Skip query construction entirely when episode recording and lesson consultation are disabled.
 - Keep automatic consolidation off the planning/reasoning/action return path and coalesce pending triggers per learning port. Persist stable lesson keys—not full lesson text—in consultation telemetry so the consulted set stays observable without duplicating reviewed memory content.

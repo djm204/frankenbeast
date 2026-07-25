@@ -263,6 +263,14 @@ export { BEAST_DEFINITIONS } from './beasts/definitions/catalog.js';
 export { BeastCatalogService } from './beasts/services/beast-catalog-service.js';
 export { BeastInterviewService } from './beasts/services/beast-interview-service.js';
 export { AgentService } from './beasts/services/agent-service.js';
+export {
+  HiveStatusQuery,
+  DEFAULT_HIVE_STATUS_LIMIT,
+  MAX_HIVE_STATUS_LIMIT,
+  HIVE_STATUS_STALE_AFTER_MS,
+  workspaceHiveId,
+  type HiveStatusQueryOptions,
+} from './beasts/services/hive-status-query.js';
 export { AgentInitService } from './beasts/services/agent-init-service.js';
 export { BeastDispatchService } from './beasts/services/beast-dispatch-service.js';
 export { BeastRunService } from './beasts/services/beast-run-service.js';

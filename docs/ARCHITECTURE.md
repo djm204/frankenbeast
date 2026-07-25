@@ -508,18 +508,27 @@ episodic windows, remains best-effort relative to the authoritative faculty
 result, and continues to propose lessons through operator review rather than
 approving them.
 
-### Hive Brain central-command chat (accepted design)
+### Hive Brain central-command chat (accepted design, partial runtime)
 
 [ADR-041](adr/041-hive-brain-command-center.md) fixes the architecture for the
-planned Hive Brain command center. A durable `BrainConversation` extends the
+Hive Brain command center. A durable `BrainConversation` will extend the
 existing project-scoped chat session model; it does not replace
 `/v1/chat/ws`, its `franken.chat.v1` events, or the REST reconciliation routes.
 The conversation owns transcript and resumable turn/approval state, while the
-planned `BrainRegistry` from #3685 remains the single identity/capability
+implemented `BrainRegistry` remains the single identity/capability
 registry for one workspace `hive` brain and its `faculty` brains.
 
-This is an accepted target contract, not shipped runtime behavior yet. The
-implementation must preserve the current `franken-web` transport and route all
+`HiveStatusQuery` is the shipped read-only #3702 slice. It binds one project-root
+workspace, requires a server-derived subject identity, scans at most 1,000
+tracked-agent rows, returns at most 100 matching non-deleted agents, and enriches
+them with safely attributable episodes from the real workspace `HiveMindStore`.
+Results mark stale, ambiguous, or unavailable state explicitly and preserve
+tracked status if hive reads fail. The module intentionally does not expose a
+caller-selected subject over HTTP. It does not create agents, mutate
+conversations, or dispatch work.
+
+The remaining conversation and dispatch implementation must preserve the
+current `franken-web` transport and route all
 Beast launches through `ChatRuntime` -> `BeastDispatchPort` ->
 `BeastDispatchService`; direct process/container execution from a brain or
 faculty is prohibited. See
