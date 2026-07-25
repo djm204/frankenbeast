@@ -111,6 +111,19 @@ export {
   BrainSnapshotSchema,
 } from './brain.js';
 
+// Workspace-scoped Hive Brain conversation aggregate
+export type {
+  BrainConversation,
+  BrainConversationPendingApproval,
+  BrainConversationSupervisedAgent,
+} from './brain-conversation.js';
+export {
+  CURRENT_BRAIN_CONVERSATION_SCHEMA_VERSION,
+  BrainConversationSchema,
+  BrainConversationPendingApprovalSchema,
+  BrainConversationSupervisedAgentSchema,
+} from './brain-conversation.js';
+
 // Provider interfaces + types
 export type {
   ILlmProvider,

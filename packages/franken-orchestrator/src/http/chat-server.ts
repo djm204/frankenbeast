@@ -3,8 +3,13 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
+import { BrainRegistry } from '@franken/brain';
 import type { ILlmClient } from '@franken/types';
-import { FileSessionStore, type ISessionStore } from '../chat/session-store.js';
+import {
+  BrainConversationSessionStore,
+  FileSessionStore,
+  type ISessionStore,
+} from '../chat/session-store.js';
 import { FileApprovalAuditLog } from '../chat/approval-audit-log.js';
 import type { ChatSession } from '../chat/types.js';
 import { createChatRuntime, type ChatRuntimeBundle } from '../chat/chat-runtime-factory.js';
@@ -39,6 +44,7 @@ export interface StartChatServerOptions {
   allowedOrigins?: string[];
   sessionStoreDir: string;
   sessionStore?: ISessionStore;
+  brainRegistry?: BrainRegistry;
   llm: ILlmClient;
   executionLlm?: ILlmClient;
   projectName: string;
@@ -55,7 +61,7 @@ export interface StartChatServerOptions {
     getConfig(): OrchestratorConfig;
     setConfig(config: OrchestratorConfig): void;
   };
-  beastControl?: BeastRoutesDeps;
+  beastControl?: BeastRoutesDeps & { brains?: BrainRegistry };
   disposeBeastControl?: (() => void) | undefined;
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
@@ -98,8 +104,18 @@ async function loadLegacyCommsSession(
   }
 }
 
-export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
-  return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
+export function resolveChatServerSessionStore(
+  options: Pick<StartChatServerOptions, 'brainRegistry' | 'sessionStore' | 'sessionStoreDir'>,
+): ISessionStore {
+  if (options.sessionStore) return options.sessionStore;
+  if (!options.brainRegistry) {
+    throw new Error('brainRegistry is required when sessionStore is not provided');
+  }
+  return new BrainConversationSessionStore(
+    new FileSessionStore(options.sessionStoreDir),
+    options.brainRegistry,
+    'local-operator',
+  );
 }
 
 function createCommsRuntimeAdapter(
@@ -275,7 +291,14 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     );
   }
   const tokenSecret = createSessionTokenSecret();
-  const sessionStore = resolveChatServerSessionStore(options);
+  const ownedBrainRegistry = options.sessionStore || options.brainRegistry || options.beastControl?.brains
+    ? undefined
+    : new BrainRegistry(join(dirname(options.sessionStoreDir), 'brains'));
+  const effectiveBrainRegistry = options.brainRegistry ?? options.beastControl?.brains ?? ownedBrainRegistry;
+  const sessionStore = options.sessionStore ?? resolveChatServerSessionStore({
+    sessionStoreDir: options.sessionStoreDir,
+    brainRegistry: effectiveBrainRegistry!,
+  });
   const chatRateLimiter = createChatRateLimiter(options.chatRateLimit ?? options.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   const chatMutationAdmission = new ChatMutationAdmission(chatRateLimiter);
   const approvalAuditLog = new FileApprovalAuditLog();
@@ -397,6 +420,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();
       await closedServer;
+      ownedBrainRegistry?.close();
       options.analyticsDeps?.analytics.close?.();
     },
   };

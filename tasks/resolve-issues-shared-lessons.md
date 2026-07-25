@@ -1,5 +1,12 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Canonical workspace conversations over legacy session projections
+- Keep workspace Hive brains in a registry namespace disjoint from agent-type brains, and hash externally sourced workspace IDs for filenames rather than weakening the existing portable agent-type path contract.
+- Commit the canonical conversation aggregate and session-binding metadata in one SQLite transaction. Treat legacy session files as a repairable compatibility projection, leave unbound records unchanged, and use non-creating lookups on reads so inspecting old sessions does not materialize empty Hive databases.
+- Check durable schema metadata before additive DDL. Future-version rejection is not fail-closed if startup creates current tables or indexes before reporting the incompatible version.
+- When one canonical aggregate has multiple transport bindings, every canonical write must journal all projections as pending; repairing only the active binding makes stale rollback files look clean. Adopt externally assigned comms session IDs on first save instead of treating them as legacy-only records.
+- Conversation databases can contain transcripts and approval execution metadata. Create workspace directories as `0700`, force SQLite databases and sidecars to `0600`, and test the effective POSIX modes rather than relying on the process umask.
+
 ## 2026-07-25 — Retention enforcement must preserve upstream invariants
 - Retention deletion must honor producer-side lifecycle windows such as learning cooldowns, not only the generic memory-class TTL. Validate persisted cooldown metadata before classifying an expired learning row as a compaction candidate.
 - Cached rollback floors are references to mutable rows: validate the referenced checkpoint inside the enforcement transaction before excluding older checkpoints. When a shared delete budget leaves scanned checkpoint candidates pending, rewind the checkpoint cursor as well as the episodic cursor; otherwise continuous inserts can starve old checkpoints indefinitely.

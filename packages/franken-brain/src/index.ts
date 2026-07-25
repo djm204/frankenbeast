@@ -81,3 +81,16 @@ export {
 } from './sqlite-brain.js';
 
 export { BrainRegistry } from './brain-registry.js';
+export {
+  CorruptBrainConversationError,
+  SqliteBrainConversationRepository,
+  UnsupportedBrainConversationSchemaVersionError,
+  type BrainConversationRepository,
+} from './brain-conversation.js';
+export {
+  CURRENT_BRAIN_CONVERSATION_SCHEMA_VERSION,
+  BrainConversationSchema,
+  type BrainConversation,
+  type BrainConversationPendingApproval,
+  type BrainConversationSupervisedAgent,
+} from '@franken/types';

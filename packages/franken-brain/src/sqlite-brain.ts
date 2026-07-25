@@ -6,6 +6,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from 'node:crypto';
+import { chmodSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { resolve as resolvePath } from 'node:path';
 import Database from 'better-sqlite3';
@@ -36,6 +37,7 @@ import type {
   RelevantLesson,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
+import { SqliteBrainConversationRepository } from './brain-conversation.js';
 
 // --- Working Memory ---
 
@@ -115,6 +117,8 @@ export interface SqliteBrainOptions {
   hydrateWorkingMemoryFromDb?: boolean;
   workingMemoryHydrationLimits?: Partial<WorkingMemoryHydrationLimits>;
   encryption?: MemoryEncryptionOptions;
+  /** Scope conversation persistence to a workspace, or disable it for agent-type registry brains. */
+  conversationWorkspaceId?: string | null;
 }
 
 export type MemoryRetentionClass =
@@ -6389,6 +6393,14 @@ export class SqliteBrain implements IBrain {
   readonly working: SqliteWorkingMemory;
   readonly episodic: SqliteEpisodicMemory;
   readonly recovery: SqliteRecoveryMemory;
+  private readonly conversationRepository: SqliteBrainConversationRepository | undefined;
+
+  get conversations(): SqliteBrainConversationRepository {
+    if (!this.conversationRepository) {
+      throw new Error('BrainConversation persistence is only available on workspace Hive brains');
+    }
+    return this.conversationRepository;
+  }
   private planningFaculty: IPlanningFaculty = Object.freeze({
     kind: 'planning' as const,
     configured: false,
@@ -6488,6 +6500,14 @@ export class SqliteBrain implements IBrain {
     }
     this.dbPath = normalizeSqliteDbPath(dbPath);
     this.db = new Database(dbPath);
+    if (dbPath !== ':memory:' && process.platform !== 'win32') {
+      try {
+        chmodSync(resolvePath(dbPath), 0o600);
+      } catch (error) {
+        this.db.close();
+        throw error;
+      }
+    }
     this.db.pragma('busy_timeout = 5000');
     this.db.pragma('secure_delete = ON');
     assertSupportedMemorySchema(this.db);
@@ -6540,6 +6560,17 @@ export class SqliteBrain implements IBrain {
       (event) => this.auditRecorder(event),
       (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
     );
+    if (options.conversationWorkspaceId !== null) {
+      try {
+        this.conversationRepository = new SqliteBrainConversationRepository(
+          this.db,
+          options.conversationWorkspaceId,
+        );
+      } catch (error) {
+        this.db.close();
+        throw error;
+      }
+    }
     SqliteBrain.registerLiveBrain(this.dbPath, this);
   }
 

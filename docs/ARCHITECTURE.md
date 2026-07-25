@@ -13,7 +13,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 
 | Package | Role |
 |---------|------|
-|| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` whose safe agent-type IDs default to durable `.fbeast/brains/<agentTypeId>.db` files, and planning/reasoning/action/learning faculty surfaces. The local Beast CLI attaches the existing planner, critique chain, and governor; the built-in learning faculty clusters similar failure episodes into review-gated lesson candidates and exposes occurrence-aware retrieval without consumer wiring. |
+|| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` for both durable agent-type brains and workspace Hive brains. `SqliteBrainConversationRepository` persists one canonical `BrainConversation` per `(workspaceId, subjectId)` behind `forWorkspaceHive`; planning/reasoning/action/learning faculty surfaces remain additive. |
 | `@franken/planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
 | `@franken/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
@@ -873,6 +873,18 @@ fbeast mcp init / client config
 The top-level [`examples/`](../examples/README.md) directory contains standalone, scaffoldable sample projects for CLI planning, MCP registration, and orchestrator configuration. Package READMEs, `docs/guides/quickstart.md`, `docs/guides/run-cli-beast.md`, and tests next to the implementation provide deeper usage details. Older examples that mention Claude/OpenAI/Ollama adapters or a Docker firewall proxy describe pre-consolidation surfaces.
 
 ## Chat System Architecture
+
+Workspace command-center state is now represented by the versioned
+`BrainConversation` entity. `BrainRegistry.forWorkspaceHive(workspaceId)` opens
+a disjoint, hashed database under `.fbeast/brains/workspaces/`, and
+`SqliteBrainConversationRepository`
+atomically persists transcript, routing, approval, supervised-agent, summary,
+provider, token, and cost state. `BrainConversationSessionStore` is an additive
+`ISessionStore` compatibility projection used by the standalone chat server for
+newly bound `local-operator` sessions; injected stores and unbound legacy
+per-session files continue to load unchanged. Bound sessions share a
+conversation mutation-admission key. Hive-aware routing and
+dispatch remain the separate #3702 and #3703 integration boundaries.
 
 The chat system provides a two-tier interactive experience available via CLI REPL and HTTP+WebSocket server.
 

@@ -454,7 +454,8 @@ export class ChatSocketController {
     session: ChatSession,
     work: () => Promise<void>,
   ): Promise<void> {
-    if (!this.chatMutationAdmission.begin(session.id)) {
+    const mutationKey = this.sessionStore.mutationKey?.(session.id) ?? session.id;
+    if (!this.chatMutationAdmission.begin(mutationKey)) {
       this.emitRateLimitError(peer, 'A chat turn is already running for this chat session.');
       return;
     }
@@ -464,7 +465,7 @@ export class ChatSocketController {
       await work();
     } finally {
       this.activeSessionTurns.delete(session.id);
-      this.chatMutationAdmission.end(session.id);
+      this.chatMutationAdmission.end(mutationKey);
     }
   }
 

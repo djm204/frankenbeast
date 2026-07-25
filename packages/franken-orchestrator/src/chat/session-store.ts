@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { ChatSessionSchema, type ChatSession } from './types.js';
 import { isoNow, now as deterministicNow } from '@franken/types';
+import type { BrainConversation, BrainRegistry } from '@franken/brain';
 import { atomicWriteFileSync } from '../session/atomic-file.js';
 
 const MAX_CHAT_SESSION_ID_LENGTH = 128;
@@ -31,6 +32,7 @@ export interface ISessionStore {
   save(session: ChatSession): void;
   list(): string[];
   listSessions(projectId?: string): ChatSession[];
+  mutationKey?(sessionId: string): string;
   listCorruptions?(projectId?: string): CorruptChatSessionFile[];
   delete(id: string): void;
 }
@@ -258,5 +260,169 @@ export class FileSessionStore implements ISessionStore {
     } catch {
       return undefined;
     }
+  }
+}
+
+/**
+ * Compatibility store that keeps legacy session files as transport bindings
+ * while a workspace BrainConversation is the canonical state for new sessions.
+ */
+export class BrainConversationSessionStore implements ISessionStore {
+  constructor(
+    private readonly legacyStore: ISessionStore,
+    private readonly brainRegistry: BrainRegistry,
+    private readonly subjectId: string,
+  ) {}
+
+  mutationKey(sessionId: string): string {
+    const legacy = this.legacyStore.get(sessionId);
+    if (!legacy) return sessionId;
+    const brain = this.brainRegistry.getWorkspaceHive(legacy.projectId);
+    return brain?.conversations.getConversationIdForSession(sessionId) ?? sessionId;
+  }
+
+  create(projectId: string): ChatSession {
+    const binding = this.legacyStore.create(projectId);
+    try {
+      const brain = this.brainRegistry.forWorkspaceHive(projectId);
+      const conversation = brain.conversations.resolveOrCreateAndBind(
+        projectId,
+        this.subjectId,
+        binding.id,
+      );
+      const projected = this.project(binding, conversation);
+      this.repairProjection(binding.id, projected, brain);
+      return projected;
+    } catch (error) {
+      try {
+        this.legacyStore.delete(binding.id);
+      } catch {
+        // The unbound legacy record remains readable if compensating cleanup fails.
+      }
+      throw error;
+    }
+  }
+
+  get(id: string): ChatSession | undefined {
+    const binding = this.legacyStore.get(id);
+    if (!binding) return undefined;
+    const brain = this.brainRegistry.getWorkspaceHive(binding.projectId);
+    if (!brain) return binding;
+    const conversationId = brain.conversations.getConversationIdForSession(id);
+    if (!conversationId) return binding;
+    const conversation = brain.conversations.get(conversationId);
+    if (!conversation) {
+      throw new Error(`BrainConversation binding ${id} references missing conversation ${conversationId}`);
+    }
+    const projected = this.project(binding, conversation);
+    if (brain.conversations.isProjectionPending(id)) {
+      this.repairProjection(id, projected, brain);
+    }
+    return projected;
+  }
+
+  save(session: ChatSession): void {
+    const binding = this.legacyStore.get(session.id);
+    let brain = this.brainRegistry.getWorkspaceHive(session.projectId);
+    const conversationId = brain?.conversations.getConversationIdForSession(session.id);
+    if (binding && (!brain || !conversationId)) {
+      this.legacyStore.save(session);
+      return;
+    }
+    if (!brain || !conversationId) {
+      brain = this.brainRegistry.forWorkspaceHive(session.projectId);
+      const conversation = brain.conversations.resolveOrCreateAndBind(
+        session.projectId,
+        this.subjectId,
+        session.id,
+      );
+      try {
+        const canonical = this.toConversation(session, conversation);
+        brain.conversations.saveBound(session.id, canonical);
+        this.repairProjection(session.id, this.project(session, canonical), brain);
+        return;
+      } catch (error) {
+        brain.conversations.unbindSession(session.id);
+        throw error;
+      }
+    }
+    const conversation = brain.conversations.get(conversationId);
+    if (!conversation) {
+      throw new Error(`BrainConversation binding ${session.id} references missing conversation ${conversationId}`);
+    }
+    const canonical = this.toConversation(session, conversation);
+    brain.conversations.saveBound(session.id, canonical);
+    this.repairProjection(session.id, this.project(session, canonical), brain);
+  }
+
+  list(): string[] {
+    return this.legacyStore.list();
+  }
+
+  listSessions(projectId?: string): ChatSession[] {
+    return this.list()
+      .map((id) => this.get(id))
+      .filter((session): session is ChatSession => session !== undefined)
+      .filter((session) => projectId === undefined || session.projectId === projectId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  listCorruptions(projectId?: string): CorruptChatSessionFile[] {
+    return this.legacyStore.listCorruptions?.(projectId) ?? [];
+  }
+
+  delete(id: string): void {
+    const binding = this.legacyStore.get(id);
+    if (!binding) return;
+    this.brainRegistry
+      .getWorkspaceHive(binding.projectId)
+      ?.conversations.unbindSession(id);
+    this.legacyStore.delete(id);
+  }
+
+  private project(binding: ChatSession, conversation: BrainConversation): ChatSession {
+    return {
+      id: binding.id,
+      conversationId: conversation.id,
+      projectId: binding.projectId,
+      transcript: conversation.transcript,
+      state: conversation.state,
+      pendingApproval: conversation.pendingApproval,
+      beastContext: conversation.beastContext,
+      providerContext: conversation.providerContext,
+      routingMetadata: conversation.routingMetadata,
+      tokenTotals: conversation.tokenTotals,
+      costUsd: conversation.costUsd,
+      createdAt: binding.createdAt,
+      updatedAt: conversation.updatedAt,
+    };
+  }
+
+  private repairProjection(
+    sessionId: string,
+    projection: ChatSession,
+    brain: ReturnType<BrainRegistry['forWorkspaceHive']>,
+  ): void {
+    try {
+      this.legacyStore.save(projection);
+      brain.conversations.markProjectionComplete(sessionId);
+    } catch {
+      // Canonical state and the pending marker committed together. A later read retries this projection.
+    }
+  }
+
+  private toConversation(session: ChatSession, existing: BrainConversation): BrainConversation {
+    return {
+      ...existing,
+      transcript: session.transcript,
+      state: session.state,
+      pendingApproval: session.pendingApproval ?? null,
+      beastContext: session.beastContext ?? null,
+      providerContext: session.providerContext ?? null,
+      routingMetadata: session.routingMetadata ?? {},
+      tokenTotals: session.tokenTotals,
+      costUsd: session.costUsd,
+      updatedAt: session.updatedAt,
+    };
   }
 }
