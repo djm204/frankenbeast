@@ -77,6 +77,7 @@ export interface TokenTotals {
   readonly completionTokens: number;
   readonly cacheReadTokens: number;
   readonly cacheCreationTokens: number;
+  readonly cacheCreation1hTokens?: number;
   readonly totalTokens: number;
 }
 
@@ -897,6 +898,9 @@ export class CliSkillExecutor {
         completionTokens: t.completionTokens,
         cacheReadTokens: t.cacheReadTokens,
         cacheCreationTokens: t.cacheCreationTokens,
+        ...(t.cacheCreation1hTokens !== undefined
+          ? { cacheCreation1hTokens: t.cacheCreation1hTokens }
+          : {}),
       };
     });
     return this.observer.costCalc.totalCost(entries);

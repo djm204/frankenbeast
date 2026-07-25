@@ -239,20 +239,20 @@ const customCalc = new CostCalculator(myPricing)
 
 `cacheHitRatio({ promptTokens, cacheReadTokens })` returns the fraction of reusable input served from cache. It returns `0` when both counts are zero.
 
-Default pricing (USD, verified 2026-07-25; cache creation uses Anthropic's 5-minute write tier):
+Default pricing (USD, verified 2026-07-25):
 
-| Model | Prompt / M | Completion / M | Cache read / M | Cache creation / M |
-|---|---:|---:|---:|---:|
-| `claude-opus-4-6` | $5.00 | $25.00 | $0.50 | $6.25 |
-| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 | $3.75 |
-| `claude-haiku-4-5` | $1.00 | $5.00 | $0.10 | $1.25 |
-| `claude` (alias for sonnet) | $3.00 | $15.00 | $0.30 | $3.75 |
-| `gpt-4o` | $2.50 | $10.00 | $1.25 | prompt fallback |
-| `gpt-4o-mini` | $0.15 | $0.60 | $0.075 | prompt fallback |
-| `gemini-2.0-flash` | $0.10 | $0.40 | prompt fallback | prompt fallback |
-| `gemini` (alias for flash) | $0.10 | $0.40 | prompt fallback | prompt fallback |
-| `codex` | $5.00 | $15.00 | prompt fallback | prompt fallback |
-| `aider` (uses sonnet by default) | $3.00 | $15.00 | prompt fallback | prompt fallback |
+| Model | Prompt / M | Completion / M | Cache read / M | Cache creation 5m / M | Cache creation 1h / M |
+|---|---:|---:|---:|---:|---:|
+| `claude-opus-4-6` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
+| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
+| `claude-haiku-4-5` | $1.00 | $5.00 | $0.10 | $1.25 | $2.00 |
+| `claude` (alias for sonnet) | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
+| `gpt-4o` | $2.50 | $10.00 | $1.25 | prompt fallback | prompt fallback |
+| `gpt-4o-mini` | $0.15 | $0.60 | $0.075 | prompt fallback | prompt fallback |
+| `gemini-2.0-flash` | $0.10 | $0.40 | prompt fallback | prompt fallback | prompt fallback |
+| `gemini` (alias for flash) | $0.10 | $0.40 | prompt fallback | prompt fallback | prompt fallback |
+| `codex` | $5.00 | $15.00 | prompt fallback | prompt fallback | prompt fallback |
+| `aider` (uses sonnet by default) | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
 
 ### `CircuitBreaker`
 

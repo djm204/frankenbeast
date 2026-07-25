@@ -91,6 +91,7 @@ export class PrometheusAdapter implements ExportAdapter {
       const completionTokens = span.metadata['completionTokens']
       const cacheReadTokens = span.metadata['cacheReadTokens']
       const cacheCreationTokens = span.metadata['cacheCreationTokens']
+      const cacheCreation1hTokens = span.metadata['cacheCreation1hTokens']
       if (typeof promptTokens === 'number') {
         assertValidTokenDelta(promptTokens, 'promptTokens')
       }
@@ -102,6 +103,15 @@ export class PrometheusAdapter implements ExportAdapter {
       }
       if (typeof cacheCreationTokens === 'number') {
         assertValidTokenDelta(cacheCreationTokens, 'cacheCreationTokens')
+      }
+      if (typeof cacheCreation1hTokens === 'number') {
+        assertValidTokenDelta(cacheCreation1hTokens, 'cacheCreation1hTokens')
+        const cacheCreation = typeof cacheCreationTokens === 'number' ? cacheCreationTokens : 0
+        if (cacheCreation1hTokens > cacheCreation) {
+          throw new RangeError(
+            'PrometheusAdapter: cacheCreation1hTokens must not exceed cacheCreationTokens',
+          )
+        }
       }
       if (
         typeof promptTokens !== 'number' &&
@@ -164,6 +174,7 @@ export class PrometheusAdapter implements ExportAdapter {
       const completionTokens = span.metadata['completionTokens']
       const cacheReadTokens = span.metadata['cacheReadTokens']
       const cacheCreationTokens = span.metadata['cacheCreationTokens']
+      const cacheCreation1hTokens = span.metadata['cacheCreation1hTokens']
 
       if (
         typeof model === 'string' &&
@@ -176,6 +187,8 @@ export class PrometheusAdapter implements ExportAdapter {
         const completion = typeof completionTokens === 'number' ? completionTokens : 0
         const cacheRead = typeof cacheReadTokens === 'number' ? cacheReadTokens : 0
         const cacheCreation = typeof cacheCreationTokens === 'number' ? cacheCreationTokens : 0
+        const cacheCreation1h =
+          typeof cacheCreation1hTokens === 'number' ? cacheCreation1hTokens : 0
 
         const existing = this.tokenCounters.get(model) ?? {
           prompt: 0,
@@ -201,7 +214,13 @@ export class PrometheusAdapter implements ExportAdapter {
             (prompt * pricing.promptPerMillion) / 1_000_000 +
             (completion * pricing.completionPerMillion) / 1_000_000 +
             (cacheRead * (pricing.cacheReadPerMillion ?? pricing.promptPerMillion)) / 1_000_000 +
-            (cacheCreation * (pricing.cacheCreationPerMillion ?? pricing.promptPerMillion)) /
+            ((cacheCreation - cacheCreation1h) *
+              (pricing.cacheCreationPerMillion ?? pricing.promptPerMillion)) /
+              1_000_000 +
+            (cacheCreation1h *
+              (pricing.cacheCreation1hPerMillion ??
+                pricing.cacheCreationPerMillion ??
+                pricing.promptPerMillion)) /
               1_000_000
           this.costCounters.set(model, (this.costCounters.get(model) ?? 0) + cost)
         }

@@ -130,6 +130,7 @@ describe('ModelAttribution', () => {
           completionPerMillion: 20,
           cacheReadPerMillion: 1,
           cacheCreationPerMillion: 12.5,
+          cacheCreation1hPerMillion: 20,
         },
       })
       attr.record({
@@ -138,10 +139,11 @@ describe('ModelAttribution', () => {
         completionTokens: 1_000_000,
         cacheReadTokens: 1_000_000,
         cacheCreationTokens: 1_000_000,
+        cacheCreation1hTokens: 400_000,
         success: true,
       })
 
-      expect(attr.report()[0]!.totalCostUsd).toBe(43.5)
+      expect(attr.report()[0]!.totalCostUsd).toBe(46.5)
     })
 
     it('returns an empty array when nothing has been recorded', () => {

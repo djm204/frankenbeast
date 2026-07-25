@@ -316,6 +316,7 @@ describe('PrometheusAdapter', () => {
             completionPerMillion: 15,
             cacheReadPerMillion: 0.3,
             cacheCreationPerMillion: 3.75,
+            cacheCreation1hPerMillion: 6,
           },
         },
       })
@@ -326,6 +327,7 @@ describe('PrometheusAdapter', () => {
           completionTokens: 1_000_000,
           cacheReadTokens: 1_000_000,
           cacheCreationTokens: 1_000_000,
+          cacheCreation1hTokens: 400_000,
         }),
       )
 
@@ -336,7 +338,7 @@ describe('PrometheusAdapter', () => {
       expect(out).toContain(
         'franken_observer_tokens_total{model="cache-model",type="cache_creation"} 1000000',
       )
-      expect(out).toContain('franken_observer_cost_usd_total{model="cache-model"} 22.05')
+      expect(out).toContain('franken_observer_cost_usd_total{model="cache-model"} 22.95')
     })
 
     it('reports cost_usd_total when a pricingTable is provided', async () => {

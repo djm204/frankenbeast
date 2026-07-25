@@ -322,6 +322,7 @@ describe('CliSkillExecutor', () => {
       completionTokens: 50,
       cacheReadTokens: 80,
       cacheCreationTokens: 20,
+      cacheCreation1hTokens: 5,
       totalTokens: 250,
     });
     observer.costCalc.totalCost.mockReturnValue(0.001);
@@ -334,6 +335,7 @@ describe('CliSkillExecutor', () => {
       completionTokens: 50,
       cacheReadTokens: 80,
       cacheCreationTokens: 20,
+      cacheCreation1hTokens: 5,
     }]);
   });
 

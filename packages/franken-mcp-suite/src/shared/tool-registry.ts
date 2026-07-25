@@ -1143,6 +1143,7 @@ const TOOLS: ToolFull[] = [
         completionTokens: { type: 'number', description: 'Output/completion token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         cacheReadTokens: { type: 'number', description: 'Input tokens read from provider cache', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         cacheCreationTokens: { type: 'number', description: 'Input tokens written to provider cache', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        cacheCreation1hTokens: { type: 'number', description: 'One-hour cache writes already included in cacheCreationTokens', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table', minimum: 0 },
       },
       required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],

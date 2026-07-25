@@ -3,6 +3,7 @@ export interface ObserverCostNumbers {
   completionTokens: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
+  cacheCreation1hTokens?: number;
   costUsd?: number;
 }
 
@@ -69,6 +70,12 @@ export function validateObserverCostNumbers(input: ObserverCostNumbers): void {
   if (input.cacheCreationTokens !== undefined && (!Number.isFinite(input.cacheCreationTokens) || !Number.isSafeInteger(input.cacheCreationTokens) || input.cacheCreationTokens < 0)) {
     throw new Error('cacheCreationTokens must be a finite safe non-negative integer');
   }
+  if (input.cacheCreation1hTokens !== undefined && (!Number.isFinite(input.cacheCreation1hTokens) || !Number.isSafeInteger(input.cacheCreation1hTokens) || input.cacheCreation1hTokens < 0)) {
+    throw new Error('cacheCreation1hTokens must be a finite safe non-negative integer');
+  }
+  if ((input.cacheCreation1hTokens ?? 0) > (input.cacheCreationTokens ?? 0)) {
+    throw new Error('cacheCreation1hTokens must not exceed cacheCreationTokens');
+  }
   if (input.costUsd !== undefined && (!Number.isFinite(input.costUsd) || input.costUsd < 0)) {
     throw new Error('costUsd must be a finite non-negative number');
   }
@@ -91,6 +98,13 @@ export function parseObserverCostArgs(args: Record<string, unknown>): ParseResul
   if (!cacheCreationTokensArg.ok) {
     return { ok: false, message: 'cacheCreationTokens must be a finite safe non-negative integer' };
   }
+  const cacheCreation1hTokensArg = parseOptionalNonNegativeIntegerArg('cacheCreation1hTokens', args['cacheCreation1hTokens']);
+  if (!cacheCreation1hTokensArg.ok) {
+    return { ok: false, message: 'cacheCreation1hTokens must be a finite safe non-negative integer' };
+  }
+  if ((cacheCreation1hTokensArg.value ?? 0) > (cacheCreationTokensArg.value ?? 0)) {
+    return { ok: false, message: 'cacheCreation1hTokens must not exceed cacheCreationTokens' };
+  }
   const costUsdArg = parseOptionalNonNegativeNumberArg('costUsd', args['costUsd']);
   if (!costUsdArg.ok) {
     return { ok: false, message: 'costUsd must be a finite non-negative number' };
@@ -103,6 +117,7 @@ export function parseObserverCostArgs(args: Record<string, unknown>): ParseResul
     completionTokens: completionTokensArg.value,
     ...(cacheReadTokensArg.value !== undefined ? { cacheReadTokens: cacheReadTokensArg.value } : {}),
     ...(cacheCreationTokensArg.value !== undefined ? { cacheCreationTokens: cacheCreationTokensArg.value } : {}),
+    ...(cacheCreation1hTokensArg.value !== undefined ? { cacheCreation1hTokens: cacheCreation1hTokensArg.value } : {}),
     ...(costUsdArg.value !== undefined ? { costUsd: costUsdArg.value } : {}),
   };
   validateObserverCostNumbers(parsed);

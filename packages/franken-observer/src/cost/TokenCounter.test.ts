@@ -237,4 +237,20 @@ describe('cacheHitRatio()', () => {
   ] as const)('returns the expected ratio for %s', (_name, record, expected) => {
     expect(cacheHitRatio(record)).toBe(expected)
   })
+
+  it.each([
+    ['negative', { promptTokens: -1, cacheReadTokens: 1 }],
+    ['fractional', { promptTokens: 1.5, cacheReadTokens: 1 }],
+    ['non-finite', { promptTokens: Number.POSITIVE_INFINITY, cacheReadTokens: 1 }],
+    ['unsafe', { promptTokens: Number.MAX_SAFE_INTEGER + 1, cacheReadTokens: 0 }],
+  ])('rejects %s token counts', (_name, record) => {
+    expect(() => cacheHitRatio(record)).toThrow(RangeError)
+  })
+
+  it('rejects a denominator outside the safe-integer range', () => {
+    expect(() => cacheHitRatio({
+      promptTokens: Number.MAX_SAFE_INTEGER,
+      cacheReadTokens: 1,
+    })).toThrow(RangeError)
+  })
 })

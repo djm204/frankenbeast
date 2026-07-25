@@ -7,6 +7,7 @@ export interface AttributionEntry {
   completionTokens: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
+  cacheCreation1hTokens?: number
   success: boolean
 }
 
@@ -26,6 +27,7 @@ interface ModelState {
   completionTokens: number
   cacheReadTokens: number
   cacheCreationTokens: number
+  cacheCreation1hTokens: number
 }
 
 export interface ModelAttributionOptions {
@@ -43,6 +45,7 @@ export class ModelAttribution {
   private totalCompletionTokens = 0
   private totalCacheReadTokens = 0
   private totalCacheCreationTokens = 0
+  private totalCacheCreation1hTokens = 0
 
   constructor(pricing: PricingTable, options: ModelAttributionOptions = {}) {
     const maxModels = options.maxModels ?? DEFAULT_MAX_MODELS
@@ -80,8 +83,15 @@ export class ModelAttribution {
     ModelAttribution.assertValidDelta(entry.completionTokens, 'completionTokens')
     const cacheReadDelta = entry.cacheReadTokens ?? 0
     const cacheCreationDelta = entry.cacheCreationTokens ?? 0
+    const cacheCreation1hDelta = entry.cacheCreation1hTokens ?? 0
     ModelAttribution.assertValidDelta(cacheReadDelta, 'cacheReadTokens')
     ModelAttribution.assertValidDelta(cacheCreationDelta, 'cacheCreationTokens')
+    ModelAttribution.assertValidDelta(cacheCreation1hDelta, 'cacheCreation1hTokens')
+    if (cacheCreation1hDelta > cacheCreationDelta) {
+      throw new RangeError(
+        'ModelAttribution: cacheCreation1hTokens must not exceed cacheCreationTokens',
+      )
+    }
     if (!this.state.has(entry.model) && this.state.size >= this.maxModels) {
       throw new RangeError(
         `ModelAttribution: model cardinality limit of ${this.maxModels} reached; rejected model "${entry.model}"`,
@@ -95,6 +105,7 @@ export class ModelAttribution {
       completionTokens: 0,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
+      cacheCreation1hTokens: 0,
     }
     const promptTokens = ModelAttribution.safeAdd(existing.promptTokens, entry.promptTokens)
     const completionTokens = ModelAttribution.safeAdd(existing.completionTokens, entry.completionTokens)
@@ -102,6 +113,10 @@ export class ModelAttribution {
     const cacheCreationTokens = ModelAttribution.safeAdd(
       existing.cacheCreationTokens,
       cacheCreationDelta,
+    )
+    const cacheCreation1hTokens = ModelAttribution.safeAdd(
+      existing.cacheCreation1hTokens,
+      cacheCreation1hDelta,
     )
     const inputTokens = ModelAttribution.safeAdd(promptTokens, cacheReadTokens)
     const reusableInputTokens = ModelAttribution.safeAdd(inputTokens, cacheCreationTokens)
@@ -117,6 +132,10 @@ export class ModelAttribution {
       this.totalCacheCreationTokens,
       cacheCreationDelta,
     )
+    const totalCacheCreation1hTokens = ModelAttribution.safeAdd(
+      this.totalCacheCreation1hTokens,
+      cacheCreation1hDelta,
+    )
     const totalInputTokens = ModelAttribution.safeAdd(totalPromptTokens, totalCacheReadTokens)
     const totalReusableInputTokens = ModelAttribution.safeAdd(
       totalInputTokens,
@@ -131,11 +150,13 @@ export class ModelAttribution {
       completionTokens,
       cacheReadTokens,
       cacheCreationTokens,
+      cacheCreation1hTokens,
     })
     this.totalPromptTokens = totalPromptTokens
     this.totalCompletionTokens = totalCompletionTokens
     this.totalCacheReadTokens = totalCacheReadTokens
     this.totalCacheCreationTokens = totalCacheCreationTokens
+    this.totalCacheCreation1hTokens = totalCacheCreation1hTokens
   }
 
   report(): AttributionRow[] {
@@ -151,6 +172,7 @@ export class ModelAttribution {
         completionTokens: s.completionTokens,
         cacheReadTokens: s.cacheReadTokens,
         cacheCreationTokens: s.cacheCreationTokens,
+        cacheCreation1hTokens: s.cacheCreation1hTokens,
       }),
     }))
   }

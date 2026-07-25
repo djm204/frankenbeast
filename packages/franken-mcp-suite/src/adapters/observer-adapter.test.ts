@@ -722,23 +722,26 @@ describe('ObserverAdapter', () => {
       completionTokens: 1_000_000,
       cacheReadTokens: 1_000_000,
       cacheCreationTokens: 1_000_000,
+      cacheCreation1hTokens: 400_000,
     });
     const summary = await observer.cost({ sessionId: 'sess-cache' });
 
-    expect(logged).toEqual({ costUsd: 22.05, unknownModel: false });
+    expect(logged).toEqual({ costUsd: 22.95, unknownModel: false });
     expect(summary).toEqual({
       totalPromptTokens: 1_000_000,
       totalCompletionTokens: 1_000_000,
       totalCacheReadTokens: 1_000_000,
       totalCacheCreationTokens: 1_000_000,
-      totalCostUsd: 22.05,
+      totalCacheCreation1hTokens: 400_000,
+      totalCostUsd: 22.95,
       byModel: [{
         model: 'claude-sonnet-4-6',
         promptTokens: 1_000_000,
         completionTokens: 1_000_000,
         cacheReadTokens: 1_000_000,
         cacheCreationTokens: 1_000_000,
-        costUsd: 22.05,
+        cacheCreation1hTokens: 400_000,
+        costUsd: 22.95,
       }],
     });
   });

@@ -23,7 +23,22 @@ export interface CacheHitRatioInput {
 }
 
 export function cacheHitRatio(record: CacheHitRatioInput): number {
+  for (const [label, value] of [
+    ['promptTokens', record.promptTokens],
+    ['cacheReadTokens', record.cacheReadTokens],
+  ] as const) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new RangeError(
+        `cacheHitRatio: ${label} must be a non-negative safe integer, received ${value}`,
+      )
+    }
+  }
   const denominator = record.promptTokens + record.cacheReadTokens
+  if (!Number.isSafeInteger(denominator)) {
+    throw new RangeError(
+      `cacheHitRatio: input token total ${denominator} exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+    )
+  }
   return denominator === 0 ? 0 : record.cacheReadTokens / denominator
 }
 

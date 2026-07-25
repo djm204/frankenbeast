@@ -48,6 +48,7 @@ const SCHEMA = `
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
     cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
     cost_source TEXT NOT NULL DEFAULT 'computed',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -119,6 +120,7 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   ensureCostColumn('cost_source', "TEXT NOT NULL DEFAULT 'legacy'");
   ensureCostColumn('cache_read_tokens', 'INTEGER NOT NULL DEFAULT 0');
   ensureCostColumn('cache_creation_tokens', 'INTEGER NOT NULL DEFAULT 0');
+  ensureCostColumn('cache_creation_1h_tokens', 'INTEGER NOT NULL DEFAULT 0');
 
   return {
     db,
