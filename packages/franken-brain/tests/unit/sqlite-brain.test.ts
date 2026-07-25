@@ -995,6 +995,31 @@ describe('SqliteBrain', () => {
       expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
     });
 
+    it('rejects a zero similarity threshold before unrelated failures can cluster', () => {
+      recordStaleDeclarationFailure('lint failed', '2026-07-24T10:00:00.000Z');
+      recordStaleDeclarationFailure('docker crashed', '2026-07-24T10:01:00.000Z');
+
+      expect(() => brain.learning.consolidate({
+        threshold: 2,
+        lookback: 10,
+        similarityThreshold: 0,
+      })).toThrow('similarityThreshold must be greater than 0');
+    });
+
+    it('uses event id as the stable lookback tie-breaker', () => {
+      for (const summary of [
+        'Stale declarations broke workspace build first',
+        'Stale declarations broke workspace build second',
+        'Stale declarations broke workspace build third',
+      ]) {
+        recordStaleDeclarationFailure(summary, '2026-07-24T10:00:00.000Z');
+      }
+
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+
+      expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',
@@ -1030,6 +1055,42 @@ describe('SqliteBrain', () => {
       });
     });
 
+    it('prevents reviewers from changing immutable lesson evidence lineage', () => {
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed with stale declarations',
+        '2026-07-24T10:00:00.000Z',
+      );
+      const [candidate] = brain.learning.consolidate({ threshold: 1, lookback: 10 });
+
+      expect(() => brain.memoryReview.edit(candidate!.id, {
+        value: { ...candidate!.value, evidenceEventIds: [] },
+      })).toThrow('kind and evidenceEventIds are immutable');
+      expect(() => brain.memoryReview.edit(candidate!.id, {
+        value: { kind: 'reviewer-retyped-value' },
+      })).toThrow('kind and evidenceEventIds are immutable');
+      expect(brain.memoryReview.list()[0]?.value).toMatchObject({ evidenceEventIds: [1] });
+    });
+
+    it('does not scan unrelated review candidates for lesson operations', () => {
+      brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'generic.review.item',
+        value: { kind: 'generic-review' },
+        source: 'unrelated-review-subsystem',
+        confidence: 0.5,
+        reason: 'Unrelated review backlog item',
+      });
+      recordStaleDeclarationFailure(
+        'TypeScript workspace build failed with stale declarations',
+        '2026-07-24T10:00:00.000Z',
+      );
+      const fullList = vi.spyOn(brain.memoryReview, 'list');
+
+      expect(brain.learning.consolidate({ threshold: 1, lookback: 10 })).toHaveLength(1);
+      expect(brain.learning.relevantLessons('TypeScript workspace build')).toHaveLength(1);
+      expect(fullList).not.toHaveBeenCalled();
+    });
+
     it('does not re-propose a rejected lesson when later evidence changes its value', () => {
       recordStaleDeclarationFailure('TypeScript workspace build failed with stale declarations', '2026-07-24T10:00:00.000Z');
       recordStaleDeclarationFailure('Stale declarations broke the TypeScript workspace build', '2026-07-24T10:01:00.000Z');
@@ -1052,20 +1113,15 @@ describe('SqliteBrain', () => {
       }
       expect(brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.5 })).toHaveLength(2);
       recordStaleDeclarationFailure(
-        'RolloverOnlyMarker unrelated worker deadlock',
+        'RolloverOnlyMarker omega cache mismatch fault',
         '2026-07-24T10:04:00.000Z',
       );
+      brain.learning.consolidate({ threshold: 2, lookback: 10, similarityThreshold: 0.5 });
       const duplicateWithRolledEvidence = brain.memoryReview.list('pending')[1]!;
-      const rolledLesson = duplicateWithRolledEvidence.value as Record<string, unknown> & {
-        evidenceEventIds: number[];
-      };
+      const rolledLesson = duplicateWithRolledEvidence.value as Record<string, unknown>;
       brain.memoryReview.edit(duplicateWithRolledEvidence.id, {
         value: {
           ...rolledLesson,
-          evidenceEventIds: [
-            ...rolledLesson.evidenceEventIds,
-            5,
-          ],
           firstSeenAt: '2026-07-24T09:59:00.000Z',
         },
       });

@@ -3132,7 +3132,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
         `SELECT * FROM episodic_events WHERE type = 'failure'
-         ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
       );
       const result = collectRowsToEvents(
         (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
@@ -3723,6 +3723,7 @@ type MemoryCandidateRow = {
   memory_key: string;
   value: string;
   source: string;
+  candidate_kind?: string | null;
   source_type?: MemorySourceType | null;
   source_id?: string | null;
   evidence_id: string | null;
@@ -3787,7 +3788,9 @@ export class SqliteMemoryReviewQueue {
     private dbPath: string,
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
-  ) {}
+  ) {
+    this.backfillCandidateKinds();
+  }
 
   propose(proposal: MemoryCandidateProposal): MemoryCandidate {
     this.validateProposal(proposal);
@@ -3822,10 +3825,10 @@ export class SqliteMemoryReviewQueue {
       this.db
         .prepare(
           `INSERT INTO memory_review_candidates (
-            id, target_store, memory_key, value, source, source_type, source_id, evidence_id, confidence,
+            id, target_store, memory_key, value, source, candidate_kind, source_type, source_id, evidence_id, confidence,
             reason, expires_at, revalidate_at, status, suppression_reason, reviewer, note, created_at,
             updated_at, decided_at, schema_version
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, NULL, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
         )
         .run(
           candidate.id,
@@ -3833,6 +3836,7 @@ export class SqliteMemoryReviewQueue {
           candidate.key,
           this.encodeValue(candidate.value),
           this.encodeText(candidate.source),
+          isConsolidatedLesson(candidate.value) ? 'consolidated-lesson' : 'other',
           normalizeMemorySourceType(candidate.sourceType, candidate.source),
           this.encodeSourceId(candidate.sourceId, candidate.source),
           candidate.evidenceId ? this.encodeText(candidate.evidenceId) : null,
@@ -3902,7 +3906,23 @@ export class SqliteMemoryReviewQueue {
     }
   }
 
-  edit(id: string, edit: MemoryCandidateEdit): MemoryCandidate {
+  /** Indexed discriminator lookup that remains queryable when payloads are encrypted. */
+  listByKind(status: MemoryCandidateStatus, kind: string): MemoryCandidate[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM memory_review_candidates
+          WHERE status = ? AND candidate_kind = ?
+          ORDER BY created_at ASC, id ASC`,
+      )
+      .all(status, kind) as MemoryCandidateRow[];
+    return rows.map((row) => this.rowToCandidate(row));
+  }
+
+  edit(
+    id: string,
+    edit: MemoryCandidateEdit,
+    lineageEditToken?: symbol,
+  ): MemoryCandidate {
     try {
       let result: MemoryCandidate | undefined;
       const tx = this.db.transaction(() => {
@@ -3912,6 +3932,20 @@ export class SqliteMemoryReviewQueue {
           ...edit,
           updatedAt: isoNow(),
         };
+        if (
+          lineageEditToken !== LESSON_LINEAGE_EDIT_TOKEN
+          && isConsolidatedLesson(candidate.value)
+          && edit.value !== undefined
+          && (
+            !isConsolidatedLesson(updated.value)
+            || stableStringify(updated.value.evidenceEventIds)
+              !== stableStringify(candidate.value.evidenceEventIds)
+          )
+        ) {
+          throw new Error(
+            'Consolidated lesson kind and evidenceEventIds are immutable during review',
+          );
+        }
         if (edit.source !== undefined && edit.sourceType === undefined) {
           updated.sourceType = normalizeMemorySourceType(undefined, updated.source);
         }
@@ -3923,13 +3957,14 @@ export class SqliteMemoryReviewQueue {
         this.db
           .prepare(
             `UPDATE memory_review_candidates
-             SET memory_key = ?, value = ?, source = ?, source_type = ?, source_id = ?, evidence_id = ?, confidence = ?, reason = ?, expires_at = ?, revalidate_at = ?, updated_at = ?
+             SET memory_key = ?, value = ?, source = ?, candidate_kind = ?, source_type = ?, source_id = ?, evidence_id = ?, confidence = ?, reason = ?, expires_at = ?, revalidate_at = ?, updated_at = ?
              WHERE id = ? AND status = 'pending'`,
           )
           .run(
             updated.key,
             this.encodeValue(updated.value),
             this.encodeText(updated.source),
+            isConsolidatedLesson(updated.value) ? 'consolidated-lesson' : 'other',
             normalizeMemorySourceType(updated.sourceType, updated.source),
             this.encodeSourceId(updated.sourceId, updated.source),
             updated.evidenceId ? this.encodeText(updated.evidenceId) : null,
@@ -5652,6 +5687,28 @@ export class SqliteMemoryReviewQueue {
   private decodeValue(value: string): unknown {
     return parseStoredWorkingMemoryValue(this.decodeText(value));
   }
+
+  private backfillCandidateKinds(): void {
+    const rows = this.db.prepare(
+      'SELECT id, value FROM memory_review_candidates WHERE candidate_kind IS NULL',
+    ).all() as Array<{ id: string; value: string }>;
+    if (rows.length === 0) return;
+    const update = this.db.prepare(
+      'UPDATE memory_review_candidates SET candidate_kind = ? WHERE id = ? AND candidate_kind IS NULL',
+    );
+    const backfill = this.db.transaction(() => {
+      for (const row of rows) {
+        let kind = 'other';
+        try {
+          if (isConsolidatedLesson(this.decodeValue(row.value))) kind = 'consolidated-lesson';
+        } catch {
+          // Leave malformed legacy payload handling to the normal review read path.
+        }
+        update.run(kind, row.id);
+      }
+    });
+    backfill.immediate();
+  }
 }
 
 function normalizeMemorySourceType(
@@ -5966,6 +6023,7 @@ function stableStringify(value: unknown): string {
 // --- SqliteBrain ---
 
 const liveSqliteBrainsByPath = new Map<string, Set<SqliteBrain>>();
+const LESSON_LINEAGE_EDIT_TOKEN = Symbol('lesson-lineage-edit');
 
 function normalizeSqliteDbPath(dbPath: string): string {
   return dbPath === ':memory:' ? dbPath : resolvePath(dbPath);
@@ -6093,6 +6151,8 @@ export class SqliteBrain implements IBrain {
     this.encryption = encryption;
     assertMemoryEncryptionState(this.db, dbPath, encryption);
     migrateMemorySchemaDatabase(this.db, dbPath, { dryRun: false });
+    // Schema migration can replace review tables, so re-assert additive metadata and indexes.
+    this.ensureMemoryReviewMetadataColumns();
     this.auditRecorder = (event) => insertMemoryAccessAuditEvent(this.db, event, encryption);
     this.accessAudit = new SqliteMemoryAccessAuditTrail(this.db, encryption);
     const limits = {
@@ -6243,8 +6303,8 @@ export class SqliteBrain implements IBrain {
     if (!Number.isSafeInteger(lookback) || lookback < threshold || lookback > 1_000) {
       throw new RangeError('Lesson consolidation lookback must be a safe integer between threshold and 1000');
     }
-    if (!Number.isFinite(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 1) {
-      throw new RangeError('Lesson consolidation similarityThreshold must be between 0 and 1');
+    if (!Number.isFinite(similarityThreshold) || similarityThreshold <= 0 || similarityThreshold > 1) {
+      throw new RangeError('Lesson consolidation similarityThreshold must be greater than 0 and at most 1');
     }
 
     const consolidate = this.db.transaction(() => {
@@ -6254,16 +6314,16 @@ export class SqliteBrain implements IBrain {
         left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
       );
     let pendingLessons = this.memoryReview
-      .list('pending')
+      .listByKind('pending', 'consolidated-lesson')
       .filter((candidate) => isConsolidatedLesson(candidate.value));
     const approvedLessons = this.memoryReview
-      .list('approved')
+      .listByKind('approved', 'consolidated-lesson')
       .filter((candidate) => isConsolidatedLesson(candidate.value))
       .filter((candidate) => (
         this.memoryReview.provenanceFor('working', candidate.key)?.candidateId === candidate.id
       ));
     const suppressedLessons = (['rejected', 'suppressed'] as const)
-      .flatMap((status) => this.memoryReview.list(status))
+      .flatMap((status) => this.memoryReview.listByKind(status, 'consolidated-lesson'))
       .filter((candidate) => isConsolidatedLesson(candidate.value));
     const created: LessonConsolidationItem[] = [];
     for (const cluster of clusterSimilarFailureEvents(events, similarityThreshold)) {
@@ -6337,7 +6397,7 @@ export class SqliteBrain implements IBrain {
                 : `episodic:${value.evidenceEventIds[0]}`,
               confidence: mergedConfidence,
               reason: `${mergedOccurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
-            })
+            }, LESSON_LINEAGE_EDIT_TOKEN)
           : pending;
         const duplicateIds = new Set(matchingPending.slice(1).map(({ candidate }) => candidate.id));
         if (duplicateIds.size > 0) {
@@ -6470,7 +6530,7 @@ export class SqliteBrain implements IBrain {
 
     const lessons = (['pending', 'approved'] as const)
       .flatMap((status) => this.memoryReview
-        .list(status)
+        .listByKind(status, 'consolidated-lesson')
         .filter((candidate) => (
           status === 'pending'
           || this.memoryReview.provenanceFor('working', candidate.key)?.candidateId === candidate.id
@@ -6502,7 +6562,7 @@ export class SqliteBrain implements IBrain {
     const ids = new Set(eventIds);
     if (ids.size === 0) return [];
     return (['pending', 'approved', 'rejected', 'suppressed'] as const)
-      .flatMap((status) => this.memoryReview.list(status))
+      .flatMap((status) => this.memoryReview.listByKind(status, 'consolidated-lesson'))
       .filter((candidate) => isConsolidatedLesson(candidate.value))
       .filter((candidate) => (
         (candidate.value as ConsolidatedLesson).evidenceEventIds.some((id) => ids.has(id))
@@ -6673,6 +6733,7 @@ export class SqliteBrain implements IBrain {
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        candidate_kind TEXT,
         source_type TEXT,
         source_id TEXT,
         evidence_id TEXT,
@@ -6763,11 +6824,16 @@ export class SqliteBrain implements IBrain {
 
   private ensureMemoryReviewMetadataColumns(): void {
     ensureColumns(this.db, 'memory_review_candidates', {
+      candidate_kind: 'TEXT',
       source_type: 'TEXT',
       source_id: 'TEXT',
       expires_at: 'TEXT',
       revalidate_at: 'TEXT',
     });
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_memory_review_candidates_status_kind
+        ON memory_review_candidates(status, candidate_kind, created_at, id);
+    `);
     ensureColumns(this.db, 'memory_review_provenance', {
       source_type: 'TEXT',
       source_id: 'TEXT',
@@ -7772,6 +7838,7 @@ function migrateMemorySchemaDatabase(
         memory_key TEXT NOT NULL,
         value TEXT NOT NULL,
         source TEXT NOT NULL,
+        candidate_kind TEXT,
         source_type TEXT,
         source_id TEXT,
         evidence_id TEXT,

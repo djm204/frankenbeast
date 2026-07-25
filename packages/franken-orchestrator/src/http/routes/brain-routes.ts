@@ -22,11 +22,19 @@ const MAX_EPISODE_SUMMARY_BYTES = 4 * 1_024;
 const MAX_EPISODE_DETAILS_BYTES = 8 * 1_024;
 const MAX_EPISODE_STEP_BYTES = 1_024;
 const MAX_EPISODE_TIMESTAMP_BYTES = 64;
+const MAX_LESSON_QUERY_LENGTH = 256;
+const DEFAULT_LESSON_LIMIT = 10;
+const MAX_LESSON_LIMIT = 100;
 
 const EpisodeQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_EPISODE_PAGE_LIMIT).default(DEFAULT_EPISODE_PAGE_LIMIT),
   offset: z.coerce.number().int().min(0).max(MAX_EPISODE_PAGE_OFFSET).default(0),
   query: z.string().trim().min(1).max(MAX_EPISODE_QUERY_LENGTH).optional(),
+}).strict();
+
+const LessonQuerySchema = z.object({
+  query: z.string().trim().min(1).max(MAX_LESSON_QUERY_LENGTH),
+  limit: z.coerce.number().int().min(1).max(MAX_LESSON_LIMIT).default(DEFAULT_LESSON_LIMIT),
 }).strict();
 
 export interface BrainRoutesDeps {
@@ -70,6 +78,17 @@ function parseEpisodeQuery(c: Context): z.infer<typeof EpisodeQuerySchema> {
     ...(c.req.query('limit') === undefined ? {} : { limit: c.req.query('limit') }),
     ...(c.req.query('offset') === undefined ? {} : { offset: c.req.query('offset') }),
     ...(c.req.query('query') === undefined ? {} : { query: c.req.query('query') }),
+  });
+  if (!parsed.success) {
+    throw new HttpError(422, 'VALIDATION_ERROR', 'Request validation failed', parsed.error.issues);
+  }
+  return parsed.data;
+}
+
+function parseLessonQuery(c: Context): z.infer<typeof LessonQuerySchema> {
+  const parsed = LessonQuerySchema.safeParse({
+    query: c.req.query('query'),
+    ...(c.req.query('limit') === undefined ? {} : { limit: c.req.query('limit') }),
   });
   if (!parsed.success) {
     throw new HttpError(422, 'VALIDATION_ERROR', 'Request validation failed', parsed.error.issues);
@@ -133,6 +152,7 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
     const { agentTypeId, brain, context } = resolveBrain(c, deps);
     const allWorkingKeys = brain.working.persistedKeys();
     const lastCheckpoint = brain.recovery.lastCheckpoint();
+    const learningConfigured = context?.faculties?.learning ?? brain.learning.configured;
 
     return c.json({
       data: {
@@ -148,7 +168,7 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
           planning: { configured: context?.faculties?.planning ?? brain.planning.configured },
           reasoning: { configured: context?.faculties?.reasoning ?? brain.reasoning.configured },
           action: { configured: context?.faculties?.action ?? brain.action.configured },
-          learning: { configured: context?.faculties?.learning ?? brain.learning.configured },
+          learning: { configured: learningConfigured },
         },
         capabilities: {
           memoryReview: true,
@@ -156,7 +176,7 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
           recordLearning: true,
         },
         lessons: {
-          available: false,
+          available: learningConfigured,
           count: null,
         },
       },
@@ -188,12 +208,16 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
 
   app.get('/v1/brain/:agentTypeId/lessons', (c) => readBrainState(() => {
     const { brain, context } = resolveBrain(c, deps);
+    const facultyConfigured = context?.faculties?.learning ?? brain.learning.configured;
+    const query = facultyConfigured ? parseLessonQuery(c) : undefined;
     return c.json({
-      data: [],
+      data: query ? brain.learning.relevantLessons(query.query, { limit: query.limit }) : [],
       meta: {
-        available: false,
-        facultyConfigured: context?.faculties?.learning ?? brain.learning.configured,
-        reason: 'Consolidated lessons are not available until the learning faculty is configured',
+        available: facultyConfigured,
+        facultyConfigured,
+        ...(!facultyConfigured
+          ? { reason: 'Consolidated lessons are not available until the learning faculty is configured' }
+          : {}),
       },
     });
   }));
