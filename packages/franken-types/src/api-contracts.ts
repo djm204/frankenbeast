@@ -46,6 +46,7 @@ export const HiveStatusResponseSchema = z.object({
     limit: z.number().int().min(1).max(100),
     totalAgents: z.number().int().min(0).max(100).nullable(),
     truncated: z.boolean(),
+    scanIncomplete: z.boolean(),
     staleAfterMs: z.number().int().positive(),
     hive: z.object({
       status: z.enum(['available', 'partial', 'unavailable']),

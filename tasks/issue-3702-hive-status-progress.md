@@ -9,3 +9,8 @@
 - [x] Run focused tests, typecheck, lint, and build; inspect the final diff.
 - [ ] Commit with the required identity and publish one PR through Approval Cop.
 - [ ] Complete current-head CI/Codex review (maximum five triggers), merge through Approval Cop, and post root evidence.
+- [x] Add RED-capable regressions for all five current-head Codex findings on PR #3778.
+- [x] Implement the smallest fail-closed attribution, scan completeness, corrupt-run, future-time, and mixed-read fixes.
+- [x] Run focused and full quality gates and inspect the diff.
+- [x] Create the local remediation commit as David Mendez.
+- [x] Record the immutable push command on dedicated Approval Cop gate `t_c2c37d35`, then block for review/publication.

@@ -6,7 +6,10 @@ import { HiveMindStore, hiveMindAgentTypeNamespace } from '@franken/brain';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
+import {
+  BeastRepositoryJsonCorruptionError,
+  SQLiteBeastRepository,
+} from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import { AgentService } from '../../../src/beasts/services/agent-service.js';
 import type { BeastRunService } from '../../../src/beasts/services/beast-run-service.js';
 import {
@@ -115,6 +118,21 @@ describe('HiveStatusQuery', () => {
     });
   });
 
+  it('rejects an active observation materially ahead of the query clock', () => {
+    const { agents, query } = createHarness('2026-07-25T13:00:00.000Z');
+    const coder = createAgent(agents, 'coder', 'operator');
+    agents.updateAgent(coder.id, { status: 'running' });
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      agents: [{
+        agentId: coder.id,
+        observation: 'unavailable',
+        errorCode: 'INVALID_OBSERVATION_TIME',
+      }],
+    });
+  });
+
   it('marks an old pending-approval run stale using the run status vocabulary', () => {
     const { root, agents, hive } = createHarness();
     const coder = createAgent(agents, 'coder', 'operator');
@@ -182,6 +200,46 @@ describe('HiveStatusQuery', () => {
     });
   });
 
+  it('degrades a corrupt linked run to an unavailable agent observation', () => {
+    const { root, agents, hive } = createHarness();
+    const coder = createAgent(agents, 'coder', 'operator');
+    const linkedAgents = {
+      listAgentPage: () => ({
+        agents: [{ ...coder, dispatchRunId: 'run-corrupt' }],
+        rowsScanned: 1,
+      }),
+    } as unknown as AgentService;
+    const runs = {
+      getRun: () => {
+        throw new BeastRepositoryJsonCorruptionError({
+          table: 'beast_runs',
+          column: 'config_snapshot',
+          rowId: 'run-corrupt',
+          valueSnippet: '[redacted]',
+        });
+      },
+    } as unknown as BeastRunService;
+    const query = new HiveStatusQuery(
+      workspaceHiveId(root),
+      linkedAgents,
+      runs,
+      hive,
+      () => new Date('2026-07-25T12:00:00.000Z'),
+    );
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      agents: [{
+        agentId: coder.id,
+        observation: 'unavailable',
+        errorCode: 'LINKED_RUN_NOT_FOUND',
+      }],
+    });
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
   it('filters by subject and reports bounded truncation', () => {
     const { agents, query } = createHarness();
     createAgent(agents, 'coder', 'operator');
@@ -221,6 +279,31 @@ describe('HiveStatusQuery', () => {
     });
   });
 
+  it('reports mixed successful and failed hive namespace reads as partial', () => {
+    const { agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    createAgent(agents, 'reviewer', 'operator');
+    hive.publish(hiveMindAgentTypeNamespace('reviewer'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Reviewer activity remains readable',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+    const recent = hive.recent.bind(hive);
+    vi.spyOn(hive, 'recent').mockImplementation((namespace, options) => {
+      if (namespace === hiveMindAgentTypeNamespace('coder')) throw new Error('corrupt coder namespace');
+      return recent(namespace, options);
+    });
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      recentActivity: [{ summary: 'Reviewer activity remains readable' }],
+      meta: { hive: { status: 'partial' } },
+    });
+  });
+
   it('does not attribute type-level activity past a deleted agent from another subject', () => {
     const { agents, hive, query } = createHarness();
     createAgent(agents, 'coder', 'operator');
@@ -246,6 +329,37 @@ describe('HiveStatusQuery', () => {
         },
       },
     });
+  });
+
+  it('fails closed on type-level attribution when a corrupt agent row is skipped', () => {
+    const { dbPath, agents, hive, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    const corrupt = createAgent(agents, 'coder', 'another-operator');
+    const db = new Database(dbPath);
+    closeables.push(db);
+    db.prepare('UPDATE tracked_agents SET init_config = ? WHERE id = ?').run('{', corrupt.id);
+    hive.publish(hiveMindAgentTypeNamespace('coder'), 'registry-process-publisher', {
+      kind: 'episode',
+      event: {
+        type: 'observation',
+        summary: 'Could belong to the skipped agent',
+        createdAt: '2026-07-25T11:59:30.000Z',
+      },
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(query.query({ subjectId: 'operator' })).toMatchObject({
+      status: 'partial',
+      recentActivity: [],
+      meta: {
+        hive: {
+          status: 'partial',
+          errorCodes: ['ATTRIBUTION_INCOMPLETE'],
+        },
+      },
+    });
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
   });
 
   it('does not duplicate type-level activity for multiple agents owned by one subject', () => {
@@ -312,8 +426,10 @@ describe('HiveStatusQuery', () => {
 
     const result = query.query({ subjectId: 'operator', limit: 100 });
 
+    expect(result.status).toBe('partial');
     expect(result.agents).toEqual([]);
-    expect(result.meta.truncated).toBe(true);
+    expect(result.summary).not.toContain('No agents have been dispatched');
+    expect(result.meta).toMatchObject({ truncated: true, scanIncomplete: true });
     expect(warning).toHaveBeenCalled();
     warning.mockRestore();
   });

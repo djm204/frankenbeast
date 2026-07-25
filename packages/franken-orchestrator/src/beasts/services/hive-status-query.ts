@@ -9,12 +9,14 @@ import {
 } from '@franken/types';
 
 import type { BeastRun, TrackedAgent } from '../types.js';
+import { BeastRepositoryJsonCorruptionError } from '../repository/sqlite-beast-repository.js';
 import type { AgentService } from './agent-service.js';
 import type { BeastRunService } from './beast-run-service.js';
 
 export const DEFAULT_HIVE_STATUS_LIMIT = 25;
 export const MAX_HIVE_STATUS_LIMIT = 100;
 export const HIVE_STATUS_STALE_AFTER_MS = 5 * 60 * 1_000;
+const HIVE_STATUS_FUTURE_TOLERANCE_MS = 30 * 1_000;
 const MAX_ACTIVITY_SUMMARY_BYTES = 1_024;
 const MAX_AGENT_ROWS_SCANNED = 1_000;
 const AGENT_SCAN_PAGE_SIZE = 100;
@@ -95,7 +97,10 @@ function mapAgent(
   } else if (run && !reconciledRun) {
     observation = 'unavailable';
     errorCode = 'LINKED_RUN_MISMATCH';
-  } else if (!Number.isFinite(observedMs)) {
+  } else if (
+    !Number.isFinite(observedMs)
+    || observedMs - nowMs > HIVE_STATUS_FUTURE_TOLERANCE_MS
+  ) {
     observation = 'unavailable';
     errorCode = 'INVALID_OBSERVATION_TIME';
   } else if (ACTIVE_STATUSES.has(status) && nowMs - observedMs > HIVE_STATUS_STALE_AFTER_MS) {
@@ -119,8 +124,16 @@ function mapAgent(
   };
 }
 
-function summarizeAgents(agents: readonly HiveAgentStatus[], truncated: boolean): string {
-  if (agents.length === 0) return 'No agents have been dispatched in this workspace.';
+function summarizeAgents(
+  agents: readonly HiveAgentStatus[],
+  truncated: boolean,
+  scanIncomplete: boolean,
+): string {
+  if (agents.length === 0) {
+    return scanIncomplete
+      ? 'The bounded agent scan was incomplete; matching agents may have been omitted.'
+      : 'No agents have been dispatched in this workspace.';
+  }
   const stale = agents.filter((agent) => agent.observation === 'stale').length;
   const unavailable = agents.filter((agent) => agent.observation === 'unavailable').length;
   const suffix = [
@@ -155,11 +168,12 @@ export class HiveStatusQuery {
     const now = this.now();
     const agentStatuses = selected.agents.map((agent) => mapAgent(
       agent,
-      agent.dispatchRunId ? this.runs.getRun(agent.dispatchRunId) : undefined,
+      agent.dispatchRunId ? this.readLinkedRun(agent.dispatchRunId) : undefined,
       now.getTime(),
     ));
     const hive = this.readActivity(selected.agents, selected.attribution, limit);
-    const partial = hive.status !== 'available'
+    const partial = selected.scanIncomplete
+      || hive.status !== 'available'
       || agentStatuses.some((agent) => agent.observation !== 'current');
 
     return HiveStatusResponseSchema.parse({
@@ -167,13 +181,14 @@ export class HiveStatusQuery {
       subjectId: options.subjectId,
       generatedAt: now.toISOString(),
       status: partial ? 'partial' : 'current',
-      summary: summarizeAgents(agentStatuses, selected.truncated),
+      summary: summarizeAgents(agentStatuses, selected.truncated, selected.scanIncomplete),
       agents: agentStatuses,
       recentActivity: hive.activity,
       meta: {
         limit,
         totalAgents: selected.truncated ? null : agentStatuses.length,
         truncated: selected.truncated,
+        scanIncomplete: selected.scanIncomplete,
         staleAfterMs: HIVE_STATUS_STALE_AFTER_MS,
         hive: {
           status: hive.status,
@@ -183,9 +198,22 @@ export class HiveStatusQuery {
     });
   }
 
+  private readLinkedRun(runId: string): BeastRun | undefined {
+    try {
+      return this.runs.getRun(runId);
+    } catch (error) {
+      if (!(error instanceof BeastRepositoryJsonCorruptionError)) throw error;
+      console.warn(
+        `Skipping corrupt linked Beast run ${runId}; persisted state was left unchanged for operator repair.`,
+      );
+      return undefined;
+    }
+  }
+
   private readAgents(subjectId: string, limit: number): {
     agents: TrackedAgent[];
     truncated: boolean;
+    scanIncomplete: boolean;
     attribution: ReadonlyMap<string, 'unique' | 'ambiguous' | 'incomplete'>;
   } {
     const matches: TrackedAgent[] = [];
@@ -193,12 +221,14 @@ export class HiveStatusQuery {
     let cursor: string | undefined;
     let scanned = 0;
     let hasMoreRows = false;
+    let skippedRows = false;
     do {
       const page = this.agents.listAgentPage({
         limit: Math.min(AGENT_SCAN_PAGE_SIZE, MAX_AGENT_ROWS_SCANNED - scanned),
         ...(cursor ? { cursor } : {}),
       });
       scanned += page.rowsScanned;
+      skippedRows ||= page.rowsScanned > page.agents.length;
       for (const agent of page.agents) {
         const subjects = subjectsByAgentType.get(agent.definitionId) ?? new Set<string>();
         subjects.add(agent.createdByUser);
@@ -215,13 +245,15 @@ export class HiveStatusQuery {
       const subjects = subjectsByAgentType.get(agentTypeId);
       attribution.set(
         agentTypeId,
-        hasMoreRows ? 'incomplete' : subjects?.size === 1 ? 'unique' : 'ambiguous',
+        hasMoreRows || skippedRows ? 'incomplete' : subjects?.size === 1 ? 'unique' : 'ambiguous',
       );
     }
 
+    const scanIncomplete = hasMoreRows && scanned >= MAX_AGENT_ROWS_SCANNED;
     return {
       agents: matches.slice(0, limit),
-      truncated: matches.length > limit || (hasMoreRows && scanned >= MAX_AGENT_ROWS_SCANNED),
+      truncated: matches.length > limit || scanIncomplete,
+      scanIncomplete,
       attribution,
     };
   }
@@ -242,6 +274,8 @@ export class HiveStatusQuery {
     const selected: HiveMindEntry[] = [];
     const selectedIds = new Set<number>();
     let status: 'available' | 'partial' | 'unavailable' = 'available';
+    let successfulReads = 0;
+    let failedReads = 0;
     const errorCodes = new Set<'ATTRIBUTION_AMBIGUOUS' | 'ATTRIBUTION_INCOMPLETE'>();
     for (const agent of agents) {
       let entries = entriesByAgentType.get(agent.definitionId);
@@ -251,8 +285,9 @@ export class HiveStatusQuery {
             kind: 'episode',
             limit: MAX_HIVE_ENTRIES_SCANNED_PER_TYPE,
           });
+          successfulReads += 1;
         } catch {
-          status = 'unavailable';
+          failedReads += 1;
           entries = [];
         }
         entriesByAgentType.set(agent.definitionId, entries);
@@ -262,7 +297,7 @@ export class HiveStatusQuery {
       const attributionState = attribution.get(agent.definitionId);
       const latest = attributed ?? (attributionState === 'unique' ? entries[0] : undefined);
       if (!attributed && entries.length > 0 && attributionState !== 'unique') {
-        status = status === 'unavailable' ? status : 'partial';
+        status = 'partial';
         errorCodes.add(attributionState === 'incomplete'
           ? 'ATTRIBUTION_INCOMPLETE'
           : 'ATTRIBUTION_AMBIGUOUS');
@@ -273,6 +308,9 @@ export class HiveStatusQuery {
       }
     }
     selected.sort((left, right) => right.id - left.id);
+    if (failedReads > 0) {
+      status = successfulReads > 0 ? 'partial' : 'unavailable';
+    }
     return {
       activity: selected.slice(0, limit).map(mapActivity),
       status,

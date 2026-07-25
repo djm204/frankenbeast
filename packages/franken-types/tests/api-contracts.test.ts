@@ -35,6 +35,7 @@ describe('web/API contracts', () => {
         limit: 25,
         totalAgents: 1,
         truncated: false,
+        scanIncomplete: false,
         staleAfterMs: 300000,
         hive: { status: 'available' },
       },
