@@ -2784,6 +2784,7 @@ interface MemoryRetentionEnforcementScanState {
   episodicRows?: EpisodicRow[];
   checkpointCursor?: MemoryRetentionScanCursor;
   nextCheckpointCursor?: MemoryRetentionScanCursor;
+  checkpointRows?: CheckpointRow[];
   checkpointFloorSearchCursorId?: number;
   nextCheckpointFloorSearchCursorId?: number;
   checkpointRollbackFloorId?: number;
@@ -6626,6 +6627,12 @@ export class SqliteBrain implements IBrain {
         });
       const policy = MEMORY_RETENTION_POLICIES[className];
       const observedAgeDays = ageDays(event.createdAt, nowMs);
+      const learningCooldownMs = readLearningCooldownMs(event);
+      const learningCreatedAtMs = Date.parse(event.createdAt);
+      const hasActiveLearningCooldown = learningCooldownMs !== undefined
+        && learningCooldownMs > 0
+        && Number.isFinite(learningCreatedAtMs)
+        && nowMs < learningCreatedAtMs + learningCooldownMs;
       const decision = retentionActionForEntry({
         className,
         policy,
@@ -6641,15 +6648,29 @@ export class SqliteBrain implements IBrain {
         key,
         ...(agentId === undefined ? {} : { agentId }),
         class: className,
-        action: decision.action,
+        action: hasActiveLearningCooldown ? 'protect' : decision.action,
         policy: { ...policy },
-        protected: policy.protected,
+        protected: policy.protected || hasActiveLearningCooldown,
         ...(observedAgeDays === undefined ? {} : { ageDays: observedAgeDays }),
-        reason: decision.reason,
+        reason: hasActiveLearningCooldown
+          ? 'Learning evidence is preserved until its stored cooldown expires'
+          : decision.reason,
       });
     }
 
     let checkpointRows: CheckpointRow[];
+    const cachedCheckpointRollbackFloorId = enforcementScanState?.checkpointRollbackFloorId;
+    if (enforcementScanState !== undefined && cachedCheckpointRollbackFloorId !== undefined) {
+      const cachedCheckpointRollbackFloor = this.db.prepare(
+        `SELECT id, state, created_at FROM checkpoints WHERE id = ?`,
+      ).get(cachedCheckpointRollbackFloorId) as CheckpointRow | undefined;
+      if (
+        cachedCheckpointRollbackFloor === undefined
+        || parseCheckpointState(cachedCheckpointRollbackFloor, this.encryption) === null
+      ) {
+        delete enforcementScanState.checkpointRollbackFloorId;
+      }
+    }
     const discoveringCheckpointFloor = maxScanRows !== undefined
       && enforcementScanState !== undefined
       && enforcementScanState.checkpointRollbackFloorId === undefined;
@@ -6720,6 +6741,7 @@ export class SqliteBrain implements IBrain {
         .all(maxScanRows) as CheckpointRow[];
     }
     if (enforcementScanState !== undefined && !discoveringCheckpointFloor) {
+      enforcementScanState.checkpointRows = checkpointRows;
       const lastRow = checkpointRows.at(-1);
       if (lastRow === undefined) {
         delete enforcementScanState.nextCheckpointCursor;
@@ -6903,6 +6925,31 @@ export class SqliteBrain implements IBrain {
           scanState.nextEpisodicCursor = 'created_at' in predecessor
             ? { createdAt: predecessor.created_at, id: predecessor.id }
             : predecessor;
+        }
+      }
+      const selectedCheckpointIds = new Set(
+        candidates
+          .filter((entry) => entry.store === 'checkpoint')
+          .map((entry) => Number(entry.key)),
+      );
+      const pendingCheckpointIds = new Set(
+        report.compactionCandidates
+          .filter((entry) => entry.store === 'checkpoint' && !selectedCheckpointIds.has(Number(entry.key)))
+          .map((entry) => Number(entry.key)),
+      );
+      const firstPendingCheckpointIndex = scanState.checkpointRows
+        ?.findIndex((row) => pendingCheckpointIds.has(row.id)) ?? -1;
+      if (firstPendingCheckpointIndex >= 0) {
+        const predecessor = firstPendingCheckpointIndex === 0
+          ? undefined
+          : scanState.checkpointRows?.[firstPendingCheckpointIndex - 1];
+        if (predecessor === undefined) {
+          delete scanState.nextCheckpointCursor;
+        } else {
+          scanState.nextCheckpointCursor = {
+            createdAt: predecessor.created_at,
+            id: predecessor.id,
+          };
         }
       }
       const deleted = { episodic: 0, checkpoints: 0 };

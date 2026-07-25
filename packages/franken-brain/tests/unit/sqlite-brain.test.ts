@@ -359,6 +359,53 @@ describe('SqliteBrain', () => {
       expect(brain.recovery.lastCheckpoint()?.runId).toBe('protected-floor-with-old-state-time');
     });
 
+    it('rewinds to unselected checkpoint candidates when episodic deletion uses the batch budget', () => {
+      for (let day = 2; day <= 4; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `checkpoint-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      brain.enforceMemoryRetention({
+        now: '2026-01-04T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 3,
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'oldest expired episodic candidate',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 3,
+      });
+      for (let day = 5; day <= 7; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `new-checkpoint-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 3,
+      });
+
+      expect(first.deleted).toEqual({ episodic: 1, checkpoints: 0 });
+      expect(second.report.compactionCandidates.map((entry) => entry.key)).toContain('1');
+      expect(brain.recovery.listCheckpoints().map((checkpoint) => checkpoint.id)).not.toContain('1');
+    });
+
     it('bounds working-memory rows in bounded retention reports', () => {
       brain.working.set('working.a', 'a');
       brain.working.set('working.b', 'b');
@@ -618,6 +665,65 @@ describe('SqliteBrain', () => {
       expect(brain.recovery.listCheckpoints()).toEqual([
         { id: '1', timestamp: '2026-01-01T00:00:00.000Z' },
       ]);
+    });
+
+    it('rediscovers the rollback floor after right-to-forget deletes the cached checkpoint', () => {
+      brain.recovery.checkpoint({
+        runId: 'older-usable-run',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'retain this recovery point' },
+        timestamp: '2026-01-01T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'cached-floor-run',
+        phase: 'execution',
+        step: 2,
+        context: { note: 'forget cached floor marker' },
+        timestamp: '2026-01-02T00:00:00.000Z',
+      });
+
+      brain.enforceMemoryRetention({
+        now: '2026-01-02T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+      brain.rightToForget({ query: 'forget cached floor marker' });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 2,
+      });
+
+      expect(result.deleted.checkpoints).toBe(0);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('older-usable-run');
+    });
+
+    it('preserves learning evidence until its stored cooldown expires', () => {
+      brain.episodic.recordLearning({
+        type: 'observation',
+        summary: 'Reuse focused verification for retention changes',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }, { key: 'retention-verification', cooldownMs: 30 * 24 * 60 * 60 * 1000 });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-10T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 10,
+      });
+      const duplicate = brain.episodic.recordLearning({
+        type: 'observation',
+        summary: 'Same learning during its cooldown',
+        createdAt: '2026-01-10T00:00:00.000Z',
+      }, { key: 'retention-verification', cooldownMs: 30 * 24 * 60 * 60 * 1000 });
+
+      expect(result.deleted.episodic).toBe(0);
+      expect(result.report.entries.find((entry) => entry.store === 'episodic')).toMatchObject({
+        action: 'protect',
+        protected: true,
+      });
+      expect(duplicate.recorded).toBe(false);
     });
 
     it('documents policy ordering and protects user preferences from compaction', () => {

@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Retention enforcement must preserve upstream invariants
+- Retention deletion must honor producer-side lifecycle windows such as learning cooldowns, not only the generic memory-class TTL. Validate persisted cooldown metadata before classifying an expired learning row as a compaction candidate.
+- Cached rollback floors are references to mutable rows: validate the referenced checkpoint inside the enforcement transaction before excluding older checkpoints. When a shared delete budget leaves scanned checkpoint candidates pending, rewind the checkpoint cursor as well as the episodic cursor; otherwise continuous inserts can starve old checkpoints indefinitely.
+
 ## 2026-07-24 — Recovering a blocked issue lane without destructive reset
 - When a dedicated issue worktree is clean but its branch contains unrelated historical commits, preserve that worktree and its audit trail. Create a new isolated branch/worktree directly from current `origin/main`, verify exact HEAD equality and no competing PR, and continue the same one-issue lifecycle there instead of waiting on or bypassing a destructive reset gate.
 
