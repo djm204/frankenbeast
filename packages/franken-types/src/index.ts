@@ -74,6 +74,7 @@ export type {
   LessonConsolidationOptions,
   RelevantLessonsOptions,
   ConsolidatedLesson,
+  LessonReplacement,
   LessonConsolidationItem,
   RelevantLesson,
   IPlanningFaculty,
