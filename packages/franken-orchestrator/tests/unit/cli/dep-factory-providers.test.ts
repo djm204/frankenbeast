@@ -38,6 +38,7 @@ const traceViewerMocks = vi.hoisted(() => ({
 const observerDepsMocks = vi.hoisted(() => ({
   enabled: { kind: 'enabled-observer-deps' },
   disabled: { kind: 'disabled-observer-deps' },
+  close: vi.fn(async () => {}),
 }));
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
@@ -68,7 +69,7 @@ vi.mock('../../../src/adapters/cli-observer-bridge.js', () => ({
     this.getActiveSessionId = vi.fn(() => undefined);
     this.recordReplay = vi.fn();
     this.getReplayManifest = vi.fn(() => [...mockBridgeReplayManifest]);
-    this.close = vi.fn(async () => {});
+    this.close = observerDepsMocks.close;
     this.observerDeps = observerDepsMocks.enabled;
     this.disabledObserverDeps = observerDepsMocks.disabled;
   }),
@@ -262,6 +263,7 @@ describe('dep-factory provider wiring', () => {
     optionalModuleMocks.critiqueError = undefined;
     optionalModuleMocks.governorError = undefined;
     traceViewerMocks.stop.mockClear();
+    observerDepsMocks.close.mockClear();
     mockBridgeReplayManifest.length = 0;
   });
 
@@ -306,6 +308,16 @@ describe('dep-factory provider wiring', () => {
       expect.stringContaining('Compaction telemetry disabled: database is locked'),
       'dep-factory',
     );
+  });
+
+  it('closes compaction telemetry when trace viewer shutdown fails', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    traceViewerMocks.stop.mockRejectedValueOnce(new Error('trace viewer stop failed'));
+    const result = await createCliDeps(makeOpts({ verbose: true }));
+
+    await expect(result.finalize()).rejects.toThrow('trace viewer stop failed');
+
+    expect(observerDepsMocks.close).toHaveBeenCalledOnce();
   });
 
   it('throws descriptive error for unknown provider name', async () => {

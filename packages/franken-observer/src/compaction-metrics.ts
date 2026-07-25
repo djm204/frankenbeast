@@ -36,6 +36,7 @@ export interface CompactionRate {
 
 const DEFAULT_QUERY_LIMIT = 100
 const MAX_QUERY_LIMIT = 1_000
+export const COMPACTION_RETENTION_MS = 24 * 60 * 60 * 1_000
 
 export class CompactionMetrics {
   constructor(private readonly adapter: CompactionEventAdapter) {}
@@ -55,8 +56,8 @@ export class CompactionMetrics {
   }
 
   async compactionRate(sessionId: string, windowMs: number, now = wallClockNow()): Promise<CompactionRate> {
-    if (!Number.isSafeInteger(windowMs) || windowMs <= 0) {
-      throw new RangeError('windowMs must be a positive safe integer')
+    if (!Number.isSafeInteger(windowMs) || windowMs <= 0 || windowMs > COMPACTION_RETENTION_MS) {
+      throw new RangeError(`windowMs must be a positive safe integer no greater than ${COMPACTION_RETENTION_MS}`)
     }
     const aggregate = await this.adapter.aggregateCompactions({
       sessionId,

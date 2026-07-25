@@ -4,9 +4,14 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Worker } from 'node:worker_threads'
+import { wallClockNow } from '@franken/types'
 import type { Trace, Span } from '../../core/types.js'
 import type { ExportAdapter, TraceSummary } from '../../export/ExportAdapter.js'
-import type { CompactionEvent, CompactionEventQuery } from '../../compaction-metrics.js'
+import {
+  COMPACTION_RETENTION_MS,
+  type CompactionEvent,
+  type CompactionEventQuery,
+} from '../../compaction-metrics.js'
 import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 import {
   CREATE_TABLES,
@@ -70,7 +75,6 @@ interface FlushedSpanState {
 }
 
 const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_compaction_events_session_timestamp'
-const COMPACTION_RETENTION_MS = 24 * 60 * 60 * 1000
 const COMPACTION_PRIMARY_KEY = ['runId', 'sessionId', 'generation']
 
 export interface SQLiteAdapterOptions {
@@ -212,15 +216,21 @@ function execute(operation, payload) {
       return undefined
     }
     case 'recordCompaction':
-      db.transaction((event, retentionMs) => {
+      db.transaction((event, retentionCutoff) => {
         db.prepare(sql.upsertCompactionEvent).run(event)
-        db.prepare(sql.deleteCompactionsBefore).run(event.timestamp - retentionMs)
-      })(payload.event, payload.retentionMs)
+        db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
+      })(payload.event, payload.retentionCutoff)
       return undefined
     case 'queryCompactions':
-      return db.prepare(sql.selectCompactionEvents).all(payload.query)
+      return db.transaction((query, retentionCutoff) => {
+        db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
+        return db.prepare(sql.selectCompactionEvents).all(query)
+      })(payload.query, payload.retentionCutoff)
     case 'aggregateCompactions':
-      return db.prepare(sql.selectCompactionAggregate).get(payload.query)
+      return db.transaction((query, retentionCutoff) => {
+        db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
+        return db.prepare(sql.selectCompactionAggregate).get(query)
+      })(payload.query, payload.retentionCutoff)
     default:
       throw new Error('Unknown SQLite worker operation: ' + operation)
   }
@@ -944,7 +954,7 @@ export class SQLiteAdapter implements ExportAdapter {
         await this.withSqliteLockRetry('record compaction event', () => (
           this.workerClient!.request<void>('recordCompaction', {
             event,
-            retentionMs: COMPACTION_RETENTION_MS,
+            retentionCutoff: wallClockNow() - COMPACTION_RETENTION_MS,
           })
         ))
         return
@@ -952,7 +962,7 @@ export class SQLiteAdapter implements ExportAdapter {
       await this.withSqliteLockRetry('record compaction event', () => {
         const transaction = this.db.transaction((record: CompactionEvent) => {
           this.db.prepare(UPSERT_COMPACTION_EVENT).run(record)
-          this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(record.timestamp - COMPACTION_RETENTION_MS)
+          this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
         })
         transaction(event)
       })
@@ -968,12 +978,16 @@ export class SQLiteAdapter implements ExportAdapter {
       }
       if (this.workerClient !== undefined) {
         return this.withSqliteLockRetry('query compaction events', () => (
-          this.workerClient!.request<CompactionEvent[]>('queryCompactions', { query: params })
+          this.workerClient!.request<CompactionEvent[]>('queryCompactions', {
+            query: params,
+            retentionCutoff: wallClockNow() - COMPACTION_RETENTION_MS,
+          })
         ))
       }
-      return this.withSqliteLockRetry('query compaction events', () => (
-        this.db.prepare(SELECT_COMPACTION_EVENTS).all(params) as CompactionEvent[]
-      ))
+      return this.withSqliteLockRetry('query compaction events', () => this.db.transaction(() => {
+        this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
+        return this.db.prepare(SELECT_COMPACTION_EVENTS).all(params) as CompactionEvent[]
+      })())
     })
   }
 
@@ -986,16 +1000,20 @@ export class SQLiteAdapter implements ExportAdapter {
         return this.withSqliteLockRetry('aggregate compaction events', () => (
           this.workerClient!.request<{ count: number; latestAt: number | null }>(
             'aggregateCompactions',
-            { query },
+            {
+              query,
+              retentionCutoff: wallClockNow() - COMPACTION_RETENTION_MS,
+            },
           )
         ))
       }
-      return this.withSqliteLockRetry('aggregate compaction events', () => (
-        this.db.prepare(SELECT_COMPACTION_AGGREGATE).get(query) as {
+      return this.withSqliteLockRetry('aggregate compaction events', () => this.db.transaction(() => {
+        this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
+        return this.db.prepare(SELECT_COMPACTION_AGGREGATE).get(query) as {
           count: number
           latestAt: number | null
         }
-      ))
+      })())
     })
   }
 

@@ -301,6 +301,34 @@ describe('CliObserverBridge', () => {
     });
   });
 
+  describe('recordCompaction()', () => {
+    it('correlates compaction telemetry with the persisted trace id', async () => {
+      const recordCompaction = vi.fn(async () => undefined);
+      const compactionAdapter: CompactionEventAdapter = {
+        recordCompaction,
+        queryCompactions: vi.fn(async () => []),
+        aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
+      };
+      const bridge = new CliObserverBridge({ ...defaultConfig, compactionAdapter });
+      bridge.startTrace('chunk-session-1');
+      const traceId = bridge.observerDeps.trace.id;
+
+      await bridge.recordCompaction({
+        sessionId: 'chunk-session-1',
+        generation: 1,
+        triggerReason: 'threshold',
+        tokensBefore: 900,
+        tokensAfter: 120,
+        timestamp: 1_750_000_000_000,
+      });
+
+      expect(recordCompaction).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'chunk-session-1',
+        runId: traceId,
+      }));
+    });
+  });
+
   // ── Integration (chunk 05) ──
 
   describe('integration', () => {

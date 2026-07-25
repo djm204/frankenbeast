@@ -209,7 +209,7 @@ export class CliObserverBridge implements IObserverModule {
     }
     await this.compactionMetrics.record({
       ...event,
-      runId: this.activeSessionId,
+      runId: this.trace?.id ?? this.activeSessionId,
     });
   }
 

@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js';
 import { CompactionMetrics } from './compaction-metrics.js';
 import { TraceContext } from './core/TraceContext.js';
+import { wallClockNow } from '@franken/types';
 
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -20,6 +22,7 @@ describe('CompactionMetrics', () => {
     tempDirs.push(dir);
     const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
     const metrics = new CompactionMetrics(adapter);
+    const now = wallClockNow();
 
     await metrics.record({
       sessionId: 'chunk-session-1',
@@ -28,7 +31,7 @@ describe('CompactionMetrics', () => {
       triggerReason: 'threshold',
       tokensBefore: 900,
       tokensAfter: 120,
-      timestamp: 1_750_000_000_000,
+      timestamp: now,
     });
 
     await expect(metrics.query('chunk-session-1')).resolves.toEqual([
@@ -39,7 +42,7 @@ describe('CompactionMetrics', () => {
         triggerReason: 'threshold',
         tokensBefore: 900,
         tokensAfter: 120,
-        timestamp: 1_750_000_000_000,
+        timestamp: now,
       },
     ]);
 
@@ -51,8 +54,9 @@ describe('CompactionMetrics', () => {
     tempDirs.push(dir);
     const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
     const metrics = new CompactionMetrics(adapter);
+    const now = wallClockNow();
 
-    for (const [runId, timestamp] of [['run-1', 100], ['run-2', 200]] as const) {
+    for (const [runId, timestamp] of [['run-1', now - 1], ['run-2', now]] as const) {
       await metrics.record({
         sessionId: 'seeded-session',
         runId,
@@ -76,7 +80,7 @@ describe('CompactionMetrics', () => {
     tempDirs.push(dir);
     const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
     const metrics = new CompactionMetrics(adapter);
-    const now = 1_750_000_000_000;
+    const now = wallClockNow();
     const retentionMs = 24 * 60 * 60 * 1_000;
 
     await metrics.record({
@@ -102,12 +106,36 @@ describe('CompactionMetrics', () => {
     await adapter.close();
   });
 
+  it('prunes expired orphaned compactions when telemetry is only read', async () => {
+    vi.useFakeTimers();
+    const now = new Date('2026-07-25T12:00:00.000Z');
+    vi.setSystemTime(now);
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-idle-retention-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+
+    await metrics.record({
+      sessionId: 'idle-session',
+      runId: 'orphaned-idle-run',
+      generation: 1,
+      triggerReason: 'threshold',
+      tokensBefore: 900,
+      tokensAfter: 120,
+      timestamp: now.getTime(),
+    });
+    vi.setSystemTime(now.getTime() + (24 * 60 * 60 * 1_000) + 1);
+
+    await expect(metrics.query('idle-session')).resolves.toEqual([]);
+    await adapter.close();
+  });
+
   it('calculates a windowed compaction rate without hydrating event payloads', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'compaction-rate-'));
     tempDirs.push(dir);
     const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
     const metrics = new CompactionMetrics(adapter);
-    const now = 1_750_000_000_000;
+    const now = wallClockNow();
 
     for (const [generation, timestamp] of [[1, now - 3_600_001], [2, now - 1_000], [3, now], [4, now + 1]] as const) {
       await metrics.record({
@@ -131,6 +159,17 @@ describe('CompactionMetrics', () => {
     await adapter.close();
   });
 
+  it('rejects rate windows longer than retained compaction history', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-rate-retention-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+
+    await expect(metrics.compactionRate('chunk-session-rate', (24 * 60 * 60 * 1_000) + 1))
+      .rejects.toThrow(/no greater than 86400000/);
+    await adapter.close();
+  });
+
   it('removes compaction telemetry when its retained trace run is deleted', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'compaction-retention-'));
     tempDirs.push(dir);
@@ -145,7 +184,7 @@ describe('CompactionMetrics', () => {
       triggerReason: 'threshold',
       tokensBefore: 900,
       tokensAfter: 120,
-      timestamp: 1_750_000_000_000,
+      timestamp: wallClockNow(),
     });
 
     await adapter.deleteTrace(trace.id);

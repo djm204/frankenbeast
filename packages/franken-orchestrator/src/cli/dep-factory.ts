@@ -1178,10 +1178,13 @@ function appendAuditFinalize(
 
 function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<void> {
   return async () => {
-    if (observer.traceViewerHandle) {
-      await observer.traceViewerHandle.stop();
+    try {
+      if (observer.traceViewerHandle) {
+        await observer.traceViewerHandle.stop();
+      }
+    } finally {
+      await observer.observerBridge.close();
     }
-    await observer.observerBridge.close();
   };
 }
 

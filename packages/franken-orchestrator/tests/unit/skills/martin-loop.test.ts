@@ -874,6 +874,7 @@ describe('MartinLoop', () => {
     const metrics = new CompactionMetrics(adapter);
     const bridge = new CliObserverBridge({ budgetLimitUsd: 1, compactionAdapter: adapter });
     bridge.startTrace('run-threshold');
+    const traceId = bridge.observerDeps.trace.id;
 
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
@@ -905,7 +906,7 @@ describe('MartinLoop', () => {
     await expect(metrics.query(stored!.sessionId)).resolves.toEqual([
       expect.objectContaining({
         sessionId: stored!.sessionId,
-        runId: 'run-threshold',
+        runId: traceId,
         generation: 1,
         triggerReason: 'threshold',
         tokensBefore: 900,
