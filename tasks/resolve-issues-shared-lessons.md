@@ -551,3 +551,6 @@
 
 ## 2026-07-24 — Registry-backed operational HTTP reads
 - Read-only routes over durable registries need an existing-only lookup API: never reuse a get-or-create method for an operator-supplied id. Mount the route with the service-owned registry in both standalone and combined modes, proxy it through compatibility gateways, bound every collection/query input and every variable-length row field, and translate storage failures before shared error logging can expose internal paths.
+
+## 2026-07-25 — Shared memory inherits local safety semantics
+- A cross-agent SQLite memory substrate needs more than namespace isolation: retain bounded rows, filter entry kinds before read limits, keep database metadata authoritative over payload fields, revoke rejected/never-store candidates, propagate right-to-forget for owned entries, avoid plaintext publication from encrypted brains, and include hive state in encrypted DR backups.

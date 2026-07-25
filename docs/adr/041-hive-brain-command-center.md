@@ -4,7 +4,7 @@
 - **Status:** Accepted
 - **Deciders:** Frankenbeast maintainers
 - **Supersedes:** none
-- **Related:** ADR-014, issues #3685, #3690, #3695, #3696, #3700, #3701, #3702, #3703, and #3704
+- **Related:** ADR-014, issues #3685, #3690, #3695, #3696, #3700, #3701, #3702, #3703, #3704, and #3705
 
 ## Context
 
@@ -145,14 +145,21 @@ The initial additive contract is:
   capability/lesson availability;
 - `GET /v1/brain/:agentTypeId/episodes` for bounded episodic paging and optional
   recall query; and
-- `GET /v1/brain/:agentTypeId/lessons` for explicit incremental lesson support.
-  Until consolidated lesson reads exist, this returns an empty collection with
-  `available: false` rather than inventing lesson storage or returning 404.
+- `GET /v1/brain/:agentTypeId/lessons` for explicit lesson availability and
+  bounded relevance search. A non-empty `query` retrieves consolidated lessons;
+  an omitted query returns an empty collection rather than misrepresenting an
+  unfiltered result as a recent feed.
 
 All three routes require Beast operator authentication. Collection responses
 have fixed maximum limits, invalid identifiers and queries receive typed client
 errors, and storage failures map to a stable error without exposing internal
 database paths or exception text.
+
+The `franken-web` overview now exposes these reads through a read-only Brain
+panel. The operator selects an explicit agent-type id, sees memory and faculty
+configuration from the summary, and can search lessons by topic. The browser
+does not receive the operator token, fabricate unavailable state, or add a
+parallel command-center chat transport.
 
 ### 4. Migrate without breaking `franken-web`
 
@@ -290,7 +297,21 @@ input policy (threshold 3, lookback 100, similarity 0.5); bursts coalesce into o
 pending pass and CLI shutdown drains it. Halted critiques are excluded, query
 assembly is capped before redaction, and clustering uses objective/request context
 rather than lifecycle boilerplate. This does not inject lesson text into prompts, share lessons across
-brains (#3689), or change the dispatch boundaries above.
+brains through chat, or change the dispatch boundaries above.
+
+Issue #3689 adds the lower-level shared learning substrate independently of the
+command-center chat work. Durable `BrainRegistry` entries bind to one WAL-backed
+`.fbeast/hive/hive.db` and an enforced `agent-type:<id>` namespace. A literal
+`global` namespace exists only as an explicit caller opt-in. High-confidence
+consolidated lessons and significant failure/negative-decision episodes are
+published synchronously after their local transaction commits. Running peers
+poll bounded, cursored pages; `relevantLessons()` consults at most 1,000 shared
+lesson rows and labels peer results separately from local experience. Review
+rejection/never-store and right-to-forget remove owned hive entries, namespaces
+retain at most 10,000 rows by default, encrypted brains skip plaintext hive
+publication, and encrypted DR backups include hive state. This substrate
+does not add a socket, background poller, conversation aggregate, or dispatch
+path.
 
 ## Consequences
 

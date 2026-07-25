@@ -94,3 +94,18 @@ export {
   type BrainConversationPendingApproval,
   type BrainConversationSupervisedAgent,
 } from '@franken/types';
+
+export {
+  HIVE_MIND_GLOBAL_NAMESPACE,
+  HIVE_MIN_LESSON_CONFIDENCE,
+  HiveMindStore,
+  hiveMindAgentTypeNamespace,
+  type HiveMindEntry,
+  type HiveMindEpisodePublishEntry,
+  type HiveMindLessonPublishEntry,
+  type HiveMindNamespace,
+  type HiveMindPollOptions,
+  type HiveMindPublishEntry,
+  type HiveMindRecentOptions,
+  type HiveMindStoreOptions,
+} from './hive-mind-store.js';

@@ -90,6 +90,53 @@ export interface DashboardSnapshot {
   slo?: DashboardSlo | undefined;
 }
 
+export type DashboardBrainFacultyName = 'planning' | 'reasoning' | 'action' | 'learning';
+
+export interface DashboardBrainState {
+  agentTypeId: string;
+  workingMemory: {
+    keys: string[];
+    total: number;
+    truncated: boolean;
+  };
+  episodic: { eventCount: number };
+  recovery: { lastCheckpointAt: string | null };
+  faculties: Record<DashboardBrainFacultyName, { configured: boolean }>;
+  capabilities: {
+    memoryReview: boolean;
+    retentionReporting: boolean;
+    recordLearning: boolean;
+  };
+  lessons: {
+    available: boolean;
+    count: number | null;
+  };
+}
+
+export interface DashboardBrainLessons {
+  data: DashboardBrainLesson[];
+  meta: {
+    available: boolean;
+    facultyConfigured: boolean;
+    reason?: string;
+  };
+}
+
+export interface DashboardBrainLesson {
+  kind: 'consolidated-lesson';
+  key: string;
+  status: 'pending' | 'approved';
+  pattern: string;
+  keywords: readonly string[];
+  searchTerms?: readonly string[];
+  occurrenceCount: number;
+  confidence: number;
+  evidenceEventIds: readonly number[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  relevance: number;
+}
+
 export class DashboardApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -97,6 +144,27 @@ export class DashboardApiClient {
     const res = await fetch(`${this.baseUrl}/api/dashboard`);
     if (!res.ok) throw await createResponseError(res);
     return (await res.json()) as DashboardSnapshot;
+  }
+
+  async fetchBrainState(agentTypeId: string): Promise<DashboardBrainState> {
+    const res = await fetch(`${this.baseUrl}/v1/brain/${encodeURIComponent(agentTypeId)}`);
+    if (!res.ok) throw await createResponseError(res);
+    const body = await res.json() as { data: DashboardBrainState };
+    return body.data;
+  }
+
+  async fetchBrainLessons(
+    agentTypeId: string,
+    query?: string,
+    limit?: number,
+  ): Promise<DashboardBrainLessons> {
+    const search = new URLSearchParams();
+    if (query?.trim()) search.set('query', query.trim());
+    if (limit !== undefined) search.set('limit', String(limit));
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    const res = await fetch(`${this.baseUrl}/v1/brain/${encodeURIComponent(agentTypeId)}/lessons${suffix}`);
+    if (!res.ok) throw await createResponseError(res);
+    return res.json() as Promise<DashboardBrainLessons>;
   }
 
   async toggleSkill(name: string, enabled: boolean): Promise<void> {

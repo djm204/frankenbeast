@@ -37,12 +37,12 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches planning to the supplied planner, reasoning to the real critique chain, and action to the real governor, while the built-in learning faculty clusters similar failures into review-gated lesson candidates |
+| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, durable per-agent brains, and a retention-bounded WAL-backed `.fbeast/hive/hive.db` store that shares lessons/significant episodes only inside enforced agent-type namespaces (or explicit global opt-in), propagates review/right-to-forget revocations, skips plaintext publication for encrypted brains, and participates in encrypted DR backups |
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
 | `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
-| `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics |
+| `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, read-only per-agent-type Brain faculty/lesson inspection, network config, metrics |
 | `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, comms gateway (Slack/Discord/Telegram/WhatsApp), beast control APIs, phases, circuit breakers, skill execution, crash recovery |
 | `packages/franken-mcp-suite/` | MCP suite (`@franken/mcp-suite`) for tool registry/server/proxy integrations |
 | `packages/live-bench/` | Live benchmark harness (`@franken/live-bench`) and fixture workspace tooling |
@@ -65,7 +65,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
 - `ReasoningFacultyAdapter`: consults up to five relevant lesson keys before critique, preserves the enabled `ICritiqueModule` result, and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
 - `ActionFacultyAdapter`: preserves governor approval outcomes and records real gating decisions as queryable episodic context without approval tokens; synthetic health probes do not create episodes
-- Learning faculty: `consolidate()` clusters bounded episodic inputs and proposes patterns through `memoryReview`; `relevantLessons()` returns pending/approved matches with occurrence counts and confidence. Planning and reasoning record observable consultations with redacted 512-byte queries. Negative reasoning/action outcomes asynchronously schedule the existing consolidation core with threshold 3, lookback 100, and similarity 0.5, coalescing bursts into one pending pass; this remains review-gated and does not inject lesson text into prompts.
+- Learning faculty: `consolidate()` clusters bounded episodic inputs and proposes patterns through `memoryReview`; confidence >= 0.65 publishes to the same-type hive immediately. `relevantLessons()` merges local results with at most 1,000 shared rows and labels `source: 'local' | 'peer'`. Significant failures and negative reasoning/action decisions also publish as hive episodes. `HiveMindStore.poll()` is cursor-based (default 100, maximum 1,000); no background timer or socket is added. Planning and reasoning record observable consultations with redacted 512-byte queries, and negative outcomes still schedule the bounded review-gated consolidation core.
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)
@@ -148,6 +148,11 @@ packages/franken-orchestrator/src/
   `/v1/chat/ws` browser contract remains in place; #3702/#3703 still own runtime
   Hive routing and governed dispatch integration.
   Do not add a second socket protocol or dispatch directly from a brain/faculty.
+- **Brain dashboard inspection is implemented and remains read-only.** The
+  overview panel reads one explicit existing agent-type id through bounded
+  `/v1/brain/*` routes, displays memory and faculty configuration, and searches
+  consolidated lessons by topic. It does not enumerate/create brains, expose
+  browser credentials, or claim an unfiltered recent lesson feed.
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
 - Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
 - **Beast daemon execution pipeline**: `ProcessBeastExecutor` manages spawned agent processes with config file passthrough (`FRANKENBEAST_RUN_CONFIG` env var), `ProcessSupervisor` three-way exit gate, early stdout/stderr buffering, and stop/kill escalation (SIGTERM → timeout → SIGKILL). `BeastEventBus` publishes real-time `run.status`, `run.log`, and `agent.status` events to SSE subscribers. `SseConnectionTicketStore` authenticates EventSource connections via single-use tickets (ADR-030). Config files are written to `.fbeast/.build/run-configs/` and cleaned up on terminal state.

@@ -157,6 +157,8 @@ describe('encrypted DR state backups', () => {
       await writeFile(join(fbeastDir, 'state', 'kanban.db'), 'sqlite-kanban-bytes', 'utf8');
       await mkdir(join(fbeastDir, 'brains'), { recursive: true });
       await writeFile(join(fbeastDir, 'brains', 'coder.db'), 'coder brain sqlite bytes', 'utf8');
+      await mkdir(join(fbeastDir, 'hive'), { recursive: true });
+      await writeFile(join(fbeastDir, 'hive', 'hive.db'), 'shared hive sqlite bytes', 'utf8');
 
       const envelope = await createEncryptedStateBackup({
         stateDir: join(fbeastDir, 'state'),
@@ -167,6 +169,7 @@ describe('encrypted DR state backups', () => {
       expect(envelope.manifest.sourceDir).toBe(fbeastDir);
       expect(envelope.manifest.files.map((file) => file.path)).toEqual(expect.arrayContaining([
         'brains/coder.db',
+        'hive/hive.db',
         'state/kanban.db',
       ]));
     } finally {

@@ -63,6 +63,15 @@ connect to `/v1/chat/ws` with `franken.chat.v1`, and reconcile from
 `session.ready`/the session GET route. Hive/faculty selection will be additive;
 no second brain-chat socket or browser-side Beast dispatch path is permitted.
 
+The overview dashboard includes a separate read-only Brain inspection panel.
+Enter an existing agent-type id to read its bounded memory/faculty summary from
+`/v1/brain/:agentTypeId`; when the learning faculty is available, search
+persisted consolidated lessons by topic through `/v1/brain/:agentTypeId/lessons`.
+The route intentionally returns no lesson rows without a query, so the UI states
+that no unfiltered recent feed exists instead of fabricating one. These requests
+stay behind the same-origin `/v1` proxy and never attach a browser-readable
+operator credential.
+
 If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. Beast routes (`/v1/beasts/*`) reuse that same target by default. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls run on a different backend, for example a separate local orchestrator or daemon port:
 
 | Local workflow | Backend topology | Vite env vars to set |

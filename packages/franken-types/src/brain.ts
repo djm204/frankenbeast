@@ -166,6 +166,10 @@ export interface RelevantLesson extends ConsolidatedLesson {
   readonly key: string;
   readonly status: 'pending' | 'approved';
   readonly relevance: number;
+  /** Local lessons come from this brain; peer lessons came from another live agent. */
+  readonly source: 'local' | 'peer';
+  /** Non-secret publisher identity for peer lessons. */
+  readonly publisherId?: string;
 }
 
 export interface BrainSerializeOptions {

@@ -359,15 +359,16 @@ SqliteBrain
 └── faculties     learning consolidation plus attachable planning/reasoning/action faculties
 
 BrainRegistry
-├── `forAgentType(agentTypeId)` → stable agent-scoped `SqliteBrain`
-└── `forWorkspaceHive(workspaceId)` → stable workspace Hive `SqliteBrain`
+├── `forAgentType(agentTypeId)` → stable `.fbeast/brains/<agentTypeId>.db` brain
+│   └── same-type agents → shared `.fbeast/hive/hive.db` HiveMindStore namespace
+└── `forWorkspaceHive(workspaceId)` → stable workspace Hive brain with conversations
 ```
 
 The learning faculty is built into `SqliteBrain`: `consolidate()` performs a bounded O(n²) connected-component pass over recent failure episodes using normalized-token similarity, then proposes threshold-crossing patterns through `memoryReview`; `relevantLessons()` searches pending and approved patterns and reports occurrence-derived confidence. The heuristic requires at least three shared meaningful tokens for multi-event clustering, so paraphrases with little lexical overlap require a future embedding-backed implementation. Single occurrences are 0.35 confidence, each additional occurrence adds 0.15, and confidence caps at 0.95.
 
-The orchestrator's local CLI attaches configured planning, reasoning, and action adapters. Planning delegates to the existing planner and records lifecycle episodes; reasoning delegates to the existing critique chain and records compact verdict episodes; `brain.action.requestApproval()` delegates to the existing governor unchanged and records approved/rejected/aborted decisions as recallable episodic events. `SqliteBrain` does not import or reimplement planner, critique, or governor logic. Lesson retrieval is not wired into planning/reasoning consumers here; that remains #3699. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
+The orchestrator's local CLI attaches configured planning, reasoning, and action adapters. Planning delegates to the existing planner and records lifecycle episodes; reasoning delegates to the existing critique chain and records compact verdict episodes; `brain.action.requestApproval()` delegates to the existing governor unchanged and records approved/rejected/aborted decisions as recallable episodic events. Planning and reasoning consult bounded local and peer lesson results. `SqliteBrain` does not import or reimplement planner, critique, or governor logic.
 
-The package creates the required SQLite schema in its constructor and enables WAL mode. `BrainRegistry` validates agent-type IDs as portable path components and defaults each one to `.fbeast/brains/<agentTypeId>.db`; `forAgentType(id, ':memory:')` remains the explicit ephemeral opt-out. Spawned Beast runtime config carries the canonical catalog `definitionId` into orchestrator dependency construction, so repeated runs of one agent type reopen the same database while different definitions remain isolated. An explicit `brain.dbPath` still overrides the registry default. The repository ignores the entire `.fbeast/` state tree, including SQLite WAL/SHM sidecars.
+The package creates the required SQLite schemas in their constructors and enables WAL mode with a 5-second busy timeout. `BrainRegistry` validates agent-type IDs as portable path components and defaults each one to `.fbeast/brains/<agentTypeId>.db`; `forAgentType(id, ':memory:')` remains the explicit ephemeral opt-out. Durable registry brains also bind to `.fbeast/hive/hive.db` under the enforced `agent-type:<id>` namespace. High-confidence consolidated lessons and significant failure/negative-decision episodes publish immediately; review rejection/never-store and right-to-forget remove matching entries owned by that brain. `relevantLessons()` merges a bounded peer scan with local results and labels each result `source: 'local' | 'peer'`. `HiveMindStore.poll(namespace, { sinceId, limit })` is the public incremental API (default 100, maximum 1,000 rows); each namespace retains at most 10,000 rows by default, and newest-entry reads can filter by kind before their bound. Callers poll at their own lifecycle boundary, so there is no background timer or socket cost. The literal `global` namespace is a separate explicit opt-in and is never read by an agent-type lookup automatically. Hive publishing is disabled when local memory encryption is enabled, preventing plaintext copies of encrypted memory. Encrypted DR backups include `.fbeast/hive/`. Spawned Beast runtime config carries the canonical catalog `definitionId` into orchestrator dependency construction, so repeated runs of one agent type reopen the same database while different definitions remain isolated. An explicit `brain.dbPath` still overrides the registry default. The repository ignores the entire `.fbeast/` state tree, including hive databases and SQLite WAL/SHM sidecars.
 
 ## Hive Brain registry relationship
 
@@ -412,8 +413,9 @@ Future schema changes should increment `CURRENT_MEMORY_SCHEMA_VERSION`, add a fo
 
 ```text
 src/
-  index.ts          Public barrel exports (`SqliteBrain`, `BrainRegistry`)
+  index.ts          Public barrel exports (`SqliteBrain`, `BrainRegistry`, `HiveMindStore`)
   brain-registry.ts Durable process-local brain lookup by safe agent-type ID
+  hive-mind-store.ts Shared namespaced lesson/episode polling store
   sqlite-brain.ts   Working, episodic, recovery, serialize/hydrate implementation
 
 tests/
