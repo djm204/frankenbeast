@@ -5790,7 +5790,18 @@ export class SqliteMemoryReviewQueue {
        WHERE candidate_kind IS NULL
           OR (candidate_kind = 'consolidated-lesson'
               AND (${this.encryption
-                ? '1 = 1'
+                ? `lesson_evidence_ids IS NULL
+                   OR lesson_suppression_tokens IS NULL
+                   OR json_valid(lesson_suppression_tokens) = 0
+                   OR EXISTS (
+                     SELECT 1
+                       FROM json_each(CASE
+                         WHEN json_valid(lesson_suppression_tokens)
+                         THEN lesson_suppression_tokens
+                         ELSE '[]'
+                       END)
+                      WHERE value NOT GLOB 'h0:*' AND value NOT GLOB 'h1:*'
+                   )`
                 : 'lesson_evidence_ids IS NULL OR lesson_suppression_tokens IS NULL'}))`,
     ).all() as Array<{
       id: string;
@@ -6221,14 +6232,35 @@ function migrateEncryptedLessonSuppressionTokens(
 }
 
 function lessonSuppressionSimilarity(left: ReadonlySet<string>, right: ReadonlySet<string>): number {
-  if (left.size < 3 || right.size < 3) return 0;
-  const intersection = [...left].filter((token) => right.has(token)).length;
+  const namespace = leftHasPrefix(left, 'h1:') && leftHasPrefix(right, 'h1:')
+    ? 'h1:'
+    : leftHasPrefix(left, 'h0:') && leftHasPrefix(right, 'h0:')
+      ? 'h0:'
+      : '';
+  const comparableLeft = lessonTokensInNamespace(left, namespace);
+  const comparableRight = lessonTokensInNamespace(right, namespace);
+  if (comparableLeft.size < 3 || comparableRight.size < 3) return 0;
+  const intersection = [...comparableLeft]
+    .filter((token) => comparableRight.has(token)).length;
   if (intersection < 3) return 0;
-  const unionSize = new Set([...left, ...right]).size;
+  const unionSize = new Set([...comparableLeft, ...comparableRight]).size;
   return Math.max(
     intersection / unionSize,
-    (intersection / Math.min(left.size, right.size)) * 0.72,
+    (intersection / Math.min(comparableLeft.size, comparableRight.size)) * 0.72,
   );
+}
+
+function leftHasPrefix(tokens: ReadonlySet<string>, prefix: 'h0:' | 'h1:'): boolean {
+  return [...tokens].some((token) => token.startsWith(prefix));
+}
+
+function lessonTokensInNamespace(
+  tokens: ReadonlySet<string>,
+  namespace: '' | 'h0:' | 'h1:',
+): Set<string> {
+  return new Set([...tokens].filter((token) => namespace
+    ? token.startsWith(namespace)
+    : !token.startsWith('h0:') && !token.startsWith('h1:')));
 }
 
 function stableStringify(value: unknown): string {
@@ -6654,7 +6686,13 @@ export class SqliteBrain implements IBrain {
         pendingLessons = pendingLessons.filter((candidate) => !matchedIds.has(candidate.id));
         pendingLessons.push(updated);
         if ((lessonChanged || duplicateIds.size > 0) && isConsolidatedLesson(updated.value)) {
-          created.push({ id: updated.id, key: updated.key, status: 'pending', value: updated.value });
+          created.push({
+            id: updated.id,
+            key: updated.key,
+            status: 'pending',
+            value: updated.value,
+            ...(updated.replaces ? { replaces: updated.replaces } : {}),
+          });
         }
         continue;
       }
@@ -6802,7 +6840,8 @@ export class SqliteBrain implements IBrain {
     const relevantLessonsForStatus = (status: 'pending' | 'approved'): RelevantLesson[] => {
       const lessons: RelevantLesson[] = [];
       const matchedKeys = new Set<string>();
-      for (let offset = 0; ; offset += pageSize) {
+      const scanLimit = pageSize * 10;
+      for (let offset = 0; offset < scanLimit; offset += pageSize) {
         const page = this.memoryReview.listByKind(
           status,
           'consolidated-lesson',

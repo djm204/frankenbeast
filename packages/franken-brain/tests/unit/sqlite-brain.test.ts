@@ -1443,6 +1443,150 @@ describe('SqliteBrain', () => {
         );
       });
 
+    it('caps lesson relevance scans when no rows match', () => {
+      const base = brain.memoryReview.propose({
+        targetStore: 'working',
+        key: 'lesson.review.scan-budget',
+        value: {
+          kind: 'consolidated-lesson',
+          pattern: 'unrelated filler lesson',
+          keywords: ['unrelated', 'filler', 'lesson'],
+          occurrenceCount: 1,
+          confidence: 0.35,
+          evidenceEventIds: [1],
+          firstSeenAt: '2026-07-24T10:00:00.000Z',
+          lastSeenAt: '2026-07-24T10:00:00.000Z',
+        },
+        source: 'test',
+        confidence: 0.35,
+        reason: 'scan budget fixture',
+      });
+      const page = Array.from({ length: 100 }, (_, index) => ({
+        ...base,
+        id: `${base.id}-${index}`,
+        key: `${base.key}-${index}`,
+      }));
+      const listByKind = vi.spyOn(brain.memoryReview, 'listByKind').mockImplementation(
+        (status) => status === 'pending' ? page : [],
+      );
+
+      expect(brain.learning.relevantLessons('needle', { limit: 1 })).toEqual([]);
+      const pendingOffsets = listByKind.mock.calls
+        .filter(([status]) => status === 'pending')
+        .map(([, , options]) => options?.offset ?? 0);
+      expect(pendingOffsets).toEqual(Array.from({ length: 10 }, (_, index) => index * 100));
+    });
+
+    it('does not count h0 and h1 forms as separate suppression tokens', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encrypted-token-count-'));
+      const encrypted = new SqliteBrain(join(dir, 'brain.db'), undefined, {
+        encryption: { enabled: true, key: 'encrypted-token-count-key' },
+      });
+      try {
+        encrypted.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'alpha beta',
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        const [rejected] = encrypted.learning.consolidate({ threshold: 1, lookback: 1 });
+        encrypted.memoryReview.reject(rejected!.id, { reviewer: 'operator' });
+        encrypted.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'alpha beta gamma',
+          createdAt: '2026-07-24T10:01:00.000Z',
+        });
+
+        expect(encrypted.learning.consolidate({
+          threshold: 1,
+          lookback: 1,
+          similarityThreshold: 0.7,
+        })).toHaveLength(1);
+      } finally {
+        encrypted.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not rewrite modern encrypted lesson tokens on restart', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-encrypted-token-migration-'));
+      const dbPath = join(dir, 'brain.db');
+      const options = {
+        encryption: { enabled: true, key: 'encrypted-token-migration-key' },
+      } as const;
+      let encrypted: SqliteBrain | undefined;
+      try {
+        encrypted = new SqliteBrain(dbPath, undefined, options);
+        encrypted.episodic.record({
+          type: 'failure',
+          step: 'build',
+          summary: 'modern encrypted token lesson',
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        encrypted.learning.consolidate({ threshold: 1, lookback: 1 });
+        encrypted.close();
+        encrypted = undefined;
+        const raw = new Database(dbPath);
+        raw.exec(`
+          CREATE TRIGGER reject_redundant_lesson_token_rewrite
+          BEFORE UPDATE ON memory_review_candidates
+          WHEN OLD.candidate_kind = 'consolidated-lesson'
+          BEGIN
+            SELECT RAISE(ABORT, 'modern lesson tokens must not be rewritten');
+          END;
+        `);
+        raw.close();
+
+        expect(() => {
+          encrypted = new SqliteBrain(dbPath, undefined, options);
+        }).not.toThrow();
+      } finally {
+        encrypted?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('preserves replacement metadata when a bridging revision is refreshed', () => {
+      for (const [summary, createdAt] of [
+        ['AlphaRefresh parser timeout crash', '2026-07-24T10:00:00.000Z'],
+        ['AlphaRefresh parser timeout crash', '2026-07-24T10:01:00.000Z'],
+        ['OmegaRefresh cache mismatch overflow', '2026-07-24T10:02:00.000Z'],
+        ['OmegaRefresh cache mismatch overflow', '2026-07-24T10:03:00.000Z'],
+      ] as const) {
+        recordStaleDeclarationFailure(summary, createdAt);
+      }
+      const initial = brain.learning.consolidate({
+        threshold: 2,
+        lookback: 10,
+        similarityThreshold: 0.5,
+      });
+      for (const candidate of initial) brain.memoryReview.approve(candidate.id);
+      recordStaleDeclarationFailure(
+        'AlphaRefresh parser timeout crash OmegaRefresh cache mismatch overflow',
+        '2026-07-24T10:04:00.000Z',
+      );
+      const [revision] = brain.learning.consolidate({
+        threshold: 2,
+        lookback: 10,
+        similarityThreshold: 0.5,
+      });
+      expect(revision?.replaces).toHaveLength(1);
+      recordStaleDeclarationFailure(
+        'AlphaRefresh parser timeout crash OmegaRefresh cache mismatch overflow again',
+        '2026-07-24T10:05:00.000Z',
+      );
+
+      const [refreshed] = brain.learning.consolidate({
+        threshold: 2,
+        lookback: 10,
+        similarityThreshold: 0.5,
+      });
+
+      expect(refreshed?.id).toBe(revision?.id);
+      expect(refreshed?.replaces).toEqual(revision?.replaces);
+    });
+
     it('uses reviewer-edited candidate confidence for lesson retrieval', () => {
       for (let index = 0; index < 3; index += 1) {
         recordStaleDeclarationFailure(
