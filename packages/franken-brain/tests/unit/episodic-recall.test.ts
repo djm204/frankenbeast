@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
 import { SqliteBrain } from '../../src/sqlite-brain.js';
 
 describe('EpisodicMemory.recall()', () => {
@@ -118,6 +119,104 @@ describe('EpisodicMemory.recall()', () => {
       });
 
       expect(encryptedBrain.episodic.recall('error: unavailable')).toHaveLength(1);
+    } finally {
+      encryptedBrain.close();
+    }
+  });
+
+  it('bounds encrypted episodic details by decrypted response size', () => {
+    const encryptedBrain = new SqliteBrain(':memory:', undefined, {
+      encryption: { enabled: true, key: 'episodic-bounds-test-key' },
+    });
+    try {
+      encryptedBrain.episodic.record({
+        type: 'observation',
+        summary: 'within plaintext bound',
+        details: { marker: 'searchable-needle', payload: 'x'.repeat(7_000) },
+        createdAt: '2026-03-18T10:30:00Z',
+      });
+      encryptedBrain.episodic.record({
+        type: 'observation',
+        summary: 'outside plaintext bound',
+        details: { marker: 'oversized-search-needle', payload: 'x'.repeat(1_100_000) },
+        createdAt: '2026-03-18T10:31:00Z',
+      });
+
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'searchable-needle',
+        maxDetailsBytes: 8_192,
+      })[0]?.details).toMatchObject({ marker: 'searchable-needle' });
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        maxDetailsBytes: 8_192,
+      })[0]).toMatchObject({ detailsTruncated: true });
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'outside plaintext bound',
+        maxDetailsBytes: 8_192,
+      })[0]).toMatchObject({ summary: 'outside plaintext bound', detailsTruncated: true });
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'oversized-search-needle',
+        maxDetailsBytes: 8_192,
+      })[0]).toMatchObject({ detailsTruncated: true });
+    } finally {
+      encryptedBrain.close();
+    }
+  });
+
+  it('searches legitimate payloads that merely contain quarantine-shaped metadata', () => {
+    const isolatedBrain = new SqliteBrain();
+    try {
+      isolatedBrain.episodic.record({
+        type: 'observation',
+        summary: 'ordinary event',
+        createdAt: '2026-03-18T10:32:00Z',
+        details: {
+          quarantine: { field: 'details', eventId: 1, reason: 'invalid JSON' },
+          payload: 'legitimate-search-marker',
+        },
+      });
+      expect(isolatedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'legitimate-search-marker',
+        maxDetailsBytes: 8_192,
+      })).toHaveLength(1);
+    } finally {
+      isolatedBrain.close();
+    }
+  });
+
+  it('does not rank unauthenticated plaintext from tampered oversized encrypted details', () => {
+    const encryptedBrain = new SqliteBrain(':memory:', undefined, {
+      encryption: { enabled: true, key: 'episodic-tamper-test-key' },
+    });
+    try {
+      encryptedBrain.episodic.record({
+        type: 'observation',
+        summary: 'ordinary encrypted event',
+        details: { marker: 'tampered-search-needle', payload: 'x'.repeat(1_100_000) },
+        createdAt: '2026-03-18T10:33:00Z',
+      });
+      const db = (encryptedBrain as unknown as { db: Database.Database }).db;
+      const row = db.prepare('SELECT id, details FROM episodic_events LIMIT 1')
+        .get() as { id: number; details: string };
+      const envelope = row.details.split(':');
+      envelope[3] = `${envelope[3]![0] === 'A' ? 'B' : 'A'}${envelope[3]!.slice(1)}`;
+      db.prepare('UPDATE episodic_events SET details = ? WHERE id = ?').run(envelope.join(':'), row.id);
+
+      expect(encryptedBrain.episodic.readBoundedPage({
+        limit: 10,
+        offset: 0,
+        query: 'tampered-search-needle',
+        maxDetailsBytes: 8_192,
+      })).toEqual([]);
     } finally {
       encryptedBrain.close();
     }

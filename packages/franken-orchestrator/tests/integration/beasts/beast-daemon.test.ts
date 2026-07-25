@@ -112,6 +112,34 @@ describe('beast daemon', () => {
     }
   });
 
+  it('mounts registry-backed brain routes on the Beast daemon', async () => {
+    const paths = await makePaths();
+    const services = createBeastServices(paths);
+    const brain = services.brains.forAgentType('coder');
+    brain.episodic.record({
+      type: 'observation',
+      summary: 'Daemon-visible brain event',
+      createdAt: '2026-07-24T10:00:00.000Z',
+    });
+    const app = createBeastDaemonApp({ services, operatorToken });
+
+    try {
+      const response = await app.request('/v1/brain/coder', {
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        data: {
+          agentTypeId: 'coder',
+          episodic: { eventCount: 1 },
+        },
+      });
+    } finally {
+      services.dispose();
+    }
+  });
+
   it('reports drain mode in health and rejects new mutating beast work', async () => {
     const paths = await makePaths();
     const services = createBeastServices(paths);
