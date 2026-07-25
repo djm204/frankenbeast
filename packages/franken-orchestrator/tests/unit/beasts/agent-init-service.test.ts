@@ -72,6 +72,26 @@ describe('AgentInitService', () => {
     expect(agents.getAgent(agent.id).status).toBe('initializing');
   });
 
+  it('stops an initializing chat agent when its interview is rejected', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const agents = new AgentService(repository, () => '2026-03-11T00:00:00.000Z');
+    const init = new AgentInitService(agents, { createRun: vi.fn() } as never);
+    const agent = init.createChatInitAgent({
+      definitionId: 'martin-loop',
+      chatSessionId: 'sess-rejected',
+      command: 'martin-loop',
+      initActionKind: 'martin-loop',
+      config: {},
+    });
+
+    init.abortAgent(agent.id);
+
+    const detail = agents.getAgentDetail(agent.id);
+    expect(detail.agent.status).toBe('stopped');
+    expect(detail.events.map((event) => event.type)).toContain('agent.interview.rejected');
+  });
+
   it('includes trusted selected-skill capabilities in chat init defaults', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-agent-init-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

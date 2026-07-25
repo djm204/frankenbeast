@@ -564,6 +564,18 @@ export function beastRoutes(deps: BeastRoutesDeps): Hono {
     return c.json({ data: session }, 201);
   });
 
+  app.post('/v1/beasts/interviews/:sessionId/abort', (c) => {
+    const sessionId = c.req.param('sessionId');
+    try {
+      return c.json({ data: deps.interviews.abort(sessionId) });
+    } catch (error) {
+      if (error instanceof UnknownBeastInterviewSessionError) {
+        throw new InterviewSessionNotFoundHttpError(sessionId);
+      }
+      throw error;
+    }
+  });
+
   app.post('/v1/beasts/interviews/:sessionId/answer', async (c) => {
     const body = validateBody(InterviewAnswerBody, await parseJsonBody(c));
     const sessionId = c.req.param('sessionId');

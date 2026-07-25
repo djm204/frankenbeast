@@ -3,6 +3,7 @@ import { ConversationEngine } from '../../../src/chat/conversation-engine.js';
 import { createChatRuntime } from '../../../src/chat/chat-runtime-factory.js';
 import { ChatRuntime } from '../../../src/chat/runtime.js';
 import { TurnRunner } from '../../../src/chat/turn-runner.js';
+import type { BeastDispatchPort } from '../../../src/chat/beast-daemon-dispatch-adapter.js';
 
 describe('chat runtime parity', () => {
   it('preserves CLI continuation semantics through the shared runtime factory', async () => {
@@ -257,6 +258,38 @@ describe('chat runtime parity', () => {
     expect(result.pendingApproval).toBe(false);
     expect(result.beastContext).toBeNull();
   });
+
+  it.each(['/reject', 'Action rejected by user: stop'])(
+    'terminates the correlated Beast interview before clearing rejected context for %s',
+    async (input) => {
+    const reject = vi.fn().mockResolvedValue(undefined);
+    const runtime = new ChatRuntime({
+      engine: { processTurn: vi.fn() } as unknown as ConversationEngine,
+      turnRunner: new TurnRunner({ execute: vi.fn() }),
+      beastDispatchAdapter: {
+        handle: vi.fn(),
+        reject,
+      } as unknown as BeastDispatchPort,
+    });
+    const beastContext = {
+      agentId: 'agent-1',
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-1',
+      status: 'interviewing' as const,
+    };
+
+    const result = await runtime.run(input, {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      projectId: 'test-project',
+      transcript: [],
+      beastContext,
+    });
+
+    expect(reject).toHaveBeenCalledWith(beastContext);
+    expect(result.beastContext).toBeNull();
+    },
+  );
 
   it('surfaces real token usage and truncation on the runtime result when the llm reports it', async () => {
     const usage = { inputTokens: 120, outputTokens: 30, totalTokens: 150 };

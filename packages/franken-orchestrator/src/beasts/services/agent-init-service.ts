@@ -129,4 +129,19 @@ export class AgentInitService {
       throw error;
     }
   }
+
+  abortAgent(agentId: string): TrackedAgent {
+    const agent = this.agents.getMutableAgent(agentId);
+    if (agent.status !== 'initializing') {
+      return agent;
+    }
+    const stopped = this.agents.updateAgent(agentId, { status: 'stopped' });
+    this.agents.appendEvent(agentId, {
+      level: 'info',
+      type: 'agent.interview.rejected',
+      message: 'Stopped tracked agent after its chat interview was rejected',
+      payload: {},
+    });
+    return stopped;
+  }
 }

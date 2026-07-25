@@ -110,6 +110,20 @@ export class BeastInterviewService {
     };
   }
 
+  abort(sessionId: string): BeastInterviewSession {
+    const session = this.repository.getInterviewSession(sessionId);
+    if (!session) {
+      throw new UnknownBeastInterviewSessionError(sessionId);
+    }
+    if (session.status !== 'active') {
+      return session;
+    }
+    return this.repository.updateInterviewSession(sessionId, {
+      status: 'aborted',
+      updatedAt: isoNow(),
+    });
+  }
+
   private getDefinitionOrThrow(definitionId: string): BeastDefinition {
     const definition = this.catalog.getDefinition(definitionId);
     if (!definition) {

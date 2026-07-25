@@ -68,6 +68,19 @@ const BEAST_NOUNS = /\b(beast|frankenbeast|agent|worker)\b/i;
 export class BeastDaemonDispatchAdapter {
   constructor(private readonly options: BeastDaemonDispatchAdapterOptions) {}
 
+  async reject(context: ChatBeastContext): Promise<void> {
+    if (context.interviewSessionId) {
+      await this.request(`/v1/beasts/interviews/${encodeURIComponent(context.interviewSessionId)}/abort`, {
+        method: 'POST',
+      });
+    }
+    if (context.agentId) {
+      await this.request(`/v1/beasts/agents/${encodeURIComponent(context.agentId)}/stop`, {
+        method: 'POST',
+      });
+    }
+  }
+
   async handle(input: string, state: ChatBeastDispatchState): Promise<ChatBeastDispatchResult | null> {
     const activeContext = state.beastContext && state.executionMode
       ? { ...state.beastContext, executionMode: state.executionMode }
@@ -361,6 +374,7 @@ export type BeastDispatchPort = {
     beastContext?: ChatBeastContext | null | undefined;
     executionMode?: BeastExecutionMode | undefined;
   }): Promise<ChatBeastDispatchResult | null>;
+  reject(context: ChatBeastContext): Promise<void>;
 };
 
 function commandFor(definitionId: string): string {
