@@ -3269,6 +3269,34 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
+  recentFacultyNegativeOutcomes(n = 10): EpisodicEvent[] {
+    const quarantinedEventIds = new Set<number>();
+    const stmt = this.db.prepare(
+      `SELECT * FROM episodic_events WHERE type = 'decision'
+       ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+    );
+    const result = collectRowsToEvents(
+      (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
+      n,
+      this.encryption,
+      (eventId) => quarantinedEventIds.add(eventId),
+      isConsolidatableFacultyNegativeOutcome,
+    );
+    this.audit?.({
+      operation: 'episodic.recent',
+      store: 'episodic',
+      outcome: 'success',
+      details: {
+        limit: n,
+        count: result.length,
+        ...(quarantinedEventIds.size > 0
+          ? { quarantinedEventIds: [...quarantinedEventIds] }
+          : {}),
+      },
+    });
+    return result;
+  }
+
   recent(
     n = 10,
     reportCorruptDetails?: CorruptEpisodicDetailsReporter,
@@ -6179,8 +6207,8 @@ function consolidatedLesson(cluster: readonly EpisodicEvent[]): ConsolidatedLess
   const ordered = [...cluster].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
   );
-  const summaries = ordered.map((event) => event.summary);
-  const pattern = [...summaries].sort((left, right) =>
+  const lessonTexts = ordered.map(lessonEventText);
+  const pattern = [...lessonTexts].sort((left, right) =>
     left.length - right.length || left.localeCompare(right),
   )[0]!;
   const tokenSets = ordered.map((event) => semanticMemoryTokens(lessonEventText(event)));
@@ -6672,8 +6700,7 @@ export class SqliteBrain implements IBrain {
     const failures = this.episodic
       .recentFailures(lookback, false, ['skill-evolution', 'planning-lifecycle'], lookback);
     const facultyNegativeOutcomes = this.episodic
-      .recent(lookback)
-      .filter(isConsolidatableFacultyNegativeOutcome);
+      .recentFacultyNegativeOutcomes(lookback);
     const events = [...new Map(
       [...failures, ...facultyNegativeOutcomes]
         .map((event) => [event.id ?? `${event.createdAt}:${event.summary}`, event]),
