@@ -1627,6 +1627,7 @@ export async function main(): Promise<void> {
         target: args.brainTarget,
         json: args.json,
         registry: inspection.registry,
+        resolveContext: inspection.resolveContext,
         print: printLine,
       });
     } finally {

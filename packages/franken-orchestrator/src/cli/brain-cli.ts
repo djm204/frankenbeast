@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { BrainRegistry } from '@franken/brain';
 import type { MemoryCandidate, SqliteBrain } from '@franken/brain';
@@ -9,6 +9,8 @@ import Database from 'better-sqlite3';
 
 import type { BrainAction } from './args.js';
 import type { BrainRouteContext } from '../http/routes/brain-routes.js';
+import { SQLiteBeastRepository } from '../beasts/repository/sqlite-beast-repository.js';
+import { resolvePersistedBrainContext } from '../beasts/create-beast-services.js';
 
 const MAX_WORKING_MEMORY_KEYS = 100;
 const MAX_LESSONS = 10;
@@ -20,7 +22,17 @@ type BrainRegistryReader = Pick<BrainRegistry, 'getAgentType'>;
 
 export interface BrainInspectionHandle {
   registry: BrainRegistry;
+  resolveContext(agentTypeId: string): BrainRouteContext | undefined;
   dispose(): Promise<void>;
+}
+
+async function backupDatabase(sourcePath: string, destinationPath: string): Promise<void> {
+  const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
+  try {
+    await source.backup(destinationPath);
+  } finally {
+    source.close();
+  }
 }
 
 /** Open a consistent disposable copy so inspection never writes to the source brain. */
@@ -33,17 +45,38 @@ export async function createBrainInspectionHandle(
   try {
     // Validate with BrainRegistry's canonical portable-id rules before deriving a path.
     registry.getAgentType(agentTypeId);
-    const sourcePath = join(brainsDir, `${agentTypeId}.db`);
+    const projectRoot = dirname(dirname(brainsDir));
+    const sourceBeastsDb = join(dirname(brainsDir), 'beast.db');
+    let persistedContext: BrainRouteContext | undefined;
+    if (existsSync(sourceBeastsDb)) {
+      const snapshotBeastsDb = join(snapshotDir, 'beast.db');
+      await backupDatabase(sourceBeastsDb, snapshotBeastsDb);
+      const repository = new SQLiteBeastRepository(snapshotBeastsDb);
+      try {
+        persistedContext = resolvePersistedBrainContext(repository, agentTypeId, { projectRoot });
+      } finally {
+        repository.close();
+      }
+    }
+    const sourcePath = persistedContext?.dbPath ?? join(brainsDir, `${agentTypeId}.db`);
     if (!existsSync(sourcePath)) {
       throw new Error(`No persisted brain exists for agent type '${agentTypeId}'`);
     }
+    await backupDatabase(sourcePath, join(snapshotDir, `${agentTypeId}.db`));
 
-    const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
-    try {
-      await source.backup(join(snapshotDir, `${agentTypeId}.db`));
-    } finally {
-      source.close();
-    }
+    const inspectionContext = persistedContext?.faculties
+      ? { faculties: persistedContext.faculties }
+      : undefined;
+    return {
+      registry,
+      resolveContext: (candidateAgentTypeId: string) => (
+        candidateAgentTypeId === agentTypeId ? inspectionContext : undefined
+      ),
+      dispose: async () => {
+        registry.close();
+        await rm(snapshotDir, { recursive: true, force: true });
+      },
+    };
   } catch (error) {
     registry.close();
     await rm(snapshotDir, { recursive: true, force: true });
@@ -53,13 +86,6 @@ export async function createBrainInspectionHandle(
     throw error;
   }
 
-  return {
-    registry,
-    dispose: async () => {
-      registry.close();
-      await rm(snapshotDir, { recursive: true, force: true });
-    },
-  };
 }
 
 export interface BrainCommandDeps {

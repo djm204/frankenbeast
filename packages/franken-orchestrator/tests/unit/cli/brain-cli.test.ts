@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrainRegistry } from '@franken/brain';
 
+import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import {
   createBrainInspectionHandle,
   handleBrainCommand,
@@ -53,6 +54,61 @@ describe('handleBrainCommand()', () => {
     }
 
     expect(await readFile(sourcePath)).toEqual(before);
+  });
+
+  it('reports persisted faculty configuration from the latest established Beast run', async () => {
+    const { root, brainsDir, registry } = await fixture();
+    registry.forAgentType('faculty-state');
+    registry.close();
+    registries.splice(registries.indexOf(registry), 1);
+
+    const beastsDb = join(root, '.fbeast', 'beast.db');
+    const brainDb = join(brainsDir, 'faculty-state.db');
+    const repository = new SQLiteBeastRepository(beastsDb);
+    const run = repository.createRun({
+      definitionId: 'faculty-state',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {
+        modules: { planner: true, critique: true, governor: false, memory: true },
+      },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-25T10:00:00.000Z',
+    });
+    repository.createAttempt(run.id, {
+      status: 'completed',
+      startedAt: '2026-07-25T10:00:01.000Z',
+    });
+    repository.close();
+    const beforeBrain = await readFile(brainDb);
+    const beforeBeasts = await readFile(beastsDb);
+
+    const inspection = await createBrainInspectionHandle(brainsDir, 'faculty-state');
+    try {
+      expect(inspection.resolveContext('faculty-state')).toMatchObject({
+        faculties: { planning: true, reasoning: true, action: false, learning: true },
+      });
+      const print = vi.fn();
+      await handleBrainCommand({
+        action: 'show',
+        target: 'faculty-state',
+        json: true,
+        registry: inspection.registry,
+        resolveContext: inspection.resolveContext,
+        print,
+      });
+      expect(JSON.parse(vi.mocked(print).mock.calls[0]?.[0] as string).data.faculties).toEqual({
+        planning: { configured: true },
+        reasoning: { configured: true },
+        action: { configured: false },
+        learning: { configured: true },
+      });
+    } finally {
+      await inspection.dispose();
+    }
+    expect(await readFile(brainDb)).toEqual(beforeBrain);
+    expect(await readFile(beastsDb)).toEqual(beforeBeasts);
   });
 
   it('prints the bounded HTTP-compatible brain summary as JSON', async () => {
