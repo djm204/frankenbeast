@@ -18,6 +18,7 @@ import type { ProjectPaths } from '../../../src/cli/project-root.js';
 import type { RunConfig } from '../../../src/cli/run-config-loader.js';
 import { isPlainOutput, setPlainOutput } from '../../../src/logging/beast-logger.js';
 import { CompactionMetrics, SQLiteAdapter } from '@franken/observer';
+import { wallClockNow } from '@franken/types';
 
 function createTempPaths(): ProjectPaths {
   const root = join(tmpdir(), `dep-factory-wiring-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -116,7 +117,7 @@ describe('dep-factory wiring integration', () => {
       triggerReason: 'threshold',
       tokensBefore: 900,
       tokensAfter: 120,
-      timestamp: 1_750_000_000_000,
+      timestamp: wallClockNow(),
     });
 
     const reader = new SQLiteAdapter(paths.tracesDb, { useWorkerThread: false });
