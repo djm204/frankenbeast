@@ -57,13 +57,13 @@ describe('ActionFacultyAdapter', () => {
         step: 'action:governor',
         summary: `Action decision (${outcome.decision}): Deploy production release`,
         createdAt: '2026-07-24T15:00:00.000Z',
-        details: {
+        details: expect.objectContaining({
           taskId: 'task-3696',
           skillId: 'deploy-prod',
           requiresHitl: true,
           decision: outcome.decision,
           reason: expectedReason,
-        },
+        }),
       }),
     ]);
   });
@@ -106,6 +106,9 @@ describe('ActionFacultyAdapter', () => {
         decision: 'rejected',
         reason: 'Policy requires a safer action',
       });
+      await deps.sqliteBrain?.action.requestApproval(request);
+      await deps.sqliteBrain?.action.requestApproval(request);
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
       expect(governor.requestApproval).toHaveBeenCalledWith(request);
       expect(deps.sqliteBrain?.episodic.recall('wired-task', 1)).toEqual([
@@ -116,6 +119,9 @@ describe('ActionFacultyAdapter', () => {
             reason: 'Policy requires a safer action',
           }),
         }),
+      ]);
+      expect(deps.sqliteBrain?.learning.relevantLessons('action decision rejected governed action')).toEqual([
+        expect.objectContaining({ occurrenceCount: 3 }),
       ]);
     } finally {
       deps.sqliteBrain?.close();

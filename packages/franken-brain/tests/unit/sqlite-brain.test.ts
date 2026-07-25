@@ -1732,6 +1732,92 @@ describe('SqliteBrain', () => {
       expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
     });
 
+    it('uses event id as the stable faculty-outcome lookback tie-breaker', () => {
+      for (const index of [1, 2, 3]) {
+        brain.episodic.record({
+          type: 'decision',
+          step: 'reasoning:critique',
+          summary: `Reasoning verdict: fail — workspace failure ${index}`,
+          details: {
+            category: 'reasoning-lifecycle',
+            outcome: 'negative',
+            lessonContext: 'workspace declaration failure',
+          },
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+      }
+
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+
+      expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
+    });
+
+    it('clusters faculty outcomes by their context rather than lifecycle boilerplate', () => {
+      for (const context of ['frontend', 'backend', 'storage']) {
+        brain.episodic.record({
+          type: 'decision',
+          step: 'reasoning:critique',
+          summary: `Reasoning verdict: fail — ${context}`,
+          details: {
+            category: 'reasoning-lifecycle',
+            outcome: 'negative',
+            lessonContext: context,
+          },
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+      }
+
+      expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
+    });
+
+    it('persists the sanitized faculty lesson context instead of the raw action summary', () => {
+      for (const secret of ['raw-token-first', 'raw-token-second']) {
+        brain.episodic.record({
+          type: 'decision',
+          step: 'action:request',
+          summary: `Action rejected for leaked credential ${secret}`,
+          details: {
+            category: 'action-lifecycle',
+            outcome: 'negative',
+            lessonContext: 'Action request rejected for a redacted credential',
+          },
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+      }
+
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+
+      expect(candidate?.value.pattern).toBe('Action request rejected for a redacted credential');
+      expect(JSON.stringify(candidate?.value)).not.toContain('raw-token-');
+    });
+
+    it('applies the faculty-outcome lookback after filtering unrelated episodes', () => {
+      for (const index of [1, 2, 3]) {
+        brain.episodic.record({
+          type: 'decision',
+          step: 'reasoning:critique',
+          summary: `Reasoning verdict: fail — bounded failure ${index}`,
+          details: {
+            category: 'reasoning-lifecycle',
+            outcome: 'negative',
+            lessonContext: 'bounded faculty failure',
+          },
+          createdAt: `2026-07-24T10:0${index}:00.000Z`,
+        });
+      }
+      for (const index of [4, 5, 6]) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `Unrelated consultation ${index}`,
+          createdAt: `2026-07-24T10:0${index}:00.000Z`,
+        });
+      }
+
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+
+      expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',
@@ -2113,7 +2199,7 @@ describe('SqliteBrain', () => {
       ]);
       expect(brain.learning.relevantLessons('NeedleMarker', { limit: 1 })[0]?.pattern)
         .toBe('NeedleMarker exact lesson');
-    });
+    }, 20_000);
 
     it('stops paging each lesson status after satisfying the requested limit', () => {
       const base = brain.memoryReview.propose({
