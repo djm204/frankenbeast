@@ -160,8 +160,20 @@ newly bound `local-operator` sessions; injected stores and unbound legacy
 per-session records remain valid. Bound sessions share one conversation
 mutation-admission key across REST and WebSocket turns. The existing REST
 session routes and `/v1/chat/ws` remain the browser transport. No existing REST
-or WebSocket chat API contract changed. #3703's governed dispatch boundary is
-implemented; #3702 still owns runtime Hive query/faculty routing.
+or WebSocket chat API contract changed. #3703's governed dispatch boundary and
+the read-only #3702 status-query slice are implemented; runtime Hive
+query/faculty routing remains follow-up work.
+
+The package exports `HiveStatusQuery`, a read-only query module for "what are my
+agents doing" turns that do not provide an `agentId`. A query is bound to one
+project-root workspace, requires a server-derived subject id, scans at most
+1,000 tracked rows, returns at most 100 matching non-deleted agents, and enriches
+authoritative status with safely attributable episodes from the real workspace
+`HiveMindStore`. Old active states are marked stale; ambiguous attribution,
+missing linked runs, and hive read failures remain explicit rather than being
+presented as current. The module is not mounted as an HTTP route because the
+shared operator credential does not establish a subject principal. It does not
+mutate chat state, create agents, or dispatch work.
 
 The dispatch invariant is unchanged: transport -> `ChatRuntime` ->
 `BeastDispatchPort` -> `BeastDispatchService` -> the normal Beast executor and
@@ -184,7 +196,8 @@ outcome, then records the request, decision, and reason as a recallable episodic
 event. Approval tokens are returned to the caller but are not copied into the
 episode, and startup health probes do not create episodes.
 
-This per-run faculty wiring does not implement the future workspace Hive routing
+This per-run faculty wiring and the read-only `HiveStatusQuery` do not replace
+`BrainConversation` persistence or implement future workspace dispatch routing
 in ADR-041.
 
 ## Package areas

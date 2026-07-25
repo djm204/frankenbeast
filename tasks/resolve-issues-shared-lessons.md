@@ -1,5 +1,11 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Cross-agent hive activity needs explicit attribution truth
+- A workspace-wide status query may use agent-type hive activity for a subject only when the bounded tracked-agent scan proves that type belongs to one subject, or when the publisher id matches that subject's tracked agent/run directly. If the scan is incomplete or the type is shared, omit generic activity and expose a stable partial/error marker instead of guessing ownership.
+- Count soft-deleted agents when proving agent-type ownership; persisted hive episodes can outlive the tracked-agent row's active lifecycle.
+- Reconcile a linked run's tracked-agent id and definition before using its state, and derive run freshness only from run timestamps. Optional hive-store open/read failures must degrade the status query, not prevent unrelated Beast services from starting.
+- Bound physical rows scanned, not only successfully decoded agents, and deduplicate type-level hive entries when several same-type agents share one subject. Keep tracked-agent/run status authoritative when hive reads fail.
+
 ## 2026-07-25 — Read-only brain inspection must snapshot context and sanitize persisted output
 - Resolve persisted brain paths and faculty flags from a snapshot of the Beast repository before opening the brain snapshot. If both contexts share one SQLite file, reuse the same backup so inspection cannot combine different live moments; always use an explicit fixed snapshot filename so a valid 255-byte agent id never becomes an invalid derived filename.
 - Treat every persisted string as untrusted output: truncate on complete UTF-8 code-point boundaries, bound timestamps and lesson fields independently, escape C0/C1 plus Unicode format/display controls in human output, and map storage/snapshot failures to stable operator errors without leaking paths or SQLite internals.

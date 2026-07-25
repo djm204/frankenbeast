@@ -285,15 +285,21 @@ compatibility projection, migration coverage, and fail-closed persistence tests:
   supervised-agent/summary state, compatibility projection/binding migration,
   physical workspace/agent database separation, shared conversation admission,
   standalone-server composition, atomicity, corruption, and restart tests.
-- **#3702 — hive-aware query/routing:** resolve the workspace Hive Brain and
-  optional faculty from `BrainRegistry`, record routing metadata, and expose
-  additive typed API fields without changing v1 transport behavior.
+- **#3702 — hive-aware query/routing (read-only query implemented):** `HiveStatusQuery` implements the
+  read-only query slice without changing dispatch behavior. It binds one
+  project-root workspace, filters a bounded tracked-agent scan by subject,
+  enriches authoritative status with bounded, safely attributable hive
+  episodes, and reports stale, ambiguous, unreconciled, or unavailable state
+  explicitly. The package exports the module but does not expose caller-selected
+  subject identity over HTTP; conversation routing metadata and server-derived
+  identity remain owned by #3701 rather than being duplicated here.
 - **#3703 — dispatch integration:** feed routed Beast requests through
   `BeastDispatchPort`/`BeastDispatchService`, preserving governor/HITL, auth,
   admission, audit, capacity, and idempotency behavior.
 
-The persistence layer does not activate Hive-aware query routing or dispatch.
-Those remain #3702 and #3703 and must reuse the existing admission, governor,
+The registry, conversation persistence, and #3702 read-only query slice are
+implemented. Future conversation routing and #3703 dispatch work must continue
+to preserve the boundaries above and reuse the existing admission, governor,
 audit, and Beast executor paths.
 
 The agent-scoped planning faculty adapter is now implemented independently of

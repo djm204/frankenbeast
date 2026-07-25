@@ -137,7 +137,7 @@ packages/franken-orchestrator/src/
   bounds each scan with `maxScanRows`, and always preserves the newest usable
   checkpoint. The v1 order is policy priority
   then oldest-first; it does not perform lessons-aware or semantic pruning.
-- **Hive Brain conversation persistence and governed Beast dispatch are implemented; Hive query routing remains a follow-up.**
+- **Hive Brain conversation persistence, governed Beast dispatch, and its read-only status query are implemented; Hive query routing remains a follow-up.**
   [ADR-041](../adr/041-hive-brain-command-center.md)
   (`docs/adr/041-hive-brain-command-center.md`) now has a versioned
   `BrainConversation`, `SqliteBrainConversationRepository`, and
@@ -149,9 +149,14 @@ packages/franken-orchestrator/src/
   `BeastDispatchPort` -> `BeastDispatchService`; a canonical
   `pending_approval` blocks every bound transport session before another Beast
   dispatch can start, and denied approval remains denied. The existing REST and
-  `/v1/chat/ws` browser contract remains in place. #3703 is implemented; #3702
-  still owns Hive query/faculty routing. Do not add a second socket protocol or
-  dispatch directly from a brain/faculty.
+  `/v1/chat/ws` browser contract remains in place. `HiveStatusQuery` provides the
+  bounded workspace/subject cross-agent read model for trusted server-side
+  callers: tracked-agent state remains authoritative, safely attributable hive
+  episodes add recent activity, and stale/ambiguous/unavailable data is explicit.
+  It is intentionally not an HTTP route until transport authentication can derive
+  subject identity. #3703 governed dispatch and the #3702 read model are
+  implemented; Hive query/faculty routing remains follow-up work. Do not add a
+  second socket protocol or dispatch directly from a brain/faculty.
 - **Brain dashboard inspection is implemented and remains read-only.** The
   overview panel reads one explicit existing agent-type id through bounded
   `/v1/brain/*` routes, displays memory and faculty configuration, and searches

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { HiveMindStore, hiveMindAgentTypeNamespace } from '@franken/brain';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
@@ -37,6 +38,146 @@ describe('createBeastServices', () => {
     if (tempDir) {
       await rm(tempDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
       tempDir = undefined;
+    }
+  });
+
+  it('exposes a workspace-owned hive status query with an empty real-store result', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, '.fbeast', 'beast.db'),
+      beastLogsDir: join(tempDir, '.fbeast', 'logs'),
+      root: tempDir,
+    });
+    try {
+      expect(services.hiveStatus.query({ subjectId: 'operator' })).toMatchObject({
+        subjectId: 'operator',
+        status: 'current',
+        summary: 'No agents have been dispatched in this workspace.',
+        agents: [],
+        recentActivity: [],
+        meta: {
+          limit: 25,
+          totalAgents: 0,
+          truncated: false,
+          hive: { status: 'available' },
+        },
+      });
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('keeps Beast services available when the optional hive store cannot open', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    await mkdir(join(tempDir, '.fbeast'), { recursive: true });
+    await writeFile(join(tempDir, '.fbeast', 'hive'), 'not-a-directory');
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+
+    const services = createBeastServices({
+      beastsDb: join(tempDir, '.fbeast', 'beast.db'),
+      beastLogsDir: join(tempDir, '.fbeast', 'logs'),
+      root: tempDir,
+    });
+    try {
+      expect(services.hiveStatus.query({ subjectId: 'operator' })).toMatchObject({
+        status: 'partial',
+        agents: [],
+        recentActivity: [],
+        meta: { hive: { status: 'unavailable' } },
+      });
+    } finally {
+      services.dispose();
+    }
+  });
+
+  it('summarizes multiple agent types and real hive activity without an agent id', async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'franken-create-beast-services-'));
+    const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
+    const services = createBeastServices({
+      beastsDb: join(tempDir, '.fbeast', 'beast.db'),
+      beastLogsDir: join(tempDir, '.fbeast', 'logs'),
+      root: tempDir,
+    });
+
+    try {
+      const coder = services.agents.createAgent({
+        definitionId: 'coder',
+        source: 'api',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'code', config: {} },
+        initConfig: {
+          agentRole: 'coding',
+          requestedTools: [
+            'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+            'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+          ],
+          skills: [],
+        },
+      });
+      services.agents.updateAgent(coder.id, { status: 'running' });
+      services.agents.createAgent({
+        definitionId: 'reviewer',
+        source: 'api',
+        createdByUser: 'operator',
+        initAction: { kind: 'martin-loop', command: 'review', config: {} },
+        initConfig: {
+          agentRole: 'coding',
+          requestedTools: [
+            'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+            'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+          ],
+          skills: [],
+        },
+      });
+      services.agents.createAgent({
+        definitionId: 'planner',
+        source: 'api',
+        createdByUser: 'another-operator',
+        initAction: { kind: 'martin-loop', command: 'plan', config: {} },
+        initConfig: {
+          agentRole: 'coding',
+          requestedTools: [
+            'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+            'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+          ],
+          skills: [],
+        },
+      });
+      const hiveWriter = new HiveMindStore(join(tempDir, '.fbeast', 'hive', 'hive.db'));
+      try {
+        hiveWriter.publish(hiveMindAgentTypeNamespace('coder'), coder.id, {
+          kind: 'episode',
+          event: {
+            type: 'failure',
+            summary: 'Build failed before verification',
+            createdAt: new Date().toISOString(),
+          },
+        });
+      } finally {
+        hiveWriter.close();
+      }
+
+      const result = services.hiveStatus.query({ subjectId: 'operator', limit: 10 });
+
+      expect(result.status).toBe('current');
+      expect(result.agents).toHaveLength(2);
+      expect(result.agents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ agentTypeId: 'reviewer', status: 'initializing', observation: 'current' }),
+        expect.objectContaining({ agentTypeId: 'coder', status: 'running', observation: 'current' }),
+      ]));
+      expect(result.recentActivity).toEqual([
+        expect.objectContaining({
+          agentTypeId: 'coder',
+          kind: 'episode',
+          summary: 'Build failed before verification',
+        }),
+      ]);
+      expect(result.meta).toMatchObject({ totalAgents: 2, truncated: false, hive: { status: 'available' } });
+      expect(result.summary).toContain('2 agents');
+      expect(result.summary).not.toContain('planner');
+    } finally {
+      services.dispose();
     }
   });
 

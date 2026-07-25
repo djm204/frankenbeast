@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as apiContracts from '../src/api-contracts.js';
 import {
   ChatSocketTicketResponseSchema,
   ChatSessionResponseSchema,
@@ -10,6 +11,37 @@ import {
 } from '../src/api-contracts.js';
 
 describe('web/API contracts', () => {
+  it('validates the bounded workspace hive status response contract', () => {
+    const schema = (apiContracts as unknown as {
+      HiveStatusResponseSchema?: { parse(value: unknown): unknown };
+    }).HiveStatusResponseSchema;
+    expect(schema).toBeDefined();
+    expect(schema?.parse({
+      workspaceId: 'workspace:1234',
+      subjectId: 'local-operator',
+      generatedAt: '2026-07-25T00:00:00.000Z',
+      status: 'partial',
+      summary: '1 agent found in this workspace; 1 stale.',
+      agents: [{
+        agentId: 'agent-1',
+        agentTypeId: 'coder',
+        status: 'running',
+        lastObservedAt: '2026-07-24T23:00:00.000Z',
+        observation: 'stale',
+        summary: 'coder last reported running; this observation is stale.',
+      }],
+      recentActivity: [],
+      meta: {
+        limit: 25,
+        totalAgents: 1,
+        truncated: false,
+        scanIncomplete: false,
+        staleAfterMs: 300000,
+        hive: { status: 'available' },
+      },
+    })).toBeDefined();
+  });
+
   it('validates chat session DTOs consumed by the web client', () => {
     const session = ChatSessionResponseSchema.parse({
       id: 'sess-1',
