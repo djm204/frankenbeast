@@ -726,6 +726,75 @@ describe('SqliteBrain', () => {
       expect(duplicate.recorded).toBe(false);
     });
 
+    it('does not protect ordinary events that only contain cooldown-shaped metadata', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'ordinary expired observation',
+        details: {
+          memoryClass: 'transient_observation',
+          learningCooldownMs: 30 * 24 * 60 * 60 * 1000,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-10T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 10,
+      });
+
+      expect(result.deleted.episodic).toBe(1);
+      expect(brain.episodic.recent(-1)).toEqual([]);
+    });
+
+    it('restores all retention scan state with one audit lookup after reopening', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-state-'));
+      const dbPath = join(dir, 'brain.db');
+      let scheduledBrain: SqliteBrain | undefined;
+
+      try {
+        scheduledBrain = new SqliteBrain(dbPath);
+        scheduledBrain.episodic.record({
+          type: 'observation',
+          summary: 'protected retention cursor marker',
+          details: { memoryClass: 'audit_record' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        });
+        scheduledBrain.enforceMemoryRetention({
+          now: '2026-01-10T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 1,
+        });
+        scheduledBrain.close();
+
+        scheduledBrain = new SqliteBrain(dbPath);
+        const db = (scheduledBrain as unknown as { db: Database.Database }).db;
+        const originalPrepare = db.prepare.bind(db);
+        const preparedSql: string[] = [];
+        db.prepare = ((sql: string) => {
+          preparedSql.push(sql);
+          return originalPrepare(sql);
+        }) as typeof db.prepare;
+        try {
+          scheduledBrain.enforceMemoryRetention({
+            now: '2026-01-10T00:00:00.000Z',
+            maxDeletes: 1,
+            maxScanRows: 1,
+          });
+        } finally {
+          db.prepare = originalPrepare as typeof db.prepare;
+        }
+
+        expect(preparedSql.filter((sql) => (
+          sql.includes('FROM memory_access_audit_events')
+          && sql.includes("operation = 'retention.enforce'")
+        ))).toHaveLength(1);
+      } finally {
+        scheduledBrain?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('documents policy ordering and protects user preferences from compaction', () => {
       brain.working.set('user.preference.response-style', 'concise');
       brain.working.set('env.node.version', { value: '20.x', memoryClass: 'environment_fact' });

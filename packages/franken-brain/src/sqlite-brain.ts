@@ -7178,9 +7178,7 @@ export class SqliteBrain implements IBrain {
     return this.buildMemoryRetentionReport(options, true);
   }
 
-  private persistedRetentionScanCursor(
-    store: 'episodic' | 'checkpoint',
-  ): MemoryRetentionScanCursor | undefined {
+  private persistedRetentionScanDetails(): Record<string, unknown> | undefined {
     const row = this.db.prepare(
       `SELECT details
        FROM memory_access_audit_events
@@ -7190,7 +7188,13 @@ export class SqliteBrain implements IBrain {
        ORDER BY id DESC
        LIMIT 1`,
     ).get() as Pick<MemoryAccessAuditRow, 'details'> | undefined;
-    const details = parseMemoryAccessDetails(row?.details ?? null);
+    return parseMemoryAccessDetails(row?.details ?? null);
+  }
+
+  private retentionScanCursor(
+    details: Record<string, unknown> | undefined,
+    store: 'episodic' | 'checkpoint',
+  ): MemoryRetentionScanCursor | undefined {
     const createdAt = details?.[`${store}ScanCursorCreatedAt`];
     const id = details?.[`${store}ScanCursorId`];
     return typeof createdAt === 'string' && Number.isInteger(id) && Number(id) > 0
@@ -7198,17 +7202,11 @@ export class SqliteBrain implements IBrain {
       : undefined;
   }
 
-  private persistedRetentionScanNumber(key: string): number | undefined {
-    const row = this.db.prepare(
-      `SELECT details
-       FROM memory_access_audit_events
-       WHERE store = 'retention'
-         AND operation = 'retention.enforce'
-         AND outcome = 'success'
-       ORDER BY id DESC
-       LIMIT 1`,
-    ).get() as Pick<MemoryAccessAuditRow, 'details'> | undefined;
-    const value = parseMemoryAccessDetails(row?.details ?? null)?.[key];
+  private retentionScanNumber(
+    details: Record<string, unknown> | undefined,
+    key: string,
+  ): number | undefined {
+    const value = details?.[key];
     return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
   }
 
@@ -7354,9 +7352,11 @@ export class SqliteBrain implements IBrain {
         });
       const policy = MEMORY_RETENTION_POLICIES[className];
       const observedAgeDays = ageDays(event.createdAt, nowMs);
+      const learningKey = readLearningKey(event);
       const learningCooldownMs = readLearningCooldownMs(event);
       const learningCreatedAtMs = Date.parse(event.createdAt);
-      const hasActiveLearningCooldown = learningCooldownMs !== undefined
+      const hasActiveLearningCooldown = learningKey !== undefined
+        && learningCooldownMs !== undefined
         && learningCooldownMs > 0
         && Number.isFinite(learningCreatedAtMs)
         && nowMs < learningCreatedAtMs + learningCooldownMs;
@@ -7599,14 +7599,22 @@ export class SqliteBrain implements IBrain {
     }
     const maxScanRows = options.maxScanRows
       ?? Math.min(MAX_MEMORY_RETENTION_SCAN_ENTRIES, Math.max(maxDeletes * 10, 100));
+    const persistedScanDetails = (
+      this.retentionEpisodicScanCursor === undefined
+      || this.retentionCheckpointScanCursor === undefined
+      || this.retentionCheckpointFloorSearchCursorId === undefined
+      || this.retentionCheckpointRollbackFloorId === undefined
+    )
+      ? this.persistedRetentionScanDetails()
+      : undefined;
     const episodicCursor = this.retentionEpisodicScanCursor
-      ?? this.persistedRetentionScanCursor('episodic');
+      ?? this.retentionScanCursor(persistedScanDetails, 'episodic');
     const checkpointCursor = this.retentionCheckpointScanCursor
-      ?? this.persistedRetentionScanCursor('checkpoint');
+      ?? this.retentionScanCursor(persistedScanDetails, 'checkpoint');
     const checkpointFloorSearchCursorId = this.retentionCheckpointFloorSearchCursorId
-      ?? this.persistedRetentionScanNumber('checkpointFloorSearchCursorId');
+      ?? this.retentionScanNumber(persistedScanDetails, 'checkpointFloorSearchCursorId');
     const checkpointRollbackFloorId = this.retentionCheckpointRollbackFloorId
-      ?? this.persistedRetentionScanNumber('checkpointRollbackFloorId');
+      ?? this.retentionScanNumber(persistedScanDetails, 'checkpointRollbackFloorId');
     const scanState: MemoryRetentionEnforcementScanState = {
       ...(episodicCursor === undefined
         ? {}
