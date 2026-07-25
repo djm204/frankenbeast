@@ -17,6 +17,8 @@
 - [x] Publish the round-4 follow-up through Approval Cop.
 - [x] Fix the fifth-round episodic cursor finding, reconcile current `main`, and publish through Approval Cop.
 - [x] Address seventh-round rollback-floor invalidation, learning-cooldown retention, and checkpoint-cursor starvation findings with focused RED/GREEN and full brain gates.
-- [ ] Publish the seventh-round follow-up through Approval Cop and obtain a fresh exact-head Codex result.
+- [x] Publish the seventh-round follow-up through Approval Cop and obtain a fresh exact-head Codex result.
+- [x] Address the fresh current-head Codex findings for whole-population budgets, indexed singleton cursor restoration, and best-effort failure auditing with focused RED/GREEN plus full brain gates.
+- [ ] Publish the follow-up through Approval Cop and obtain a fresh exact-head Codex result.
 - [ ] Reach current-head Codex clean with zero unresolved Codex threads and green CI before exact-head merge.
 - [ ] Append reusable lessons and post terminal evidence to root task `t_7b3979ad`.

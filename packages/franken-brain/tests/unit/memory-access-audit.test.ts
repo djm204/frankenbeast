@@ -124,6 +124,30 @@ describe('memory access audit trail', () => {
     brain.close();
   });
 
+  it('preserves the retention failure when error audit persistence also fails', () => {
+    const brain = new SqliteBrain(':memory:');
+    const db = (brain as unknown as { db: Database.Database }).db;
+    db.exec(`
+      CREATE TRIGGER fail_retention_success_audit_with_original_error
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'retention.enforce' AND NEW.outcome = 'success'
+      BEGIN
+        SELECT RAISE(ABORT, 'original retention enforcement failure');
+      END;
+      CREATE TRIGGER fail_retention_error_audit_with_secondary_error
+      BEFORE INSERT ON memory_access_audit_events
+      WHEN NEW.operation = 'retention.enforce' AND NEW.outcome = 'error'
+      BEGIN
+        SELECT RAISE(ABORT, 'secondary retention error audit failure');
+      END;
+    `);
+
+    expect(() => brain.enforceMemoryRetention({
+      now: '2026-01-10T00:00:00.000Z',
+    })).toThrow('original retention enforcement failure');
+    brain.close();
+  });
+
   it('rolls back review proposals when success audit persistence fails', () => {
     const brain = new SqliteBrain(':memory:');
     const db = (brain as unknown as { db: Database.Database }).db;

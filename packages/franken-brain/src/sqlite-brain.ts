@@ -2788,6 +2788,7 @@ interface MemoryRetentionScanCursor {
 }
 
 interface MemoryRetentionEnforcementScanState {
+  persistedEntryCount?: number;
   episodicCursor?: MemoryRetentionScanCursor;
   nextEpisodicCursor?: MemoryRetentionScanCursor;
   episodicRows?: EpisodicRow[];
@@ -6348,6 +6349,7 @@ export class SqliteBrain implements IBrain {
   private retentionCheckpointScanCursor: MemoryRetentionScanCursor | undefined;
   private retentionCheckpointFloorSearchCursorId: number | undefined;
   private retentionCheckpointRollbackFloorId: number | undefined;
+  private retentionScanStateLoaded = false;
 
   /** Attach the governor-backed action faculty used by orchestrator gating paths. */
   attachActionFaculty(faculty: IActionFaculty): void {
@@ -7092,6 +7094,8 @@ export class SqliteBrain implements IBrain {
         ON memory_access_audit_events(created_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS idx_memory_access_audit_operation
         ON memory_access_audit_events(store, operation, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_memory_access_audit_retention_success
+        ON memory_access_audit_events(store, operation, outcome, id DESC);
     `);
     this.ensureMemoryReviewMetadataColumns();
   }
@@ -7554,10 +7558,11 @@ export class SqliteBrain implements IBrain {
         .sort(compareMemoryRetentionCompactionCandidates);
       const activeEntries = entries.filter((entry) => entry.action !== 'expired');
       const existingCompactionCount = activeEntries.filter((entry) => entry.action === 'compact').length;
-      const extraBudgetCompactions = Math.max(0, activeEntries.length - maxEntries - existingCompactionCount);
+      const activeEntryCount = enforcementScanState?.persistedEntryCount ?? activeEntries.length;
+      const extraBudgetCompactions = Math.max(0, activeEntryCount - maxEntries - existingCompactionCount);
       for (const entry of nonProtectedBudgetCandidates.slice(0, extraBudgetCompactions)) {
         entry.action = 'compact';
-        entry.reason = `Memory store has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
+        entry.reason = `Memory store has ${activeEntryCount} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
       }
     }
 
@@ -7599,37 +7604,49 @@ export class SqliteBrain implements IBrain {
     }
     const maxScanRows = options.maxScanRows
       ?? Math.min(MAX_MEMORY_RETENTION_SCAN_ENTRIES, Math.max(maxDeletes * 10, 100));
-    const persistedScanDetails = (
-      this.retentionEpisodicScanCursor === undefined
-      || this.retentionCheckpointScanCursor === undefined
-      || this.retentionCheckpointFloorSearchCursorId === undefined
-      || this.retentionCheckpointRollbackFloorId === undefined
-    )
-      ? this.persistedRetentionScanDetails()
-      : undefined;
-    const episodicCursor = this.retentionEpisodicScanCursor
-      ?? this.retentionScanCursor(persistedScanDetails, 'episodic');
-    const checkpointCursor = this.retentionCheckpointScanCursor
-      ?? this.retentionScanCursor(persistedScanDetails, 'checkpoint');
-    const checkpointFloorSearchCursorId = this.retentionCheckpointFloorSearchCursorId
-      ?? this.retentionScanNumber(persistedScanDetails, 'checkpointFloorSearchCursorId');
-    const checkpointRollbackFloorId = this.retentionCheckpointRollbackFloorId
-      ?? this.retentionScanNumber(persistedScanDetails, 'checkpointRollbackFloorId');
+    if (!this.retentionScanStateLoaded) {
+      const persistedScanDetails = this.persistedRetentionScanDetails();
+      this.retentionEpisodicScanCursor = this.retentionScanCursor(
+        persistedScanDetails,
+        'episodic',
+      );
+      this.retentionCheckpointScanCursor = this.retentionScanCursor(
+        persistedScanDetails,
+        'checkpoint',
+      );
+      this.retentionCheckpointFloorSearchCursorId = this.retentionScanNumber(
+        persistedScanDetails,
+        'checkpointFloorSearchCursorId',
+      );
+      this.retentionCheckpointRollbackFloorId = this.retentionScanNumber(
+        persistedScanDetails,
+        'checkpointRollbackFloorId',
+      );
+      this.retentionScanStateLoaded = true;
+    }
     const scanState: MemoryRetentionEnforcementScanState = {
-      ...(episodicCursor === undefined
+      ...(this.retentionEpisodicScanCursor === undefined
         ? {}
-        : { episodicCursor }),
-      ...(checkpointCursor === undefined
+        : { episodicCursor: this.retentionEpisodicScanCursor }),
+      ...(this.retentionCheckpointScanCursor === undefined
         ? {}
-        : { checkpointCursor }),
-      ...(checkpointFloorSearchCursorId === undefined
+        : { checkpointCursor: this.retentionCheckpointScanCursor }),
+      ...(this.retentionCheckpointFloorSearchCursorId === undefined
         ? {}
-        : { checkpointFloorSearchCursorId }),
-      ...(checkpointRollbackFloorId === undefined
+        : { checkpointFloorSearchCursorId: this.retentionCheckpointFloorSearchCursorId }),
+      ...(this.retentionCheckpointRollbackFloorId === undefined
         ? {}
-        : { checkpointRollbackFloorId }),
+        : { checkpointRollbackFloorId: this.retentionCheckpointRollbackFloorId }),
     };
     const enforce = this.db.transaction((): MemoryRetentionEnforcementResult => {
+      if (options.maxEntries !== undefined) {
+        const row = this.db.prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM episodic_events)
+             + (SELECT COUNT(*) FROM checkpoints) AS count`,
+        ).get() as { count: number };
+        scanState.persistedEntryCount = row.count;
+      }
       const report = this.buildMemoryRetentionReport(
         { ...options, maxScanRows },
         false,
@@ -7733,16 +7750,20 @@ export class SqliteBrain implements IBrain {
       this.retentionCheckpointRollbackFloorId = scanState.nextCheckpointRollbackFloorId;
       return result;
     } catch (error) {
-      this.auditRecorder({
-        operation: 'retention.enforce',
-        store: 'retention',
-        outcome: 'error',
-        details: {
-          errorName: error instanceof Error ? error.name : 'Error',
-          maxDeletes,
-          maxScanRows,
-        },
-      });
+      try {
+        this.auditRecorder({
+          operation: 'retention.enforce',
+          store: 'retention',
+          outcome: 'error',
+          details: {
+            errorName: error instanceof Error ? error.name : 'Error',
+            maxDeletes,
+            maxScanRows,
+          },
+        });
+      } catch {
+        // Avoid masking the enforcement/audit failure that rolled back retention changes.
+      }
       throw error;
     }
   }

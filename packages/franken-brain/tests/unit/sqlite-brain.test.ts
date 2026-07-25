@@ -747,7 +747,29 @@ describe('SqliteBrain', () => {
       expect(brain.episodic.recent(-1)).toEqual([]);
     });
 
-    it('restores all retention scan state with one audit lookup after reopening', () => {
+    it('enforces maxEntries against rows outside the bounded scan page', () => {
+      for (let index = 0; index < 4; index += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `fresh bounded observation ${index}`,
+          details: { memoryClass: 'transient_observation' },
+          createdAt: `2026-01-0${index + 1}T00:00:00.000Z`,
+        });
+      }
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-05T00:00:00.000Z',
+        expiryHorizonMs: 30 * 24 * 60 * 60 * 1000,
+        maxEntries: 3,
+        maxDeletes: 10,
+        maxScanRows: 2,
+      });
+
+      expect(result.deleted.episodic).toBe(1);
+      expect(brain.episodic.count()).toBe(3);
+    });
+
+    it('restores all retention scan state with one indexed audit lookup after reopening', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-state-'));
       const dbPath = join(dir, 'brain.db');
       let scheduledBrain: SqliteBrain | undefined;
@@ -781,6 +803,11 @@ describe('SqliteBrain', () => {
             maxDeletes: 1,
             maxScanRows: 1,
           });
+          scheduledBrain.enforceMemoryRetention({
+            now: '2026-01-10T00:00:00.000Z',
+            maxDeletes: 1,
+            maxScanRows: 1,
+          });
         } finally {
           db.prepare = originalPrepare as typeof db.prepare;
         }
@@ -789,6 +816,18 @@ describe('SqliteBrain', () => {
           sql.includes('FROM memory_access_audit_events')
           && sql.includes("operation = 'retention.enforce'")
         ))).toHaveLength(1);
+        const queryPlan = db.prepare(
+          `EXPLAIN QUERY PLAN SELECT details
+           FROM memory_access_audit_events
+           WHERE store = 'retention'
+             AND operation = 'retention.enforce'
+             AND outcome = 'success'
+           ORDER BY id DESC
+           LIMIT 1`,
+        ).all() as Array<{ detail: string }>;
+        expect(queryPlan.some(({ detail }) => (
+          detail.includes('idx_memory_access_audit_retention_success')
+        ))).toBe(true);
       } finally {
         scheduledBrain?.close();
         rmSync(dir, { recursive: true, force: true });
