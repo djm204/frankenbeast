@@ -28,7 +28,10 @@ function durablePublisherId(dbPath: string): string {
     db.prepare(`
       INSERT OR IGNORE INTO brain_registry_metadata (key, value)
       VALUES (?, ?)
-    `).run(HIVE_PUBLISHER_ID_METADATA_KEY, randomUUID());
+    `).run(
+      HIVE_PUBLISHER_ID_METADATA_KEY,
+      createHash('sha256').update(dbPath).digest('hex'),
+    );
     const row = db.prepare(`
       SELECT value FROM brain_registry_metadata WHERE key = ?
     `).get(HIVE_PUBLISHER_ID_METADATA_KEY) as { value: string } | undefined;
@@ -115,6 +118,11 @@ export class BrainRegistry {
 
     const requestedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
     const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
+    const existing = agentBrains?.get(resolvedDbPath);
+    if (existing) {
+      if (dbPath !== undefined) this.preferredDbPaths.set(registryKey, resolvedDbPath);
+      return existing;
+    }
     if (resolvedDbPath !== ':memory:') {
       mkdirSync(dirname(resolvedDbPath), { recursive: true });
     }
@@ -122,11 +130,6 @@ export class BrainRegistry {
       ?? (resolvedDbPath === ':memory:'
         ? randomUUID()
         : durablePublisherId(resolvedDbPath));
-    const existing = agentBrains?.get(resolvedDbPath);
-    if (existing) {
-      if (dbPath !== undefined) this.preferredDbPaths.set(registryKey, resolvedDbPath);
-      return existing;
-    }
     const brain = new SqliteBrain(resolvedDbPath, undefined, {
       conversationWorkspaceId: null,
       hiveMind: {

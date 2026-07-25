@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -177,7 +178,7 @@ describe('HiveMindStore', () => {
       expect(() => store.deletePublishedWhere(namespace, 'publisher-a', () => true))
         .toThrow('Secure deletion could not truncate the Hive WAL');
       reader.exec('ROLLBACK');
-      expect(store.deletePublishedWhere(namespace, 'publisher-a', () => true)).toBe(0);
+      expect(store.poll(namespace)).toEqual([]);
       const sqliteBytes = [dbPath, `${dbPath}-wal`]
         .filter(existsSync)
         .map(path => readFileSync(path).toString('utf8'))
@@ -190,6 +191,37 @@ describe('HiveMindStore', () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 10_000);
+
+  it('leaves securely erased pages available for reuse instead of vacuuming per deletion', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-secure-delete-reuse-'));
+    const dbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const store = new HiveMindStore(dbPath);
+    const observer = new Database(dbPath);
+    try {
+      for (let index = 0; index < 64; index += 1) {
+        store.publish(namespace, 'publisher-a', {
+          kind: 'episode',
+          event: {
+            type: 'failure',
+            summary: `reusable-page-${index}-${'payload-'.repeat(1_024)}`,
+            createdAt: '2026-07-25T10:00:00.000Z',
+          },
+        });
+      }
+      observer.pragma('wal_checkpoint(TRUNCATE)');
+      const pageCount = observer.pragma('page_count', { simple: true }) as number;
+
+      expect(store.deletePublishedWhere(namespace, 'publisher-a', () => true)).toBe(64);
+
+      expect(observer.pragma('page_count', { simple: true })).toBe(pageCount);
+      expect(observer.pragma('freelist_count', { simple: true }) as number).toBeGreaterThan(0);
+    } finally {
+      observer.close();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it('filters by kind before applying the newest-entry bound', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-kind-bound-'));
@@ -345,6 +377,42 @@ describe('HiveMindStore', () => {
         expect(observer.poll(namespace, { kind: 'lesson' })).toEqual([
           expect.objectContaining({ candidateId: baseline!.id, status: 'approved' }),
         ]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('conservatively revokes a dependent legacy hive lesson without a candidate identity', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-forget-legacy-lesson-'));
+    const hiveDbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const registry = new BrainRegistry(join(root, 'brains'), hiveDbPath, 'publisher-a');
+    const brain = registry.forAgentType('coder');
+    try {
+      recordCluster(brain, 'LegacyCandidateMarker build timeout');
+      const [candidate] = brain.learning.consolidate({ threshold: 3 });
+      const publisher = new HiveMindStore(hiveDbPath);
+      try {
+        publisher.deleteLessonPublication(namespace, 'publisher-a', candidate!.id, candidate!.key);
+        publisher.publish(namespace, 'publisher-a', {
+          kind: 'lesson',
+          key: candidate!.key,
+          status: 'pending',
+          lesson: candidate!.value as ReturnType<typeof lessonValue>,
+        });
+      } finally {
+        publisher.close();
+      }
+
+      brain.rightToForget({ type: 'episodic', query: 'LegacyCandidateMarker' });
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace, { kind: 'lesson' })).toEqual([]);
       } finally {
         observer.close();
       }
@@ -540,6 +608,67 @@ describe('HiveMindStore', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('migrates publications owned by the preceding path-derived publisher identity', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-migration-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    const durableDbPath = join(brainsDir, 'coder.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const legacyPublisherId = createHash('sha256').update(durableDbPath).digest('hex');
+    try {
+      mkdirSync(brainsDir, { recursive: true });
+      const legacyBrain = new SqliteBrain(durableDbPath);
+      legacyBrain.episodic.record({
+        type: 'failure',
+        summary: 'legacy-path-private-token request failed',
+        createdAt: '2026-07-25T10:00:00.000Z',
+      });
+      legacyBrain.close();
+      const publisher = new HiveMindStore(hiveDbPath);
+      publisher.publish(namespace, legacyPublisherId, {
+        kind: 'episode',
+        event: {
+          type: 'failure',
+          summary: 'legacy-path-private-token request failed',
+          createdAt: '2026-07-25T10:00:00.000Z',
+        },
+      });
+      publisher.close();
+
+      const registry = new BrainRegistry(brainsDir, hiveDbPath);
+      registry.forAgentType('coder', durableDbPath)
+        .rightToForget({ query: 'legacy-path-private-token' });
+      registry.close();
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace)).toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('returns a cached durable brain without reopening its locked database', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-cache-'));
+    const brainsDir = join(root, 'brains');
+    const durableDbPath = join(brainsDir, 'coder.db');
+    const registry = new BrainRegistry(brainsDir, join(root, 'hive.db'));
+    const brain = registry.forAgentType('coder', durableDbPath);
+    const blocker = new Database(durableDbPath);
+    try {
+      blocker.exec('BEGIN IMMEDIATE');
+      expect(registry.forAgentType('coder', durableDbPath)).toBe(brain);
+    } finally {
+      if (blocker.inTransaction) blocker.exec('ROLLBACK');
+      blocker.close();
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it('preserves durable publisher ownership when the same brain is reopened through a symlink', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-symlink-'));

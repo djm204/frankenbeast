@@ -224,6 +224,7 @@ export class HiveMindStore {
         value TEXT NOT NULL
       );
     `);
+    this.retryPendingSecureDelete();
   }
 
   publish(
@@ -233,6 +234,7 @@ export class HiveMindStore {
   ): HiveMindEntry {
     assertNamespace(namespace);
     assertPublisherId(publisherId);
+    this.retryPendingSecureDelete();
     if (entry.kind !== 'lesson' && entry.kind !== 'episode') {
       throw new TypeError('Hive mind entry kind must be lesson or episode');
     }
@@ -270,6 +272,7 @@ export class HiveMindStore {
 
   poll(namespace: HiveMindNamespace, options: HiveMindPollOptions = {}): HiveMindEntry[] {
     assertNamespace(namespace);
+    this.retryPendingSecureDelete();
     const { sinceId, limit } = assertPollOptions(options);
     const clauses = ['namespace = ?', 'id > ?'];
     const parameters: Array<string | number> = [namespace, sinceId];
@@ -296,6 +299,7 @@ export class HiveMindStore {
   /** Return the newest bounded window, ordered newest first. */
   recent(namespace: HiveMindNamespace, options: HiveMindRecentOptions = {}): HiveMindEntry[] {
     assertNamespace(namespace);
+    this.retryPendingSecureDelete();
     const { limit } = assertPollOptions(options);
     const clauses = ['namespace = ?'];
     const parameters: Array<string | number> = [namespace];
@@ -385,13 +389,19 @@ export class HiveMindStore {
     `).get(SECURE_DELETE_PENDING_KEY) !== undefined;
   }
 
+  private retryPendingSecureDelete(): void {
+    if (this.dbPath !== ':memory:' && this.hasPendingSecureDelete()) {
+      this.purgeDeletedContent();
+    }
+  }
+
   private purgeDeletedContent(): void {
     truncateWalOrThrow(this.db);
-    this.db.exec('VACUUM');
     this.db.prepare('DELETE FROM hive_mind_metadata WHERE key = ?').run(SECURE_DELETE_PENDING_KEY);
   }
 
   close(): void {
+    this.retryPendingSecureDelete();
     this.db.close();
   }
 }
