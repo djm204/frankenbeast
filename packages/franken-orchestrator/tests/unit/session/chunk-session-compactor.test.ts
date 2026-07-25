@@ -61,4 +61,65 @@ describe('ChunkSessionCompactor', () => {
       triggerReason: 'threshold',
     }));
   });
+
+  it('timestamps observations with the wall clock used by rate windows', async () => {
+    const onCompaction = vi.fn(async () => undefined);
+    const compactor = new ChunkSessionCompactor({
+      summarize: async () => 'Compacted summary',
+      onCompaction,
+    });
+    const session = createChunkSession({
+      planName: 'clock-plan',
+      taskId: 'impl:clock',
+      chunkId: 'clock',
+      promiseTag: 'IMPL_CLOCK_DONE',
+      workingDir: '/tmp/clock',
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+    const compacted = {
+      ...await compactor.compact(session),
+      updatedAt: '2000-01-01T00:00:00.000Z',
+    };
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+
+    try {
+      await compactor.recordCompaction(session, compacted, 'threshold');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(onCompaction).toHaveBeenCalledWith(expect.objectContaining({
+      timestamp: Date.parse('2030-01-01T00:00:00.000Z'),
+    }));
+  });
+
+  it('commits manual compaction before recording its trigger reason', async () => {
+    const order: string[] = [];
+    const onCompaction = vi.fn(async () => { order.push('observe'); });
+    const compactor = new ChunkSessionCompactor({
+      summarize: async () => 'Compacted summary',
+      onCompaction,
+    });
+    const session = createChunkSession({
+      planName: 'manual-plan',
+      taskId: 'impl:manual',
+      chunkId: 'manual',
+      promiseTag: 'IMPL_MANUAL_DONE',
+      workingDir: '/tmp/manual',
+      provider: 'claude',
+      maxTokens: 200000,
+    });
+
+    const compacted = await compactor.compactAndRecord(session, async () => {
+      order.push('persist');
+    });
+
+    expect(compacted.compactionGeneration).toBe(1);
+    expect(order).toEqual(['persist', 'observe']);
+    expect(onCompaction).toHaveBeenCalledWith(expect.objectContaining({
+      triggerReason: 'manual',
+    }));
+  });
 });

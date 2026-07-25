@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   TokenCounter,
   CostCalculator,
   CircuitBreaker,
   LoopDetector,
+  type CompactionEventAdapter,
 } from '@franken/observer';
 import { CliObserverBridge } from '../../../src/adapters/cli-observer-bridge.js';
 import type { IObserverModule } from '../../../src/deps.js';
@@ -278,6 +279,25 @@ describe('CliObserverBridge', () => {
       const source = await readFile(new URL('../../../src/adapters/cli-observer-bridge.ts', import.meta.url), 'utf-8');
       expect(source).not.toContain('as unknown as Trace');
       expect(source).not.toContain('as unknown as Span');
+    });
+  });
+
+  describe('close()', () => {
+    it('keeps observer adapter shutdown failures best-effort', async () => {
+      const close = vi.fn(async () => { throw new Error('SQLite worker close timed out'); });
+      const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {
+        recordCompaction: vi.fn(async () => undefined),
+        queryCompactions: vi.fn(async () => []),
+        aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
+        close,
+      };
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        compactionAdapter,
+      });
+
+      await expect(bridge.close()).resolves.toBeUndefined();
+      expect(close).toHaveBeenCalledOnce();
     });
   });
 

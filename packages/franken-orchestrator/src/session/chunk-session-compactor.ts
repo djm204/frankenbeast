@@ -1,5 +1,5 @@
 import { createChunkTranscriptEntry, type ChunkSession, type ChunkTranscriptEntry } from './chunk-session.js';
-import { isoNow } from '@franken/types';
+import { isoNow, wallClockNow } from '@franken/types';
 
 export type ChunkCompactionTriggerReason = 'threshold' | 'manual';
 
@@ -74,8 +74,23 @@ export class ChunkSessionCompactor {
       triggerReason,
       tokensBefore: this.deps.measureSessionTokens?.(previous) ?? previous.contextWindow.usedTokens,
       tokensAfter: this.deps.measureSessionTokens?.(compacted) ?? compacted.contextWindow.usedTokens,
-      timestamp: Date.parse(compacted.updatedAt),
+      timestamp: wallClockNow(),
     });
+  }
+
+  async compactAndRecord(
+    session: ChunkSession,
+    persist: (compacted: ChunkSession) => void | Promise<void>,
+    triggerReason: ChunkCompactionTriggerReason = 'manual',
+  ): Promise<ChunkSession> {
+    const compacted = await this.compact(session);
+    await persist(compacted);
+    try {
+      await this.recordCompaction(session, compacted, triggerReason);
+    } catch {
+      // Operational telemetry must not abort a successfully committed compaction.
+    }
+    return compacted;
   }
 
   private retainCriticalTranscript(entries: readonly ChunkTranscriptEntry[]): ChunkTranscriptEntry[] {

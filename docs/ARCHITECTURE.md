@@ -174,7 +174,7 @@ flowchart TD
     COB -.->|"budget enforcement"| CSE
 ```
 
-**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` also estimates rendered context-window usage so chunk execution can snapshot and compact before exceeding the provider budget. Completed threshold or manual compactions are written to the observer SQLite database with the chunk-session id, Beast run id, generation, trigger reason, before/after token estimates, and timestamp. `CompactionMetrics` provides bounded event queries and a windowed `compactionRate()` aggregation for later Brain Vitals consumers.
+**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` also estimates rendered context-window usage so chunk execution can snapshot and compact before exceeding the provider budget. Completed threshold compactions, plus manual compactions committed through `ChunkSessionCompactor.compactAndRecord()`, are written to the observer SQLite database with the chunk-session id, Beast run id, generation, trigger reason, before/after token estimates, and a wall-clock timestamp. `CompactionMetrics` provides bounded event queries and a windowed `compactionRate()` aggregation for later Brain Vitals consumers.
 
 #### Canonical Chunk Sessions
 

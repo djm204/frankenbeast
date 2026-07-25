@@ -214,7 +214,11 @@ export class CliObserverBridge implements IObserverModule {
   }
 
   async close(): Promise<void> {
-    await this.compactionAdapter?.close?.();
+    try {
+      await this.compactionAdapter?.close?.();
+    } catch {
+      // Observer shutdown is best-effort and must not fail a completed run.
+    }
   }
 
   private requireTrace(): Trace {
