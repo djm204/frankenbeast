@@ -1365,6 +1365,12 @@ describe('ws chat server', () => {
     const session = store.create('proj');
     session.state = 'pending_approval';
     session.pendingApproval = null;
+    session.beastContext = {
+      definitionId: 'martin-loop',
+      interviewSessionId: 'interview-denied',
+      status: 'interviewing',
+      executionMode: 'process',
+    };
     store.save(session);
     const secret = createSessionTokenSecret();
     const token = issueSessionToken({ expiresInMs: CHAT_SOCKET_TOKEN_TTL_MS, secret, sessionId: session.id });
@@ -1394,6 +1400,7 @@ describe('ws chat server', () => {
     expect(execute).not.toHaveBeenCalled();
     expect(store.get(session.id)?.state).toBe('rejected');
     expect(store.get(session.id)?.pendingApproval).toBeNull();
+    expect(store.get(session.id)?.beastContext).toBeNull();
     const events = sent.map((raw) => JSON.parse(raw) as Record<string, unknown>);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn.approval.resolved',

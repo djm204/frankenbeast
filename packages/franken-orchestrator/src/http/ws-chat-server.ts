@@ -606,6 +606,7 @@ export class ChatSocketController {
         if (!approved) {
           session.pendingApproval = null;
           session.state = 'rejected';
+          session.beastContext = null;
           session.updatedAt = nowIso();
           this.sessionStore.save(session);
           this.emit(peer, {
@@ -645,6 +646,7 @@ export class ChatSocketController {
       });
       session.pendingApproval = null;
       session.state = 'rejected';
+      session.beastContext = null;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       this.emit(peer, {
@@ -701,6 +703,7 @@ export class ChatSocketController {
     } catch {
       session.pendingApproval = null;
       session.state = 'rejected';
+      session.beastContext = null;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       const timestamp = nowIso();
@@ -721,6 +724,7 @@ export class ChatSocketController {
       await this.recordApprovalReplay(session, runtimeInput, 'approval was already consumed', connectionRequester(peer, this.connections));
       session.pendingApproval = null;
       session.state = 'rejected';
+      session.beastContext = null;
       session.updatedAt = nowIso();
       this.sessionStore.save(session);
       const timestamp = nowIso();

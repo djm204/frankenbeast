@@ -479,6 +479,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         if (session.state === 'pending_approval' && !approved) {
           session.state = 'rejected';
           session.pendingApproval = null;
+          session.beastContext = null;
           session.updatedAt = isoNow();
           sessionStore.save(session);
 
@@ -525,6 +526,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
           await recordApprovalReplay(session, runtimeInput, 'approval was already consumed', approvalRequester(c));
           session.pendingApproval = null;
           session.state = 'rejected';
+          session.beastContext = null;
           session.updatedAt = isoNow();
           sessionStore.save(session);
           return c.json({
@@ -588,6 +590,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
         });
         session.state = 'rejected';
         session.pendingApproval = null;
+        session.beastContext = null;
       }
       session.updatedAt = isoNow();
       sessionStore.save(session);

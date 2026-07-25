@@ -912,8 +912,14 @@ provider, token, and cost state. `BrainConversationSessionStore` is an additive
 `ISessionStore` compatibility projection used by the standalone chat server for
 newly bound `local-operator` sessions; injected stores and unbound legacy
 per-session files continue to load unchanged. Bound sessions share a
-conversation mutation-admission key. Hive-aware routing and
-dispatch remain the separate #3702 and #3703 integration boundaries.
+conversation mutation-admission key. Their Beast requests use the existing
+`ChatRuntime` -> `BeastDispatchPort` -> `BeastDispatchService` path; there is no
+Brain-only run creation or executor path. The canonical conversation's
+`pending_approval` state is checked before runtime dispatch, so a second bound
+browser session cannot bypass an unresolved or denied approval. The executor's
+`pending_approval` run outcome is returned unchanged. No existing REST or
+WebSocket chat API contract changed. Hive-aware query/faculty selection remains
+the separate #3702 integration boundary.
 
 The chat system provides a two-tier interactive experience available via CLI REPL and HTTP+WebSocket server.
 
