@@ -1,7 +1,9 @@
 import { Buffer } from 'node:buffer';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
+import { hiveMindAgentTypeNamespace } from './hive-mind-store.js';
 import { SqliteBrain } from './sqlite-brain.js';
 
 const MAX_AGENT_TYPE_ID_BYTES = 255;
@@ -39,7 +41,11 @@ export class BrainRegistry {
   private readonly brains = new Map<string, Map<string, SqliteBrain>>();
   private readonly preferredDbPaths = new Map<string, string>();
 
-  constructor(private readonly brainsDir = join('.fbeast', 'brains')) {}
+  constructor(
+    private readonly brainsDir = join('.fbeast', 'brains'),
+    private readonly hiveDbPath = join(dirname(brainsDir), 'hive', 'hive.db'),
+    private readonly publisherId: string = randomUUID(),
+  ) {}
 
   forAgentType(agentTypeId: string, dbPath?: string): SqliteBrain {
     assertSafeAgentTypeId(agentTypeId);
@@ -70,7 +76,13 @@ export class BrainRegistry {
     if (dbPath === undefined) {
       mkdirSync(this.brainsDir, { recursive: true });
     }
-    const brain = new SqliteBrain(resolvedDbPath);
+    const brain = new SqliteBrain(resolvedDbPath, undefined, {
+      hiveMind: {
+        dbPath: resolvedDbPath === ':memory:' ? ':memory:' : this.hiveDbPath,
+        namespace: hiveMindAgentTypeNamespace(agentTypeId),
+        publisherId: this.publisherId,
+      },
+    });
     const paths = agentBrains ?? new Map<string, SqliteBrain>();
     paths.set(resolvedDbPath, brain);
     this.brains.set(agentTypeId, paths);

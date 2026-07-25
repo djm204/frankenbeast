@@ -37,7 +37,7 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches planning to the supplied planner, reasoning to the real critique chain, and action to the real governor, while the built-in learning faculty clusters similar failures into review-gated lesson candidates |
+| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, durable per-agent brains, and a retention-bounded WAL-backed `.fbeast/hive/hive.db` store that shares lessons/significant episodes only inside enforced agent-type namespaces (or explicit global opt-in), propagates review/right-to-forget revocations, skips plaintext publication for encrypted brains, and participates in encrypted DR backups |
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
@@ -65,7 +65,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
 - `ReasoningFacultyAdapter`: consults up to five relevant lesson keys before critique, preserves the enabled `ICritiqueModule` result, and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
 - `ActionFacultyAdapter`: preserves governor approval outcomes and records real gating decisions as queryable episodic context without approval tokens; synthetic health probes do not create episodes
-- Learning faculty: `consolidate()` clusters bounded episodic inputs and proposes patterns through `memoryReview`; `relevantLessons()` returns pending/approved matches with occurrence counts and confidence. Planning and reasoning record observable consultations with redacted 512-byte queries. Negative reasoning/action outcomes asynchronously schedule the existing consolidation core with threshold 3, lookback 100, and similarity 0.5, coalescing bursts into one pending pass; this remains review-gated and does not inject lesson text into prompts.
+- Learning faculty: `consolidate()` clusters bounded episodic inputs and proposes patterns through `memoryReview`; confidence >= 0.65 publishes to the same-type hive immediately. `relevantLessons()` merges local results with at most 1,000 shared rows and labels `source: 'local' | 'peer'`. Significant failures and negative reasoning/action decisions also publish as hive episodes. `HiveMindStore.poll()` is cursor-based (default 100, maximum 1,000); no background timer or socket is added. Planning and reasoning record observable consultations with redacted 512-byte queries, and negative outcomes still schedule the bounded review-gated consolidation core.
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)

@@ -13,7 +13,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 
 | Package | Role |
 |---------|------|
-|| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` whose safe agent-type IDs default to durable `.fbeast/brains/<agentTypeId>.db` files, and planning/reasoning/action/learning faculty surfaces. The local Beast CLI attaches the existing planner, critique chain, and governor; planning/reasoning consult bounded relevant lessons, while negative reasoning/action outcomes trigger bounded review-gated consolidation. |
+| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` whose safe agent-type IDs default to durable `.fbeast/brains/<agentTypeId>.db` files and bind to an enforced same-type namespace in `.fbeast/hive/hive.db`. The WAL-backed, retention-bounded `HiveMindStore` shares lessons/significant episodes across in-flight peer agents; peer lessons are labeled separately, review/right-to-forget revocations propagate, encrypted brains do not publish plaintext, and encrypted DR backups include hive state. Planning/reasoning/action/learning faculty behavior remains on the existing adapters. |
 | `@franken/planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
 | `@franken/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |

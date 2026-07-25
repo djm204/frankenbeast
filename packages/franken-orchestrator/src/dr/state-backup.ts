@@ -157,7 +157,10 @@ async function resolveBackupRoot(stateDir: string): Promise<string> {
       await pathIsFile(join(projectRoot, 'beast.db'))
       || (
         basename(projectRoot) === '.fbeast'
-        && await pathIsDirectory(join(projectRoot, 'brains'))
+        && (
+          await pathIsDirectory(join(projectRoot, 'brains'))
+          || await pathIsDirectory(join(projectRoot, 'hive'))
+        )
       )
     ) {
       return projectRoot;
@@ -179,10 +182,13 @@ async function discoverBackupFiles(requestedStateDir: string, root: string): Pro
     );
     const brainsDir = join(root, 'brains');
     const brainFiles = await pathIsDirectory(brainsDir) ? await walkFiles(brainsDir) : [];
+    const hiveDir = join(root, 'hive');
+    const hiveFiles = await pathIsDirectory(hiveDir) ? await walkFiles(hiveDir) : [];
     return [
       ...(siblingDbExists ? [siblingDb] : []),
       ...siblingDbSidecars.filter((path): path is string => path !== undefined),
       ...brainFiles,
+      ...hiveFiles,
       ...await walkFiles(requestedRoot),
     ].sort();
   }
