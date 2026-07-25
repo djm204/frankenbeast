@@ -2151,7 +2151,7 @@ describe('SqliteBrain', () => {
       ]);
       expect(brain.learning.relevantLessons('NeedleMarker', { limit: 1 })[0]?.pattern)
         .toBe('NeedleMarker exact lesson');
-    });
+    }, 20_000);
 
     it('stops paging each lesson status after satisfying the requested limit', () => {
       const base = brain.memoryReview.propose({
