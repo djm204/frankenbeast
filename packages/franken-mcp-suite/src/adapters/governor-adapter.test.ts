@@ -1148,14 +1148,17 @@ describe('GovernorAdapter', () => {
 
     const db = new Database(dbPath);
     db.prepare(`
-      INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd)
-      VALUES (?, ?, ?, ?, ?)
-    `).run('sess-known', 'gpt-4o', 1_000_000, 1_000_000, 0);
+      INSERT INTO cost_ledger (
+        session_id, model, prompt_tokens, completion_tokens,
+        cache_read_tokens, cache_creation_tokens, cost_usd
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('sess-known', 'gpt-4o', 1_000_000, 1_000_000, 1_000_000, 1_000_000, 0);
     db.close();
 
     await expect(governor.budgetStatus()).resolves.toEqual({
-      totalSpendUsd: 12.5,
-      byModel: [{ model: 'gpt-4o', costUsd: 12.5 }],
+      totalSpendUsd: 16.25,
+      byModel: [{ model: 'gpt-4o', costUsd: 16.25 }],
     });
   });
 

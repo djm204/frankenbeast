@@ -108,6 +108,29 @@ describe('SpanLifecycle', () => {
       })
     })
 
+    it('forwards one-hour cache creation to metadata and the counter', () => {
+      const trace = TraceContext.createTrace('goal')
+      const span = TraceContext.startSpan(trace, { name: 'one-hour-cached-llm-call' })
+      const counter = new TokenCounter()
+
+      SpanLifecycle.recordTokenUsage(span, {
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+        model: 'claude-sonnet-4-6',
+      }, counter)
+
+      expect(span.metadata).toMatchObject({
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      })
+      expect(counter.totalsFor('claude-sonnet-4-6')).toMatchObject({
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      })
+    })
+
     it('rejects atomically: a counter validation throw leaves the span unmutated', () => {
       const trace = TraceContext.createTrace('goal')
       const span = TraceContext.startSpan(trace, { name: 'llm-call' })

@@ -42,6 +42,7 @@ export interface ILlmObserver {
       completionTokens: number;
       cacheReadTokens?: number;
       cacheCreationTokens?: number;
+      cacheCreation1hTokens?: number;
     }): void;
   };
   startSpan(trace: any, opts: { name: string }): any;
@@ -51,6 +52,7 @@ export interface ILlmObserver {
     completionTokens: number;
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
+    cacheCreation1hTokens?: number;
     model: string;
   }, counter: any): void;
   trace: any;
@@ -162,6 +164,9 @@ export class AdapterLlmClient implements ILlmClient {
               : {}),
             ...(usage?.cacheCreationTokens !== undefined
               ? { cacheCreationTokens: usage.cacheCreationTokens }
+              : {}),
+            ...(usage?.cacheCreation1hTokens !== undefined
+              ? { cacheCreation1hTokens: usage.cacheCreation1hTokens }
               : {}),
           },
           this.observer.counter,

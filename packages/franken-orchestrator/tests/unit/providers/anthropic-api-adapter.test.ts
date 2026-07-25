@@ -99,20 +99,25 @@ describe('AnthropicApiAdapter', () => {
   });
 
   describe('translateUsage()', () => {
-    it('preserves Anthropic cache-read and cache-creation usage', () => {
+    it('preserves Anthropic cache-read and cache-creation usage by TTL', () => {
       const adapter = new AnthropicApiAdapter({ apiKey: 'test-...ure' });
 
       expect(adapter.translateUsage({
         input_tokens: 100,
         output_tokens: 50,
         cache_read_input_tokens: 80,
-        cache_creation_input_tokens: 20,
+        cache_creation_input_tokens: 50,
+        cache_creation: {
+          ephemeral_5m_input_tokens: 20,
+          ephemeral_1h_input_tokens: 30,
+        },
       } as any)).toEqual({
         inputTokens: 100,
         outputTokens: 50,
         cacheReadTokens: 80,
-        cacheCreationTokens: 20,
-        totalTokens: 250,
+        cacheCreationTokens: 50,
+        cacheCreation1hTokens: 30,
+        totalTokens: 280,
       });
     });
 

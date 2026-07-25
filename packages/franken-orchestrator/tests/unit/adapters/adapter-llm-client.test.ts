@@ -132,6 +132,7 @@ describe('AdapterLlmClient', () => {
       outputTokens: 100,
       cacheReadTokens: 300,
       cacheCreationTokens: 100,
+      cacheCreation1hTokens: 40,
       totalTokens: 1100,
     };
     const client = new AdapterLlmClient(
@@ -143,7 +144,11 @@ describe('AdapterLlmClient', () => {
 
     expect(observer.recordTokenUsage).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ cacheReadTokens: 300, cacheCreationTokens: 100 }),
+      expect.objectContaining({
+        cacheReadTokens: 300,
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      }),
       expect.anything(),
     );
   });

@@ -45,6 +45,21 @@ describe('TokenCounter', () => {
       })
     })
 
+    it('preserves the one-hour cache-creation subset for cost calculation', () => {
+      counter.record({
+        model: 'claude-sonnet-4-6',
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      })
+
+      expect(counter.totalsFor('claude-sonnet-4-6')).toMatchObject({
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      })
+    })
+
     it('tracks multiple models independently', () => {
       counter.record({ model: 'claude-opus-4-6', promptTokens: 100, completionTokens: 50 })
       counter.record({ model: 'gpt-4o', promptTokens: 200, completionTokens: 80 })

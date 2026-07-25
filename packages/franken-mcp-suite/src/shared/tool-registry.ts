@@ -1152,10 +1152,21 @@ const TOOLS: ToolFull[] = [
       if (!parsedArgs.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${parsedArgs.message}` }], isError: true };
       }
-      const { model, promptTokens, completionTokens } = parsedArgs.value;
+      const {
+        model,
+        promptTokens,
+        completionTokens,
+        cacheReadTokens = 0,
+        cacheCreationTokens = 0,
+      } = parsedArgs.value;
       const result = await observer.logCost(parsedArgs.value);
       const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
-      return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
+      return {
+        content: [{
+          type: 'text',
+          text: `Logged cost: ${promptTokens} prompt + ${completionTokens} completion + ${cacheReadTokens} cache read + ${cacheCreationTokens} cache creation tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}`,
+        }],
+      };
     },
   },
   {
@@ -1174,7 +1185,15 @@ const TOOLS: ToolFull[] = [
       if (summary.byModel.length === 0) {
         return { content: [{ type: 'text', text: 'No cost data recorded.' }] };
       }
-      const lines = [`## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`, '', ...summary.byModel.map((row) => `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`), '', `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`];
+      const lines = [
+        `## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`,
+        '',
+        ...summary.byModel.map((row) =>
+          `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion + ${row.cacheReadTokens ?? 0} cache read + ${row.cacheCreationTokens ?? 0} cache creation = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`,
+        ),
+        '',
+        `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion + ${summary.totalCacheReadTokens ?? 0} cache read + ${summary.totalCacheCreationTokens ?? 0} cache creation = $${summary.totalCostUsd.toFixed(4)}`,
+      ];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },

@@ -146,11 +146,13 @@ export class AnthropicApiAdapter implements ILlmProvider {
   translateUsage(usage: Anthropic.Usage): TokenUsage {
     const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
     const cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
+    const cacheCreation1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
     const translated: TokenUsage = {
       inputTokens: usage.input_tokens,
       outputTokens: usage.output_tokens,
       cacheReadTokens,
       cacheCreationTokens,
+      ...(cacheCreation1hTokens > 0 ? { cacheCreation1hTokens } : {}),
       totalTokens:
         usage.input_tokens +
         usage.output_tokens +

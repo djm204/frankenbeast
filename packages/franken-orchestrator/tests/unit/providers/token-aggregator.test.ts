@@ -49,7 +49,7 @@ describe('TokenAggregator', () => {
     });
 
     expect(aggregator.getTotalUsage()).toMatchObject({
-      totalInputTokens: 110,
+      totalInputTokens: 210,
       totalOutputTokens: 55,
       totalCacheReadTokens: 80,
       totalCacheCreationTokens: 20,

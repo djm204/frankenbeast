@@ -12,14 +12,17 @@ describe('CostCalculator', () => {
         completionPerMillion: 25,
         cacheReadPerMillion: 0.5,
         cacheCreationPerMillion: 6.25,
+        cacheCreation1hPerMillion: 10,
       })
       expect(DEFAULT_PRICING['claude-sonnet-4-6']).toMatchObject({
         cacheReadPerMillion: 0.3,
         cacheCreationPerMillion: 3.75,
+        cacheCreation1hPerMillion: 6,
       })
       expect(DEFAULT_PRICING['claude-haiku-4-5']).toMatchObject({
         cacheReadPerMillion: 0.1,
         cacheCreationPerMillion: 1.25,
+        cacheCreation1hPerMillion: 2,
       })
     })
 
@@ -85,6 +88,16 @@ describe('CostCalculator', () => {
         cacheReadTokens: 1_000_000,
         cacheCreationTokens: 1_000_000,
       })).toBe(17.4)
+    })
+
+    it('prices one-hour Anthropic cache creation separately from five-minute creation', () => {
+      expect(calc.calculate({
+        model: 'claude-sonnet-4-6',
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheCreationTokens: 1_000_000,
+        cacheCreation1hTokens: 400_000,
+      })).toBeCloseTo((600_000 * 3.75 + 400_000 * 6) / 1_000_000, 8)
     })
 
     it('falls back to prompt pricing when cache-specific rates are unset', () => {

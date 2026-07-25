@@ -107,6 +107,8 @@ export interface TokenUsage {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
+  /** One-hour cache writes, already included in cacheCreationTokens. */
+  cacheCreation1hTokens?: number;
   totalTokens: number;
 }
 
@@ -193,9 +195,17 @@ export const TokenUsageSchema = z
     outputTokens: TokenCountSchema,
     cacheReadTokens: TokenCountSchema.optional(),
     cacheCreationTokens: TokenCountSchema.optional(),
+    cacheCreation1hTokens: TokenCountSchema.optional(),
     totalTokens: TokenCountSchema,
   })
   .superRefine((usage, ctx) => {
+    if ((usage.cacheCreation1hTokens ?? 0) > (usage.cacheCreationTokens ?? 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cacheCreation1hTokens'],
+        message: 'cacheCreation1hTokens must not exceed cacheCreationTokens',
+      });
+    }
     const expectedTotal =
       usage.inputTokens +
       usage.outputTokens +

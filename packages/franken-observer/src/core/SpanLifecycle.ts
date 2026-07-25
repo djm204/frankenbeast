@@ -6,6 +6,7 @@ export interface TokenUsage {
   completionTokens: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
+  cacheCreation1hTokens?: number
   model?: string
 }
 
@@ -51,10 +52,15 @@ export const SpanLifecycle = {
     }
     const cacheReadTokens = usage.cacheReadTokens ?? 0
     const cacheCreationTokens = usage.cacheCreationTokens ?? 0
+    const cacheCreation1hTokens = usage.cacheCreation1hTokens ?? 0
     assertValidTokenDelta(usage.promptTokens, 'promptTokens')
     assertValidTokenDelta(usage.completionTokens, 'completionTokens')
     assertValidTokenDelta(cacheReadTokens, 'cacheReadTokens')
     assertValidTokenDelta(cacheCreationTokens, 'cacheCreationTokens')
+    assertValidTokenDelta(cacheCreation1hTokens, 'cacheCreation1hTokens')
+    if (cacheCreation1hTokens > cacheCreationTokens) {
+      throw new RangeError('SpanLifecycle: cacheCreation1hTokens must not exceed cacheCreationTokens')
+    }
     const uncachedTokens = safeAddTokenCounts(usage.promptTokens, usage.completionTokens)
     const cachedTokens = safeAddTokenCounts(cacheReadTokens, cacheCreationTokens)
     const totalTokens = safeAddTokenCounts(uncachedTokens, cachedTokens)
@@ -69,6 +75,7 @@ export const SpanLifecycle = {
         completionTokens: usage.completionTokens,
         cacheReadTokens,
         cacheCreationTokens,
+        ...(usage.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens } : {}),
       })
     }
     const data: Record<string, unknown> = {
@@ -81,6 +88,9 @@ export const SpanLifecycle = {
     }
     if (usage.cacheCreationTokens !== undefined) {
       data['cacheCreationTokens'] = cacheCreationTokens
+    }
+    if (usage.cacheCreation1hTokens !== undefined) {
+      data['cacheCreation1hTokens'] = cacheCreation1hTokens
     }
     if (usage.model !== undefined) {
       data['model'] = usage.model

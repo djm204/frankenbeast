@@ -4,6 +4,8 @@ export interface TokenRecord {
   completionTokens: number
   cacheReadTokens?: number
   cacheCreationTokens?: number
+  /** One-hour cache writes, already included in cacheCreationTokens. */
+  cacheCreation1hTokens?: number
 }
 
 export interface TokenTotals {
@@ -11,6 +13,7 @@ export interface TokenTotals {
   completionTokens: number
   cacheReadTokens: number
   cacheCreationTokens: number
+  cacheCreation1hTokens?: number
   totalTokens: number
 }
 
@@ -37,12 +40,14 @@ export class TokenCounter {
     completion: number
     cacheRead: number
     cacheCreation: number
+    cacheCreation1h: number
   }>()
   private readonly maxModels: number
   private totalPromptTokens = 0
   private totalCompletionTokens = 0
   private totalCacheReadTokens = 0
   private totalCacheCreationTokens = 0
+  private totalCacheCreation1hTokens = 0
 
   constructor(options: TokenCounterOptions = {}) {
     const maxModels = options.maxModels ?? DEFAULT_MAX_MODELS
@@ -77,10 +82,15 @@ export class TokenCounter {
   record(entry: TokenRecord): void {
     const cacheReadTokens = entry.cacheReadTokens ?? 0
     const cacheCreationTokens = entry.cacheCreationTokens ?? 0
+    const cacheCreation1hTokens = entry.cacheCreation1hTokens ?? 0
     TokenCounter.assertValidDelta(entry.promptTokens, 'promptTokens')
     TokenCounter.assertValidDelta(entry.completionTokens, 'completionTokens')
     TokenCounter.assertValidDelta(cacheReadTokens, 'cacheReadTokens')
     TokenCounter.assertValidDelta(cacheCreationTokens, 'cacheCreationTokens')
+    TokenCounter.assertValidDelta(cacheCreation1hTokens, 'cacheCreation1hTokens')
+    if (cacheCreation1hTokens > cacheCreationTokens) {
+      throw new RangeError('TokenCounter: cacheCreation1hTokens must not exceed cacheCreationTokens')
+    }
     if (!this.counts.has(entry.model) && this.counts.size >= this.maxModels) {
       throw new RangeError(
         `TokenCounter: model cardinality limit of ${this.maxModels} reached; rejected model "${entry.model}"`,
@@ -91,11 +101,13 @@ export class TokenCounter {
       completion: 0,
       cacheRead: 0,
       cacheCreation: 0,
+      cacheCreation1h: 0,
     }
     const prompt = TokenCounter.safeAdd(existing.prompt, entry.promptTokens)
     const completion = TokenCounter.safeAdd(existing.completion, entry.completionTokens)
     const cacheRead = TokenCounter.safeAdd(existing.cacheRead, cacheReadTokens)
     const cacheCreation = TokenCounter.safeAdd(existing.cacheCreation, cacheCreationTokens)
+    const cacheCreation1h = TokenCounter.safeAdd(existing.cacheCreation1h, cacheCreation1hTokens)
     // Validate the combined per-model total up-front so a record whose
     // prompt+completion overflows the safe-integer range is rejected here,
     // atomically, instead of poisoning later totalsFor() reads.
@@ -113,14 +125,19 @@ export class TokenCounter {
       this.totalCacheCreationTokens,
       cacheCreationTokens,
     )
+    const globalCacheCreation1h = TokenCounter.safeAdd(
+      this.totalCacheCreation1hTokens,
+      cacheCreation1hTokens,
+    )
     const globalUncached = TokenCounter.safeAdd(globalPrompt, globalCompletion)
     const globalCached = TokenCounter.safeAdd(globalCacheRead, globalCacheCreation)
     TokenCounter.safeAdd(globalUncached, globalCached)
-    this.counts.set(entry.model, { prompt, completion, cacheRead, cacheCreation })
+    this.counts.set(entry.model, { prompt, completion, cacheRead, cacheCreation, cacheCreation1h })
     this.totalPromptTokens = globalPrompt
     this.totalCompletionTokens = globalCompletion
     this.totalCacheReadTokens = globalCacheRead
     this.totalCacheCreationTokens = globalCacheCreation
+    this.totalCacheCreation1hTokens = globalCacheCreation1h
   }
 
   totalsFor(model: string): TokenTotals {
@@ -129,6 +146,7 @@ export class TokenCounter {
       completion: 0,
       cacheRead: 0,
       cacheCreation: 0,
+      cacheCreation1h: 0,
     }
     const uncached = TokenCounter.safeAdd(entry.prompt, entry.completion)
     const cached = TokenCounter.safeAdd(entry.cacheRead, entry.cacheCreation)
@@ -137,6 +155,7 @@ export class TokenCounter {
       completionTokens: entry.completion,
       cacheReadTokens: entry.cacheRead,
       cacheCreationTokens: entry.cacheCreation,
+      ...(entry.cacheCreation1h > 0 ? { cacheCreation1hTokens: entry.cacheCreation1h } : {}),
       totalTokens: TokenCounter.safeAdd(uncached, cached),
     }
   }
@@ -152,6 +171,9 @@ export class TokenCounter {
       completionTokens: this.totalCompletionTokens,
       cacheReadTokens: this.totalCacheReadTokens,
       cacheCreationTokens: this.totalCacheCreationTokens,
+      ...(this.totalCacheCreation1hTokens > 0
+        ? { cacheCreation1hTokens: this.totalCacheCreation1hTokens }
+        : {}),
       totalTokens: TokenCounter.safeAdd(uncached, cached),
     }
   }
@@ -166,5 +188,6 @@ export class TokenCounter {
     this.totalCompletionTokens = 0
     this.totalCacheReadTokens = 0
     this.totalCacheCreationTokens = 0
+    this.totalCacheCreation1hTokens = 0
   }
 }
