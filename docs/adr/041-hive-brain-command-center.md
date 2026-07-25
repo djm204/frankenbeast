@@ -233,6 +233,8 @@ run approval remains owned by the existing governor/executor rather than the cha
 approval endpoint. This is the same chat approval gate
 and Beast service/execution path used by legacy per-session callers, not a
 Brain-only governor. No existing REST or WebSocket chat API contract changed.
+`BeastDispatchService.createRun` does not expose a direct `IGovernorModule` call;
+the established governor boundary remains inside the selected Beast executor.
 
 `dispatchedBy = "chat"`, the conversation/session correlation ids, selected
 `brainKey`/`facultyId`, and routing reason must be retained as audit metadata.
