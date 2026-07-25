@@ -1166,7 +1166,7 @@ const TOOLS: ToolFull[] = [
       return {
         content: [{
           type: 'text',
-          text: `Logged cost: ${promptTokens} prompt + ${completionTokens} completion + ${cacheReadTokens} cache read + ${cacheCreationTokens} cache creation + ${cacheCreation1hTokens} one-hour cache creation tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}`,
+          text: `Logged cost: ${promptTokens} prompt + ${completionTokens} completion + ${cacheReadTokens} cache read + ${cacheCreationTokens} cache creation (${cacheCreation1hTokens} one-hour) tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}`,
         }],
       };
     },
@@ -1191,10 +1191,10 @@ const TOOLS: ToolFull[] = [
         `## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`,
         '',
         ...summary.byModel.map((row) =>
-          `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion + ${row.cacheReadTokens ?? 0} cache read + ${row.cacheCreationTokens ?? 0} cache creation + ${row.cacheCreation1hTokens ?? 0} one-hour cache creation = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`,
+          `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion + ${row.cacheReadTokens ?? 0} cache read + ${row.cacheCreationTokens ?? 0} cache creation (${row.cacheCreation1hTokens ?? 0} one-hour) = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`,
         ),
         '',
-        `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion + ${summary.totalCacheReadTokens ?? 0} cache read + ${summary.totalCacheCreationTokens ?? 0} cache creation + ${summary.totalCacheCreation1hTokens ?? 0} one-hour cache creation = $${summary.totalCostUsd.toFixed(4)}`,
+        `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion + ${summary.totalCacheReadTokens ?? 0} cache read + ${summary.totalCacheCreationTokens ?? 0} cache creation (${summary.totalCacheCreation1hTokens ?? 0} one-hour) = $${summary.totalCostUsd.toFixed(4)}`,
       ];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },

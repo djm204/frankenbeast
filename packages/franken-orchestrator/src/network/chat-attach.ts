@@ -19,6 +19,21 @@ function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
+    ...(
+      a.cacheReadTokens !== undefined || b.cacheReadTokens !== undefined
+        ? { cacheReadTokens: (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0) }
+        : {}
+    ),
+    ...(
+      a.cacheCreationTokens !== undefined || b.cacheCreationTokens !== undefined
+        ? { cacheCreationTokens: (a.cacheCreationTokens ?? 0) + (b.cacheCreationTokens ?? 0) }
+        : {}
+    ),
+    ...(
+      a.cacheCreation1hTokens !== undefined || b.cacheCreation1hTokens !== undefined
+        ? { cacheCreation1hTokens: (a.cacheCreation1hTokens ?? 0) + (b.cacheCreation1hTokens ?? 0) }
+        : {}
+    ),
     totalTokens: a.totalTokens + b.totalTokens,
   };
 }
@@ -260,7 +275,17 @@ function parseTokenUsage(value: unknown): TokenUsage | undefined {
   const outputTokens = usage['outputTokens'];
   const totalTokens = usage['totalTokens'];
   if (typeof inputTokens === 'number' && typeof outputTokens === 'number' && typeof totalTokens === 'number') {
-    return { inputTokens, outputTokens, totalTokens };
+    const cacheReadTokens = usage['cacheReadTokens'];
+    const cacheCreationTokens = usage['cacheCreationTokens'];
+    const cacheCreation1hTokens = usage['cacheCreation1hTokens'];
+    return {
+      inputTokens,
+      outputTokens,
+      ...(typeof cacheReadTokens === 'number' ? { cacheReadTokens } : {}),
+      ...(typeof cacheCreationTokens === 'number' ? { cacheCreationTokens } : {}),
+      ...(typeof cacheCreation1hTokens === 'number' ? { cacheCreation1hTokens } : {}),
+      totalTokens,
+    };
   }
   return undefined;
 }
@@ -375,6 +400,7 @@ function sendManagedChatInput(socket: WebSocket, input: string): void {
 }
 
 export const __chatAttachTestHooks = {
+  addUsage,
   awaitRemoteReply,
   createRemoteSession,
   parseManagedChatMessage,

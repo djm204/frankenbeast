@@ -104,8 +104,8 @@ describe('Observer Server', () => {
     });
     expect(logCostResult.content[0]!.text).toContain('1000 prompt');
     expect(logCostResult.content[0]!.text).toContain('300 cache read');
-    expect(logCostResult.content[0]!.text).toContain('100 cache creation');
-    expect(logCostResult.content[0]!.text).toContain('40 one-hour cache creation');
+    expect(logCostResult.content[0]!.text).toContain('100 cache creation (40 one-hour)');
+    expect(logCostResult.content[0]!.text).not.toContain('+ 40 one-hour cache creation');
     expect(logCostResult.content[0]!.text).toContain('$0.0000');
     expect(logCostResult.content[0]!.text).toContain('unknown model');
 
@@ -114,8 +114,8 @@ describe('Observer Server', () => {
     expect(costResult.content[0]!.text).toContain('3000');
     expect(costResult.content[0]!.text).toContain('1300');
     expect(costResult.content[0]!.text).toContain('300 cache read');
-    expect(costResult.content[0]!.text).toContain('100 cache creation');
-    expect(costResult.content[0]!.text).toContain('40 one-hour cache creation');
+    expect(costResult.content[0]!.text).toContain('100 cache creation (40 one-hour)');
+    expect(costResult.content[0]!.text).not.toContain('+ 40 one-hour cache creation');
 
     const trailResult = await trailTool.handler({ sessionId: 'sess-1' });
     expect(observer.trail).toHaveBeenCalledWith('sess-1');
