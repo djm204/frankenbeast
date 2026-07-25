@@ -36,6 +36,12 @@ import type {
   RelevantLesson,
 } from '@franken/types';
 import { isoNow } from '@franken/types';
+import {
+  HIVE_MIN_LESSON_CONFIDENCE,
+  HiveMindStore,
+  type HiveMindEntry,
+  type HiveMindNamespace,
+} from './hive-mind-store.js';
 
 // --- Working Memory ---
 
@@ -115,6 +121,11 @@ export interface SqliteBrainOptions {
   hydrateWorkingMemoryFromDb?: boolean;
   workingMemoryHydrationLimits?: Partial<WorkingMemoryHydrationLimits>;
   encryption?: MemoryEncryptionOptions;
+  hiveMind?: {
+    dbPath: string;
+    namespace: HiveMindNamespace;
+    publisherId: string;
+  };
 }
 
 export type MemoryRetentionClass =
@@ -2814,11 +2825,18 @@ interface MemoryRetentionEnforcementScanState {
 
 type CorruptEpisodicDetailsReporter = (eventId: number) => void;
 
+function isSignificantHiveEpisode(event: EpisodicEvent): boolean {
+  return event.type === 'failure'
+    || event.details?.['outcome'] === 'negative'
+    || event.details?.['critical'] === true;
+}
+
 class SqliteEpisodicMemory implements IEpisodicMemory {
   constructor(
     private db: Database.Database,
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
+    private significantEpisode?: (event: EpisodicEvent) => void,
   ) {}
 
   record(event: EpisodicEvent): void {
@@ -2834,6 +2852,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
         });
       });
       tx.immediate();
+      if (isSignificantHiveEpisode(event)) this.significantEpisode?.(event);
     } catch (error) {
       try {
         this.audit?.({
@@ -2921,6 +2940,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
 
       this.db.exec('COMMIT');
       transactionActive = false;
+      if (isSignificantHiveEpisode(guardedEvent)) this.significantEpisode?.(guardedEvent);
       return { recorded: true, key, cooldownMs };
     } catch (error) {
       if (transactionActive) {
@@ -3917,6 +3937,7 @@ export class SqliteMemoryReviewQueue {
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
     private expireWorkingKeys?: (keys: readonly string[]) => void,
+    private reviewDecision?: (candidate: MemoryCandidate, wasConsolidatedLesson: boolean) => void,
   ) {
     this.backfillCandidateKinds();
   }
@@ -4193,9 +4214,11 @@ export class SqliteMemoryReviewQueue {
     const now = isoNow();
     let finalizeWorkingFlush: (() => void) | undefined;
     let approvedCandidate: MemoryCandidate | undefined;
+    let wasConsolidatedLesson = false;
     let retiredLessonKeys: string[] = [];
     const approveTx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id);
+      wasConsolidatedLesson = isConsolidatedLesson(candidate.value);
       const lineageRow = this.db.prepare(
         'SELECT lesson_replaces_keys FROM memory_review_candidates WHERE id = ?',
       ).get(id) as { lesson_replaces_keys?: string | null } | undefined;
@@ -4343,6 +4366,7 @@ export class SqliteMemoryReviewQueue {
       this.expireWorkingKeys?.(retiredLessonKeys);
     }
     const result = approvedCandidate ?? this.requireCandidate(id);
+    this.reviewDecision?.(result, wasConsolidatedLesson);
     return result;
   }
 
@@ -4361,8 +4385,10 @@ export class SqliteMemoryReviewQueue {
     const now = isoNow();
     let rejectedCandidate: MemoryCandidate | undefined;
     let purgeRejectedSecretContent = false;
+    let wasConsolidatedLesson = false;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
+      wasConsolidatedLesson = isConsolidatedLesson(candidate.value);
       this.assertDecisionOptionsNotDeletionGuarded(options);
       if (conflictGuard) {
         this.assertConflictUnchanged(
@@ -4414,6 +4440,7 @@ export class SqliteMemoryReviewQueue {
       purgeDeletedSqliteContent(this.db, this.dbPath);
     }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
+    this.reviewDecision?.(result, wasConsolidatedLesson);
     return result;
   }
 
@@ -4426,8 +4453,10 @@ export class SqliteMemoryReviewQueue {
     let neverStoredCandidate: MemoryCandidate | undefined;
     let originalKey: string | undefined;
     let purgedWorkingKey: string | undefined;
+    let wasConsolidatedLesson = false;
     const tx = this.db.transaction(() => {
       const candidate = this.requireCandidate(id, 'pending');
+      wasConsolidatedLesson = isConsolidatedLesson(candidate.value);
       originalKey = candidate.key;
       this.assertDecisionOptionsNotDeletionGuarded(options);
       const shouldAuditWorkingDelete = candidate.targetStore === 'working' && this.working.has(candidate.key);
@@ -4484,6 +4513,7 @@ export class SqliteMemoryReviewQueue {
     finalizeWorkingFlush?.();
     purgeDeletedSqliteContent(this.db, this.dbPath);
     const result = neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
+    this.reviewDecision?.(result, wasConsolidatedLesson);
     return result;
   }
 
@@ -6490,6 +6520,9 @@ export class SqliteBrain implements IBrain {
   private readonly dbPath: string;
   private readonly encryption: MemoryCipher | undefined;
   private readonly auditRecorder: MemoryAccessAuditRecorder;
+  private readonly hiveMindStore: HiveMindStore | undefined;
+  private readonly hiveMindNamespace: HiveMindNamespace | undefined;
+  private readonly hiveMindPublisherId: string | undefined;
   private retentionEpisodicScanCursor: MemoryRetentionScanCursor | undefined;
   private retentionCheckpointScanCursor: MemoryRetentionScanCursor | undefined;
   private retentionCheckpointFloorSearchCursorId: number | undefined;
@@ -6565,6 +6598,7 @@ export class SqliteBrain implements IBrain {
       this.db,
       encryption,
       (event) => this.auditRecorder(event),
+      (event) => this.publishHiveEpisode(event),
     );
     this.recovery = new SqliteRecoveryMemory(
       this.db,
@@ -6580,7 +6614,19 @@ export class SqliteBrain implements IBrain {
       encryption,
       (event) => this.auditRecorder(event),
       (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
+      (candidate, wasConsolidatedLesson) => this.handleHiveReviewDecision(candidate, wasConsolidatedLesson),
     );
+    const hiveMind = encryption ? undefined : options.hiveMind;
+    this.hiveMindNamespace = hiveMind?.namespace;
+    this.hiveMindPublisherId = hiveMind?.publisherId;
+    let hiveMindStore: HiveMindStore | undefined;
+    try {
+      hiveMindStore = hiveMind ? new HiveMindStore(hiveMind.dbPath) : undefined;
+    } catch {
+      // Shared memory is additive. A missing/locked hive must not disable local memory.
+      hiveMindStore = undefined;
+    }
+    this.hiveMindStore = hiveMindStore;
     SqliteBrain.registerLiveBrain(this.dbPath, this);
   }
 
@@ -6952,7 +6998,17 @@ export class SqliteBrain implements IBrain {
     }
     return created;
     });
-    return consolidate.immediate();
+    const lessons = consolidate.immediate();
+    for (const lesson of lessons) {
+      if (lesson.value.confidence < HIVE_MIN_LESSON_CONFIDENCE) continue;
+      this.publishHiveEntry({
+        kind: 'lesson',
+        key: lesson.key,
+        status: lesson.status,
+        lesson: lesson.value,
+      });
+    }
+    return lessons;
   }
 
   private findRelevantLessons(
@@ -6998,6 +7054,7 @@ export class SqliteBrain implements IBrain {
             key: candidate.key,
             status,
             relevance: lessonRelevance(normalizedQuery, value),
+            source: 'local',
           } satisfies RelevantLesson;
           if (lesson.relevance <= 0 || lesson.confidence < minConfidence) continue;
           lessons.push(lesson);
@@ -7010,6 +7067,7 @@ export class SqliteBrain implements IBrain {
     };
     const lessons = (['pending', 'approved'] as const)
       .flatMap((status) => relevantLessonsForStatus(status))
+      .concat(this.findRelevantPeerLessons(normalizedQuery, minConfidence))
       .sort((left, right) =>
         right.relevance - left.relevance
         || right.confidence - left.confidence
@@ -7019,6 +7077,85 @@ export class SqliteBrain implements IBrain {
     return lessons
       .filter((lesson, index) => lessons.findIndex(({ key }) => key === lesson.key) === index)
       .slice(0, limit);
+  }
+
+  private findRelevantPeerLessons(query: string, minConfidence: number): RelevantLesson[] {
+    if (!this.hiveMindStore || !this.hiveMindNamespace || !this.hiveMindPublisherId) return [];
+    let entries: ReturnType<HiveMindStore['recent']>;
+    try {
+      entries = this.hiveMindStore.recent(this.hiveMindNamespace, {
+        limit: 1_000,
+        excludePublisherId: this.hiveMindPublisherId,
+        kind: 'lesson',
+      });
+    } catch {
+      return [];
+    }
+    return entries
+      .filter(entry => entry.kind === 'lesson')
+      .map((entry) => ({
+        ...entry.lesson,
+        key: entry.key,
+        status: entry.status,
+        relevance: lessonRelevance(query, entry.lesson),
+        source: 'peer' as const,
+        publisherId: entry.publisherId,
+      }))
+      .filter(lesson => lesson.relevance > 0 && lesson.confidence >= minConfidence);
+  }
+
+  private publishHiveEpisode(event: EpisodicEvent): void {
+    this.publishHiveEntry({ kind: 'episode', event });
+  }
+
+  private handleHiveReviewDecision(
+    candidate: MemoryCandidate,
+    wasConsolidatedLesson: boolean,
+  ): void {
+    if (
+      !wasConsolidatedLesson
+      || !this.hiveMindStore
+      || !this.hiveMindNamespace
+      || !this.hiveMindPublisherId
+    ) return;
+    try {
+      this.hiveMindStore.deleteLesson(
+        this.hiveMindNamespace,
+        this.hiveMindPublisherId,
+        candidate.key,
+      );
+      if (candidate.status === 'approved' && isConsolidatedLesson(candidate.value)) {
+        this.hiveMindStore.publish(this.hiveMindNamespace, this.hiveMindPublisherId, {
+          kind: 'lesson',
+          key: candidate.key,
+          status: 'approved',
+          lesson: candidate.value,
+        });
+      }
+    } catch {
+      // Review decisions remain local-authoritative when shared storage is unavailable.
+    }
+  }
+
+  private publishHiveEntry(entry: Parameters<HiveMindStore['publish']>[2]): void {
+    if (!this.hiveMindStore || !this.hiveMindNamespace || !this.hiveMindPublisherId) return;
+    try {
+      this.hiveMindStore.publish(this.hiveMindNamespace, this.hiveMindPublisherId, entry);
+    } catch {
+      // Hive sharing is additive; a shared-store outage must not roll back local memory.
+    }
+  }
+
+  private deleteHiveMindMatches(
+    selector: NormalizedRightToForgetSelector,
+    memoryType: RightToForgetMemoryType,
+  ): number {
+    if (!this.hiveMindStore || !this.hiveMindNamespace || !this.hiveMindPublisherId) return 0;
+    return this.hiveMindStore.deletePublishedWhere(
+      this.hiveMindNamespace,
+      this.hiveMindPublisherId,
+      entry => hiveMindEntryMatchesSelector(entry, selector, memoryType),
+    );
   }
 
   private lessonCandidatesDependingOn(eventIds: readonly number[]): MemoryCandidate[] {
@@ -8162,6 +8299,7 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       const auditEventId = tx() as number;
+      this.deleteHiveMindMatches(normalizedSelector, memoryType);
       if (deletedWorkingKeys.size > 0 || episodicMatchCount > 0 || checkpointMatchCount > 0 || reviewMatchCount > 0) {
         finalizePersistedWorkingDelete?.();
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
@@ -8562,6 +8700,7 @@ export class SqliteBrain implements IBrain {
   close(): void {
     SqliteBrain.unregisterLiveBrain(this.dbPath, this);
     this.db.close();
+    this.hiveMindStore?.close();
   }
 }
 
@@ -9714,6 +9853,24 @@ function workingEntryMatchesSelector(key: string, value: unknown, selector: Norm
     ) return true;
   }
   return false;
+}
+
+function hiveMindEntryMatchesSelector(
+  entry: HiveMindEntry,
+  selector: NormalizedRightToForgetSelector,
+  memoryType: RightToForgetMemoryType,
+): boolean {
+  if (entry.kind === 'lesson') {
+    return memoryType !== 'episodic'
+      && workingEntryMatchesSelector(entry.key, entry.lesson, selector);
+  }
+  return memoryType !== 'working'
+    && episodicRowMatchesSelector(
+      entry.event.step ?? '',
+      entry.event.summary,
+      entry.event.details === undefined ? null : JSON.stringify(entry.event.details),
+      selector,
+    );
 }
 
 function isQuarantinedEpisodicDetails(event: EpisodicEvent): boolean {

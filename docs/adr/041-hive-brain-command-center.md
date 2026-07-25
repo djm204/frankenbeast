@@ -294,7 +294,21 @@ input policy (threshold 3, lookback 100, similarity 0.5); bursts coalesce into o
 pending pass and CLI shutdown drains it. Halted critiques are excluded, query
 assembly is capped before redaction, and clustering uses objective/request context
 rather than lifecycle boilerplate. This does not inject lesson text into prompts, share lessons across
-brains (#3689), or change the dispatch boundaries above.
+brains through chat, or change the dispatch boundaries above.
+
+Issue #3689 adds the lower-level shared learning substrate independently of the
+command-center chat work. Durable `BrainRegistry` entries bind to one WAL-backed
+`.fbeast/hive/hive.db` and an enforced `agent-type:<id>` namespace. A literal
+`global` namespace exists only as an explicit caller opt-in. High-confidence
+consolidated lessons and significant failure/negative-decision episodes are
+published synchronously after their local transaction commits. Running peers
+poll bounded, cursored pages; `relevantLessons()` consults at most 1,000 shared
+lesson rows and labels peer results separately from local experience. Review
+rejection/never-store and right-to-forget remove owned hive entries, namespaces
+retain at most 10,000 rows by default, encrypted brains skip plaintext hive
+publication, and encrypted DR backups include hive state. This substrate
+does not add a socket, background poller, conversation aggregate, or dispatch
+path.
 
 ## Consequences
 

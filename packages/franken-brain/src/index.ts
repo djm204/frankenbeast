@@ -81,3 +81,18 @@ export {
 } from './sqlite-brain.js';
 
 export { BrainRegistry } from './brain-registry.js';
+
+export {
+  HIVE_MIND_GLOBAL_NAMESPACE,
+  HIVE_MIN_LESSON_CONFIDENCE,
+  HiveMindStore,
+  hiveMindAgentTypeNamespace,
+  type HiveMindEntry,
+  type HiveMindEpisodePublishEntry,
+  type HiveMindLessonPublishEntry,
+  type HiveMindNamespace,
+  type HiveMindPollOptions,
+  type HiveMindPublishEntry,
+  type HiveMindRecentOptions,
+  type HiveMindStoreOptions,
+} from './hive-mind-store.js';
