@@ -85,9 +85,11 @@ describe('Observer Server', () => {
 
     const logCostResult = await logCostTool.handler({
       sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
+      cacheReadTokens: 300, cacheCreationTokens: 100,
     });
     expect(observer.logCost).toHaveBeenCalledWith({
       sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
+      cacheReadTokens: 300, cacheCreationTokens: 100,
     });
     expect(logCostResult.content[0]!.text).toContain('1000');
     expect(logCostResult.content[0]!.text).toContain('$0.0000');

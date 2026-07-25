@@ -83,6 +83,43 @@ describe('ObserverPortAdapter', () => {
     });
   });
 
+  it('includes cache metadata in token spend and cost calculation', async () => {
+    const trace = makeTrace();
+    const traceContext = {
+      createTrace: vi.fn().mockReturnValue(trace),
+      startSpan: vi.fn().mockImplementation((_trace: any, options: any) => {
+        const span = makeSpan(trace.id, options.name);
+        trace.spans.push(span);
+        return span;
+      }),
+      endSpan: vi.fn(),
+    };
+    const costCalculator = { calculate: vi.fn().mockReturnValue(0.5) };
+    const adapter = new ObserverPortAdapter({ traceContext, costCalculator });
+    adapter.startTrace('session-1');
+    adapter.startSpan('task:1').end({
+      promptTokens: 10,
+      completionTokens: 5,
+      cacheReadTokens: 8,
+      cacheCreationTokens: 2,
+      model: 'claude-sonnet-4-6',
+    });
+
+    await expect(adapter.getTokenSpend('session-1')).resolves.toEqual({
+      inputTokens: 20,
+      outputTokens: 5,
+      totalTokens: 25,
+      estimatedCostUsd: 0.5,
+    });
+    expect(costCalculator.calculate).toHaveBeenCalledWith({
+      model: 'claude-sonnet-4-6',
+      promptTokens: 10,
+      completionTokens: 5,
+      cacheReadTokens: 8,
+      cacheCreationTokens: 2,
+    });
+  });
+
   it('rejects a span with negative token metadata instead of letting it cancel', async () => {
     const trace = makeTrace();
     const traceContext = {

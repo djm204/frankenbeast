@@ -75,6 +75,8 @@ export interface Trace {
 export interface TokenTotals {
   readonly promptTokens: number;
   readonly completionTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheCreationTokens: number;
   readonly totalTokens: number;
 }
 
@@ -82,11 +84,15 @@ export interface TokenRecord {
   readonly model: string;
   readonly promptTokens: number;
   readonly completionTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheCreationTokens?: number;
 }
 
 export interface TokenUsage {
   readonly promptTokens: number;
   readonly completionTokens: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheCreationTokens?: number;
   readonly model?: string;
 }
 
@@ -885,7 +891,13 @@ export class CliSkillExecutor {
   private computeCurrentCost(): number {
     const entries = this.observer.counter.allModels().map((m) => {
       const t = this.observer.counter.totalsFor(m);
-      return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
+      return {
+        model: m,
+        promptTokens: t.promptTokens,
+        completionTokens: t.completionTokens,
+        cacheReadTokens: t.cacheReadTokens,
+        cacheCreationTokens: t.cacheCreationTokens,
+      };
     });
     return this.observer.costCalc.totalCost(entries);
   }

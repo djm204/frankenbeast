@@ -52,13 +52,23 @@ export class CostCalculator {
   private static assertValidTokenAggregates(entries: TokenRecord[]): void {
     let promptTokens = 0
     let completionTokens = 0
+    let cacheReadTokens = 0
+    let cacheCreationTokens = 0
 
     for (const entry of entries) {
+      const cacheRead = entry.cacheReadTokens ?? 0
+      const cacheCreation = entry.cacheCreationTokens ?? 0
       CostCalculator.assertValidTokenCount(entry.promptTokens, 'promptTokens')
       CostCalculator.assertValidTokenCount(entry.completionTokens, 'completionTokens')
+      CostCalculator.assertValidTokenCount(cacheRead, 'cacheReadTokens')
+      CostCalculator.assertValidTokenCount(cacheCreation, 'cacheCreationTokens')
       promptTokens = CostCalculator.safeAddTokenCounts(promptTokens, entry.promptTokens)
       completionTokens = CostCalculator.safeAddTokenCounts(completionTokens, entry.completionTokens)
-      CostCalculator.safeAddTokenCounts(promptTokens, completionTokens)
+      cacheReadTokens = CostCalculator.safeAddTokenCounts(cacheReadTokens, cacheRead)
+      cacheCreationTokens = CostCalculator.safeAddTokenCounts(cacheCreationTokens, cacheCreation)
+      const uncached = CostCalculator.safeAddTokenCounts(promptTokens, completionTokens)
+      const cached = CostCalculator.safeAddTokenCounts(cacheReadTokens, cacheCreationTokens)
+      CostCalculator.safeAddTokenCounts(uncached, cached)
     }
   }
 
@@ -67,8 +77,12 @@ export class CostCalculator {
   }
 
   calculateWithAttribution(entry: TokenRecord): CostCalculation {
+    const cacheReadTokens = entry.cacheReadTokens ?? 0
+    const cacheCreationTokens = entry.cacheCreationTokens ?? 0
     CostCalculator.assertValidTokenCount(entry.promptTokens, 'promptTokens')
     CostCalculator.assertValidTokenCount(entry.completionTokens, 'completionTokens')
+    CostCalculator.assertValidTokenCount(cacheReadTokens, 'cacheReadTokens')
+    CostCalculator.assertValidTokenCount(cacheCreationTokens, 'cacheCreationTokens')
 
     const model = this.pricing[entry.model]
     if (model === undefined) {
@@ -81,7 +95,10 @@ export class CostCalculator {
     return {
       costUsd:
         (entry.promptTokens * model.promptPerMillion) / 1_000_000 +
-        (entry.completionTokens * model.completionPerMillion) / 1_000_000,
+        (entry.completionTokens * model.completionPerMillion) / 1_000_000 +
+        (cacheReadTokens * (model.cacheReadPerMillion ?? model.promptPerMillion)) / 1_000_000 +
+        (cacheCreationTokens * (model.cacheCreationPerMillion ?? model.promptPerMillion)) /
+          1_000_000,
       unknownModel: false,
     }
   }

@@ -308,6 +308,37 @@ describe('PrometheusAdapter', () => {
   })
 
   describe('scrape() — cost metrics', () => {
+    it('reports and prices cache-read and cache-creation tokens', async () => {
+      const adapter = new PrometheusAdapter({
+        pricingTable: {
+          'cache-model': {
+            promptPerMillion: 3,
+            completionPerMillion: 15,
+            cacheReadPerMillion: 0.3,
+            cacheCreationPerMillion: 3.75,
+          },
+        },
+      })
+      await adapter.flush(
+        makeTraceWithMetadata({
+          model: 'cache-model',
+          promptTokens: 1_000_000,
+          completionTokens: 1_000_000,
+          cacheReadTokens: 1_000_000,
+          cacheCreationTokens: 1_000_000,
+        }),
+      )
+
+      const out = adapter.scrape()
+      expect(out).toContain(
+        'franken_observer_tokens_total{model="cache-model",type="cache_read"} 1000000',
+      )
+      expect(out).toContain(
+        'franken_observer_tokens_total{model="cache-model",type="cache_creation"} 1000000',
+      )
+      expect(out).toContain('franken_observer_cost_usd_total{model="cache-model"} 22.05')
+    })
+
     it('reports cost_usd_total when a pricingTable is provided', async () => {
       const adapter = new PrometheusAdapter({
         pricingTable: {

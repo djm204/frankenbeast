@@ -36,11 +36,23 @@ export interface IAdapter {
 
 export interface ILlmObserver {
   counter: {
-    record(entry: { model: string; promptTokens: number; completionTokens: number }): void;
+    record(entry: {
+      model: string;
+      promptTokens: number;
+      completionTokens: number;
+      cacheReadTokens?: number;
+      cacheCreationTokens?: number;
+    }): void;
   };
   startSpan(trace: any, opts: { name: string }): any;
   endSpan(span: any, opts: { status: string }): void;
-  recordTokenUsage(span: any, usage: { promptTokens: number; completionTokens: number; model: string }, counter: any): void;
+  recordTokenUsage(span: any, usage: {
+    promptTokens: number;
+    completionTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    model: string;
+  }, counter: any): void;
   trace: any;
 }
 
@@ -145,6 +157,12 @@ export class AdapterLlmClient implements ILlmClient {
             model,
             promptTokens,
             completionTokens,
+            ...(usage?.cacheReadTokens !== undefined
+              ? { cacheReadTokens: usage.cacheReadTokens }
+              : {}),
+            ...(usage?.cacheCreationTokens !== undefined
+              ? { cacheCreationTokens: usage.cacheCreationTokens }
+              : {}),
           },
           this.observer.counter,
         );

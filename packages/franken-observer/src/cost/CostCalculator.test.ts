@@ -6,8 +6,47 @@ describe('CostCalculator', () => {
   describe('with default pricing', () => {
     const calc = new CostCalculator(DEFAULT_PRICING)
 
+    it('matches published Anthropic cache pricing for listed Claude models', () => {
+      expect(DEFAULT_PRICING['claude-opus-4-6']).toEqual({
+        promptPerMillion: 5,
+        completionPerMillion: 25,
+        cacheReadPerMillion: 0.5,
+        cacheCreationPerMillion: 6.25,
+      })
+      expect(DEFAULT_PRICING['claude-sonnet-4-6']).toMatchObject({
+        cacheReadPerMillion: 0.3,
+        cacheCreationPerMillion: 3.75,
+      })
+      expect(DEFAULT_PRICING['claude-haiku-4-5']).toMatchObject({
+        cacheReadPerMillion: 0.1,
+        cacheCreationPerMillion: 1.25,
+      })
+    })
+
+    it('matches published OpenAI cached-input pricing for listed GPT-4o models', () => {
+      expect(DEFAULT_PRICING['gpt-4o']).toMatchObject({
+        promptPerMillion: 2.5,
+        completionPerMillion: 10,
+        cacheReadPerMillion: 1.25,
+      })
+      expect(DEFAULT_PRICING['gpt-4o-mini']).toMatchObject({
+        promptPerMillion: 0.15,
+        completionPerMillion: 0.6,
+        cacheReadPerMillion: 0.075,
+      })
+    })
+
+    it('uses Sonnet cache pricing for the Aider alias', () => {
+      expect(DEFAULT_PRICING['aider']).toMatchObject({
+        promptPerMillion: 3,
+        completionPerMillion: 15,
+        cacheReadPerMillion: 0.3,
+        cacheCreationPerMillion: 3.75,
+      })
+    })
+
     it('calculates cost for claude-opus-4-6 using per-million token rates', () => {
-      // Opus 4: $15/M prompt, $75/M completion (example rates)
+      // Opus 4.6: $5/M prompt, $25/M completion.
       const cost = calc.calculate({
         model: 'claude-opus-4-6',
         promptTokens: 1_000_000,
@@ -27,6 +66,39 @@ describe('CostCalculator', () => {
         (500_000 / 1_000_000) * pricing.promptPerMillion +
         (250_000 / 1_000_000) * pricing.completionPerMillion
       expect(cost).toBeCloseTo(expected, 8)
+    })
+
+    it('prices cache reads and cache creation at their configured rates', () => {
+      const calc = new CostCalculator({
+        cached: {
+          promptPerMillion: 4,
+          completionPerMillion: 8,
+          cacheReadPerMillion: 0.4,
+          cacheCreationPerMillion: 5,
+        },
+      })
+
+      expect(calc.calculate({
+        model: 'cached',
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+      })).toBe(17.4)
+    })
+
+    it('falls back to prompt pricing when cache-specific rates are unset', () => {
+      const calc = new CostCalculator({
+        fallback: { promptPerMillion: 4, completionPerMillion: 8 },
+      })
+
+      expect(calc.calculate({
+        model: 'fallback',
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+      })).toBe(8)
     })
 
     it('multiplies small token counts by the rate before scaling to millions', () => {

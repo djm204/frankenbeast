@@ -1141,6 +1141,8 @@ const TOOLS: ToolFull[] = [
         model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)', minLength: 1, maxLength: 256 },
         promptTokens: { type: 'number', description: 'Input/prompt token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         completionTokens: { type: 'number', description: 'Output/completion token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        cacheReadTokens: { type: 'number', description: 'Input tokens read from provider cache', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        cacheCreationTokens: { type: 'number', description: 'Input tokens written to provider cache', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table', minimum: 0 },
       },
       required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],

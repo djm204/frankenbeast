@@ -4,6 +4,8 @@ import type { TokenCounter } from '../cost/TokenCounter.js'
 export interface TokenUsage {
   promptTokens: number
   completionTokens: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
   model?: string
 }
 
@@ -47,9 +49,15 @@ export const SpanLifecycle = {
     if (span.status !== 'active') {
       throw new Error(`Cannot record token usage on a ${span.status} span (id: ${span.id})`)
     }
+    const cacheReadTokens = usage.cacheReadTokens ?? 0
+    const cacheCreationTokens = usage.cacheCreationTokens ?? 0
     assertValidTokenDelta(usage.promptTokens, 'promptTokens')
     assertValidTokenDelta(usage.completionTokens, 'completionTokens')
-    const totalTokens = safeAddTokenCounts(usage.promptTokens, usage.completionTokens)
+    assertValidTokenDelta(cacheReadTokens, 'cacheReadTokens')
+    assertValidTokenDelta(cacheCreationTokens, 'cacheCreationTokens')
+    const uncachedTokens = safeAddTokenCounts(usage.promptTokens, usage.completionTokens)
+    const cachedTokens = safeAddTokenCounts(cacheReadTokens, cacheCreationTokens)
+    const totalTokens = safeAddTokenCounts(uncachedTokens, cachedTokens)
 
     // Record to the counter next: it may throw if the new model/global totals
     // would overflow. Doing it before mutating the span keeps the rejection
@@ -59,12 +67,20 @@ export const SpanLifecycle = {
         model: usage.model,
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
       })
     }
     const data: Record<string, unknown> = {
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
       totalTokens,
+    }
+    if (usage.cacheReadTokens !== undefined) {
+      data['cacheReadTokens'] = cacheReadTokens
+    }
+    if (usage.cacheCreationTokens !== undefined) {
+      data['cacheCreationTokens'] = cacheCreationTokens
     }
     if (usage.model !== undefined) {
       data['model'] = usage.model

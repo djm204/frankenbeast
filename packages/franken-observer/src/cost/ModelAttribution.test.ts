@@ -123,6 +123,27 @@ describe('ModelAttribution', () => {
       expect(row.totalCostUsd).toBeCloseTo(DEFAULT_PRICING['claude-opus-4-6']!.promptPerMillion, 6)
     })
 
+    it('includes cache-read and cache-creation tiers in attributed cost', () => {
+      const attr = new ModelAttribution({
+        cached: {
+          promptPerMillion: 10,
+          completionPerMillion: 20,
+          cacheReadPerMillion: 1,
+          cacheCreationPerMillion: 12.5,
+        },
+      })
+      attr.record({
+        model: 'cached',
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+        success: true,
+      })
+
+      expect(attr.report()[0]!.totalCostUsd).toBe(43.5)
+    })
+
     it('returns an empty array when nothing has been recorded', () => {
       const attr = new ModelAttribution(DEFAULT_PRICING)
       expect(attr.report()).toEqual([])

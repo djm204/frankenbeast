@@ -9,7 +9,9 @@ import type {
   ProviderAuthMethod,
   ToolDefinition,
   BrainSnapshot,
+  TokenUsage,
 } from '@franken/types';
+import { TokenUsageSchema } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { createEgressGuardedFetch, type EgressAuditSink, type EgressPolicyConfig } from '../network/egress-policy.js';
 
@@ -80,13 +82,7 @@ export class AnthropicApiAdapter implements ILlmProvider {
       const finalMessage = await stream.finalMessage();
       yield {
         type: 'done',
-        usage: {
-          inputTokens: finalMessage.usage.input_tokens,
-          outputTokens: finalMessage.usage.output_tokens,
-          totalTokens:
-            finalMessage.usage.input_tokens +
-            finalMessage.usage.output_tokens,
-        },
+        usage: this.translateUsage(finalMessage.usage),
       };
     } catch (error) {
       if (error instanceof Anthropic.RateLimitError) {
@@ -145,6 +141,24 @@ export class AnthropicApiAdapter implements ILlmProvider {
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool['input_schema'],
     }));
+  }
+
+  translateUsage(usage: Anthropic.Usage): TokenUsage {
+    const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
+    const cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
+    const translated: TokenUsage = {
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      totalTokens:
+        usage.input_tokens +
+        usage.output_tokens +
+        cacheReadTokens +
+        cacheCreationTokens,
+    };
+    TokenUsageSchema.parse(translated);
+    return translated;
   }
 
   /**

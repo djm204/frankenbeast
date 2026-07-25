@@ -1154,8 +1154,8 @@ describe('GovernorAdapter', () => {
     db.close();
 
     await expect(governor.budgetStatus()).resolves.toEqual({
-      totalSpendUsd: 20,
-      byModel: [{ model: 'gpt-4o', costUsd: 20 }],
+      totalSpendUsd: 12.5,
+      byModel: [{ model: 'gpt-4o', costUsd: 12.5 }],
     });
   });
 
@@ -1175,9 +1175,9 @@ describe('GovernorAdapter', () => {
     db.close();
 
     await expect(governor.budgetStatus()).resolves.toEqual({
-      totalSpendUsd: 24.75,
+      totalSpendUsd: 17.25,
       byModel: [
-        { model: 'gpt-4o', costUsd: 23.5 },
+        { model: 'gpt-4o', costUsd: 16 },
         { model: 'new-model-not-in-pricing', costUsd: 1.25, unknownModel: true },
       ],
     });

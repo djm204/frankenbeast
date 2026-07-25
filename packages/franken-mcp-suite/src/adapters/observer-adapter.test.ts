@@ -712,6 +712,37 @@ describe('ObserverAdapter', () => {
     writeSpy.mockRestore();
   });
 
+  it('persists cache tiers and includes them in computed cost summaries', async () => {
+    const observer = createObserverAdapter(tracked(tmpDbPath()));
+
+    const logged = await observer.logCost({
+      sessionId: 'sess-cache',
+      model: 'claude-sonnet-4-6',
+      promptTokens: 1_000_000,
+      completionTokens: 1_000_000,
+      cacheReadTokens: 1_000_000,
+      cacheCreationTokens: 1_000_000,
+    });
+    const summary = await observer.cost({ sessionId: 'sess-cache' });
+
+    expect(logged).toEqual({ costUsd: 22.05, unknownModel: false });
+    expect(summary).toEqual({
+      totalPromptTokens: 1_000_000,
+      totalCompletionTokens: 1_000_000,
+      totalCacheReadTokens: 1_000_000,
+      totalCacheCreationTokens: 1_000_000,
+      totalCostUsd: 22.05,
+      byModel: [{
+        model: 'claude-sonnet-4-6',
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+        costUsd: 22.05,
+      }],
+    });
+  });
+
   it('preserves explicitly logged zero-cost rows in cost summaries', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);

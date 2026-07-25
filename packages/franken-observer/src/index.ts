@@ -3,7 +3,7 @@
 export { TraceContext } from './core/TraceContext.js'
 export { SpanLifecycle } from './core/SpanLifecycle.js'
 export { OTELSerializer } from './export/OTELSerializer.js'
-export { TokenCounter } from './cost/TokenCounter.js'
+export { cacheHitRatio, TokenCounter } from './cost/TokenCounter.js'
 export { CostCalculator } from './cost/CostCalculator.js'
 export { CircuitBreaker } from './cost/CircuitBreaker.js'
 export { ModelAttribution } from './cost/ModelAttribution.js'
@@ -120,7 +120,12 @@ export type {
   TraceValidationResult,
 } from './core/types.js'
 export type { TokenUsage } from './core/SpanLifecycle.js'
-export type { TokenRecord, TokenTotals, TokenCounterOptions } from './cost/TokenCounter.js'
+export type {
+  CacheHitRatioInput,
+  TokenRecord,
+  TokenTotals,
+  TokenCounterOptions,
+} from './cost/TokenCounter.js'
 export type {
   CostCalculation,
   CostCalculatorOptions,

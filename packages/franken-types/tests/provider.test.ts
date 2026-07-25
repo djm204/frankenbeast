@@ -31,6 +31,18 @@ describe('TokenUsageSchema', () => {
     expect(TokenUsageSchema.parse(usage)).toEqual(usage);
   });
 
+  it('preserves provider-reported cache token counts', () => {
+    const usage = {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 20,
+      totalTokens: 250,
+    };
+
+    expect(TokenUsageSchema.parse(usage)).toEqual(usage);
+  });
+
   it('rejects negative inputTokens', () => {
     expect(() =>
       TokenUsageSchema.parse({ inputTokens: -1, outputTokens: 0, totalTokens: 0 }),

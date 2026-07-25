@@ -46,6 +46,8 @@ const SCHEMA = `
     model TEXT NOT NULL,
     prompt_tokens INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL NOT NULL DEFAULT 0,
     cost_source TEXT NOT NULL DEFAULT 'computed',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -104,15 +106,19 @@ export function createSqliteStore(dbPath: string): SqliteStore {
   `);
 
   const costColumns = db.pragma('table_info(cost_ledger)') as Array<{ name: string }>;
-  if (!costColumns.some((column) => column.name === 'cost_source')) {
+  const ensureCostColumn = (name: string, definition: string): void => {
+    if (costColumns.some((column) => column.name === name)) return;
     try {
-      db.exec("ALTER TABLE cost_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'legacy'");
+      db.exec(`ALTER TABLE cost_ledger ADD COLUMN ${name} ${definition}`);
     } catch (error) {
-      if (!(error instanceof Error) || !/duplicate column name: cost_source/i.test(error.message)) {
+      if (!(error instanceof Error) || !new RegExp(`duplicate column name: ${name}`, 'i').test(error.message)) {
         throw error;
       }
     }
-  }
+  };
+  ensureCostColumn('cost_source', "TEXT NOT NULL DEFAULT 'legacy'");
+  ensureCostColumn('cache_read_tokens', 'INTEGER NOT NULL DEFAULT 0');
+  ensureCostColumn('cache_creation_tokens', 'INTEGER NOT NULL DEFAULT 0');
 
   return {
     db,

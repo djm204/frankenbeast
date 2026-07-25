@@ -143,6 +143,18 @@ describe('OpenAiApiAdapter', () => {
     });
   });
 
+  describe('translateUsage()', () => {
+    it('rejects usage whose combined token count is unsafe', () => {
+      const adapter = new OpenAiApiAdapter({ apiKey: 'test-...ure' });
+
+      expect(() => adapter.translateUsage({
+        prompt_tokens: Number.MAX_SAFE_INTEGER,
+        completion_tokens: 1,
+        total_tokens: Number.MAX_SAFE_INTEGER,
+      } as any)).toThrow();
+    });
+  });
+
   describe('execute()', () => {
     it('translates text stream chunks and emits done with usage', async () => {
       const adapter = new OpenAiApiAdapter({ apiKey: 'test-api-key-fixture' });
@@ -150,7 +162,15 @@ describe('OpenAiApiAdapter', () => {
       const mockChunks = [
         { choices: [{ delta: { content: 'Hello' }, finish_reason: null }], usage: null },
         { choices: [{ delta: { content: ' world' }, finish_reason: 'stop' }], usage: null },
-        { choices: [], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } },
+        {
+          choices: [],
+          usage: {
+            prompt_tokens: 20,
+            completion_tokens: 10,
+            total_tokens: 30,
+            prompt_tokens_details: { cached_tokens: 5 },
+          },
+        },
       ];
       (adapter as any).client = {
         chat: {
@@ -169,7 +189,16 @@ describe('OpenAiApiAdapter', () => {
 
       expect(events[0]).toEqual({ type: 'text', content: 'Hello' });
       expect(events[1]).toEqual({ type: 'text', content: ' world' });
-      expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 } });
+      expect(events[2]).toEqual({
+        type: 'done',
+        usage: {
+          inputTokens: 15,
+          outputTokens: 10,
+          cacheReadTokens: 5,
+          totalTokens: 30,
+        },
+      });
+
     });
 
     it('emits retryable error on rate limit', async () => {

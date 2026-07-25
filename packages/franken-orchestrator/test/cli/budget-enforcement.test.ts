@@ -47,13 +47,13 @@ function provider(name: string, script: string): ICliProvider {
 
 describe('Budget enforcement integration', () => {
   it('trips the circuit breaker when recorded cost exceeds budget', async () => {
-    // Budget: $0.01, record tokens costing $0.02
+    // Budget: $0.01, record tokens costing $0.0125
     const bridge = new CliObserverBridge({ budgetLimitUsd: 0.01 });
     bridge.startTrace('budget-trip-test');
     const deps = bridge.observerDeps;
 
     // Record 1000 prompt + 1000 completion tokens as gpt-4o
-    // gpt-4o: (1000/1M)*5 + (1000/1M)*15 = $0.005 + $0.015 = $0.02
+    // gpt-4o: (1000/1M)*2.5 + (1000/1M)*10 = $0.0025 + $0.01 = $0.0125
     const span = deps.startSpan(deps.trace, { name: 'expensive-call' });
     deps.recordTokenUsage(
       span,
@@ -69,21 +69,21 @@ describe('Budget enforcement integration', () => {
     });
     const spendUsd = deps.costCalc.totalCost(entries);
 
-    expect(spendUsd).toBeCloseTo(0.02, 4);
+    expect(spendUsd).toBeCloseTo(0.0125, 5);
 
     const result = deps.breaker.check(spendUsd);
     expect(result.tripped).toBe(true);
-    expect(result.spendUsd).toBeCloseTo(0.02, 4);
+    expect(result.spendUsd).toBeCloseTo(0.0125, 5);
     expect(result.limitUsd).toBe(0.01);
   });
 
   it('does not trip the circuit breaker when usage is within budget', async () => {
-    // Budget: $100, record tokens costing $0.02
+    // Budget: $100, record tokens costing $0.0125
     const bridge = new CliObserverBridge({ budgetLimitUsd: 100 });
     bridge.startTrace('budget-safe-test');
     const deps = bridge.observerDeps;
 
-    // Record 1000 prompt + 1000 completion tokens as gpt-4o = $0.02
+    // Record 1000 prompt + 1000 completion tokens as gpt-4o = $0.0125
     const span = deps.startSpan(deps.trace, { name: 'cheap-call' });
     deps.recordTokenUsage(
       span,
@@ -99,7 +99,7 @@ describe('Budget enforcement integration', () => {
     });
     const spendUsd = deps.costCalc.totalCost(entries);
 
-    expect(spendUsd).toBeCloseTo(0.02, 4);
+    expect(spendUsd).toBeCloseTo(0.0125, 5);
 
     const result = deps.breaker.check(spendUsd);
     expect(result.tripped).toBe(false);

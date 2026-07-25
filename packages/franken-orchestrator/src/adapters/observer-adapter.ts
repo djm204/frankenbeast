@@ -8,7 +8,13 @@ export interface TraceContextPort<Trace = TracePort, Span = SpanPort> {
 }
 
 export interface CostCalculatorPort {
-  calculate(entry: { model: string; promptTokens: number; completionTokens: number }): number;
+  calculate(entry: {
+    model: string;
+    promptTokens: number;
+    completionTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+  }): number;
 }
 
 export interface TracePort {
@@ -109,15 +115,28 @@ export class ObserverPortAdapter implements IObserverModule {
       // tokens/cost. Missing/non-numeric metadata is treated as zero.
       const promptTokens = tokenCountFromMetadata(span.metadata.promptTokens, 'promptTokens', span.id);
       const completionTokens = tokenCountFromMetadata(span.metadata.completionTokens, 'completionTokens', span.id);
-      inputTokens += promptTokens;
+      const hasCacheReadTokens = typeof span.metadata.cacheReadTokens === 'number';
+      const hasCacheCreationTokens = typeof span.metadata.cacheCreationTokens === 'number';
+      const cacheReadTokens = tokenCountFromMetadata(span.metadata.cacheReadTokens, 'cacheReadTokens', span.id);
+      const cacheCreationTokens = tokenCountFromMetadata(
+        span.metadata.cacheCreationTokens,
+        'cacheCreationTokens',
+        span.id,
+      );
+      inputTokens += promptTokens + cacheReadTokens + cacheCreationTokens;
       outputTokens += completionTokens;
 
       const model = span.metadata.model;
-      if (typeof model === 'string' && (promptTokens > 0 || completionTokens > 0)) {
+      if (
+        typeof model === 'string' &&
+        (promptTokens > 0 || completionTokens > 0 || cacheReadTokens > 0 || cacheCreationTokens > 0)
+      ) {
         estimatedCostUsd += this.costCalculator.calculate({
           model,
           promptTokens,
           completionTokens,
+          ...(hasCacheReadTokens ? { cacheReadTokens } : {}),
+          ...(hasCacheCreationTokens ? { cacheCreationTokens } : {}),
         });
       }
     }

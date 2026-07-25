@@ -105,6 +105,8 @@ export type LlmStreamEvent =
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
   totalTokens: number;
 }
 
@@ -189,15 +191,21 @@ export const TokenUsageSchema = z
   .object({
     inputTokens: TokenCountSchema,
     outputTokens: TokenCountSchema,
+    cacheReadTokens: TokenCountSchema.optional(),
+    cacheCreationTokens: TokenCountSchema.optional(),
     totalTokens: TokenCountSchema,
   })
   .superRefine((usage, ctx) => {
-    const expectedTotal = usage.inputTokens + usage.outputTokens;
+    const expectedTotal =
+      usage.inputTokens +
+      usage.outputTokens +
+      (usage.cacheReadTokens ?? 0) +
+      (usage.cacheCreationTokens ?? 0);
     if (!Number.isSafeInteger(expectedTotal)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['totalTokens'],
-        message: `inputTokens + outputTokens must not exceed Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
+        message: `combined token counts must not exceed Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`,
       });
       return;
     }
@@ -206,7 +214,7 @@ export const TokenUsageSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['totalTokens'],
-        message: 'totalTokens must equal inputTokens + outputTokens',
+        message: 'totalTokens must equal inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens',
       });
     }
   });

@@ -5,6 +5,8 @@ export interface AttributionEntry {
   model: string
   promptTokens: number
   completionTokens: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
   success: boolean
 }
 
@@ -22,6 +24,8 @@ interface ModelState {
   successfulCalls: number
   promptTokens: number
   completionTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
 }
 
 export interface ModelAttributionOptions {
@@ -37,6 +41,8 @@ export class ModelAttribution {
   private readonly maxModels: number
   private totalPromptTokens = 0
   private totalCompletionTokens = 0
+  private totalCacheReadTokens = 0
+  private totalCacheCreationTokens = 0
 
   constructor(pricing: PricingTable, options: ModelAttributionOptions = {}) {
     const maxModels = options.maxModels ?? DEFAULT_MAX_MODELS
@@ -72,6 +78,10 @@ export class ModelAttribution {
   record(entry: AttributionEntry): void {
     ModelAttribution.assertValidDelta(entry.promptTokens, 'promptTokens')
     ModelAttribution.assertValidDelta(entry.completionTokens, 'completionTokens')
+    const cacheReadDelta = entry.cacheReadTokens ?? 0
+    const cacheCreationDelta = entry.cacheCreationTokens ?? 0
+    ModelAttribution.assertValidDelta(cacheReadDelta, 'cacheReadTokens')
+    ModelAttribution.assertValidDelta(cacheCreationDelta, 'cacheCreationTokens')
     if (!this.state.has(entry.model) && this.state.size >= this.maxModels) {
       throw new RangeError(
         `ModelAttribution: model cardinality limit of ${this.maxModels} reached; rejected model "${entry.model}"`,
@@ -83,23 +93,49 @@ export class ModelAttribution {
       successfulCalls: 0,
       promptTokens: 0,
       completionTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
     }
     const promptTokens = ModelAttribution.safeAdd(existing.promptTokens, entry.promptTokens)
     const completionTokens = ModelAttribution.safeAdd(existing.completionTokens, entry.completionTokens)
-    ModelAttribution.safeAdd(promptTokens, completionTokens)
+    const cacheReadTokens = ModelAttribution.safeAdd(existing.cacheReadTokens, cacheReadDelta)
+    const cacheCreationTokens = ModelAttribution.safeAdd(
+      existing.cacheCreationTokens,
+      cacheCreationDelta,
+    )
+    const inputTokens = ModelAttribution.safeAdd(promptTokens, cacheReadTokens)
+    const reusableInputTokens = ModelAttribution.safeAdd(inputTokens, cacheCreationTokens)
+    ModelAttribution.safeAdd(reusableInputTokens, completionTokens)
 
     const totalPromptTokens = ModelAttribution.safeAdd(this.totalPromptTokens, entry.promptTokens)
     const totalCompletionTokens = ModelAttribution.safeAdd(this.totalCompletionTokens, entry.completionTokens)
-    ModelAttribution.safeAdd(totalPromptTokens, totalCompletionTokens)
+    const totalCacheReadTokens = ModelAttribution.safeAdd(
+      this.totalCacheReadTokens,
+      cacheReadDelta,
+    )
+    const totalCacheCreationTokens = ModelAttribution.safeAdd(
+      this.totalCacheCreationTokens,
+      cacheCreationDelta,
+    )
+    const totalInputTokens = ModelAttribution.safeAdd(totalPromptTokens, totalCacheReadTokens)
+    const totalReusableInputTokens = ModelAttribution.safeAdd(
+      totalInputTokens,
+      totalCacheCreationTokens,
+    )
+    ModelAttribution.safeAdd(totalReusableInputTokens, totalCompletionTokens)
 
     this.state.set(entry.model, {
       totalCalls: existing.totalCalls + 1,
       successfulCalls: existing.successfulCalls + (entry.success ? 1 : 0),
       promptTokens,
       completionTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
     })
     this.totalPromptTokens = totalPromptTokens
     this.totalCompletionTokens = totalCompletionTokens
+    this.totalCacheReadTokens = totalCacheReadTokens
+    this.totalCacheCreationTokens = totalCacheCreationTokens
   }
 
   report(): AttributionRow[] {
@@ -113,6 +149,8 @@ export class ModelAttribution {
         model,
         promptTokens: s.promptTokens,
         completionTokens: s.completionTokens,
+        cacheReadTokens: s.cacheReadTokens,
+        cacheCreationTokens: s.cacheCreationTokens,
       }),
     }))
   }

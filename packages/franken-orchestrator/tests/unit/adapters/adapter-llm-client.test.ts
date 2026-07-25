@@ -125,6 +125,29 @@ describe('AdapterLlmClient', () => {
     );
   });
 
+  it('forwards provider cache usage when recording observer usage', async () => {
+    const observer = makeObserver();
+    const usage = {
+      inputTokens: 600,
+      outputTokens: 100,
+      cacheReadTokens: 300,
+      cacheCreationTokens: 100,
+      totalTokens: 1100,
+    };
+    const client = new AdapterLlmClient(
+      makeAdapter({ transformResponse: vi.fn(() => ({ content: 'hi', usage })) }),
+      observer,
+    );
+
+    await client.complete('prompt');
+
+    expect(observer.recordTokenUsage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ cacheReadTokens: 300, cacheCreationTokens: 100 }),
+      expect.anything(),
+    );
+  });
+
   it('completeWithUsage returns providerContext when the adapter reports a fallback', async () => {
     const providerContext = { provider: 'claude', switchedFrom: 'codex', switchReason: 'rate_limited' };
     const client = new AdapterLlmClient(

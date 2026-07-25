@@ -97,8 +97,30 @@ describe('CliObserverBridge', () => {
       deps.endSpan(span);
 
       const spend = await bridge.getTokenSpend('session-cost');
-      // gpt-4o: promptPerMillion = 5.0, so 1M prompt tokens = $5.00
-      expect(spend.estimatedCostUsd).toBeCloseTo(5.0, 2);
+      // gpt-4o: promptPerMillion = 2.5, so 1M prompt tokens = $2.50
+      expect(spend.estimatedCostUsd).toBeCloseTo(2.5, 2);
+    });
+
+    it('includes cache tokens in total input and prices each cache tier', async () => {
+      const bridge = createBridge();
+      bridge.startTrace('session-cache-cost');
+      const deps = bridge.observerDeps;
+      const span = deps.startSpan(deps.trace, { name: 'cached-cost-test' });
+
+      deps.recordTokenUsage(span, {
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+        model: 'claude-sonnet-4-6',
+      }, deps.counter);
+      deps.endSpan(span);
+
+      const spend = await bridge.getTokenSpend('session-cache-cost');
+      expect(spend.inputTokens).toBe(3_000_000);
+      expect(spend.outputTokens).toBe(1_000_000);
+      expect(spend.totalTokens).toBe(4_000_000);
+      expect(spend.estimatedCostUsd).toBeCloseTo(22.05, 8);
     });
 
     it('returns zeros when startTrace has not been called', async () => {
@@ -210,8 +232,8 @@ describe('CliObserverBridge', () => {
       const spend = await bridge.getTokenSpend('session-1000-tokens');
       expect(spend.totalTokens).toBe(1000);
       expect(spend.estimatedCostUsd).toBeGreaterThan(0);
-      // gpt-4o: (500/1M)*5 + (500/1M)*15 = 0.0025 + 0.0075 = 0.01
-      expect(spend.estimatedCostUsd).toBeCloseTo(0.01, 4);
+      // gpt-4o: (500/1M)*2.5 + (500/1M)*10 = 0.00125 + 0.005 = 0.00625
+      expect(spend.estimatedCostUsd).toBeCloseTo(0.00625, 5);
     });
 
     it('record tokens exceeding budget, breaker.check() returns tripped: true', async () => {
