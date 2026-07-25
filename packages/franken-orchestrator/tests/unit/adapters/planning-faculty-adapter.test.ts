@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteBrain } from '@franken/brain';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../../../src/deps.js';
-import { PlanningFacultyAdapter } from '../../../src/adapters/planning-faculty-adapter.js';
+import {
+  PlanningFacultyAdapter,
+  type PlanningFacultyAdapterOptions,
+} from '../../../src/adapters/planning-faculty-adapter.js';
 
 function planTask(id: string, objective: string): PlanTask {
   return { id, objective, requiredSkills: [], dependsOn: [] };
@@ -55,6 +58,83 @@ describe('PlanningFacultyAdapter', () => {
       step: 'planning',
       details: { taskCount: 1, taskIds: ['implement'] },
     });
+  });
+
+  it('consults bounded relevant lessons before planning and records the consulted keys', async () => {
+    const intent: PlanIntent = { goal: 'Repair the workspace TypeScript build' };
+    const delegate: IPlannerModule = { createPlan: vi.fn().mockResolvedValue({ tasks: [] }) };
+    const brain = makeBrain();
+    const relevantLessons = vi.fn().mockReturnValue([
+      {
+        kind: 'consolidated-lesson',
+        key: 'lesson.review.stale-declarations',
+        status: 'approved',
+        pattern: 'Build workspace declarations before package typecheck',
+        keywords: ['build', 'workspace'],
+        occurrenceCount: 3,
+        confidence: 0.65,
+        evidenceEventIds: [1, 2, 3],
+        firstSeenAt: '2026-07-24T10:00:00.000Z',
+        lastSeenAt: '2026-07-24T10:02:00.000Z',
+        relevance: 0.75,
+      },
+    ]);
+    const faculty = new PlanningFacultyAdapter(delegate, brain.episodic, {
+      learning: {
+        kind: 'learning',
+        configured: true,
+        consolidate: brain.learning.consolidate,
+        relevantLessons,
+      },
+    } as PlanningFacultyAdapterOptions);
+
+    await faculty.createPlan(intent);
+
+    expect(relevantLessons).toHaveBeenCalledWith(intent.goal, { limit: 5 });
+    expect(relevantLessons.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(delegate.createPlan).mock.invocationCallOrder[0]!,
+    );
+    expect(brain.episodic.recall('planning consulted relevant lessons').find(
+      (episode) => episode.step === 'planning:lesson-consultation',
+    )).toMatchObject({
+      type: 'observation',
+      details: {
+        category: 'lesson-consultation',
+        faculty: 'planning',
+        query: intent.goal,
+        lessonCount: 1,
+        lessonKeys: ['lesson.review.stale-declarations'],
+      },
+    });
+  });
+
+  it('redacts and byte-bounds lesson queries without changing the delegated intent', async () => {
+    const brain = makeBrain();
+    const relevantLessons = vi.fn((_query: string) => []);
+    const delegate: IPlannerModule = { createPlan: vi.fn().mockResolvedValue({ tasks: [] }) };
+    const faculty = new PlanningFacultyAdapter(delegate, brain.episodic, {
+      learning: {
+        kind: 'learning',
+        configured: true,
+        consolidate: vi.fn(() => []),
+        relevantLessons,
+      },
+    });
+    const intent: PlanIntent = {
+      goal: `Repair API_TOKEN=super-secret ${'workspace '.repeat(200)}`,
+    };
+
+    await faculty.createPlan(intent);
+
+    expect(delegate.createPlan).toHaveBeenCalledWith(intent);
+    const query = relevantLessons.mock.calls[0]![0];
+    expect(query).not.toContain('super-secret');
+    expect(query).toContain('API_TOKEN=<redacted>');
+    expect(Buffer.byteLength(query, 'utf8')).toBeLessThanOrEqual(512);
+    const consultation = brain.episodic.recent().find(
+      (episode) => episode.step === 'planning:lesson-consultation',
+    );
+    expect(consultation?.details?.query).toBe(query);
   });
 
   it('does not record a created episode when the delegated planner rejects', async () => {

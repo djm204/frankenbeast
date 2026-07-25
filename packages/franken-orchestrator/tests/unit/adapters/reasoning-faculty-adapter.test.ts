@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SqliteBrain } from '@franken/brain';
 import { ReasoningFacultyAdapter } from '../../../src/adapters/reasoning-faculty-adapter.js';
-import type { ICritiqueModule, PlanGraph } from '../../../src/deps.js';
+import type { CritiqueResult, ICritiqueModule, PlanGraph } from '../../../src/deps.js';
 
 describe('ReasoningFacultyAdapter', () => {
   const brains: SqliteBrain[] = [];
@@ -37,21 +37,36 @@ describe('ReasoningFacultyAdapter', () => {
     await expect(faculty.reviewPlan(plan, context)).resolves.toBe(result);
     expect(critique.reviewPlan).toHaveBeenCalledWith(plan, context);
     expect(faculty).toMatchObject({ kind: 'reasoning', configured: true });
-    expect(brain.episodic.recall('reasoning verdict warn')).toEqual([
-      expect.objectContaining({
-        type: 'decision',
-        step: 'reasoning:critique',
-        summary: 'Reasoning verdict: warn',
-        createdAt: '2026-07-24T12:00:00.000Z',
-        details: {
+    const verdictEpisode = brain.episodic.recall('reasoning verdict warn').find(
+      (episode) => episode.step === 'reasoning:critique',
+    );
+    expect(verdictEpisode).toEqual(expect.objectContaining({
+      type: 'decision',
+      step: 'reasoning:critique',
+      summary: 'Reasoning verdict: warn',
+      createdAt: '2026-07-24T12:00:00.000Z',
+      details: expect.objectContaining({
           verdict: 'warn',
           score: 0.75,
           findingCount: 1,
           severities: ['medium'],
           taskCount: 1,
-        },
       }),
-    ]);
+    }));
+    const consultationEpisode = brain.episodic.recent().find(
+      (episode) => episode.step === 'reasoning:lesson-consultation',
+    );
+    expect(consultationEpisode).toMatchObject({
+      type: 'observation',
+      details: {
+        category: 'lesson-consultation',
+        faculty: 'reasoning',
+        query: 'Check the claim',
+        lessonCount: 0,
+        lessonKeys: [],
+      },
+    });
+    expect(consultationEpisode!.id).toBeLessThan(verdictEpisode!.id!);
   });
 
   it('records a failed verdict as a decision rather than an execution failure', async () => {
@@ -66,8 +81,85 @@ describe('ReasoningFacultyAdapter', () => {
     await faculty.reviewPlan({ tasks: [] });
 
     expect(brain.episodic.recentFailures()).toEqual([]);
-    expect(brain.episodic.recall('reasoning verdict fail')).toEqual([
-      expect.objectContaining({ type: 'decision', summary: 'Reasoning verdict: fail' }),
+    expect(brain.episodic.recall('reasoning verdict fail').find(
+      (episode) => episode.step === 'reasoning:critique',
+    )).toEqual(expect.objectContaining({
+      type: 'decision',
+      summary: expect.stringContaining('Reasoning verdict: fail'),
+    }));
+  });
+
+  it('coalesces automatic bounded consolidation after negative verdicts', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const consolidate = vi.fn((options) => brain.learning.consolidate(options));
+    const faculty = new ReasoningFacultyAdapter(
+      { reviewPlan: async () => ({
+        verdict: 'fail',
+        findings: [{ evaluator: 'verification', severity: 'high', message: 'Build failed' }],
+        score: 0,
+      }) },
+      {
+        episodic: brain.episodic,
+        learning: {
+          kind: 'learning',
+          configured: true,
+          consolidate,
+          relevantLessons: brain.learning.relevantLessons,
+        },
+      },
+      () => new Date('2026-07-24T12:00:00.000Z'),
+    );
+
+    await faculty.reviewPlan({ tasks: [] });
+    await faculty.reviewPlan({ tasks: [] });
+    await faculty.reviewPlan({ tasks: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consolidate).toHaveBeenCalledTimes(1);
+    expect(consolidate).toHaveBeenLastCalledWith({
+      threshold: 3,
+      lookback: 100,
+      similarityThreshold: 0.5,
+    });
+    expect(brain.learning.relevantLessons('reasoning verdict fail')).toEqual([
+      expect.objectContaining({
+        occurrenceCount: 3,
+        evidenceEventIds: [2, 4, 6],
+      }),
+    ]);
+  });
+
+  it('keeps failed reasoning lesson patterns relevant to later objective consultations', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const result: CritiqueResult = {
+      verdict: 'fail',
+      findings: [],
+      score: 0.2,
+    };
+    const critique: ICritiqueModule = { reviewPlan: vi.fn().mockResolvedValue(result) };
+    const faculty = new ReasoningFacultyAdapter(
+      critique,
+      brain,
+      () => new Date('2025-01-01T00:00:00.000Z'),
+    );
+    const plan = {
+      tasks: [{
+        id: 'task-1',
+        objective: 'Verify workspace declaration output',
+        requiredSkills: [],
+        dependsOn: [],
+      }],
+    };
+
+    await faculty.reviewPlan(plan);
+    await faculty.reviewPlan(plan);
+    await faculty.reviewPlan(plan);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(brain.learning.relevantLessons('workspace declaration output')).toEqual([
+      expect.objectContaining({ occurrenceCount: 3 }),
     ]);
   });
 

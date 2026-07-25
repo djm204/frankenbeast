@@ -1,5 +1,10 @@
 import type { IBrain, IReasoningFaculty } from '@franken/types';
 import type { CritiqueResult, ICritiqueModule, PlanGraph } from '../deps.js';
+import {
+  consolidateFacultyNegativeOutcome,
+  consultFacultyLessons,
+  prepareFacultyLessonQuery,
+} from './faculty-learning.js';
 
 export interface ReasoningFacultyAdapterOptions {
   readonly recordEpisodes?: boolean;
@@ -15,20 +20,28 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
 
   constructor(
     private readonly critique: ICritiqueModule,
-    private readonly brain: Pick<IBrain, 'episodic'>,
+    private readonly brain: Pick<IBrain, 'episodic' | 'learning'>,
     private readonly clock: () => Date,
     private readonly options: ReasoningFacultyAdapterOptions = {},
   ) {}
 
   async reviewPlan(plan: PlanGraph, context?: unknown): Promise<CritiqueResult> {
+    const query = prepareFacultyLessonQuery(
+      plan.tasks.map((task) => task.objective).join(' ').trim() || 'reasoning plan review',
+    );
+    if (this.options.recordEpisodes !== false) {
+      consultFacultyLessons('reasoning', query, this.brain.episodic, this.brain.learning, this.clock().toISOString());
+    }
     const result = await this.critique.reviewPlan(plan, context);
     if (this.options.recordEpisodes === false) return result;
 
     this.brain.episodic.record({
       type: 'decision',
       step: 'reasoning:critique',
-      summary: `Reasoning verdict: ${result.verdict}`,
+      summary: `Reasoning verdict: ${result.verdict}${result.verdict === 'fail' ? ` — ${query}` : ''}`,
       details: {
+        category: 'reasoning-lifecycle',
+        outcome: result.verdict === 'fail' ? 'negative' : 'positive',
         verdict: result.verdict,
         score: result.score,
         findingCount: result.findings.length,
@@ -38,6 +51,9 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
       },
       createdAt: this.clock().toISOString(),
     });
+    if (result.verdict === 'fail') {
+      consolidateFacultyNegativeOutcome(this.brain.learning);
+    }
     return result;
   }
 

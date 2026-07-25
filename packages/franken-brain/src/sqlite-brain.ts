@@ -6131,6 +6131,13 @@ function lessonEventText(event: EpisodicEvent): string {
   return event.summary;
 }
 
+function isConsolidatableFacultyNegativeOutcome(event: EpisodicEvent): boolean {
+  return event.type === 'decision'
+    && event.details?.outcome === 'negative'
+    && (event.details?.category === 'reasoning-lifecycle'
+      || event.details?.category === 'action-lifecycle');
+}
+
 function clusterSimilarFailureEvents(
   events: readonly EpisodicEvent[],
   similarityThreshold: number,
@@ -6656,8 +6663,15 @@ export class SqliteBrain implements IBrain {
     }
 
     const consolidate = this.db.transaction(() => {
-    const events = this.episodic
-      .recentFailures(lookback, false, ['skill-evolution', 'planning-lifecycle'], lookback)
+    const failures = this.episodic
+      .recentFailures(lookback, false, ['skill-evolution', 'planning-lifecycle'], lookback);
+    const facultyNegativeOutcomes = this.episodic
+      .recent(lookback)
+      .filter(isConsolidatableFacultyNegativeOutcome);
+    const events = [...new Map(
+      [...failures, ...facultyNegativeOutcomes]
+        .map((event) => [event.id ?? `${event.createdAt}:${event.summary}`, event]),
+    ).values()]
       .sort((left, right) =>
         left.createdAt.localeCompare(right.createdAt) || Number(left.id ?? 0) - Number(right.id ?? 0),
       );
