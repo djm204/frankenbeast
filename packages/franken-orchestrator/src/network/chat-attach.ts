@@ -10,7 +10,7 @@ import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../http/ws-chat-server.js';
-import { deterministicUuid, type ProviderContext, type TokenUsage } from '@franken/types';
+import { deterministicUuid, TokenUsageSchema, type ProviderContext, type TokenUsage } from '@franken/types';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
 
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -269,25 +269,17 @@ export interface RemoteReplyOutcome {
 }
 
 function parseTokenUsage(value: unknown): TokenUsage | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const usage = value as Record<string, unknown>;
-  const inputTokens = usage['inputTokens'];
-  const outputTokens = usage['outputTokens'];
-  const totalTokens = usage['totalTokens'];
-  if (typeof inputTokens === 'number' && typeof outputTokens === 'number' && typeof totalTokens === 'number') {
-    const cacheReadTokens = usage['cacheReadTokens'];
-    const cacheCreationTokens = usage['cacheCreationTokens'];
-    const cacheCreation1hTokens = usage['cacheCreation1hTokens'];
-    return {
-      inputTokens,
-      outputTokens,
-      ...(typeof cacheReadTokens === 'number' ? { cacheReadTokens } : {}),
-      ...(typeof cacheCreationTokens === 'number' ? { cacheCreationTokens } : {}),
-      ...(typeof cacheCreation1hTokens === 'number' ? { cacheCreation1hTokens } : {}),
-      totalTokens,
-    };
-  }
-  return undefined;
+  const parsed = TokenUsageSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const usage = parsed.data;
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+    ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
+    ...(usage.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens: usage.cacheCreation1hTokens } : {}),
+    totalTokens: usage.totalTokens,
+  };
 }
 
 function parseProviderContext(value: unknown): ProviderContext | undefined {

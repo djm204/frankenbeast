@@ -319,7 +319,7 @@ describe('resolveManagedChatAttachment', () => {
       usage: {
         inputTokens: 15,
         outputTokens: 10,
-        totalTokens: 30,
+        totalTokens: 34,
         cacheReadTokens: 5,
         cacheCreationTokens: 4,
         cacheCreation1hTokens: 2,
@@ -331,12 +331,35 @@ describe('resolveManagedChatAttachment', () => {
       usage: {
         inputTokens: 15,
         outputTokens: 10,
-        totalTokens: 30,
+        totalTokens: 34,
         cacheReadTokens: 5,
         cacheCreationTokens: 4,
         cacheCreation1hTokens: 2,
       },
     });
+  });
+
+  it('rejects cache-aware managed-chat usage with an inconsistent total', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'hello',
+      usage: {
+        inputTokens: 15,
+        outputTokens: 10,
+        totalTokens: 30,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 4,
+        cacheCreation1hTokens: 2,
+      },
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({});
   });
 
   it('accumulates managed-chat cache usage across turns', () => {

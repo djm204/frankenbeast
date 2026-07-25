@@ -746,6 +746,28 @@ describe('ObserverAdapter', () => {
     });
   });
 
+  it('rejects cache-token overflow while aggregating persisted rows', async () => {
+    const observer = createObserverAdapter(tracked(tmpDbPath()));
+
+    await observer.logCost({
+      sessionId: 'sess-cache-overflow',
+      model: 'claude-sonnet-4-6',
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: Number.MAX_SAFE_INTEGER,
+    });
+    await observer.logCost({
+      sessionId: 'sess-cache-overflow',
+      model: 'claude-sonnet-4-6',
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: 1,
+    });
+
+    await expect(observer.cost({ sessionId: 'sess-cache-overflow' }))
+      .rejects.toThrow(/cacheReadTokens.*Number\.MAX_SAFE_INTEGER/);
+  });
+
   it('preserves explicitly logged zero-cost rows in cost summaries', async () => {
     const dbPath = tracked(tmpDbPath());
     const observer = createObserverAdapter(dbPath);

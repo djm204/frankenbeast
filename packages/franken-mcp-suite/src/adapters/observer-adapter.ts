@@ -110,6 +110,17 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
   return true;
 }
 
+function addTokenCounts(left: number, right: number, label: string): number {
+  if (!Number.isSafeInteger(right) || right < 0) {
+    throw new RangeError(`${label} must contain non-negative safe integers`);
+  }
+  const sum = left + right;
+  if (!Number.isSafeInteger(sum)) {
+    throw new RangeError(`${label} total exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`);
+  }
+  return sum;
+}
+
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
   const store = createSqliteStore(dbPath);
   let closed = false;
@@ -232,16 +243,16 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
           costUsd: 0,
         };
 
-        current.promptTokens += row.prompt_tokens;
-        current.completionTokens += row.completion_tokens;
+        current.promptTokens = addTokenCounts(current.promptTokens, row.prompt_tokens, 'promptTokens');
+        current.completionTokens = addTokenCounts(current.completionTokens, row.completion_tokens, 'completionTokens');
         if (row.cache_read_tokens > 0) {
-          current.cacheReadTokens = (current.cacheReadTokens ?? 0) + row.cache_read_tokens;
+          current.cacheReadTokens = addTokenCounts(current.cacheReadTokens ?? 0, row.cache_read_tokens, 'cacheReadTokens');
         }
         if (row.cache_creation_tokens > 0) {
-          current.cacheCreationTokens = (current.cacheCreationTokens ?? 0) + row.cache_creation_tokens;
+          current.cacheCreationTokens = addTokenCounts(current.cacheCreationTokens ?? 0, row.cache_creation_tokens, 'cacheCreationTokens');
         }
         if (row.cache_creation_1h_tokens > 0) {
-          current.cacheCreation1hTokens = (current.cacheCreation1hTokens ?? 0) + row.cache_creation_1h_tokens;
+          current.cacheCreation1hTokens = addTokenCounts(current.cacheCreation1hTokens ?? 0, row.cache_creation_1h_tokens, 'cacheCreation1hTokens');
         }
         if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasDefaultPricing(row.model)) {
           current.unknownModel = true;
@@ -261,12 +272,29 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       }
 
       const byModel = [...grouped.values()];
-      const totalCacheReadTokens = byModel.reduce((sum, row) => sum + (row.cacheReadTokens ?? 0), 0);
-      const totalCacheCreationTokens = byModel.reduce((sum, row) => sum + (row.cacheCreationTokens ?? 0), 0);
-      const totalCacheCreation1hTokens = byModel.reduce((sum, row) => sum + (row.cacheCreation1hTokens ?? 0), 0);
+      const totalPromptTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.promptTokens, 'totalPromptTokens'),
+        0,
+      );
+      const totalCompletionTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.completionTokens, 'totalCompletionTokens'),
+        0,
+      );
+      const totalCacheReadTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.cacheReadTokens ?? 0, 'totalCacheReadTokens'),
+        0,
+      );
+      const totalCacheCreationTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.cacheCreationTokens ?? 0, 'totalCacheCreationTokens'),
+        0,
+      );
+      const totalCacheCreation1hTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.cacheCreation1hTokens ?? 0, 'totalCacheCreation1hTokens'),
+        0,
+      );
       return {
-        totalPromptTokens: byModel.reduce((sum, row) => sum + row.promptTokens, 0),
-        totalCompletionTokens: byModel.reduce((sum, row) => sum + row.completionTokens, 0),
+        totalPromptTokens,
+        totalCompletionTokens,
         ...(totalCacheReadTokens > 0 ? { totalCacheReadTokens } : {}),
         ...(totalCacheCreationTokens > 0 ? { totalCacheCreationTokens } : {}),
         ...(totalCacheCreation1hTokens > 0 ? { totalCacheCreation1hTokens } : {}),
