@@ -1,9 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrainRegistry } from '@franken/brain';
+import Database from 'better-sqlite3';
 
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
 import {
@@ -46,6 +47,7 @@ describe('handleBrainCommand()', () => {
         action: 'show',
         target: 'readonly',
         registry: inspection.registry,
+        resolveContext: inspection.resolveContext,
         print,
       });
       expect(vi.mocked(print).mock.calls[0]?.[0]).toContain('goal');
@@ -109,6 +111,73 @@ describe('handleBrainCommand()', () => {
     }
     expect(await readFile(brainDb)).toEqual(beforeBrain);
     expect(await readFile(beastsDb)).toEqual(beforeBeasts);
+  });
+
+  it('inspects a portable 255-byte agent id when persisted context provides an explicit brain path', async () => {
+    const { root, brainsDir, registry } = await fixture();
+    const agentTypeId = 'a'.repeat(255);
+    const customBrainDb = join(root, 'custom-brain.db');
+    registry.forAgentType(agentTypeId, customBrainDb);
+    registry.close();
+    registries.splice(registries.indexOf(registry), 1);
+
+    const repository = new SQLiteBeastRepository(join(root, '.fbeast', 'beast.db'));
+    const run = repository.createRun({
+      definitionId: agentTypeId,
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { brain: { dbPath: customBrainDb } },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-25T10:00:00.000Z',
+    });
+    repository.createAttempt(run.id, { status: 'completed', startedAt: '2026-07-25T10:00:01.000Z' });
+    repository.close();
+
+    const inspection = await createBrainInspectionHandle(brainsDir, agentTypeId);
+    try {
+      expect(inspection.resolveContext(agentTypeId)?.dbPath).toBeDefined();
+      await expect(handleBrainCommand({
+        action: 'show',
+        target: agentTypeId,
+        registry: inspection.registry,
+        resolveContext: inspection.resolveContext,
+        print: vi.fn(),
+      })).resolves.toBeUndefined();
+    } finally {
+      await inspection.dispose();
+    }
+  });
+
+  it('reuses one snapshot when the Beast repository is also the configured brain database', async () => {
+    const { root, brainsDir, registry } = await fixture();
+    registry.close();
+    registries.splice(registries.indexOf(registry), 1);
+    const sharedDb = join(root, '.fbeast', 'beast.db');
+    await mkdir(join(root, '.fbeast'), { recursive: true });
+    const sharedBrainRegistry = new BrainRegistry(brainsDir);
+    sharedBrainRegistry.forAgentType('shared-database', sharedDb);
+    sharedBrainRegistry.close();
+
+    const repository = new SQLiteBeastRepository(sharedDb);
+    const run = repository.createRun({
+      definitionId: 'shared-database',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { brain: { dbPath: sharedDb } },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-25T10:00:00.000Z',
+    });
+    repository.createAttempt(run.id, { status: 'completed', startedAt: '2026-07-25T10:00:01.000Z' });
+    repository.close();
+
+    const inspection = await createBrainInspectionHandle(brainsDir, 'shared-database');
+    try {
+      expect(inspection.resolveContext('shared-database')?.dbPath).toMatch(/\/beast\.db$/u);
+    } finally {
+      await inspection.dispose();
+    }
   });
 
   it('prints the bounded HTTP-compatible brain summary as JSON', async () => {
@@ -188,6 +257,101 @@ describe('handleBrainCommand()', () => {
     expect(output.data[0].pattern).toContain('TypeScript workspace build failed');
   });
 
+  it('truncates lesson strings only at complete UTF-8 code point boundaries', async () => {
+    const { registry } = await fixture();
+    const brain = registry.forAgentType('unicode-lessons');
+    brain.memoryReview.propose({
+      targetStore: 'working',
+      key: `${'k'.repeat(511)}💥tail`,
+      value: {
+        kind: 'consolidated-lesson',
+        pattern: `${'p'.repeat(2047)}💥tail`,
+        keywords: [],
+        searchTerms: [],
+        occurrenceCount: 1,
+        confidence: 0.9,
+        evidenceEventIds: [],
+        firstSeenAt: '2026-07-25T10:00:00.000Z',
+        lastSeenAt: '2026-07-25T10:00:00.000Z',
+      },
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Exercise bounded UTF-8 lesson projection.',
+    });
+    const print = vi.fn();
+
+    await handleBrainCommand({ action: 'lessons', target: 'unicode-lessons', json: true, registry, print });
+
+    const lesson = JSON.parse(vi.mocked(print).mock.calls[0]?.[0] as string).data[0];
+    expect(Buffer.byteLength(lesson.key, 'utf8')).toBeLessThanOrEqual(512);
+    expect(Buffer.byteLength(lesson.pattern, 'utf8')).toBeLessThanOrEqual(2 * 1024);
+    expect(lesson.key).not.toContain('�');
+    expect(lesson.pattern).not.toContain('�');
+  });
+
+  it('escapes terminal control characters in human lesson output', async () => {
+    const { registry } = await fixture();
+    const brain = registry.forAgentType('terminal-lessons');
+    brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'terminal-control',
+      value: {
+        kind: 'consolidated-lesson',
+        pattern: 'trusted line\n\u001b]8;;https://attacker.invalid\u0007spoofed',
+        keywords: [],
+        searchTerms: [],
+        occurrenceCount: 1,
+        confidence: 0.9,
+        evidenceEventIds: [],
+        firstSeenAt: '2026-07-25T10:00:00.000Z',
+        lastSeenAt: '2026-07-25T10:00:00.000Z',
+      },
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Exercise safe terminal rendering.',
+    });
+    const print = vi.fn();
+
+    await handleBrainCommand({ action: 'lessons', target: 'terminal-lessons', registry, print });
+
+    const output = vi.mocked(print).mock.calls[0]?.[0] as string;
+    expect(output).not.toContain('\u001b');
+    expect(output.split('\n')).toHaveLength(2);
+    expect(output).toContain('trusted line\\u000a\\u001b]8;;https://attacker.invalid\\u0007spoofed');
+  });
+
+  it('bounds agent-produced lesson timestamps in JSON output', async () => {
+    const { registry } = await fixture();
+    const brain = registry.forAgentType('timestamp-lessons');
+    brain.memoryReview.propose({
+      targetStore: 'working',
+      key: 'timestamp-bound',
+      value: {
+        kind: 'consolidated-lesson',
+        pattern: 'Bound every projected string.',
+        keywords: [],
+        searchTerms: [],
+        occurrenceCount: 1,
+        confidence: 0.9,
+        evidenceEventIds: [],
+        firstSeenAt: `${'f'.repeat(127)}💥tail`,
+        lastSeenAt: 'l'.repeat(1024),
+      },
+      source: 'operator',
+      confidence: 0.9,
+      reason: 'Exercise bounded timestamp projection.',
+    });
+    const print = vi.fn();
+
+    await handleBrainCommand({ action: 'lessons', target: 'timestamp-lessons', json: true, registry, print });
+
+    const lesson = JSON.parse(vi.mocked(print).mock.calls[0]?.[0] as string).data[0];
+    expect(Buffer.byteLength(lesson.firstSeenAt, 'utf8')).toBeLessThanOrEqual(128);
+    expect(Buffer.byteLength(lesson.lastSeenAt, 'utf8')).toBeLessThanOrEqual(128);
+    expect(lesson.firstSeenAt).not.toContain('�');
+    expect(lesson).toMatchObject({ firstSeenAtTruncated: true, lastSeenAtTruncated: true });
+  });
+
   it('reports unavailable lessons without inventing records', async () => {
     const { registry } = await fixture();
     registry.forAgentType('planner');
@@ -225,6 +389,29 @@ describe('handleBrainCommand()', () => {
     await expect(handleBrainCommand({ action: 'show', target: 'missing', registry, print: vi.fn() }))
       .rejects.toThrow("No persisted brain exists for agent type 'missing'");
     expect(existsSync(join(brainsDir, 'missing.db'))).toBe(false);
+  });
+
+  it('sanitizes storage failures raised while opening an incompatible brain snapshot', async () => {
+    const { brainsDir, registry } = await fixture();
+    registry.close();
+    registries.splice(registries.indexOf(registry), 1);
+    await mkdir(brainsDir, { recursive: true });
+    const damaged = new Database(join(brainsDir, 'damaged.db'));
+    damaged.exec('CREATE TABLE working_memory (not_a_key TEXT)');
+    damaged.close();
+
+    const inspection = await createBrainInspectionHandle(brainsDir, 'damaged');
+    try {
+      await expect(handleBrainCommand({
+        action: 'show',
+        target: 'damaged',
+        registry: inspection.registry,
+        resolveContext: inspection.resolveContext,
+        print: vi.fn(),
+      })).rejects.toThrow('Brain state could not be read');
+    } finally {
+      await inspection.dispose();
+    }
   });
 
   it('requires an action and agent type id', async () => {

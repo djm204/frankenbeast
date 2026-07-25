@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import { BrainRegistry } from '@franken/brain';
 import type { MemoryCandidate, SqliteBrain } from '@franken/brain';
@@ -16,6 +16,7 @@ const MAX_WORKING_MEMORY_KEYS = 100;
 const MAX_LESSONS = 10;
 const MAX_LESSON_PATTERN_BYTES = 2 * 1024;
 const MAX_LESSON_KEY_BYTES = 512;
+const MAX_LESSON_TIMESTAMP_BYTES = 128;
 const LESSON_UNAVAILABLE_REASON = 'Consolidated lessons are not available until the learning faculty is configured';
 
 type BrainRegistryReader = Pick<BrainRegistry, 'getAgentType'>;
@@ -43,13 +44,15 @@ export async function createBrainInspectionHandle(
   const snapshotDir = await mkdtemp(join(tmpdir(), 'franken-brain-inspect-'));
   const registry = new BrainRegistry(snapshotDir);
   try {
-    // Validate with BrainRegistry's canonical portable-id rules before deriving a path.
-    registry.getAgentType(agentTypeId);
+    const snapshotBrainDb = join(snapshotDir, 'brain.db');
+    // An explicit path applies the 255-byte portable-id rule without deriving a filename.
+    registry.getAgentType(agentTypeId, snapshotBrainDb);
     const projectRoot = dirname(dirname(brainsDir));
     const sourceBeastsDb = join(dirname(brainsDir), 'beast.db');
     let persistedContext: BrainRouteContext | undefined;
+    let snapshotBeastsDb: string | undefined;
     if (existsSync(sourceBeastsDb)) {
-      const snapshotBeastsDb = join(snapshotDir, 'beast.db');
+      snapshotBeastsDb = join(snapshotDir, 'beast.db');
       await backupDatabase(sourceBeastsDb, snapshotBeastsDb);
       const repository = new SQLiteBeastRepository(snapshotBeastsDb);
       try {
@@ -62,11 +65,18 @@ export async function createBrainInspectionHandle(
     if (!existsSync(sourcePath)) {
       throw new Error(`No persisted brain exists for agent type '${agentTypeId}'`);
     }
-    await backupDatabase(sourcePath, join(snapshotDir, `${agentTypeId}.db`));
+    const inspectionDbPath = snapshotBeastsDb !== undefined
+      && resolve(sourcePath) === resolve(sourceBeastsDb)
+      ? snapshotBeastsDb
+      : snapshotBrainDb;
+    if (inspectionDbPath !== snapshotBeastsDb) {
+      await backupDatabase(sourcePath, inspectionDbPath);
+    }
 
-    const inspectionContext = persistedContext?.faculties
-      ? { faculties: persistedContext.faculties }
-      : undefined;
+    const inspectionContext: BrainRouteContext = {
+      dbPath: inspectionDbPath,
+      ...(persistedContext?.faculties ? { faculties: persistedContext.faculties } : {}),
+    };
     return {
       registry,
       resolveContext: (candidateAgentTypeId: string) => (
@@ -98,9 +108,16 @@ export interface BrainCommandDeps {
 }
 
 function truncateUtf8(value: string, maxBytes: number): { value: string; truncated: boolean } {
-  const encoded = Buffer.from(value);
-  if (encoded.byteLength <= maxBytes) return { value, truncated: false };
-  return { value: encoded.subarray(0, maxBytes).toString('utf8'), truncated: true };
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return { value, truncated: false };
+  let bytes = 0;
+  let bounded = '';
+  for (const codePoint of value) {
+    const codePointBytes = Buffer.byteLength(codePoint, 'utf8');
+    if (bytes + codePointBytes > maxBytes) break;
+    bounded += codePoint;
+    bytes += codePointBytes;
+  }
+  return { value: bounded, truncated: true };
 }
 
 function resolveBrain(deps: BrainCommandDeps): {
@@ -160,6 +177,12 @@ function plural(count: number, singular: string): string {
   return `${count} ${singular}${count === 1 ? '' : 's'}`;
 }
 
+function escapeTerminalControls(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]/gu, (character) => (
+    `\\u${character.codePointAt(0)!.toString(16).padStart(4, '0')}`
+  ));
+}
+
 function renderSummary(summary: ReturnType<typeof brainSummary>): string {
   const configuredFaculties = Object.entries(summary.faculties)
     .filter(([, state]) => state.configured)
@@ -187,6 +210,12 @@ function lessonProjection(candidate: MemoryCandidate) {
     ? truncateUtf8(candidate.value.pattern, MAX_LESSON_PATTERN_BYTES)
     : undefined;
   const key = truncateUtf8(candidate.key, MAX_LESSON_KEY_BYTES);
+  const firstSeenAt = typeof candidate.value.firstSeenAt === 'string'
+    ? truncateUtf8(candidate.value.firstSeenAt, MAX_LESSON_TIMESTAMP_BYTES)
+    : undefined;
+  const lastSeenAt = typeof candidate.value.lastSeenAt === 'string'
+    ? truncateUtf8(candidate.value.lastSeenAt, MAX_LESSON_TIMESTAMP_BYTES)
+    : undefined;
   return {
     key: key.value,
     ...(key.truncated ? { keyTruncated: true as const } : {}),
@@ -198,8 +227,10 @@ function lessonProjection(candidate: MemoryCandidate) {
       ? { occurrenceCount: candidate.value.occurrenceCount }
       : {}),
     ...(typeof candidate.confidence === 'number' ? { confidence: candidate.confidence } : {}),
-    ...(typeof candidate.value.firstSeenAt === 'string' ? { firstSeenAt: candidate.value.firstSeenAt } : {}),
-    ...(typeof candidate.value.lastSeenAt === 'string' ? { lastSeenAt: candidate.value.lastSeenAt } : {}),
+    ...(firstSeenAt ? { firstSeenAt: firstSeenAt.value } : {}),
+    ...(firstSeenAt?.truncated ? { firstSeenAtTruncated: true as const } : {}),
+    ...(lastSeenAt ? { lastSeenAt: lastSeenAt.value } : {}),
+    ...(lastSeenAt?.truncated ? { lastSeenAtTruncated: true as const } : {}),
   };
 }
 
@@ -245,15 +276,15 @@ function renderLessons(agentTypeId: string, view: ReturnType<typeof lessonsView>
   return [
     `Lessons for ${agentTypeId} (${view.data.length}${view.meta.truncated ? '+' : ''} shown):`,
     ...view.data.map((lesson) => (
-      `- [${lesson.status}] ${lesson.pattern ?? lesson.key}`
+      `- [${lesson.status}] ${escapeTerminalControls(lesson.pattern ?? lesson.key)}`
       + (lesson.occurrenceCount === undefined ? '' : ` (${plural(lesson.occurrenceCount, 'occurrence')})`)
     )),
   ].join('\n');
 }
 
 export async function handleBrainCommand(deps: BrainCommandDeps): Promise<void> {
-  const { agentTypeId, brain, context } = resolveBrain(deps);
   try {
+    const { agentTypeId, brain, context } = resolveBrain(deps);
     if (deps.action === 'show') {
       const summary = brainSummary(agentTypeId, brain, context);
       deps.print(deps.json ? JSON.stringify({ data: summary }, null, 2) : renderSummary(summary));
