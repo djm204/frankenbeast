@@ -4,11 +4,7 @@
 - **Status:** Accepted
 - **Deciders:** Frankenbeast maintainers
 - **Supersedes:** none
-<<<<<<< HEAD
-- **Related:** ADR-014, issues #3685, #3690, #3695, #3700, #3701, #3702, #3703, and #3704
-=======
-- **Related:** ADR-014, issues #3685, #3690, #3695, #3696, #3700, #3701, #3702, and #3703
->>>>>>> origin/main
+- **Related:** ADR-014, issues #3685, #3690, #3695, #3696, #3700, #3701, #3702, #3703, and #3704
 
 ## Context
 

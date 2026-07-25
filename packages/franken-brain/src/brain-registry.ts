@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { SqliteBrain } from './sqlite-brain.js';
 
@@ -36,15 +36,20 @@ function assertSafeAgentTypeId(agentTypeId: string): void {
  * including `:memory:`, when they intentionally need different persistence.
  */
 export class BrainRegistry {
-  private readonly brains = new Map<string, SqliteBrain>();
+  private readonly brains = new Map<string, Map<string, SqliteBrain>>();
+  private readonly preferredDbPaths = new Map<string, string>();
 
   constructor(private readonly brainsDir = join('.fbeast', 'brains')) {}
 
   forAgentType(agentTypeId: string, dbPath?: string): SqliteBrain {
     assertSafeAgentTypeId(agentTypeId);
 
-    const existing = this.brains.get(agentTypeId);
-    if (existing) return existing;
+    const agentBrains = this.brains.get(agentTypeId);
+    const preferredDbPath = this.preferredDbPaths.get(agentTypeId);
+    if (dbPath === undefined && preferredDbPath) {
+      const preferred = agentBrains?.get(preferredDbPath);
+      if (preferred) return preferred;
+    }
 
     if (
       dbPath === undefined
@@ -55,21 +60,42 @@ export class BrainRegistry {
       );
     }
 
-    const resolvedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
+    const requestedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
+    const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
+    const existing = agentBrains?.get(resolvedDbPath);
+    if (existing) {
+      if (dbPath !== undefined) this.preferredDbPaths.set(agentTypeId, resolvedDbPath);
+      return existing;
+    }
     if (dbPath === undefined) {
       mkdirSync(this.brainsDir, { recursive: true });
     }
     const brain = new SqliteBrain(resolvedDbPath);
-    this.brains.set(agentTypeId, brain);
+    const paths = agentBrains ?? new Map<string, SqliteBrain>();
+    paths.set(resolvedDbPath, brain);
+    this.brains.set(agentTypeId, paths);
+    this.preferredDbPaths.set(agentTypeId, resolvedDbPath);
     return brain;
   }
 
-  /** Return an existing default agent brain without creating an unknown database. */
-  getAgentType(agentTypeId: string): SqliteBrain | undefined {
+  /** Return an existing agent brain without creating an unknown database. */
+  getAgentType(agentTypeId: string, dbPath?: string): SqliteBrain | undefined {
     assertSafeAgentTypeId(agentTypeId);
 
-    const existing = this.brains.get(agentTypeId);
-    if (existing) return existing;
+    const agentBrains = this.brains.get(agentTypeId);
+    const preferredDbPath = this.preferredDbPaths.get(agentTypeId);
+    if (dbPath === undefined && preferredDbPath) {
+      const preferred = agentBrains?.get(preferredDbPath);
+      if (preferred) return preferred;
+    }
+
+    if (dbPath !== undefined) {
+      const resolvedDbPath = dbPath === ':memory:' ? dbPath : resolve(dbPath);
+      const existing = agentBrains?.get(resolvedDbPath);
+      if (existing) return existing;
+      if (dbPath === ':memory:' || !existsSync(resolvedDbPath)) return undefined;
+      return this.forAgentType(agentTypeId, resolvedDbPath);
+    }
 
     if (Buffer.byteLength(agentTypeId, 'utf8') > MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES) {
       throw new RangeError(
@@ -83,7 +109,10 @@ export class BrainRegistry {
 
   /** Close every brain owned by this registry and release its process-local keys. */
   close(): void {
-    for (const brain of this.brains.values()) brain.close();
+    for (const paths of this.brains.values()) {
+      for (const brain of paths.values()) brain.close();
+    }
     this.brains.clear();
+    this.preferredDbPaths.clear();
   }
 }

@@ -5,8 +5,9 @@ import type { BeastEventBus } from '../events/beast-event-bus.js';
 import type { SQLiteBeastRepository } from '../repository/sqlite-beast-repository.js';
 import { ProcessBeastExecutor, type ProcessBeastExecutorOptions } from './process-beast-executor.js';
 import { ProcessSupervisor, type ProcessSupervisorLike } from './process-supervisor.js';
-import { toDockerSpec, writableWorkspaceUser } from './docker-container-runtime.js';
+import { remapHostWorkspacePath, toDockerSpec, writableWorkspaceUser } from './docker-container-runtime.js';
 import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from './sandbox-policy.js';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 export interface ContainerBeastExecutorDeps {
   readonly repository: SQLiteBeastRepository;
@@ -76,6 +77,25 @@ export class ContainerBeastExecutor implements BeastExecutor {
       options.eventBus = deps.eventBus;
     }
     options.runConfigOwner = () => parseRunConfigOwner(writableWorkspaceUser(policy));
+    options.transformRunConfigSnapshot = (snapshot) => {
+      const brain = snapshot.brain;
+      if (!brain || typeof brain !== 'object' || Array.isArray(brain)) return snapshot;
+      const dbPath = (brain as Record<string, unknown>).dbPath;
+      if (typeof dbPath !== 'string') return snapshot;
+      if (dbPath !== ':memory:' && isAbsolute(dbPath)) {
+        const relativePath = relative(resolve(policy.workspaceHostPath), resolve(dbPath));
+        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
+          throw new Error(`Container brain.dbPath must be inside the mounted workspace: ${dbPath}`);
+        }
+      }
+      return {
+        ...snapshot,
+        brain: {
+          ...brain as Record<string, unknown>,
+          dbPath: remapHostWorkspacePath(dbPath, policy),
+        },
+      };
+    };
     const nextAttemptNumber = (run: BeastRun): number => deps.repository.listAttempts(run.id).length + 1;
     options.transformSpec = (run, _originalSpec, mergedSpec) => toDockerSpec(mergedSpec, policy, {
       containerName: containerNameForRunAttempt(run, nextAttemptNumber(run)),

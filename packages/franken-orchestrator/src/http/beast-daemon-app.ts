@@ -235,6 +235,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
   app.route('/', beastRoutes(routeDeps));
   app.route('/', brainRoutes({
     registry: services.brains,
+    resolveContext: services.resolveBrainContext,
     operatorToken: options.operatorToken,
     security,
     rateLimit,

@@ -31,16 +31,28 @@ const EpisodeQuerySchema = z.object({
 
 export interface BrainRoutesDeps {
   registry: BrainRegistry;
+  resolveContext?: ((agentTypeId: string) => BrainRouteContext | undefined) | undefined;
   operatorToken: string;
   security: TransportSecurityService;
   rateLimit?: BeastRateLimitOptions;
 }
 
-function resolveBrain(c: Context, registry: BrainRegistry): { agentTypeId: string; brain: SqliteBrain } {
+export interface BrainRouteContext {
+  dbPath?: string | undefined;
+  faculties?: Partial<Record<'planning' | 'reasoning' | 'action' | 'learning', boolean>> | undefined;
+}
+
+function resolveBrain(c: Context, deps: BrainRoutesDeps): {
+  agentTypeId: string;
+  brain: SqliteBrain;
+  context: BrainRouteContext | undefined;
+} {
   const agentTypeId = c.req.param('agentTypeId') ?? '';
   let brain: SqliteBrain | undefined;
+  let context: BrainRouteContext | undefined;
   try {
-    brain = registry.getAgentType(agentTypeId);
+    context = deps.resolveContext?.(agentTypeId);
+    brain = deps.registry.getAgentType(agentTypeId, context?.dbPath);
   } catch (error) {
     if (error instanceof RangeError) {
       throw new HttpError(400, 'INVALID_AGENT_TYPE_ID', 'agentTypeId is invalid');
@@ -50,7 +62,7 @@ function resolveBrain(c: Context, registry: BrainRegistry): { agentTypeId: strin
   if (!brain) {
     throw new HttpError(404, 'BRAIN_NOT_FOUND', 'No brain exists for the requested agent type');
   }
-  return { agentTypeId, brain };
+  return { agentTypeId, brain, context };
 }
 
 function parseEpisodeQuery(c: Context): z.infer<typeof EpisodeQuerySchema> {
@@ -80,14 +92,15 @@ function truncateUtf8(value: string, maxBytes: number): { value: string; truncat
   return { value: encoded.subarray(0, maxBytes).toString('utf8'), truncated: true };
 }
 
-function boundEpisode(event: EpisodicEvent) {
+function boundEpisode(event: EpisodicEvent & { detailsTruncated?: true }) {
   const step = event.step === undefined
     ? undefined
     : truncateUtf8(event.step, MAX_EPISODE_STEP_BYTES);
   const summary = truncateUtf8(event.summary, MAX_EPISODE_SUMMARY_BYTES);
   const createdAt = truncateUtf8(event.createdAt, MAX_EPISODE_TIMESTAMP_BYTES);
-  const detailsTooLarge = event.details !== undefined
-    && Buffer.byteLength(JSON.stringify(event.details)) > MAX_EPISODE_DETAILS_BYTES;
+  const detailsTooLarge = event.detailsTruncated === true || (event.details !== undefined
+    && Buffer.byteLength(JSON.stringify(event.details)) > MAX_EPISODE_DETAILS_BYTES
+  );
   return {
     ...event,
     ...(step ? { step: step.value } : {}),
@@ -117,10 +130,8 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
   }
 
   app.get('/v1/brain/:agentTypeId', (c) => readBrainState(() => {
-    const { agentTypeId, brain } = resolveBrain(c, deps.registry);
-    // Refresh persisted working memory view to avoid stale in-memory cache
-    (brain as any).refreshPreparedStateForFlush?.();
-    const allWorkingKeys = brain.working.keys().sort();
+    const { agentTypeId, brain, context } = resolveBrain(c, deps);
+    const allWorkingKeys = brain.working.persistedKeys();
     const lastCheckpoint = brain.recovery.lastCheckpoint();
 
     return c.json({
@@ -133,12 +144,11 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
         },
         episodic: { eventCount: brain.episodic.count() },
         recovery: { lastCheckpointAt: lastCheckpoint?.timestamp ?? null },
-        // Updated to reflect latest runtime faculty configuration
         faculties: {
-          planning: { configured: brain.planning.configured },
-          reasoning: { configured: brain.reasoning.configured },
-          action: { configured: brain.action.configured },
-          learning: { configured: brain.learning.configured },
+          planning: { configured: context?.faculties?.planning ?? brain.planning.configured },
+          reasoning: { configured: context?.faculties?.reasoning ?? brain.reasoning.configured },
+          action: { configured: context?.faculties?.action ?? brain.action.configured },
+          learning: { configured: context?.faculties?.learning ?? brain.learning.configured },
         },
         capabilities: {
           memoryReview: true,
@@ -154,14 +164,16 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
   }));
 
   app.get('/v1/brain/:agentTypeId/episodes', (c) => readBrainState(() => {
-    const { brain } = resolveBrain(c, deps.registry);
+    const { brain } = resolveBrain(c, deps);
     const { limit, offset, query } = parseEpisodeQuery(c);
-    const readLimit = offset + limit + 1;
-    const candidates = query === undefined
-      ? brain.episodic.recent(readLimit)
-      : brain.episodic.recall(query, readLimit);
-    const data = candidates.slice(offset, offset + limit).map(boundEpisode);
-    const hasMore = candidates.length > offset + limit;
+    const candidates = brain.episodic.readBoundedPage({
+      limit: limit + 1,
+      offset,
+      ...(query === undefined ? {} : { query }),
+      maxDetailsBytes: MAX_EPISODE_DETAILS_BYTES,
+    });
+    const data = candidates.slice(0, limit).map(boundEpisode);
+    const hasMore = candidates.length > limit;
 
     return c.json({
       data,
@@ -175,12 +187,12 @@ export function brainRoutes(deps: BrainRoutesDeps): Hono {
   }));
 
   app.get('/v1/brain/:agentTypeId/lessons', (c) => readBrainState(() => {
-    const { brain } = resolveBrain(c, deps.registry);
+    const { brain, context } = resolveBrain(c, deps);
     return c.json({
       data: [],
       meta: {
         available: false,
-        facultyConfigured: brain.learning.configured,
+        facultyConfigured: context?.faculties?.learning ?? brain.learning.configured,
         reason: 'Consolidated lessons are not available until the learning faculty is configured',
       },
     });

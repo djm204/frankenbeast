@@ -394,6 +394,42 @@ export class SQLiteBeastRepository {
     return row ? mapRun(row) : undefined;
   }
 
+  getLatestRunForDefinition(
+    definitionId: string,
+    options: CorruptJsonRecoveryOptions = {},
+  ): BeastRun | undefined {
+    const row = this.db.prepare(
+      `SELECT * FROM beast_runs
+        WHERE definition_id = ?
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1`,
+    ).get(definitionId) as BeastRunRow | undefined;
+    return row ? mapRowsRecoveringCorruptJson([row], mapRun, options)[0] : undefined;
+  }
+
+  getLatestEstablishedRunForDefinition(
+    definitionId: string,
+    options: CorruptJsonRecoveryOptions = {},
+  ): BeastRun | undefined {
+    let offset = 0;
+    while (true) {
+      const row = this.db.prepare(
+        `SELECT beast_runs.* FROM beast_runs
+          WHERE definition_id = ?
+            AND EXISTS (
+              SELECT 1 FROM beast_run_attempts
+               WHERE beast_run_attempts.run_id = beast_runs.id
+            )
+          ORDER BY created_at DESC, beast_runs.rowid DESC
+          LIMIT 1 OFFSET ?`,
+      ).get(definitionId, offset) as BeastRunRow | undefined;
+      if (!row) return undefined;
+      const mapped = mapRowsRecoveringCorruptJson([row], mapRun, options)[0];
+      if (mapped) return mapped;
+      offset += 1;
+    }
+  }
+
   listRuns(options: CorruptJsonRecoveryOptions = {}): BeastRun[] {
     const rows = this.db.prepare('SELECT * FROM beast_runs ORDER BY created_at DESC, id DESC').all() as BeastRunRow[];
     return mapRowsRecoveringCorruptJson(rows, mapRun, options);
@@ -733,6 +769,35 @@ export class SQLiteBeastRepository {
   getTrackedAgent(agentId: string, options: CorruptJsonRecoveryOptions = {}): TrackedAgent | undefined {
     const row = this.db.prepare('SELECT * FROM tracked_agents WHERE id = ?').get(agentId) as TrackedAgentRow | undefined;
     return row ? mapRowsRecoveringCorruptJson([row], mapTrackedAgent, options)[0] : undefined;
+  }
+
+  getLatestTrackedAgentForDefinition(
+    definitionId: string,
+    options: CorruptJsonRecoveryOptions = {},
+  ): TrackedAgent | undefined {
+    if (!options.recoverCorruptJson) {
+      const row = this.db.prepare(
+        `SELECT * FROM tracked_agents
+          WHERE definition_id = ?
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT 1`,
+      ).get(definitionId) as TrackedAgentRow | undefined;
+      return row ? mapTrackedAgent(row) : undefined;
+    }
+
+    let offset = 0;
+    while (true) {
+      const row = this.db.prepare(
+        `SELECT * FROM tracked_agents
+          WHERE definition_id = ?
+          ORDER BY created_at DESC, rowid DESC
+          LIMIT 1 OFFSET ?`,
+      ).get(definitionId, offset) as TrackedAgentRow | undefined;
+      if (!row) return undefined;
+      const mapped = mapRowsRecoveringCorruptJson([row], mapTrackedAgent, options)[0];
+      if (mapped) return mapped;
+      offset += 1;
+    }
   }
 
   requireTrackedAgent(agentId: string): TrackedAgent {
