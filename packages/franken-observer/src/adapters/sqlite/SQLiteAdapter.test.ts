@@ -75,6 +75,29 @@ describe('SQLiteAdapter', () => {
     second.close()
   })
 
+  it('migrates the legacy compaction identity to include runId', () => {
+    pragmaMock.mockImplementation((statement: string) => {
+      if (statement === "index_list('compaction_events')") {
+        return [{ name: 'idx_compaction_events_session_timestamp' }]
+      }
+      if (statement === "table_info('compaction_events')") {
+        return [
+          { name: 'sessionId', pk: 1 },
+          { name: 'generation', pk: 2 },
+          { name: 'runId', pk: 0 },
+        ]
+      }
+      return undefined
+    })
+
+    const adapter = createSQLiteAdapter('/tmp/legacy-compactions.db')
+
+    expect(execMock).toHaveBeenCalledWith(expect.stringContaining(
+      'PRIMARY KEY (runId, sessionId, generation)',
+    ))
+    adapter.close()
+  })
+
   it('validates retry options before opening a database handle', () => {
     expect(() => createSQLiteAdapter('/tmp/traces.db', { maxLockRetries: -1 })).toThrow(
       'maxLockRetries must be an integer between 0 and 10',

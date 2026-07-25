@@ -46,6 +46,62 @@ describe('CompactionMetrics', () => {
     await adapter.close();
   });
 
+  it('keeps identically numbered generations from separate runs', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-run-identity-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+
+    for (const [runId, timestamp] of [['run-1', 100], ['run-2', 200]] as const) {
+      await metrics.record({
+        sessionId: 'seeded-session',
+        runId,
+        generation: 1,
+        triggerReason: 'threshold',
+        tokensBefore: 900,
+        tokensAfter: 120,
+        timestamp,
+      });
+    }
+
+    await expect(metrics.query('seeded-session')).resolves.toEqual([
+      expect.objectContaining({ runId: 'run-2', generation: 1 }),
+      expect.objectContaining({ runId: 'run-1', generation: 1 }),
+    ]);
+    await adapter.close();
+  });
+
+  it('prunes expired compaction events even when they have no retained trace row', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'compaction-orphan-retention-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'), { useWorkerThread: false });
+    const metrics = new CompactionMetrics(adapter);
+    const now = 1_750_000_000_000;
+    const retentionMs = 24 * 60 * 60 * 1_000;
+
+    await metrics.record({
+      sessionId: 'orphaned-session',
+      runId: 'orphaned-run',
+      generation: 1,
+      triggerReason: 'threshold',
+      tokensBefore: 900,
+      tokensAfter: 120,
+      timestamp: now - retentionMs - 1,
+    });
+    await metrics.record({
+      sessionId: 'active-session',
+      runId: 'active-run',
+      generation: 1,
+      triggerReason: 'threshold',
+      tokensBefore: 900,
+      tokensAfter: 120,
+      timestamp: now,
+    });
+
+    await expect(metrics.query('orphaned-session')).resolves.toEqual([]);
+    await adapter.close();
+  });
+
   it('calculates a windowed compaction rate without hydrating event payloads', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'compaction-rate-'));
     tempDirs.push(dir);

@@ -10,6 +10,7 @@ import type { CompactionEvent, CompactionEventQuery } from '../../compaction-met
 import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 import {
   CREATE_TABLES,
+  MIGRATE_COMPACTION_EVENT_IDENTITY,
   UPSERT_TRACE,
   UPSERT_SPAN,
   SELECT_TRACE,
@@ -18,6 +19,7 @@ import {
   SELECT_TRACE_SUMMARIES,
   DELETE_SPANS_BY_TRACE,
   DELETE_COMPACTIONS_BY_RUN,
+  DELETE_COMPACTIONS_BEFORE,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
@@ -68,6 +70,8 @@ interface FlushedSpanState {
 }
 
 const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_compaction_events_session_timestamp'
+const COMPACTION_RETENTION_MS = 24 * 60 * 60 * 1000
+const COMPACTION_PRIMARY_KEY = ['runId', 'sessionId', 'generation']
 
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
@@ -208,7 +212,10 @@ function execute(operation, payload) {
       return undefined
     }
     case 'recordCompaction':
-      db.prepare(sql.upsertCompactionEvent).run(payload.event)
+      db.transaction((event, retentionMs) => {
+        db.prepare(sql.upsertCompactionEvent).run(event)
+        db.prepare(sql.deleteCompactionsBefore).run(event.timestamp - retentionMs)
+      })(payload.event, payload.retentionMs)
       return undefined
     case 'queryCompactions':
       return db.prepare(sql.selectCompactionEvents).all(payload.query)
@@ -286,6 +293,7 @@ class SQLiteWorkerClient {
             selectTraceSummaries: SELECT_TRACE_SUMMARIES,
             deleteSpansByTrace: DELETE_SPANS_BY_TRACE,
             deleteCompactionsByRun: DELETE_COMPACTIONS_BY_RUN,
+            deleteCompactionsBefore: DELETE_COMPACTIONS_BEFORE,
             deleteTrace: DELETE_TRACE,
             upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
             selectCompactionEvents: SELECT_COMPACTION_EVENTS,
@@ -622,6 +630,22 @@ export class SQLiteAdapter implements ExportAdapter {
           && compactionIndexes.some(index => index.name === SQLITE_SCHEMA_SENTINEL_INDEX)
         if (!schemaInitialized) {
           this.db.exec(CREATE_TABLES)
+        } else {
+          const rawTableInfo = this.db.pragma("table_info('compaction_events')") as unknown
+          const tableInfo = (Array.isArray(rawTableInfo) ? rawTableInfo : []) as Array<{
+            name?: unknown
+            pk?: unknown
+          }>
+          const primaryKey = tableInfo
+            .filter(column => typeof column.pk === 'number' && column.pk > 0)
+            .sort((left, right) => (left.pk as number) - (right.pk as number))
+            .map(column => column.name)
+          if (primaryKey.length > 0 && (
+            primaryKey.length !== COMPACTION_PRIMARY_KEY.length
+            || !COMPACTION_PRIMARY_KEY.every((name, index) => primaryKey[index] === name)
+          )) {
+            this.db.exec(MIGRATE_COMPACTION_EVENT_IDENTITY)
+          }
         }
       })
       const isTransientDatabase = databasePath === ':memory:' || databasePath === ''
@@ -918,12 +942,19 @@ export class SQLiteAdapter implements ExportAdapter {
     return this.enqueueSqliteOperation(async () => {
       if (this.workerClient !== undefined) {
         await this.withSqliteLockRetry('record compaction event', () => (
-          this.workerClient!.request<void>('recordCompaction', { event })
+          this.workerClient!.request<void>('recordCompaction', {
+            event,
+            retentionMs: COMPACTION_RETENTION_MS,
+          })
         ))
         return
       }
       await this.withSqliteLockRetry('record compaction event', () => {
-        this.db.prepare(UPSERT_COMPACTION_EVENT).run(event)
+        const transaction = this.db.transaction((record: CompactionEvent) => {
+          this.db.prepare(UPSERT_COMPACTION_EVENT).run(record)
+          this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(record.timestamp - COMPACTION_RETENTION_MS)
+        })
+        transaction(event)
       })
     })
   }

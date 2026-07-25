@@ -1194,6 +1194,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     allowTrustedCommandOverrides: options.trustProviderCommandOverrides,
   };
   assertTrustedProviderCommandOverrides(options.providersConfig, commandOverridePolicy);
+  assertTrustedProviderCommandOverrideEntries(
+    consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders),
+    commandOverridePolicy,
+  );
   const artifacts = createSessionArtifacts(options);
   clearSessionArtifacts(options, artifacts);
 

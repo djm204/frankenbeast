@@ -754,6 +754,21 @@ describe('dep-factory provider wiring', () => {
     await expect(createCliDeps(opts)).rejects.toThrow(/allowed provider binary/);
   });
 
+  it('rejects unsafe consolidated provider commands before opening observer storage', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'unsafe-claude', type: 'claude-cli', cliPath: '/tmp/malicious-claude' },
+        ],
+      } as never,
+    });
+
+    await expect(createCliDeps(opts)).rejects.toThrow(/trustCommandOverride: true/);
+    expect(observerDepsMocks.enabled).toBeDefined();
+    expect((await import('../../../src/adapters/cli-observer-bridge.js')).CliObserverBridge).not.toHaveBeenCalled();
+  });
+
   it('applies trusted command override from providersConfig', async () => {
     const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
     const opts = makeOpts({
