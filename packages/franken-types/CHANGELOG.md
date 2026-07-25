@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.18.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.17.0...franken-types-v0.18.0) (2026-07-25)
+
+
+### Features
+
+* **brain:** add agent-scoped faculty foundation ([#3740](https://github.com/djm204/frankenbeast/issues/3740)) ([a88d1e3](https://github.com/djm204/frankenbeast/commit/a88d1e35042f4cbfd93d725930f16741c69b9b6f))
+* **brain:** add shared hive mind store ([#3775](https://github.com/djm204/frankenbeast/issues/3775)) ([fb61107](https://github.com/djm204/frankenbeast/commit/fb611078254384968c916940d351ceac172816c9))
+* **brain:** consolidate repeated failure lessons ([#3760](https://github.com/djm204/frankenbeast/issues/3760)) ([5b25224](https://github.com/djm204/frankenbeast/commit/5b252241cfd8e6fc0b97b4bed64e79a343f0bd4b))
+* **brain:** persist workspace conversations ([#3772](https://github.com/djm204/frankenbeast/issues/3772)) ([fe70635](https://github.com/djm204/frankenbeast/commit/fe70635f4a32f1236299183fdc5c7b7b3f651108))
+* **brain:** record critique verdicts as reasoning episodes ([#3742](https://github.com/djm204/frankenbeast/issues/3742)) ([3191a1f](https://github.com/djm204/frankenbeast/commit/3191a1fb164bbff536fc2a72e8e27e83eeb820d7))
+* **brain:** record governor decisions as action episodes ([#3745](https://github.com/djm204/frankenbeast/issues/3745)) ([13b3399](https://github.com/djm204/frankenbeast/commit/13b3399245f01a7e72bc869d9aab40519c6106de))
+* **brain:** wire planning faculty adapter ([#3744](https://github.com/djm204/frankenbeast/issues/3744)) ([a12aa2f](https://github.com/djm204/frankenbeast/commit/a12aa2fe4a3013a2161f275a59646ecbf29d5671))
+
+
+### Bug Fixes
+
+* **brain:** harden lesson consolidation follow-up ([#3767](https://github.com/djm204/frankenbeast/issues/3767)) ([c7636c3](https://github.com/djm204/frankenbeast/commit/c7636c346eaacc1cf3cb94d9b00e8af19615f862))
+
 ## [0.17.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.16.1...franken-types-v0.17.0) (2026-07-23)
 
 

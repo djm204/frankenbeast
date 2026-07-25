@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.10.0...franken-web-v0.11.0) (2026-07-25)
+
+
+### Features
+
+* **web:** add Hive Brain dashboard panel ([#3776](https://github.com/djm204/frankenbeast/issues/3776)) ([bfd1a23](https://github.com/djm204/frankenbeast/commit/bfd1a23051a6c76f3a8c2e2eede4534f0f571f4a))
+
+
+### Documentation
+
+* **chat:** define Hive Brain command center ([#3741](https://github.com/djm204/frankenbeast/issues/3741)) ([338c0ef](https://github.com/djm204/frankenbeast/commit/338c0ef6563adb1e0aa90f42e6797aab4373dfdf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.17.0 to 0.18.0
+
 ## [0.10.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.9.2...franken-web-v0.10.0) (2026-07-23)
 
 
