@@ -39,10 +39,25 @@ export function BrainPanel({ client }: BrainPanelProps) {
   const [lessonLoading, setLessonLoading] = useState(false);
   const [lessonError, setLessonError] = useState<string | null>(null);
 
-  useEffect(() => () => {
+  useEffect(() => {
     requestSequenceRef.current += 1;
     lessonRequestSequenceRef.current += 1;
-  }, []);
+    setAgentTypeInput('');
+    setSelectedAgentType(null);
+    setBrain(null);
+    setLessons(null);
+    setLoading(false);
+    setLessonLoading(false);
+    setError(null);
+    setLessonError(null);
+    setLessonQuery('');
+    setSearchedLessonQuery(null);
+
+    return () => {
+      requestSequenceRef.current += 1;
+      lessonRequestSequenceRef.current += 1;
+    };
+  }, [client]);
 
   async function loadBrain(agentType: string): Promise<void> {
     const sequence = requestSequenceRef.current + 1;
@@ -142,7 +157,7 @@ export function BrainPanel({ client }: BrainPanelProps) {
           <button
             className="button button--primary button--compact"
             type="submit"
-            disabled={!agentTypeInput.trim() || loading}
+            disabled={!agentTypeInput.trim() || (loading && agentTypeInput.trim() === selectedAgentType)}
           >
             Inspect Brain
           </button>

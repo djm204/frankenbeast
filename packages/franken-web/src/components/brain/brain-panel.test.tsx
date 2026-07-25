@@ -151,6 +151,44 @@ describe('BrainPanel', () => {
     expect(client.fetchBrainState).toHaveBeenLastCalledWith('planner');
   });
 
+  it('allows selecting another Brain while the previous summary read is pending', async () => {
+    const firstStateRequest = deferred<DashboardBrainState>();
+    const client = mockClient({
+      fetchBrainState: vi.fn()
+        .mockReturnValueOnce(firstStateRequest.promise)
+        .mockResolvedValueOnce({ ...brainState, agentTypeId: 'planner' }),
+    });
+    render(<BrainPanel client={client} />);
+
+    fireEvent.change(screen.getByLabelText('Agent type'), { target: { value: 'reviewer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Brain' }));
+    expect(screen.getByRole('status').textContent).toContain('Loading Brain state for reviewer');
+
+    fireEvent.change(screen.getByLabelText('Agent type'), { target: { value: 'planner' } });
+    expect(screen.getByRole('button', { name: 'Inspect Brain' }).hasAttribute('disabled')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Brain' }));
+
+    expect(await screen.findByRole('region', { name: 'Brain faculties for planner' })).toBeTruthy();
+    expect(client.fetchBrainState).toHaveBeenLastCalledWith('planner');
+  });
+
+  it('invalidates and clears Brain data when the API client changes', async () => {
+    const staleStateRequest = deferred<DashboardBrainState>();
+    const firstClient = mockClient({ fetchBrainState: vi.fn().mockReturnValue(staleStateRequest.promise) });
+    const nextClient = mockClient();
+    const { rerender } = render(<BrainPanel client={firstClient} />);
+
+    fireEvent.change(screen.getByLabelText('Agent type'), { target: { value: 'reviewer' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Brain' }));
+    rerender(<BrainPanel client={nextClient} />);
+    staleStateRequest.resolve(brainState);
+
+    expect(await screen.findByRole('region', { name: 'Brain faculties' })).toBeTruthy();
+    expect(screen.getByText('Enter an agent type to inspect its persisted Brain state.')).toBeTruthy();
+    expect(screen.queryByText('1 persisted key')).toBeNull();
+    expect(nextClient.fetchBrainState).not.toHaveBeenCalled();
+  });
+
   it('shows the backend lesson-unavailable reason instead of an empty lesson claim', async () => {
     const client = mockClient({
       fetchBrainState: vi.fn().mockResolvedValue({
