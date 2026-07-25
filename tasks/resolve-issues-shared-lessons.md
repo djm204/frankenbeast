@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Read-only brain inspection must snapshot context and sanitize persisted output
+- Resolve persisted brain paths and faculty flags from a snapshot of the Beast repository before opening the brain snapshot. If both contexts share one SQLite file, reuse the same backup so inspection cannot combine different live moments; always use an explicit fixed snapshot filename so a valid 255-byte agent id never becomes an invalid derived filename.
+- Treat every persisted string as untrusted output: truncate on complete UTF-8 code-point boundaries, bound timestamps and lesson fields independently, escape C0/C1 plus Unicode format/display controls in human output, and map storage/snapshot failures to stable operator errors without leaking paths or SQLite internals.
+
 ## 2026-07-25 — Faculty lesson consultation must stay bounded before lookup
 - Apply input caps while iterating plan objectives, before `map()`/`join()` or redaction; truncating only after concatenation still allows adversarial plans to cause unbounded synchronous work. Skip query construction entirely when episode recording and lesson consultation are disabled.
 - Keep automatic consolidation off the planning/reasoning/action return path and coalesce pending triggers per learning port. Persist stable lesson keys—not full lesson text—in consultation telemetry so the consulted set stays observable without duplicating reviewed memory content.
