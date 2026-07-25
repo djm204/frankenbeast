@@ -197,6 +197,75 @@ describe('DashboardApiClient', () => {
     });
   });
 
+  describe('brain reads', () => {
+    it('reads one encoded agent-type brain summary from the real v1 route shape', async () => {
+      const summary = {
+        agentTypeId: 'code/reviewer',
+        workingMemory: { keys: ['goal'], total: 1, truncated: false },
+        episodic: { eventCount: 3 },
+        recovery: { lastCheckpointAt: '2026-07-25T01:02:03.000Z' },
+        faculties: {
+          planning: { configured: true },
+          reasoning: { configured: false },
+          action: { configured: true },
+          learning: { configured: true },
+        },
+        capabilities: { memoryReview: true, retentionReporting: true, recordLearning: true },
+        lessons: { available: true, count: null },
+      };
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: summary }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+
+      await expect(client.fetchBrainState('code/reviewer')).resolves.toEqual(summary);
+      expect(globalThis.fetch).toHaveBeenCalledWith(`${BASE_URL}/v1/brain/code%2Freviewer`);
+    });
+
+    it('queries bounded lessons and preserves route availability metadata', async () => {
+      const response = {
+        data: [{
+          kind: 'consolidated-lesson' as const,
+          key: 'lesson-1',
+          status: 'approved' as const,
+          pattern: 'Run focused tests before the workspace build',
+          keywords: ['tests', 'build'],
+          occurrenceCount: 4,
+          confidence: 0.4,
+          evidenceEventIds: [1, 2, 3, 4],
+          firstSeenAt: '2026-07-24T01:00:00.000Z',
+          lastSeenAt: '2026-07-25T01:00:00.000Z',
+          relevance: 0.9,
+        }],
+        meta: { available: true, facultyConfigured: true },
+      };
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => response });
+
+      const client = new DashboardApiClient(BASE_URL);
+
+      await expect(client.fetchBrainLessons('reviewer', 'workspace build', 5)).resolves.toEqual(response);
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        `${BASE_URL}/v1/brain/reviewer/lessons?query=workspace+build&limit=5`,
+      );
+    });
+
+    it('surfaces typed brain route error messages without adding browser credentials', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ error: { code: 'BRAIN_NOT_FOUND', message: 'No brain exists for the requested agent type' } }),
+      });
+
+      const client = new DashboardApiClient(BASE_URL);
+
+      await expect(client.fetchBrainState('missing')).rejects.toThrow('No brain exists for the requested agent type');
+      const init = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit | undefined;
+      expect(init).toBeUndefined();
+    });
+  });
+
   describe('subscribeToDashboard', () => {
     it('mints a short-lived ticket before opening EventSource', async () => {
       const closeFn = vi.fn();

@@ -42,7 +42,7 @@ npm run check:package-manager
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
 | `packages/franken-governor/` | HITL approval gates, triggers (budget/skill/confidence/ambiguity), CLI/Slack channels |
-| `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, network config, metrics |
+| `packages/franken-web/` | React web dashboard — chat UI, beast catalog/dispatch controls, read-only per-agent-type Brain faculty/lesson inspection, network config, metrics |
 | `packages/franken-orchestrator/` | Beast Loop, CLI, chat server, comms gateway (Slack/Discord/Telegram/WhatsApp), beast control APIs, phases, circuit breakers, skill execution, crash recovery |
 | `packages/franken-mcp-suite/` | MCP suite (`@franken/mcp-suite`) for tool registry/server/proxy integrations |
 | `packages/live-bench/` | Live benchmark harness (`@franken/live-bench`) and fixture workspace tooling |
@@ -143,6 +143,11 @@ packages/franken-orchestrator/src/
   transcript/routing/approval state bound to the planned `BrainRegistry`, and
   requires every Beast launch to reuse the existing governed dispatch path.
   Do not add a second socket protocol or dispatch directly from a brain/faculty.
+- **Brain dashboard inspection is implemented and remains read-only.** The
+  overview panel reads one explicit existing agent-type id through bounded
+  `/v1/brain/*` routes, displays memory and faculty configuration, and searches
+  consolidated lessons by topic. It does not enumerate/create brains, expose
+  browser credentials, or claim an unfiltered recent lesson feed.
 - Beast control catalog currently exposes three operator flows: `design-interview`, `chunk-plan` (labeled `Design Doc -> Chunk Creation` and using a `file` prompt for `designDocPath`), and `martin-loop` (now requiring `chunkDirectory` with a `directory` prompt)
 - Tracked-agent domain types, HTTP routes, and dashboard wiring now sit below the beast control layer so init lifecycle state can exist before a Beast run is dispatched
 - **Beast daemon execution pipeline**: `ProcessBeastExecutor` manages spawned agent processes with config file passthrough (`FRANKENBEAST_RUN_CONFIG` env var), `ProcessSupervisor` three-way exit gate, early stdout/stderr buffering, and stop/kill escalation (SIGTERM → timeout → SIGKILL). `BeastEventBus` publishes real-time `run.status`, `run.log`, and `agent.status` events to SSE subscribers. `SseConnectionTicketStore` authenticates EventSource connections via single-use tickets (ADR-030). Config files are written to `.fbeast/.build/run-configs/` and cleaned up on terminal state.

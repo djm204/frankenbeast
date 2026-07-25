@@ -85,6 +85,8 @@ const snapshot: DashboardSnapshot = {
 function mockClient(overrides: Partial<DashboardApiClient> = {}): DashboardApiClient {
   return {
     fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
+    fetchBrainState: vi.fn(),
+    fetchBrainLessons: vi.fn(),
     toggleSkill: vi.fn().mockResolvedValue(undefined),
     updateSecurityProfile: vi.fn().mockResolvedValue(undefined),
     subscribeToDashboard: vi.fn().mockResolvedValue(() => undefined),
@@ -107,6 +109,16 @@ describe('DashboardPage', () => {
   afterEach(() => {
     cleanup();
     useDashboardStore.getState().reset();
+  });
+
+  it('mounts the read-only Brain panel without selecting or fabricating an agent type', async () => {
+    const client = mockClient();
+
+    render(<DashboardPage client={client} />);
+
+    expect(await screen.findByRole('region', { name: 'Brain faculties' })).toBeTruthy();
+    expect(screen.getByText('Enter an agent type to inspect its persisted Brain state.')).toBeTruthy();
+    expect(client.fetchBrainState).not.toHaveBeenCalled();
   });
 
   it('renders partial dependency outages with remediation and safe work guidance', async () => {
