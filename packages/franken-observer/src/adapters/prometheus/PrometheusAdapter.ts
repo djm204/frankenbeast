@@ -13,8 +13,6 @@ export interface PrometheusAdapterOptions {
 interface TokenCounts {
   prompt: number
   completion: number
-  cacheRead: number
-  cacheCreation: number
 }
 
 interface FlushedSpanEntry {
@@ -89,76 +87,25 @@ export class PrometheusAdapter implements ExportAdapter {
 
       const promptTokens = span.metadata['promptTokens']
       const completionTokens = span.metadata['completionTokens']
-      const cacheReadTokens = span.metadata['cacheReadTokens']
-      const cacheCreationTokens = span.metadata['cacheCreationTokens']
-      const cacheCreation1hTokens = span.metadata['cacheCreation1hTokens']
       if (typeof promptTokens === 'number') {
         assertValidTokenDelta(promptTokens, 'promptTokens')
       }
       if (typeof completionTokens === 'number') {
         assertValidTokenDelta(completionTokens, 'completionTokens')
       }
-      if (typeof cacheReadTokens === 'number') {
-        assertValidTokenDelta(cacheReadTokens, 'cacheReadTokens')
-      }
-      if (typeof cacheCreationTokens === 'number') {
-        assertValidTokenDelta(cacheCreationTokens, 'cacheCreationTokens')
-      }
-      if (typeof cacheCreation1hTokens === 'number') {
-        assertValidTokenDelta(cacheCreation1hTokens, 'cacheCreation1hTokens')
-        const cacheCreation = typeof cacheCreationTokens === 'number' ? cacheCreationTokens : 0
-        if (cacheCreation1hTokens > cacheCreation) {
-          throw new RangeError(
-            'PrometheusAdapter: cacheCreation1hTokens must not exceed cacheCreationTokens',
-          )
-        }
-      }
-      if (
-        typeof promptTokens !== 'number' &&
-        typeof completionTokens !== 'number' &&
-        typeof cacheReadTokens !== 'number' &&
-        typeof cacheCreationTokens !== 'number'
-      ) continue
+      if (typeof promptTokens !== 'number' && typeof completionTokens !== 'number') continue
 
       const prompt = typeof promptTokens === 'number' ? promptTokens : 0
       const completion = typeof completionTokens === 'number' ? completionTokens : 0
-      const cacheRead = typeof cacheReadTokens === 'number' ? cacheReadTokens : 0
-      const cacheCreation = typeof cacheCreationTokens === 'number' ? cacheCreationTokens : 0
-      const existing = pendingTokenCounters.get(model) ?? {
-        prompt: 0,
-        completion: 0,
-        cacheRead: 0,
-        cacheCreation: 0,
-      }
+      const existing = pendingTokenCounters.get(model) ?? { prompt: 0, completion: 0 }
       const nextPrompt = safeAddTokenCounter(existing.prompt, prompt, `${model} prompt`)
       const nextCompletion = safeAddTokenCounter(
         existing.completion,
         completion,
         `${model} completion`,
       )
-      const nextCacheRead = safeAddTokenCounter(
-        existing.cacheRead,
-        cacheRead,
-        `${model} cache read`,
-      )
-      const nextCacheCreation = safeAddTokenCounter(
-        existing.cacheCreation,
-        cacheCreation,
-        `${model} cache creation`,
-      )
-      const nextInput = safeAddTokenCounter(nextPrompt, nextCacheRead, `${model} input token`)
-      const nextReusableInput = safeAddTokenCounter(
-        nextInput,
-        nextCacheCreation,
-        `${model} input token`,
-      )
-      safeAddTokenCounter(nextReusableInput, nextCompletion, `${model} token`)
-      pendingTokenCounters.set(model, {
-        prompt: nextPrompt,
-        completion: nextCompletion,
-        cacheRead: nextCacheRead,
-        cacheCreation: nextCacheCreation,
-      })
+      safeAddTokenCounter(nextPrompt, nextCompletion, `${model} token`)
+      pendingTokenCounters.set(model, { prompt: nextPrompt, completion: nextCompletion })
     }
 
     const newlyFlushedSpanIds: string[] = []
@@ -172,39 +119,18 @@ export class PrometheusAdapter implements ExportAdapter {
       const model = span.metadata['model']
       const promptTokens = span.metadata['promptTokens']
       const completionTokens = span.metadata['completionTokens']
-      const cacheReadTokens = span.metadata['cacheReadTokens']
-      const cacheCreationTokens = span.metadata['cacheCreationTokens']
-      const cacheCreation1hTokens = span.metadata['cacheCreation1hTokens']
 
       if (
         typeof model === 'string' &&
-        (typeof promptTokens === 'number' ||
-          typeof completionTokens === 'number' ||
-          typeof cacheReadTokens === 'number' ||
-          typeof cacheCreationTokens === 'number')
+        (typeof promptTokens === 'number' || typeof completionTokens === 'number')
       ) {
         const prompt = typeof promptTokens === 'number' ? promptTokens : 0
         const completion = typeof completionTokens === 'number' ? completionTokens : 0
-        const cacheRead = typeof cacheReadTokens === 'number' ? cacheReadTokens : 0
-        const cacheCreation = typeof cacheCreationTokens === 'number' ? cacheCreationTokens : 0
-        const cacheCreation1h =
-          typeof cacheCreation1hTokens === 'number' ? cacheCreation1hTokens : 0
 
-        const existing = this.tokenCounters.get(model) ?? {
-          prompt: 0,
-          completion: 0,
-          cacheRead: 0,
-          cacheCreation: 0,
-        }
+        const existing = this.tokenCounters.get(model) ?? { prompt: 0, completion: 0 }
         this.tokenCounters.set(model, {
           prompt: safeAddTokenCounter(existing.prompt, prompt, `${model} prompt`),
           completion: safeAddTokenCounter(existing.completion, completion, `${model} completion`),
-          cacheRead: safeAddTokenCounter(existing.cacheRead, cacheRead, `${model} cache read`),
-          cacheCreation: safeAddTokenCounter(
-            existing.cacheCreation,
-            cacheCreation,
-            `${model} cache creation`,
-          ),
         })
 
         // Cost counter — only when pricing table covers this model
@@ -212,16 +138,7 @@ export class PrometheusAdapter implements ExportAdapter {
           const pricing = this.pricingTable[model]
           const cost =
             (prompt * pricing.promptPerMillion) / 1_000_000 +
-            (completion * pricing.completionPerMillion) / 1_000_000 +
-            (cacheRead * (pricing.cacheReadPerMillion ?? pricing.promptPerMillion)) / 1_000_000 +
-            ((cacheCreation - cacheCreation1h) *
-              (pricing.cacheCreationPerMillion ?? pricing.promptPerMillion)) /
-              1_000_000 +
-            (cacheCreation1h *
-              (pricing.cacheCreation1hPerMillion ??
-                pricing.cacheCreationPerMillion ??
-                pricing.promptPerMillion)) /
-              1_000_000
+            (completion * pricing.completionPerMillion) / 1_000_000
           this.costCounters.set(model, (this.costCounters.get(model) ?? 0) + cost)
         }
       }
@@ -296,12 +213,6 @@ export class PrometheusAdapter implements ExportAdapter {
         )
         lines.push(
           `franken_observer_tokens_total{model="${escapedModel}",type="completion"} ${counts.completion}`,
-        )
-        lines.push(
-          `franken_observer_tokens_total{model="${escapedModel}",type="cache_read"} ${counts.cacheRead}`,
-        )
-        lines.push(
-          `franken_observer_tokens_total{model="${escapedModel}",type="cache_creation"} ${counts.cacheCreation}`,
         )
       }
     }
