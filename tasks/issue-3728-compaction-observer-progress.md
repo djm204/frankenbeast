@@ -8,7 +8,7 @@
 - [x] Document the compaction observer flow in `docs/ARCHITECTURE.md`.
 - [x] Run repository tests, lint, typecheck, and build.
 - [x] Audit the final diff against `origin/main`.
-- [ ] Commit, push, and open a PR linked to #3728.
+- [x] Commit, push, and open PR #3780 linked to #3728.
 - [ ] Run the GitHub Codex review loop until the current head is clean.
 - [ ] Hand off for human review without merging.
 
