@@ -358,6 +358,50 @@ describe('HiveStatusQuery', () => {
     expect(result.summary).toContain('more agents omitted');
   });
 
+  it('reconciles the canonical local operator with dashboard and local chat ownership', () => {
+    const { agents, query } = createHarness();
+    const dashboard = createAgent(agents, 'coder', 'operator');
+    const localChat = agents.createAgent({
+      definitionId: 'reviewer',
+      source: 'chat',
+      createdByUser: 'chat-session:local-chat-1',
+      chatSessionId: 'local-chat-1',
+      initAction: { kind: 'martin-loop', command: 'review', config: {} },
+      initConfig: {
+        agentRole: 'coding',
+        requestedTools: [
+          'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+          'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+        ],
+        skills: [],
+      },
+    });
+    const externalChat = agents.createAgent({
+      definitionId: 'planner',
+      source: 'chat',
+      createdByUser: 'chat-session:comms:discord:42',
+      chatSessionId: 'comms:discord:42',
+      initAction: { kind: 'martin-loop', command: 'plan', config: {} },
+      initConfig: {
+        agentRole: 'coding',
+        requestedTools: [
+          'read_file', 'search_files', 'write_file', 'patch', 'terminal',
+          'terminal.background', 'github.read', 'github.comment', 'github.pr', 'kanban.comment',
+        ],
+        skills: [],
+      },
+    });
+
+    const result = query.query({ subjectId: 'local-operator' });
+
+    expect(result.agents.map((agent) => agent.agentId).sort()).toEqual([
+      dashboard.id,
+      localChat.id,
+    ].sort());
+    expect(query.query({ subjectId: 'external:comms:discord:42' }).agents)
+      .toEqual([expect.objectContaining({ agentId: externalChat.id })]);
+  });
+
   it('omits hive activity when an agent-type namespace is shared by subjects', () => {
     const { agents, hive, query } = createHarness();
     createAgent(agents, 'coder', 'operator');
@@ -569,6 +613,25 @@ describe('HiveStatusQuery', () => {
     expect(result.agents).toEqual([]);
     expect(result.summary).not.toContain('No agents have been dispatched');
     expect(result.meta).toMatchObject({ truncated: true, scanIncomplete: true });
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it('marks a short scan partial when any physical agent row is skipped', () => {
+    const { dbPath, agents, query } = createHarness();
+    createAgent(agents, 'coder', 'operator');
+    const corrupt = createAgent(agents, 'planner', 'another-operator');
+    const db = new Database(dbPath);
+    closeables.push(db);
+    db.prepare('UPDATE tracked_agents SET init_config = ? WHERE id = ?').run('{', corrupt.id);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = query.query({ subjectId: 'operator' });
+
+    expect(result).toMatchObject({
+      status: 'partial',
+      meta: { totalAgents: null, truncated: true, scanIncomplete: true },
+    });
     expect(warning).toHaveBeenCalled();
     warning.mockRestore();
   });

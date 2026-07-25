@@ -61,6 +61,20 @@ function truncateUtf8(value: string, maxBytes: number): { value: string; truncat
   return { value: encoded.subarray(0, end).toString('utf8'), truncated: true };
 }
 
+function canonicalAgentSubject(agent: TrackedAgent): string {
+  if (agent.createdByUser === 'operator') return 'local-operator';
+  const sessionId = agent.chatSessionId
+    ?? (agent.createdByUser.startsWith('chat-session:')
+      ? agent.createdByUser.slice('chat-session:'.length)
+      : undefined);
+  if (!sessionId) return agent.createdByUser;
+  return sessionId.startsWith('comms:') ? `external:${sessionId}` : 'local-operator';
+}
+
+function agentBelongsToSubject(agent: TrackedAgent, subjectId: string): boolean {
+  return agent.createdByUser === subjectId || canonicalAgentSubject(agent) === subjectId;
+}
+
 function mapActivity(entry: HiveMindEntry): HiveRecentActivity {
   const rawSummary = entry.kind === 'episode' ? entry.event.summary : entry.lesson.pattern;
   const summary = truncateUtf8(rawSummary, MAX_ACTIVITY_SUMMARY_BYTES);
@@ -243,10 +257,10 @@ export class HiveStatusQuery {
       skippedRows ||= page.rowsScanned > page.agents.length;
       for (const agent of page.agents) {
         const subjects = subjectsByAgentType.get(agent.definitionId) ?? new Set<string>();
-        subjects.add(agent.createdByUser);
+        subjects.add(canonicalAgentSubject(agent));
         subjectsByAgentType.set(agent.definitionId, subjects);
         if (agent.status === 'deleted') continue;
-        if (agent.createdByUser === subjectId) matches.push(agent);
+        if (agentBelongsToSubject(agent, subjectId)) matches.push(agent);
       }
       cursor = page.nextCursor;
       hasMoreRows = cursor !== undefined;
@@ -261,7 +275,7 @@ export class HiveStatusQuery {
       );
     }
 
-    const scanIncomplete = hasMoreRows && scanned >= MAX_AGENT_ROWS_SCANNED;
+    const scanIncomplete = skippedRows || (hasMoreRows && scanned >= MAX_AGENT_ROWS_SCANNED);
     return {
       agents: matches.slice(0, limit),
       truncated: matches.length > limit || scanIncomplete,
