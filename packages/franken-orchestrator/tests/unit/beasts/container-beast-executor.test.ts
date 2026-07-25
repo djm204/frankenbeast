@@ -8,7 +8,7 @@ import { DEFAULT_SANDBOX_POLICY } from '../../../src/beasts/execution/sandbox-po
 import { BeastEventBus } from '../../../src/beasts/events/beast-event-bus.js';
 import { BeastLogStore } from '../../../src/beasts/events/beast-log-store.js';
 import { SQLiteBeastRepository } from '../../../src/beasts/repository/sqlite-beast-repository.js';
-import type { BeastDefinition, BeastProcessSpec } from '../../../src/beasts/types.js';
+import type { BeastProcessSpec } from '../../../src/beasts/types.js';
 import type { ProcessCallbacks, ProcessSupervisorLike } from '../../../src/beasts/execution/process-supervisor.js';
 import { RUN_CONFIG_INTEGRITY_ENV, RUN_CONFIG_INTEGRITY_SECRET_ENV } from '../../../src/cli/run-config-integrity.js';
 
@@ -162,12 +162,12 @@ describe('ContainerBeastExecutor', () => {
       dispatchedByUser: 'pfk',
       createdAt: '2026-03-10T00:00:00.000Z',
     });
-    const definition: BeastDefinition = {
+    const definition = {
       id: 'test-beast',
       version: 1,
       label: 'Test Beast',
       description: 'Test beast',
-      executionModeDefault: 'container',
+      executionModeDefault: 'container' as const,
       configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
       interviewPrompts: [],
       telemetryLabels: {},
@@ -183,6 +183,49 @@ describe('ContainerBeastExecutor', () => {
     const configPath = join(workspaceHostPath, '.fbeast', '.build', 'run-configs', `${run.id}.json`);
     expect(statSync(configPath).uid).toBe(expectedUid);
     expect(statSync(configPath).gid).toBe(expectedGid);
+  });
+
+  it('rejects persistent brain paths outside the mounted workspace', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-container-executor-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logStore = new BeastLogStore(join(workDir, 'logs'));
+    const fakeSupervisor: ProcessSupervisorLike = {
+      spawn: vi.fn(async () => ({ pid: 4242 })),
+      stop: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+    };
+    const executor = new ContainerBeastExecutor({
+      repository,
+      logStore,
+      supervisorFactory: () => fakeSupervisor,
+      policy: { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: workDir },
+    });
+    const outsideDbPath = join(tmpdir(), 'outside-workspace-brain.db');
+    const run = repository.createRun({
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'container',
+      configSnapshot: { brain: { dbPath: outsideDbPath } },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const definition = {
+      id: 'test-beast',
+      version: 1,
+      label: 'Test Beast',
+      description: 'Test beast',
+      executionModeDefault: 'container' as const,
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
+      interviewPrompts: [],
+      telemetryLabels: {},
+      buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workDir, env: {} }),
+    };
+
+    await expect(executor.start(run, definition)).rejects.toThrow(
+      `Container brain.dbPath must be inside the mounted workspace: ${outsideDbPath}`,
+    );
+    expect(fakeSupervisor.spawn).not.toHaveBeenCalled();
   });
 
   it('uses a distinct Docker container name for each retry attempt', async () => {

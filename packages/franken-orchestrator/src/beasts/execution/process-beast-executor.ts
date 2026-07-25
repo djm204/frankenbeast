@@ -301,6 +301,23 @@ function remapRuntimeConfigSnapshot(
   return changed ? remapped : configSnapshot;
 }
 
+function canonicalizePersistentBrainPath(
+  configSnapshot: Readonly<Record<string, unknown>>,
+  stableProjectRoot: string | undefined,
+): Readonly<Record<string, unknown>> {
+  const brain = configSnapshot.brain;
+  if (!stableProjectRoot || !brain || typeof brain !== 'object' || Array.isArray(brain)) return configSnapshot;
+  const dbPath = (brain as Record<string, unknown>).dbPath;
+  if (typeof dbPath !== 'string' || dbPath === ':memory:' || isAbsolute(dbPath)) return configSnapshot;
+  return {
+    ...configSnapshot,
+    brain: {
+      ...brain as Record<string, unknown>,
+      dbPath: resolve(stableProjectRoot, dbPath),
+    },
+  };
+}
+
 function remapRuntimePathArgs(
   args: readonly string[],
   sourceRoot: string | undefined,
@@ -331,6 +348,9 @@ export interface ProcessBeastExecutorOptions {
   runConfigDir?: string;
   runConfigRoot?: string;
   runConfigOwner?: RunConfigSnapshotOwner | RunConfigSnapshotOwnerProvider;
+  transformRunConfigSnapshot?: (
+    snapshot: Readonly<Record<string, unknown>>,
+  ) => Readonly<Record<string, unknown>>;
   transformSpec?: (
     run: BeastRun,
     originalSpec: BeastProcessSpec,
@@ -772,10 +792,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
     const moduleEnv = moduleConfigToEnv(run.configSnapshot.modules as ModuleConfig | undefined);
     this.supervisor.validateCwd?.(processSpec.cwd);
     const worktree = this.allocateWorktree(run, processSpec);
-    const identifiedConfigSnapshot = {
+    const identifiedConfigSnapshot = canonicalizePersistentBrainPath({
       ...run.configSnapshot,
       definitionId: run.definitionId,
-    };
+    }, this.options.runConfigRoot ?? processSpec.cwd);
     const isolatedConfigSnapshot = worktree
       ? {
           ...remapRuntimeConfigSnapshot(identifiedConfigSnapshot, processSpec.cwd, worktree.executionCwd),
@@ -804,7 +824,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
       mergedSpec.env,
       spawnedSpec.env,
     );
-    const redactedConfigSnapshot = redactRunConfigSnapshot(isolatedConfigSnapshot, configuredSecrets);
+    const runtimeConfigSnapshot = this.options.transformRunConfigSnapshot
+      ? this.options.transformRunConfigSnapshot(isolatedConfigSnapshot)
+      : isolatedConfigSnapshot;
+    const redactedConfigSnapshot = redactRunConfigSnapshot(runtimeConfigSnapshot, configuredSecrets);
     const serializedRunConfig = JSON.stringify(redactedConfigSnapshot, null, 2);
     const integrityManifest = createRunConfigIntegrityManifest(serializedRunConfig, runConfigIntegritySecret, {
       configPath: this.resolveSpawnedRunConfigPath(spawnedSpec, configFilePath),

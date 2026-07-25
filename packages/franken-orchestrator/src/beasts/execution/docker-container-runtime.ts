@@ -14,7 +14,7 @@ function canonicalExistingPath(path: string): string {
   }
 }
 
-function remapHostWorkspacePath(value: string, policy: SandboxPolicy): string {
+export function remapHostWorkspacePath(value: string, policy: SandboxPolicy): string {
   if (!isAbsolute(value)) {
     return value;
   }

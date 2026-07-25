@@ -353,6 +353,7 @@ describe('BeastDispatchService', () => {
         promptConfig: { text: 'Launch with this context.' },
         gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: true, mergeStrategy: 'squash', commitConvention: 'conventional' },
         llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+        brain: { dbPath: '.fbeast/brains/custom.db' },
       },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
@@ -371,6 +372,7 @@ describe('BeastDispatchService', () => {
       promptConfig: { text: 'Launch with this context.' },
       gitConfig: { preset: 'feature-branch', baseBranch: 'develop', branchPattern: '', prCreation: 'auto', mergeStrategy: 'squash', commitConvention: 'conventional' },
       llmConfig: { default: { provider: 'openai', model: 'gpt-5.3-codex-spark' } },
+      brain: { dbPath: '.fbeast/brains/custom.db' },
       modules: { firewall: true, skills: true, planner: false },
     });
   });

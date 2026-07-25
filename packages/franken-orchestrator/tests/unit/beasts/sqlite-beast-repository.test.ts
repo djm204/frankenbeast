@@ -189,6 +189,38 @@ describe('SQLiteBeastRepository', () => {
     }
   });
 
+  it('uses insertion order to break latest-context timestamp ties', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    const createdAt = '2026-03-10T00:00:00.000Z';
+    const oldRun = repo.createRun({
+      definitionId: 'martin-loop', definitionVersion: 1, executionMode: 'process',
+      configSnapshot: { generation: 'old' }, dispatchedBy: 'api', dispatchedByUser: 'operator', createdAt,
+    });
+    const newRun = repo.createRun({
+      definitionId: 'martin-loop', definitionVersion: 1, executionMode: 'process',
+      configSnapshot: { generation: 'new' }, dispatchedBy: 'api', dispatchedByUser: 'operator', createdAt,
+    });
+    const createAgent = (name: string) => repo.createTrackedAgent({
+      definitionId: 'martin-loop', source: 'api', status: 'completed', createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'martin-loop', config: {} },
+      initConfig: { name }, createdAt, updatedAt: createdAt,
+    });
+    const oldAgent = createAgent('old');
+    const newAgent = createAgent('new');
+    const database = new Database(dbPath);
+    database.prepare('UPDATE beast_runs SET id = ? WHERE id = ?').run('run_z_old', oldRun.id);
+    database.prepare('UPDATE beast_runs SET id = ? WHERE id = ?').run('run_a_new', newRun.id);
+    database.prepare('UPDATE tracked_agents SET id = ? WHERE id = ?').run('agent_z_old', oldAgent.id);
+    database.prepare('UPDATE tracked_agents SET id = ? WHERE id = ?').run('agent_a_new', newAgent.id);
+    database.close();
+
+    expect(repo.getLatestRunForDefinition('martin-loop')?.id).toBe('run_a_new');
+    expect(repo.getLatestTrackedAgentForDefinition('martin-loop')?.id).toBe('agent_a_new');
+    repo.close();
+  });
+
   it('creates, loads, and lists durable beast runs', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

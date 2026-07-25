@@ -384,7 +384,7 @@ describe('ProcessBeastExecutor', () => {
       definitionId: 'test-beast',
       definitionVersion: 1,
       executionMode: 'process',
-      configSnapshot: {},
+      configSnapshot: { brain: { dbPath: '.fbeast/brains/custom.db' } },
       dispatchedBy: 'dashboard',
       dispatchedByUser: 'pfk',
       createdAt: '2026-03-10T00:00:00.000Z',
@@ -409,6 +409,7 @@ describe('ProcessBeastExecutor', () => {
     });
     const configPath = (spawnedSpec as { env: Record<string, string> }).env.FRANKENBEAST_RUN_CONFIG;
     expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
+      brain: { dbPath: join(workDir, '.fbeast', 'brains', 'custom.db') },
       brainConfigDir: join(workDir, '.fbeast'),
       definitionId: 'test-beast',
     });

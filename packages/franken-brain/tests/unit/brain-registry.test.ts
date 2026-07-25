@@ -22,6 +22,26 @@ describe('BrainRegistry', () => {
     }
   });
 
+  it('preserves existing handles when an agent type moves to another explicit path', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-brain-registry-path-change-'));
+    const registry = new BrainRegistry();
+    try {
+      const first = registry.forAgentType('coder', join(root, 'first.db'));
+      first.working.set('first', true);
+      const second = registry.forAgentType('coder', join(root, 'second.db'));
+      second.working.set('second', true);
+
+      expect(first.working.get('first')).toBe(true);
+      expect(second).not.toBe(first);
+      expect(registry.forAgentType('coder')).toBe(second);
+      expect(registry.forAgentType('coder', join(root, 'first.db'))).toBe(first);
+      expect(registry.forAgentType('coder')).toBe(first);
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects identifiers that are ambiguous or unsafe as path components', () => {
     const registry = new BrainRegistry();
 
@@ -66,6 +86,33 @@ describe('BrainRegistry', () => {
         expect(secondRegistry.forAgentType('reviewer').episodic.count()).toBe(0);
       } finally {
         secondRegistry.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('opens only existing default agent brains without creating unknown databases', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-brain-registry-existing-'));
+    const brainsDir = join(root, '.fbeast', 'brains');
+
+    try {
+      const writer = new BrainRegistry(brainsDir);
+      writer.forAgentType('coder').episodic.record({
+        type: 'observation',
+        summary: 'Ship safe HTTP routes',
+        createdAt: new Date().toISOString(),
+      });
+      writer.close();
+
+      const reader = new BrainRegistry(brainsDir);
+      try {
+        expect(reader.getAgentType('coder')?.episodic.count()).toBe(1);
+        expect(reader.getAgentType('reviewer')).toBeUndefined();
+        expect(existsSync(join(brainsDir, 'reviewer.db'))).toBe(false);
+        expect(() => reader.getAgentType('../escape')).toThrow(RangeError);
+      } finally {
+        reader.close();
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
