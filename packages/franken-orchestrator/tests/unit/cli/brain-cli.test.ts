@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -232,6 +232,31 @@ describe('handleBrainCommand()', () => {
     expect(output).toContain('current-goal');
   });
 
+  it('bounds checkpoint timestamps and escapes display controls in human output', async () => {
+    const { registry } = await fixture();
+    const brain = registry.forAgentType('checkpoint-output');
+    brain.recovery.checkpoint({
+      runId: 'run-checkpoint-output',
+      phase: 'execution',
+      step: 1,
+      context: {},
+      timestamp: `trusted\n\u001bspoofed-${'t'.repeat(200)}💥`,
+    });
+    const jsonPrint = vi.fn();
+    const humanPrint = vi.fn();
+
+    await handleBrainCommand({ action: 'show', target: 'checkpoint-output', json: true, registry, print: jsonPrint });
+    await handleBrainCommand({ action: 'show', target: 'checkpoint-output', registry, print: humanPrint });
+
+    const timestamp = JSON.parse(vi.mocked(jsonPrint).mock.calls[0]?.[0] as string).data.recovery.lastCheckpointAt;
+    expect(Buffer.byteLength(timestamp, 'utf8')).toBeLessThanOrEqual(128);
+    expect(timestamp).not.toContain('�');
+    const human = vi.mocked(humanPrint).mock.calls[0]?.[0] as string;
+    expect(human).not.toContain('\u001b');
+    expect(human.split('\n')).toHaveLength(6);
+    expect(human).toContain('trusted\\u000a\\u001bspoofed');
+  });
+
   it('lists a bounded set of real consolidated lesson candidates', async () => {
     const { registry } = await fixture();
     const brain = registry.forAgentType('builder');
@@ -297,7 +322,7 @@ describe('handleBrainCommand()', () => {
       key: 'terminal-control',
       value: {
         kind: 'consolidated-lesson',
-        pattern: 'trusted line\n\u001b]8;;https://attacker.invalid\u0007spoofed',
+        pattern: 'trusted line\n\u001b]8;;https://attacker.invalid\u0007spoofed\u202ereordered\u2066isolated',
         keywords: [],
         searchTerms: [],
         occurrenceCount: 1,
@@ -316,8 +341,12 @@ describe('handleBrainCommand()', () => {
 
     const output = vi.mocked(print).mock.calls[0]?.[0] as string;
     expect(output).not.toContain('\u001b');
+    expect(output).not.toContain('\u202e');
+    expect(output).not.toContain('\u2066');
     expect(output.split('\n')).toHaveLength(2);
-    expect(output).toContain('trusted line\\u000a\\u001b]8;;https://attacker.invalid\\u0007spoofed');
+    expect(output).toContain(
+      'trusted line\\u000a\\u001b]8;;https://attacker.invalid\\u0007spoofed\\u202ereordered\\u2066isolated',
+    );
   });
 
   it('bounds agent-produced lesson timestamps in JSON output', async () => {
@@ -412,6 +441,17 @@ describe('handleBrainCommand()', () => {
     } finally {
       await inspection.dispose();
     }
+  });
+
+  it('sanitizes failures raised while creating the Beast context snapshot', async () => {
+    const { root, brainsDir, registry } = await fixture();
+    registry.forAgentType('corrupt-beast-snapshot');
+    registry.close();
+    registries.splice(registries.indexOf(registry), 1);
+    await writeFile(join(root, '.fbeast', 'beast.db'), 'not a sqlite database');
+
+    await expect(createBrainInspectionHandle(brainsDir, 'corrupt-beast-snapshot'))
+      .rejects.toThrow('Brain state could not be read');
   });
 
   it('requires an action and agent type id', async () => {

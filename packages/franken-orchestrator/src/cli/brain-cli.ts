@@ -17,6 +17,7 @@ const MAX_LESSONS = 10;
 const MAX_LESSON_PATTERN_BYTES = 2 * 1024;
 const MAX_LESSON_KEY_BYTES = 512;
 const MAX_LESSON_TIMESTAMP_BYTES = 128;
+const MAX_CHECKPOINT_TIMESTAMP_BYTES = 128;
 const LESSON_UNAVAILABLE_REASON = 'Consolidated lessons are not available until the learning faculty is configured';
 
 type BrainRegistryReader = Pick<BrainRegistry, 'getAgentType'>;
@@ -93,7 +94,10 @@ export async function createBrainInspectionHandle(
     if (error instanceof RangeError) {
       throw new Error('Invalid agent type id: use a non-empty portable path-component identifier');
     }
-    throw error;
+    if (error instanceof Error && error.message.startsWith('No persisted brain')) {
+      throw error;
+    }
+    throw new Error('Brain state could not be read');
   }
 
 }
@@ -148,6 +152,9 @@ function resolveBrain(deps: BrainCommandDeps): {
 function brainSummary(agentTypeId: string, brain: SqliteBrain, context: BrainRouteContext | undefined) {
   const allWorkingKeys = brain.working.persistedKeys();
   const lastCheckpoint = brain.recovery.lastCheckpoint();
+  const lastCheckpointAt = typeof lastCheckpoint?.timestamp === 'string'
+    ? truncateUtf8(lastCheckpoint.timestamp, MAX_CHECKPOINT_TIMESTAMP_BYTES)
+    : undefined;
   const learningConfigured = context?.faculties?.learning ?? brain.learning.configured;
   return {
     agentTypeId,
@@ -157,7 +164,10 @@ function brainSummary(agentTypeId: string, brain: SqliteBrain, context: BrainRou
       truncated: allWorkingKeys.length > MAX_WORKING_MEMORY_KEYS,
     },
     episodic: { eventCount: brain.episodic.count() },
-    recovery: { lastCheckpointAt: lastCheckpoint?.timestamp ?? null },
+    recovery: {
+      lastCheckpointAt: lastCheckpointAt?.value ?? null,
+      ...(lastCheckpointAt?.truncated ? { lastCheckpointAtTruncated: true as const } : {}),
+    },
     faculties: {
       planning: { configured: context?.faculties?.planning ?? brain.planning.configured },
       reasoning: { configured: context?.faculties?.reasoning ?? brain.reasoning.configured },
@@ -178,9 +188,12 @@ function plural(count: number, singular: string): string {
 }
 
 function escapeTerminalControls(value: string): string {
-  return value.replace(/[\u0000-\u001f\u007f-\u009f]/gu, (character) => (
-    `\\u${character.codePointAt(0)!.toString(16).padStart(4, '0')}`
-  ));
+  return value.replace(/[\u0000-\u001f\u007f-\u009f\p{Cf}]/gu, (character) => {
+    const codePoint = character.codePointAt(0)!;
+    return codePoint <= 0xffff
+      ? `\\u${codePoint.toString(16).padStart(4, '0')}`
+      : `\\u{${codePoint.toString(16)}}`;
+  });
 }
 
 function renderSummary(summary: ReturnType<typeof brainSummary>): string {
@@ -194,7 +207,9 @@ function renderSummary(summary: ReturnType<typeof brainSummary>): string {
     `Brain: ${summary.agentTypeId}`,
     `Working memory: ${plural(summary.workingMemory.total, 'key')} (${keys})`,
     `Episodic memory: ${plural(summary.episodic.eventCount, 'event')}`,
-    `Last checkpoint: ${summary.recovery.lastCheckpointAt ?? 'none'}`,
+    `Last checkpoint: ${summary.recovery.lastCheckpointAt === null
+      ? 'none'
+      : escapeTerminalControls(summary.recovery.lastCheckpointAt)}`,
     `Faculties configured: ${configuredFaculties.join(', ') || 'none'}`,
     `Lessons available: ${summary.lessons.available ? 'yes' : 'no'}`,
   ].join('\n');
