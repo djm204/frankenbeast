@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Faculty lesson consultation must stay bounded before lookup
+- Apply input caps while iterating plan objectives, before `map()`/`join()` or redaction; truncating only after concatenation still allows adversarial plans to cause unbounded synchronous work. Skip query construction entirely when episode recording and lesson consultation are disabled.
+- Keep automatic consolidation off the planning/reasoning/action return path and coalesce pending triggers per learning port. Persist stable lesson keys—not full lesson text—in consultation telemetry so the consulted set stays observable without duplicating reviewed memory content.
+
 ## 2026-07-25 — Retention enforcement must preserve upstream invariants
 - Retention deletion must honor producer-side lifecycle windows such as learning cooldowns, not only the generic memory-class TTL. Validate persisted cooldown metadata before classifying an expired learning row as a compaction candidate.
 - Cached rollback floors are references to mutable rows: validate the referenced checkpoint inside the enforcement transaction before excluding older checkpoints. When a shared delete budget leaves scanned checkpoint candidates pending, rewind the checkpoint cursor as well as the episodic cursor; otherwise continuous inserts can starve old checkpoints indefinitely.

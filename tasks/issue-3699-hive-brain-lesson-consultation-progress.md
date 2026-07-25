@@ -9,6 +9,7 @@
 - [x] Update architecture, onboarding, package README, and ADR-041 where relevant.
 - [x] Run focused tests and package/root quality gates.
 - [x] Address independent-review findings: asynchronous coalescing, objective-relevant reasoning patterns, and redacted byte-bounded queries.
+- [x] Address follow-up review finding by bounding objective iteration before concatenation and skipping query reads when memory is disabled.
 - [ ] Commit as David Mendez, push one branch, and open one PR with `Closes #3699`.
 - [ ] Reach current-head Codex clean with zero unresolved threads and green CI.
 - [ ] Merge, post root evidence, append reusable shared lessons, and close the Kanban task.

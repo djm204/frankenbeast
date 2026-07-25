@@ -163,6 +163,36 @@ describe('ReasoningFacultyAdapter', () => {
     ]);
   });
 
+  it('stops reading objectives once the bounded consultation prefix is full', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const critique: ICritiqueModule = {
+      reviewPlan: vi.fn(async () => ({ verdict: 'pass' as const, findings: [], score: 1 })),
+    };
+    const faculty = new ReasoningFacultyAdapter(
+      critique,
+      brain,
+      () => new Date('2025-01-01T00:00:00.000Z'),
+    );
+    const unreadTask = {
+      id: 'unread',
+      get objective(): string {
+        throw new Error('objective beyond bounded prefix was read');
+      },
+      requiredSkills: [],
+      dependsOn: [],
+    };
+
+    await expect(faculty.reviewPlan({
+      tasks: [{
+        id: 'prefix',
+        objective: 'x'.repeat(3_000),
+        requiredSkills: [],
+        dependsOn: [],
+      }, unreadTask],
+    })).resolves.toEqual({ verdict: 'pass', findings: [], score: 1 });
+  });
+
   it('can delegate without recording when memory is disabled', async () => {
     const brain = new SqliteBrain();
     brains.push(brain);
@@ -175,8 +205,18 @@ describe('ReasoningFacultyAdapter', () => {
       () => new Date('2026-07-24T12:00:00.000Z'),
       { recordEpisodes: false },
     );
+    const planWithUnreadObjective = {
+      tasks: [{
+        id: 'disabled',
+        get objective(): string {
+          throw new Error('disabled memory must not inspect objectives');
+        },
+        requiredSkills: [],
+        dependsOn: [],
+      }],
+    };
 
-    await expect(faculty.reviewPlan({ tasks: [] })).resolves.toMatchObject({ verdict: 'pass' });
+    await expect(faculty.reviewPlan(planWithUnreadObjective)).resolves.toMatchObject({ verdict: 'pass' });
     expect(critique.reviewPlan).toHaveBeenCalledOnce();
     expect(brain.episodic.count()).toBe(0);
   });

@@ -1,7 +1,7 @@
 import type { IEpisodicMemory, ILearningFaculty, RelevantLesson } from '@franken/types';
 import { redactSensitiveText } from '../logging/redaction.js';
 
-const MAX_LESSON_QUERY_INPUT_CHARS = 2_048;
+export const MAX_LESSON_QUERY_INPUT_CHARS = 2_048;
 const MAX_LESSON_QUERY_BYTES = 512;
 const scheduledConsolidations = new WeakSet<ILearningFaculty>();
 

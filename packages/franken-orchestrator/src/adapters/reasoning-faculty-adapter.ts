@@ -3,6 +3,7 @@ import type { CritiqueResult, ICritiqueModule, PlanGraph } from '../deps.js';
 import {
   consolidateFacultyNegativeOutcome,
   consultFacultyLessons,
+  MAX_LESSON_QUERY_INPUT_CHARS,
   prepareFacultyLessonQuery,
 } from './faculty-learning.js';
 
@@ -26,14 +27,13 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
   ) {}
 
   async reviewPlan(plan: PlanGraph, context?: unknown): Promise<CritiqueResult> {
-    const query = prepareFacultyLessonQuery(
-      plan.tasks.map((task) => task.objective).join(' ').trim() || 'reasoning plan review',
-    );
-    if (this.options.recordEpisodes !== false) {
+    const recordEpisodes = this.options.recordEpisodes !== false;
+    const query = recordEpisodes ? reasoningLessonQuery(plan) : '';
+    if (recordEpisodes) {
       consultFacultyLessons('reasoning', query, this.brain.episodic, this.brain.learning, this.clock().toISOString());
     }
     const result = await this.critique.reviewPlan(plan, context);
-    if (this.options.recordEpisodes === false) return result;
+    if (!recordEpisodes) return result;
 
     this.brain.episodic.record({
       type: 'decision',
@@ -64,4 +64,15 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
     }
     await this.critique.reviewPlan({ tasks: [] });
   }
+}
+
+function reasoningLessonQuery(plan: PlanGraph): string {
+  let query = '';
+  for (const task of plan.tasks) {
+    const separator = query.length === 0 ? '' : ' ';
+    const remaining = MAX_LESSON_QUERY_INPUT_CHARS - query.length - separator.length;
+    if (remaining <= 0) break;
+    query += `${separator}${task.objective.slice(0, remaining)}`;
+  }
+  return prepareFacultyLessonQuery(query.trim() || 'reasoning plan review');
 }
