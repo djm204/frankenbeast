@@ -75,7 +75,7 @@ export class BeastDaemonDispatchAdapter {
       });
     }
     if (context.agentId) {
-      await this.request(`/v1/beasts/agents/${encodeURIComponent(context.agentId)}/stop`, {
+      await this.request(`/v1/beasts/agents/${encodeURIComponent(context.agentId)}/reject`, {
         method: 'POST',
       });
     }

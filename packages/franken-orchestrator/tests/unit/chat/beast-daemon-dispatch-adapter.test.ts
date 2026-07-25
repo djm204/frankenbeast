@@ -110,7 +110,7 @@ describe('BeastDaemonDispatchAdapter', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('aborts daemon interviews and stops their tracked agent on rejection', async () => {
+  it('aborts daemon interviews and terminally rejects their tracked agent', async () => {
     const fetchMock = vi.fn(async (_url: URL | RequestInfo, _init?: RequestInit) => Response.json({ data: {} }));
     vi.stubGlobal('fetch', fetchMock);
     const adapter = new BeastDaemonDispatchAdapter({
@@ -135,7 +135,7 @@ describe('BeastDaemonDispatchAdapter', () => {
       url: url.toString(),
     }))).toEqual([
       { method: 'POST', url: 'http://127.0.0.1:4050/v1/beasts/interviews/interview-1/abort' },
-      { method: 'POST', url: 'http://127.0.0.1:4050/v1/beasts/agents/agent-1/stop' },
+      { method: 'POST', url: 'http://127.0.0.1:4050/v1/beasts/agents/agent-1/reject' },
     ]);
   });
 
