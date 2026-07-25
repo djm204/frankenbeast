@@ -77,7 +77,7 @@ describe('createBeastServices', () => {
     const beastsDb = join(tempDir, 'beast.db');
     const customDbPath = join(tempDir, 'custom-brain.db');
     const repo = new SQLiteBeastRepository(beastsDb);
-    repo.createRun({
+    const establishedRun = repo.createRun({
       definitionId: 'martin-loop',
       definitionVersion: 1,
       executionMode: 'process',
@@ -88,6 +88,32 @@ describe('createBeastServices', () => {
       dispatchedBy: 'api',
       dispatchedByUser: 'operator',
       createdAt: '2026-07-24T10:00:00.000Z',
+    });
+    repo.createAttempt(establishedRun.id, {
+      status: 'completed',
+      startedAt: '2026-07-24T10:00:01.000Z',
+    });
+    repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { brain: { dbPath: join(tempDir, 'queued-brain.db') } },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-24T10:00:03.000Z',
+    });
+    const corruptLatestRun = repo.createRun({
+      definitionId: 'martin-loop',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { brain: { dbPath: join(tempDir, 'corrupt-brain.db') } },
+      dispatchedBy: 'api',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-24T10:00:04.000Z',
+    });
+    repo.createAttempt(corruptLatestRun.id, {
+      status: 'failed',
+      startedAt: '2026-07-24T10:00:05.000Z',
     });
     repo.createRun({
       definitionId: 'default-modules',
@@ -108,6 +134,16 @@ describe('createBeastServices', () => {
       moduleConfig: { planner: false, critique: false, governor: false },
       createdAt: '2026-07-24T09:00:00.000Z',
       updatedAt: '2026-07-24T09:00:00.000Z',
+    });
+    const corruptLatestAgent = repo.createTrackedAgent({
+      definitionId: 'default-modules',
+      source: 'api',
+      status: 'failed',
+      createdByUser: 'operator',
+      initAction: { kind: 'martin-loop', command: 'run', config: {} },
+      initConfig: { brain: { dbPath: join(tempDir, 'corrupt-agent-brain.db') } },
+      createdAt: '2026-07-24T09:30:00.000Z',
+      updatedAt: '2026-07-24T09:30:00.000Z',
     });
     const corruptUnrelatedRun = repo.createRun({
       definitionId: 'unrelated',
@@ -137,6 +173,10 @@ describe('createBeastServices', () => {
     const rawDb = new Database(beastsDb);
     rawDb.prepare('UPDATE beast_runs SET config_snapshot = ? WHERE id = ?')
       .run('{"corrupt":', corruptUnrelatedRun.id);
+    rawDb.prepare('UPDATE beast_runs SET config_snapshot = ? WHERE id = ?')
+      .run('{"corrupt":', corruptLatestRun.id);
+    rawDb.prepare('UPDATE tracked_agents SET init_config = ? WHERE id = ?')
+      .run('{"corrupt":', corruptLatestAgent.id);
     rawDb.close();
     const { createBeastServices } = await import('../../../src/beasts/create-beast-services.js');
     const services = createBeastServices({
@@ -159,14 +199,14 @@ describe('createBeastServices', () => {
       expect(services.resolveBrainContext('default-modules')).toEqual({
         dbPath: join(tempDir, 'project-brain.db'),
         faculties: {
-          planning: true,
-          reasoning: true,
-          action: true,
+          planning: false,
+          reasoning: false,
+          action: false,
           learning: false,
         },
       });
       expect(services.resolveBrainContext('worktree-path')).toMatchObject({
-        dbPath: join(worktreeExecutionCwd, '.fbeast', 'brains', 'custom.db'),
+        dbPath: join(tempDir, '.fbeast', 'brains', 'custom.db'),
       });
       expect(services.resolveBrainContext('unknown')).toBeUndefined();
     } finally {

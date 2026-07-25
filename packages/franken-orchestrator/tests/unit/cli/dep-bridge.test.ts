@@ -349,6 +349,14 @@ describe('bridgeToBeastConfig()', () => {
       expect(config.brain?.dbPath).toBe('/custom/brain.db');
     });
 
+    it('prefers a persisted per-run brain override over project configuration', () => {
+      const orchestratorConfig = { brain: { dbPath: '/project/brain.db' } } as any;
+      const config = bridgeToBeastConfig(makeOptions({
+        runConfig: { definitionId: 'martin-loop', brain: { dbPath: '/run/brain.db' } },
+      }), orchestratorConfig);
+      expect(config.brain?.dbPath).toBe('/run/brain.db');
+    });
+
     it('passes network egress policy into runtime config', () => {
       const egressPolicy = { enabled: true, lanes: { triage: { allowedDomains: ['api.github.com'] } } };
       const orchestratorConfig = { network: { egressPolicy } } as any;

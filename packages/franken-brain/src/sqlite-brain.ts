@@ -3232,18 +3232,20 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     const decoder = new StringDecoder('utf8');
     const overlapLength = Math.max(...keywords.map(keyword => keyword.length), 1) - 1;
     let overlap = '';
+    const authenticatedMatches = new Set<string>();
     try {
       for (const plaintext of this.encryption.decryptBase64UrlChunks(headerMatch[1]!, headerMatch[2]!, chunks(this.db))) {
         const text = (overlap + decoder.write(plaintext)).toLowerCase();
         for (const keyword of keywords) {
-          if (text.includes(keyword)) matched.add(keyword);
+          if (text.includes(keyword)) authenticatedMatches.add(keyword);
         }
         overlap = text.slice(-overlapLength);
       }
       const tail = (overlap + decoder.end()).toLowerCase();
       for (const keyword of keywords) {
-        if (tail.includes(keyword)) matched.add(keyword);
+        if (tail.includes(keyword)) authenticatedMatches.add(keyword);
       }
+      for (const keyword of authenticatedMatches) matched.add(keyword);
     } catch {
       // A malformed encrypted details field must not break the bounded route.
     }
@@ -3361,7 +3363,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
           const boundedEvent = rowToEvent(row, this.encryption);
           if (!searchableEvent || !boundedEvent) continue;
           const score = row.details_truncated === 1 && row.search_details === null
-            ? this.scoreOversizedEncryptedDetails(row.id, row.summary, keywords)
+            ? this.scoreOversizedEncryptedDetails(row.id, boundedEvent.summary, keywords)
             : recallEventScore(searchableEvent, keywords);
           if (score > 0) {
             matches.push({
@@ -3388,7 +3390,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     const searchableDetails = `CASE
       WHEN json_valid(details)
        AND NOT (
-         json_type(details, '$.quarantine') = 'object'
+         json_type(details, '$') = 'object'
+         AND (SELECT count(*) FROM json_each(details)) = 1
+         AND json_type(details, '$.quarantine') = 'object'
+         AND (SELECT count(*) FROM json_each(details, '$.quarantine')) = 3
          AND json_extract(details, '$.quarantine.field') = 'details'
          AND json_extract(details, '$.quarantine.eventId') = id
          AND json_extract(details, '$.quarantine.reason') = 'invalid JSON'
