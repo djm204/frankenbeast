@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -154,6 +155,42 @@ describe('HiveMindStore', () => {
     }
   });
 
+  it('fails secure deletion when an active reader prevents WAL truncation', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-secure-delete-busy-'));
+    const dbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const secret = `reader-held-secret-${'private-payload-'.repeat(128)}`;
+    const store = new HiveMindStore(dbPath);
+    const reader = new Database(dbPath);
+    try {
+      store.publish(namespace, 'publisher-a', {
+        kind: 'episode',
+        event: {
+          type: 'failure',
+          summary: secret,
+          createdAt: '2026-07-25T10:00:00.000Z',
+        },
+      });
+      reader.exec('BEGIN');
+      reader.prepare('SELECT payload FROM hive_mind_entries').all();
+
+      expect(() => store.deletePublishedWhere(namespace, 'publisher-a', () => true))
+        .toThrow('Secure deletion could not truncate the Hive WAL');
+      reader.exec('ROLLBACK');
+      expect(store.deletePublishedWhere(namespace, 'publisher-a', () => true)).toBe(0);
+      const sqliteBytes = [dbPath, `${dbPath}-wal`]
+        .filter(existsSync)
+        .map(path => readFileSync(path).toString('utf8'))
+        .join('');
+      expect(sqliteBytes).not.toContain(secret);
+    } finally {
+      if (reader.inTransaction) reader.exec('ROLLBACK');
+      reader.close();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   it('filters by kind before applying the newest-entry bound', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-kind-bound-'));
     const store = new HiveMindStore(join(root, 'hive.db'));
@@ -273,6 +310,40 @@ describe('HiveMindStore', () => {
       try {
         expect(observer.poll(namespace, { kind: 'lesson' })).toEqual([
           expect.objectContaining({ key: baseline!.key, status: 'approved' }),
+        ]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('revokes only the dependent hive revision when an approved baseline shares its key', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-forget-revision-'));
+    const hiveDbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const registry = new BrainRegistry(join(root, 'brains'), hiveDbPath, 'publisher-a');
+    const brain = registry.forAgentType('coder');
+    try {
+      recordCluster(brain, 'RevisionIdentityMarker build timeout');
+      const [baseline] = brain.learning.consolidate({ threshold: 3 });
+      brain.memoryReview.approve(baseline!.id);
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'RevisionIdentityMarker build timeout PrivateRevisionEvidence',
+        createdAt: '2026-07-25T10:00:03.000Z',
+      });
+      const [revision] = brain.learning.consolidate({ threshold: 3 });
+      expect(revision?.key).toBe(baseline?.key);
+
+      brain.rightToForget({ type: 'episodic', query: 'PrivateRevisionEvidence' });
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace, { kind: 'lesson' })).toEqual([
+          expect.objectContaining({ candidateId: baseline!.id, status: 'approved' }),
         ]);
       } finally {
         observer.close();
@@ -457,6 +528,40 @@ describe('HiveMindStore', () => {
       const secondRegistry = new BrainRegistry(brainsDir, hiveDbPath);
       const secondBrain = secondRegistry.forAgentType('coder');
       secondBrain.rightToForget({ query: 'restart-private-token' });
+      secondRegistry.close();
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(hiveMindAgentTypeNamespace('coder'))).toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves durable publisher ownership when the same brain is reopened through a symlink', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-symlink-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    const durableDbPath = join(brainsDir, 'durable.db');
+    const linkedDbPath = join(root, 'linked-durable.db');
+    try {
+      mkdirSync(brainsDir, { recursive: true });
+      const firstRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+      const firstBrain = firstRegistry.forAgentType('coder', durableDbPath);
+      firstBrain.episodic.record({
+        type: 'failure',
+        summary: 'symlink-private-token request failed',
+        createdAt: '2026-07-25T10:00:00.000Z',
+      });
+      firstRegistry.close();
+      symlinkSync(durableDbPath, linkedDbPath);
+
+      const secondRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+      const secondBrain = secondRegistry.forAgentType('coder', linkedDbPath);
+      secondBrain.rightToForget({ query: 'symlink-private-token' });
       secondRegistry.close();
 
       const observer = new HiveMindStore(hiveDbPath);

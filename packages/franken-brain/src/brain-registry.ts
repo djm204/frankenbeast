@@ -3,6 +3,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
+import Database from 'better-sqlite3';
+
 import { hiveMindAgentTypeNamespace } from './hive-mind-store.js';
 import { SqliteBrain } from './sqlite-brain.js';
 
@@ -11,6 +13,31 @@ const MAX_DEFAULT_BRAIN_FILENAME_AGENT_TYPE_ID_BYTES = 244;
 const UNSAFE_AGENT_TYPE_ID_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f\u007f]/u;
 const WINDOWS_RESERVED_AGENT_TYPE_ID =
   /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
+const HIVE_PUBLISHER_ID_METADATA_KEY = 'hive-publisher-id';
+
+function durablePublisherId(dbPath: string): string {
+  const db = new Database(dbPath);
+  try {
+    db.pragma('busy_timeout = 5000');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS brain_registry_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `);
+    db.prepare(`
+      INSERT OR IGNORE INTO brain_registry_metadata (key, value)
+      VALUES (?, ?)
+    `).run(HIVE_PUBLISHER_ID_METADATA_KEY, randomUUID());
+    const row = db.prepare(`
+      SELECT value FROM brain_registry_metadata WHERE key = ?
+    `).get(HIVE_PUBLISHER_ID_METADATA_KEY) as { value: string } | undefined;
+    if (!row) throw new Error('Durable brain publisher identity could not be initialized');
+    return row.value;
+  } finally {
+    db.close();
+  }
+}
 
 function assertSafeAgentTypeId(agentTypeId: string): void {
   if (
@@ -88,17 +115,17 @@ export class BrainRegistry {
 
     const requestedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
     const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
+    if (resolvedDbPath !== ':memory:') {
+      mkdirSync(dirname(resolvedDbPath), { recursive: true });
+    }
     const publisherId = this.publisherId
       ?? (resolvedDbPath === ':memory:'
         ? randomUUID()
-        : createHash('sha256').update(resolvedDbPath).digest('hex'));
+        : durablePublisherId(resolvedDbPath));
     const existing = agentBrains?.get(resolvedDbPath);
     if (existing) {
       if (dbPath !== undefined) this.preferredDbPaths.set(registryKey, resolvedDbPath);
       return existing;
-    }
-    if (dbPath === undefined) {
-      mkdirSync(this.brainsDir, { recursive: true });
     }
     const brain = new SqliteBrain(resolvedDbPath, undefined, {
       conversationWorkspaceId: null,

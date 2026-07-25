@@ -18,6 +18,7 @@ const MAX_ENTRY_BYTES = 64 * 1024;
 const MAX_POLL_LIMIT = 1_000;
 const DEFAULT_MAX_ENTRIES_PER_NAMESPACE = 10_000;
 const MAX_CONFIGURED_ENTRIES_PER_NAMESPACE = 1_000_000;
+const SECURE_DELETE_PENDING_KEY = 'secure-delete-pending';
 const UNSAFE_AGENT_TYPE_ID_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f\u007f]/u;
 const WINDOWS_RESERVED_AGENT_TYPE_ID =
   /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
@@ -70,6 +71,19 @@ interface HiveMindRow {
   kind: string;
   payload: string;
   publishedAt: string;
+}
+
+interface WalCheckpointResult {
+  busy: number;
+  log: number;
+  checkpointed: number;
+}
+
+function truncateWalOrThrow(db: Database.Database): void {
+  const [result] = db.pragma('wal_checkpoint(TRUNCATE)') as WalCheckpointResult[];
+  if (!result || result.busy !== 0) {
+    throw new Error('Secure deletion could not truncate the Hive WAL because a reader is active');
+  }
 }
 
 function assertSafeAgentTypeId(agentTypeId: string): void {
@@ -205,6 +219,10 @@ export class HiveMindStore {
       );
       CREATE INDEX IF NOT EXISTS idx_hive_mind_poll
         ON hive_mind_entries(namespace, id);
+      CREATE TABLE IF NOT EXISTS hive_mind_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
   }
 
@@ -339,17 +357,38 @@ export class HiveMindStore {
        ORDER BY id ASC
     `).all(namespace, publisherId) as HiveMindRow[];
     const ids = rows.map(parseRow).filter(predicate).map(entry => entry.id);
-    if (ids.length === 0) return 0;
+    if (ids.length === 0) {
+      if (this.dbPath !== ':memory:' && this.hasPendingSecureDelete()) {
+        this.purgeDeletedContent();
+      }
+      return 0;
+    }
     const remove = this.db.transaction(() => {
       const statement = this.db.prepare('DELETE FROM hive_mind_entries WHERE id = ?');
       for (const id of ids) statement.run(id);
+      if (this.dbPath !== ':memory:') {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO hive_mind_metadata (key, value) VALUES (?, '1')
+        `).run(SECURE_DELETE_PENDING_KEY);
+      }
     });
     remove.immediate();
     if (this.dbPath !== ':memory:') {
-      this.db.pragma('wal_checkpoint(TRUNCATE)');
-      this.db.exec('VACUUM');
+      this.purgeDeletedContent();
     }
     return ids.length;
+  }
+
+  private hasPendingSecureDelete(): boolean {
+    return this.db.prepare(`
+      SELECT 1 FROM hive_mind_metadata WHERE key = ?
+    `).get(SECURE_DELETE_PENDING_KEY) !== undefined;
+  }
+
+  private purgeDeletedContent(): void {
+    truncateWalOrThrow(this.db);
+    this.db.exec('VACUUM');
+    this.db.prepare('DELETE FROM hive_mind_metadata WHERE key = ?').run(SECURE_DELETE_PENDING_KEY);
   }
 
   close(): void {

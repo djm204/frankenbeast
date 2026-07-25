@@ -7216,13 +7216,18 @@ export class SqliteBrain implements IBrain {
   private deleteHiveMindMatches(
     selector: NormalizedRightToForgetSelector,
     memoryType: RightToForgetMemoryType,
-    dependentLessonKeys: ReadonlySet<string> = new Set(),
+    dependentLessonCandidateIds: ReadonlySet<string> = new Set(),
   ): number {
     if (!this.hiveMindStore || !this.hiveMindNamespace || !this.hiveMindPublisherId) return 0;
     return this.hiveMindStore.deletePublishedWhere(
       this.hiveMindNamespace,
       this.hiveMindPublisherId,
-      entry => hiveMindEntryMatchesSelector(entry, selector, memoryType, dependentLessonKeys),
+      entry => hiveMindEntryMatchesSelector(
+        entry,
+        selector,
+        memoryType,
+        dependentLessonCandidateIds,
+      ),
     );
   }
 
@@ -8178,7 +8183,7 @@ export class SqliteBrain implements IBrain {
     let runtimeWorkingKeysToDelete = new Set<string>();
     const dependentWorkingKeysToDelete = new Set<string>();
     const dependentWorkingKeysToRefresh = new Set<string>();
-    const dependentHiveLessonKeys = new Set<string>();
+    const dependentHiveLessonCandidateIds = new Set<string>();
     let episodicMatchCount = 0;
     let checkpointMatchCount = 0;
     let reviewMatchCount = 0;
@@ -8271,7 +8276,7 @@ export class SqliteBrain implements IBrain {
           ? []
           : this.matchingReviewPayloads(normalizedSelector);
         const dependentLessons = this.lessonCandidatesDependingOn(episodicMatches);
-        for (const candidate of dependentLessons) dependentHiveLessonKeys.add(candidate.key);
+        for (const candidate of dependentLessons) dependentHiveLessonCandidateIds.add(candidate.id);
         const dependentReviewRows = this.lessonReviewRowsDependingOn(dependentLessons);
         for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
           persistedWorkingMatches.add(key);
@@ -8369,7 +8374,11 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       const auditEventId = tx() as number;
-      this.deleteHiveMindMatches(normalizedSelector, memoryType, dependentHiveLessonKeys);
+      this.deleteHiveMindMatches(
+        normalizedSelector,
+        memoryType,
+        dependentHiveLessonCandidateIds,
+      );
       if (deletedWorkingKeys.size > 0 || episodicMatchCount > 0 || checkpointMatchCount > 0 || reviewMatchCount > 0) {
         finalizePersistedWorkingDelete?.();
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
@@ -9929,10 +9938,10 @@ function hiveMindEntryMatchesSelector(
   entry: HiveMindEntry,
   selector: NormalizedRightToForgetSelector,
   memoryType: RightToForgetMemoryType,
-  dependentLessonKeys: ReadonlySet<string>,
+  dependentLessonCandidateIds: ReadonlySet<string>,
 ): boolean {
   if (entry.kind === 'lesson') {
-    return dependentLessonKeys.has(entry.key)
+    return (entry.candidateId !== undefined && dependentLessonCandidateIds.has(entry.candidateId))
       || (memoryType !== 'episodic' && workingEntryMatchesSelector(entry.key, entry.lesson, selector));
   }
   return memoryType !== 'working'
