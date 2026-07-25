@@ -32,11 +32,7 @@
 - Round 4 focused verification: observer 25/25 passed; dependency-factory provider wiring 52/52 passed.
 - Round 4 package verification: observer 905/905 passed; orchestrator 4,507/4,507 passed.
 - Round 4 root `npm run lint`, `npm run typecheck`, and `npm run build`: passed (pre-existing lint warnings only).
-- Codex round 5 findings addressed with RED→GREEN coverage: compaction rows correlate to the persisted trace id, wall-clock retention is enforced on idle reads, rate windows cannot exceed retained history, and observer storage closes even when trace-viewer shutdown fails.
-- Round 5 focused RED evidence: the four regression tests failed for the expected stale run id, missing bridge close, idle retained row, and overlong-window resolution; the same four tests then passed after restoring the fixes.
-- Round 5 package verification: observer and orchestrator tests passed (observer cache replay plus focused observer execution; orchestrator 4,509/4,509 passed).
-- Round 5 scoped lint, typecheck, and build passed for observer and orchestrator (pre-existing lint warnings only).
 - Codex round 5 RED→GREEN remediation: compaction events use the persisted trace ID; wall-clock retention runs on writes, queries, and aggregates; rate windows are capped to the 24-hour retained history; and observer shutdown runs even when trace-viewer shutdown rejects.
-- Round 5 focused RED evidence: the new trace-correlation and shutdown-finalizer tests failed against the pre-remediation paths, then passed 75/75 after restoring the production fixes; observer compaction coverage passed 7/7.
+- Round 5 focused RED evidence: four regression tests failed for the expected stale run id, missing bridge close, idle retained row, and overlong-window resolution; the same four tests passed after restoring the production fixes, and complete observer compaction coverage passed 7/7.
 - Round 5 package verification: observer package passed; orchestrator passed 4,509/4,509 after aligning the Martin-loop integration expectation with persisted trace identity.
 - Round 5 root `npm run lint`, `npm run typecheck`, and `npm run build`: passed (pre-existing lint warnings only); `git diff --check` passed and the scope audit found no Hive Brain files.
