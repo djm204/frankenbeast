@@ -139,6 +139,8 @@ export interface ConsolidatedLesson {
   readonly kind: 'consolidated-lesson';
   readonly pattern: string;
   readonly keywords: readonly string[];
+  /** Normalized retrieval tokens retained from every event in the cluster. */
+  readonly searchTerms?: readonly string[];
   readonly occurrenceCount: number;
   readonly confidence: number;
   readonly evidenceEventIds: readonly number[];

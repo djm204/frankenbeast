@@ -5884,6 +5884,7 @@ function consolidatedLesson(cluster: readonly EpisodicEvent[]): ConsolidatedLess
   const commonTokens = [...tokenSets[0]!].filter((token) =>
     tokenSets.every((tokens) => tokens.has(token)),
   );
+  const searchTerms = [...new Set(tokenSets.flatMap((tokens) => [...tokens]))].sort();
   const evidenceEventIds = ordered
     .map((event) => event.id)
     .filter((id): id is number => id !== undefined);
@@ -5891,6 +5892,7 @@ function consolidatedLesson(cluster: readonly EpisodicEvent[]): ConsolidatedLess
     kind: 'consolidated-lesson',
     pattern,
     keywords: commonTokens.sort(),
+    searchTerms,
     occurrenceCount: ordered.length,
     confidence: lessonConfidence(ordered.length),
     evidenceEventIds,
@@ -5918,6 +5920,9 @@ function isConsolidatedLesson(value: unknown): value is ConsolidatedLesson {
     && typeof record.pattern === 'string'
     && Array.isArray(record.keywords)
     && record.keywords.every((keyword) => typeof keyword === 'string')
+    && (record.searchTerms === undefined
+      || (Array.isArray(record.searchTerms)
+        && record.searchTerms.every((term) => typeof term === 'string')))
     && Number.isSafeInteger(record.occurrenceCount)
     && typeof record.confidence === 'number'
     && Array.isArray(record.evidenceEventIds)
@@ -5928,7 +5933,11 @@ function isConsolidatedLesson(value: unknown): value is ConsolidatedLesson {
 
 function lessonRelevance(query: string, lesson: ConsolidatedLesson): number {
   const queryTokens = semanticMemoryTokens(query);
-  const lessonTokens = semanticMemoryTokens([lesson.pattern, ...lesson.keywords]);
+  const lessonTokens = semanticMemoryTokens([
+    lesson.pattern,
+    ...lesson.keywords,
+    ...(lesson.searchTerms ?? []),
+  ]);
   if (queryTokens.size === 0 || lessonTokens.size === 0) return 0;
   const intersection = [...queryTokens].filter((token) => lessonTokens.has(token)).length;
   if (intersection === 0) return 0;
@@ -6250,13 +6259,12 @@ export class SqliteBrain implements IBrain {
     const approvedLessons = this.memoryReview
       .list('approved')
       .filter((candidate) => isConsolidatedLesson(candidate.value))
-      .filter((candidate) => this.memoryReview.provenanceFor('working', candidate.key) !== null);
+      .filter((candidate) => (
+        this.memoryReview.provenanceFor('working', candidate.key)?.candidateId === candidate.id
+      ));
     const suppressedLessons = (['rejected', 'suppressed'] as const)
       .flatMap((status) => this.memoryReview.list(status))
       .filter((candidate) => isConsolidatedLesson(candidate.value));
-    const approvedKeys = new Set(
-      approvedLessons.map((candidate) => candidate.key),
-    );
     const created: LessonConsolidationItem[] = [];
     for (const cluster of clusterSimilarFailureEvents(events, similarityThreshold)) {
       if (cluster.length < threshold) continue;
@@ -6290,6 +6298,12 @@ export class SqliteBrain implements IBrain {
           ...matchedLessons.flatMap((lesson) => lesson.evidenceEventIds),
           ...value.evidenceEventIds,
         ])).sort((left, right) => left - right);
+        const mergedSearchTerms = Array.from(new Set([
+          ...matchedLessons.flatMap((lesson) => lesson.searchTerms ?? []),
+          ...(value.searchTerms ?? []),
+        ])).sort();
+        const mergedOccurrenceCount = mergedEvidenceEventIds.length;
+        const mergedConfidence = lessonConfidence(mergedOccurrenceCount);
         const mergedFirstSeenAt = [
           ...matchedLessons.map((lesson) => lesson.firstSeenAt),
           value.firstSeenAt,
@@ -6300,17 +6314,20 @@ export class SqliteBrain implements IBrain {
         ].sort().at(-1)!;
         const evidenceChanged = previous.evidenceEventIds.length !== mergedEvidenceEventIds.length
           || previous.evidenceEventIds.some((id, index) => id !== mergedEvidenceEventIds[index]);
-        const lessonChanged = previous.occurrenceCount !== value.occurrenceCount
-          || previous.confidence !== value.confidence
+        const lessonChanged = previous.occurrenceCount !== mergedOccurrenceCount
+          || previous.confidence !== mergedConfidence
           || previous.firstSeenAt !== mergedFirstSeenAt
           || previous.lastSeenAt !== mergedLastSeenAt
+          || (previous.searchTerms ?? []).length !== mergedSearchTerms.length
+          || (previous.searchTerms ?? []).some((term, index) => term !== mergedSearchTerms[index])
           || evidenceChanged;
         const updated = lessonChanged
           ? this.memoryReview.edit(pending.id, {
               value: {
                 ...previous,
-                occurrenceCount: value.occurrenceCount,
-                confidence: value.confidence,
+                searchTerms: mergedSearchTerms,
+                occurrenceCount: mergedOccurrenceCount,
+                confidence: mergedConfidence,
                 evidenceEventIds: mergedEvidenceEventIds,
                 firstSeenAt: mergedFirstSeenAt,
                 lastSeenAt: mergedLastSeenAt,
@@ -6318,8 +6335,8 @@ export class SqliteBrain implements IBrain {
               evidenceId: value.evidenceEventIds[0] === undefined
                 ? key
                 : `episodic:${value.evidenceEventIds[0]}`,
-              confidence: value.confidence,
-              reason: `${value.occurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
+              confidence: mergedConfidence,
+              reason: `${mergedOccurrenceCount} similar failure episodes formed one reviewable lesson pattern.`,
             })
           : pending;
         const duplicateIds = new Set(matchingPending.slice(1).map(({ candidate }) => candidate.id));
@@ -6337,16 +6354,6 @@ export class SqliteBrain implements IBrain {
         }
         continue;
       }
-      const matchingApproved = approvedLessons
-        .some((candidate) => (
-          candidate.key === key
-          || (candidate.value as ConsolidatedLesson).evidenceEventIds.some((id) => evidenceIds.has(id))
-          || semanticMemorySimilarity(
-            (candidate.value as ConsolidatedLesson).pattern,
-            value.pattern,
-          ) >= similarityThreshold
-        ));
-      if (approvedKeys.has(key) || matchingApproved) continue;
       const matchingSuppressed = suppressedLessons.some((candidate) => (
         candidate.key === key
         || (candidate.value as ConsolidatedLesson).evidenceEventIds.some((id) => evidenceIds.has(id))
@@ -6356,6 +6363,62 @@ export class SqliteBrain implements IBrain {
         ) >= similarityThreshold
       ));
       if (matchingSuppressed) continue;
+      const matchingApproved = approvedLessons
+        .map((candidate) => ({
+          candidate,
+          exactKey: candidate.key === key,
+          sharesEvidence: (candidate.value as ConsolidatedLesson).evidenceEventIds
+            .some((id) => evidenceIds.has(id)),
+          similarity: semanticMemorySimilarity(
+            (candidate.value as ConsolidatedLesson).pattern,
+            value.pattern,
+          ),
+        }))
+        .filter(({ exactKey, sharesEvidence, similarity }) =>
+          exactKey || sharesEvidence || similarity >= similarityThreshold)
+        .sort((left, right) => Number(right.exactKey) - Number(left.exactKey)
+          || Number(right.sharesEvidence) - Number(left.sharesEvidence)
+          || right.similarity - left.similarity
+          || right.candidate.createdAt.localeCompare(left.candidate.createdAt)
+          || right.candidate.id.localeCompare(left.candidate.id));
+      const approved = matchingApproved[0]?.candidate;
+      if (approved) {
+        const previous = approved.value as ConsolidatedLesson;
+        const mergedEvidenceEventIds = Array.from(new Set([
+          ...previous.evidenceEventIds,
+          ...value.evidenceEventIds,
+        ])).sort((left, right) => left - right);
+        if (mergedEvidenceEventIds.length === previous.evidenceEventIds.length) continue;
+        const mergedOccurrenceCount = mergedEvidenceEventIds.length;
+        const revisedValue: ConsolidatedLesson = {
+          ...previous,
+          searchTerms: Array.from(new Set([
+            ...(previous.searchTerms ?? []),
+            ...(value.searchTerms ?? []),
+          ])).sort(),
+          occurrenceCount: mergedOccurrenceCount,
+          confidence: lessonConfidence(mergedOccurrenceCount),
+          evidenceEventIds: mergedEvidenceEventIds,
+          firstSeenAt: [previous.firstSeenAt, value.firstSeenAt].sort()[0]!,
+          lastSeenAt: [previous.lastSeenAt, value.lastSeenAt].sort().at(-1)!,
+        };
+        const candidate = this.memoryReview.propose({
+          targetStore: 'working',
+          key: approved.key,
+          value: revisedValue,
+          source: 'episodic-lesson-consolidation',
+          evidenceId: value.evidenceEventIds[0] === undefined
+            ? approved.key
+            : `episodic:${value.evidenceEventIds[0]}`,
+          confidence: revisedValue.confidence,
+          reason: `${mergedOccurrenceCount} similar failure episodes formed an expanded lesson revision for review.`,
+        });
+        if (candidate.status === 'pending' && isConsolidatedLesson(candidate.value)) {
+          pendingLessons.push(candidate);
+          created.push({ id: candidate.id, key: candidate.key, status: 'pending', value: candidate.value });
+        }
+        continue;
+      }
       const reviewKeys = new Set([
         key,
         ...cluster.map((event) => lessonReviewKey({
@@ -6405,12 +6468,12 @@ export class SqliteBrain implements IBrain {
       throw new RangeError('Relevant lesson minConfidence must be between 0 and 1');
     }
 
-    return (['pending', 'approved'] as const)
+    const lessons = (['pending', 'approved'] as const)
       .flatMap((status) => this.memoryReview
         .list(status)
         .filter((candidate) => (
           status === 'pending'
-          || this.memoryReview.provenanceFor('working', candidate.key) !== null
+          || this.memoryReview.provenanceFor('working', candidate.key)?.candidateId === candidate.id
         ))
         .map((candidate) => ({ status, candidate })))
       .filter(({ candidate }) => isConsolidatedLesson(candidate.value))
@@ -6429,7 +6492,9 @@ export class SqliteBrain implements IBrain {
         || right.confidence - left.confidence
         || right.occurrenceCount - left.occurrenceCount
         || right.lastSeenAt.localeCompare(left.lastSeenAt),
-      )
+      );
+    return lessons
+      .filter((lesson, index) => lessons.findIndex(({ key }) => key === lesson.key) === index)
       .slice(0, limit);
   }
 
