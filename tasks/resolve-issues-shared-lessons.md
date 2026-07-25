@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Retention enforcement must preserve upstream invariants
+- Retention deletion must honor producer-side lifecycle windows such as learning cooldowns, not only the generic memory-class TTL. Validate persisted cooldown metadata before classifying an expired learning row as a compaction candidate.
+- Cached rollback floors are references to mutable rows: validate the referenced checkpoint inside the enforcement transaction before excluding older checkpoints. When a shared delete budget leaves scanned checkpoint candidates pending, rewind the checkpoint cursor as well as the episodic cursor; otherwise continuous inserts can starve old checkpoints indefinitely.
+
 ## 2026-07-24 — Review-gated lesson consolidation
 - A consolidation pass should refresh an existing pending review candidate when later episodes increase its evidence; otherwise occurrence counts and confidence become stale as soon as the threshold is first crossed. Keep approved values stable and route future evolution through a separately reviewed update.
 - Derive consolidated-memory keys from normalized patterns, not bounded-window event ids; preserve reviewer-edited fields on evidence refresh and check key-level suppressions before re-proposing rejected candidates.
@@ -525,6 +529,10 @@
 
 ## 2026-07-22 — Webhook delivery deadlines and cancellation
 - A per-attempt webhook deadline must cover DNS resolution, transport, and bounded error-body reads—not stop at response headers. Caller cancellation must also interrupt DNS, active requests, response-body reads, and retry backoff, with owned timers and abort listeners removed on every terminal path.
+
+## 2026-07-24 — Retention enforcement safety
+- Explicit SQLite retention enforcement should consume the same report snapshot it presents, cap each atomic deletion batch, and record a non-sensitive success audit inside the transaction so audit failure rolls back destructive writes; record the error outcome after rollback.
+- Recovery compaction must protect the newest usable checkpoint rather than the highest row ID, because recovery already skips corrupt rows. Keep every adapter's scoped candidate ordering aligned by exporting and reusing the core priority/age comparator instead of reimplementing lexical ID sorting.
 
 ## 2026-07-24 — Faculty adapters should wrap lifecycle seams
 - Attach faculty adapters in the consolidated dependency factory and reuse the existing planner and execution trace seams; do not reimplement DAG ordering or add a parallel executor. Keep faculty failure episodes recallable by task objective while limiting their details to the error class, preserve established generic traces needed by recovery, suppress fake lifecycle events from health probes, and make additive telemetry best-effort so it cannot replace planner/execution outcomes.

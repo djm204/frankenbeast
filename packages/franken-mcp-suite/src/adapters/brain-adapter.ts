@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   DEFAULT_WORKING_MEMORY_LIMITS,
   SqliteBrain,
+  compareMemoryRetentionCompactionCandidates,
   type MemoryAttributionListOptions,
   type MemoryCandidate,
   type MemoryCandidateStatus,
@@ -145,6 +146,20 @@ export interface ProjectMemoryExport {
 
 export interface MemoryRetentionReportInput extends MemoryRetentionReportOptions, MemoryScopeInput {}
 
+export interface ScopedMemoryRetentionReport extends MemoryRetentionReport {
+  /**
+   * Present when maxScanRows bounded the underlying per-store scan. Because
+   * read-scope filtering happens after that scan, callers must treat a capped
+   * scoped report as partial rather than interpreting an empty result as proof
+   * that no visible retention candidates exist.
+   */
+  scan?: {
+    maxRowsPerStore: number;
+    truncated: true;
+    scopeFilterAppliedAfterScan: boolean;
+  };
+}
+
 export interface BrainAdapter {
   query(input: BrainQueryInput): Promise<BrainMemoryEntry[]>;
   store(input: {
@@ -157,7 +172,7 @@ export interface BrainAdapter {
   frontload(input?: MemoryScopeInput): Promise<BrainFrontloadSection[]>;
   exportProjectMemory(input?: MemoryExportInput): Promise<ProjectMemoryExport>;
   memoryAccessAuditReport(input?: MemoryAccessAuditReportInput): Promise<MemoryAccessAuditReport>;
-  memoryRetentionReport(input?: MemoryRetentionReportInput): Promise<MemoryRetentionReport>;  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
+  memoryRetentionReport(input?: MemoryRetentionReportInput): Promise<ScopedMemoryRetentionReport>;  forget(key: string, input?: AgentScopedInput): Promise<boolean>;
   rightToForget(
     input: RightToForgetSelector & AgentScopedInput,
   ): Promise<RightToForgetReport>;
@@ -511,7 +526,7 @@ function applyRetentionBudget(
   if (extraBudgetCompactions === 0) return scopedEntries;
   const retainedCandidates = scopedEntries
     .filter((entry) => !entry.protected && (entry.action === "retain" || entry.action === "nearing_expiry"))
-    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+    .sort(compareMemoryRetentionCompactionCandidates);
   for (const entry of retainedCandidates.slice(0, extraBudgetCompactions)) {
     entry.action = "compact";
     entry.reason = `Scoped memory report has ${activeEntries.length} active entries, over report budget ${maxEntries}; ${entry.class} has compaction priority ${entry.policy.compactPriority}`;
@@ -523,7 +538,8 @@ function filterRetentionReportByScope(
   report: MemoryRetentionReport,
   scope: { readScope: MemoryReadScope; agentId?: string },
   maxEntries?: number,
-): MemoryRetentionReport {
+  maxScanRows?: number,
+): ScopedMemoryRetentionReport {
   const entries = applyRetentionBudget(
     report.entries
       .filter((entry) => canReadMemoryEntry(entry.agentId, scope))
@@ -532,7 +548,7 @@ function filterRetentionReportByScope(
   );
   const compactionCandidates = entries
     .filter((entry) => entry.action === "compact")
-    .sort((a, b) => b.policy.compactPriority - a.policy.compactPriority || a.key.localeCompare(b.key));
+    .sort(compareMemoryRetentionCompactionCandidates);
   return {
     ...report,
     counts: {
@@ -544,6 +560,15 @@ function filterRetentionReportByScope(
     },
     entries,
     compactionCandidates,
+    ...(maxScanRows === undefined
+      ? {}
+      : {
+          scan: {
+            maxRowsPerStore: maxScanRows,
+            truncated: true as const,
+            scopeFilterAppliedAfterScan: scope.readScope !== "all",
+          },
+        }),
   };
 }
 
@@ -598,7 +623,7 @@ const MEMORY_ACCESS_TOOL_OPERATIONS: Record<string, { operation: string; targetS
   fbeast_memory_review_conflicts: { operation: "read", targetStore: "working", targetClass: "memory-review-conflict" },
   fbeast_memory_review_decide: { operation: "review", targetStore: "working", targetClass: "memory-review-candidate" },
   fbeast_memory_access_audit_report: { operation: "read", targetStore: "audit", targetClass: "memory-access-audit" },
-  fbeast_memory_retention_report: { operation: "read", targetStore: "working|episodic", targetClass: "memory-retention-report" },
+  fbeast_memory_retention_report: { operation: "read", targetStore: "working|episodic|checkpoint", targetClass: "memory-retention-report" },
 };
 
 const MEMORY_REVIEW_DECISIONS = new Set(["approve", "reject", "never_store", "resolve_conflict"]);
@@ -1559,11 +1584,13 @@ export function createBrainAdapter(
         ...(input.maxEntries !== undefined
           ? { maxEntries: Number.MAX_SAFE_INTEGER }
           : {}),
+        ...(input.maxScanRows === undefined ? {} : { maxScanRows: input.maxScanRows }),
       };
       return filterRetentionReportByScope(
         brain.memoryRetentionReport(reportOptions),
         readScope,
         input.maxEntries,
+        input.maxScanRows,
       );    },
 
     async forget(key, input = {}) {

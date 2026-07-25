@@ -122,6 +122,718 @@ describe('SqliteBrain', () => {
   });
 
   describe('memory retention policy report', () => {
+    it('indexes bounded retention scans without table scans or temporary sorting', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'franken-retention-indexes-'));
+      const dbPath = join(dir, 'brain.db');
+      new SqliteBrain(dbPath).close();
+      const indexedDb = new Database(dbPath, { readonly: true });
+      const episodicPlan = indexedDb
+        .prepare(
+          `EXPLAIN QUERY PLAN
+           SELECT * FROM episodic_events ORDER BY created_at ASC, id ASC LIMIT 100`,
+        )
+        .all() as Array<{ detail: string }>;
+      const checkpointPlan = indexedDb
+        .prepare(
+          `EXPLAIN QUERY PLAN
+           SELECT * FROM checkpoints ORDER BY created_at ASC, id ASC LIMIT 100`,
+        )
+        .all() as Array<{ detail: string }>;
+
+      expect(episodicPlan.map((row) => row.detail).join('\n')).toContain(
+        'USING INDEX idx_episodic_events_retention',
+      );
+      expect(checkpointPlan.map((row) => row.detail).join('\n')).toContain(
+        'USING INDEX idx_checkpoints_retention',
+      );
+      expect([...episodicPlan, ...checkpointPlan].map((row) => row.detail).join('\n'))
+        .not.toContain('USE TEMP B-TREE');
+      indexedDb.close();
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('enforces reported episodic and checkpoint compaction while preserving useful recent state', () => {
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'obsolete transient failure',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'recent transient failure',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-09T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'old-run',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'obsolete checkpoint' },
+        timestamp: '2026-01-01T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'current-run',
+        phase: 'execution',
+        step: 2,
+        context: { note: 'current checkpoint' },
+        timestamp: '2026-01-09T00:00:00.000Z',
+      });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-09T00:00:00.000Z',
+        maxDeletes: 10,
+      });
+
+      expect(result.deleted).toEqual({ episodic: 1, checkpoints: 1 });
+      expect(result.report.compactionCandidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ store: 'episodic', key: '1' }),
+        expect.objectContaining({ store: 'checkpoint', key: '1' }),
+      ]));
+      expect(brain.episodic.recall('obsolete', 10)).toEqual([]);
+      expect(brain.episodic.recall('recent', 10)).toHaveLength(1);
+      expect(brain.episodic.recentFailures(10).map((event) => event.summary)).toEqual([
+        'recent transient failure',
+      ]);
+      expect(brain.recovery.listCheckpoints()).toEqual([
+        { id: '2', timestamp: '2026-01-09T00:00:00.000Z' },
+      ]);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('current-run');
+      expect(brain.accessAudit.list({ operation: 'retention.enforce' })).toMatchObject([
+        {
+          store: 'retention',
+          outcome: 'success',
+          details: { episodicDeleted: 1, checkpointsDeleted: 1, maxDeletes: 10 },
+        },
+      ]);
+    });
+
+    it('rejects unbounded retention enforcement batches', () => {
+      expect(() => brain.enforceMemoryRetention({ maxDeletes: 1_001 })).toThrow(
+        'maxDeletes must be a positive safe integer no greater than 1000',
+      );
+    });
+
+    it('bounds deletions and selects the oldest candidate when priorities match', () => {
+      for (const createdAt of [
+        '2026-01-03T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-02T00:00:00.000Z',
+      ]) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `transient ${createdAt}`,
+          details: { memoryClass: 'transient_observation' },
+          createdAt,
+        });
+      }
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-10T00:00:00.000Z',
+        maxDeletes: 1,
+      });
+
+      expect(result.deleted).toEqual({ episodic: 1, checkpoints: 0 });
+      expect(result.report.compactionCandidates.map((entry) => entry.key)).toEqual(['2', '3', '1']);
+      expect(brain.episodic.recent(-1).map((event) => event.id)).toEqual([1, 3]);
+    });
+
+    it('bounds retention scans before selecting a deletion batch', () => {
+      for (let day = 1; day <= 5; day += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `bounded transient ${day}`,
+          details: { memoryClass: 'transient_observation' },
+          createdAt: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+
+      expect(result.report.entries.filter((entry) => entry.store === 'episodic')).toHaveLength(2);
+      expect(result.report.compactionCandidates.map((entry) => entry.key)).toEqual(['1', '2']);
+      expect(result.deleted).toEqual({ episodic: 1, checkpoints: 0 });
+    });
+
+    it('resumes at undeleted episodic candidates when the delete cap is smaller than the scan cap', () => {
+      for (let day = 1; day <= 8; day += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `expired candidate ${day}`,
+          details: { memoryClass: 'transient_observation' },
+          createdAt: `2026-01-${String(day).padStart(2, '0')}T00:00:00.000Z`,
+        });
+      }
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 4,
+      });
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 4,
+      });
+
+      expect(first.report.compactionCandidates.map((entry) => entry.key)).toEqual(['1', '2', '3', '4']);
+      expect(second.report.compactionCandidates.map((entry) => entry.key)).toContain('2');
+      expect(brain.episodic.recent(-1).map((event) => event.id)).not.toContain(2);
+    });
+
+    it('advances bounded episodic scans past protected rows on later batches', () => {
+      for (const id of [1, 2]) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `protected audit ${id}`,
+          details: { memoryClass: 'audit_record' },
+          createdAt: `2026-01-0${id}T00:00:00.000Z`,
+        });
+      }
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'expired candidate beyond the first scan window',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-03T00:00:00.000Z',
+      });
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+
+      expect(first.deleted).toEqual({ episodic: 0, checkpoints: 0 });
+      expect(second.deleted).toEqual({ episodic: 1, checkpoints: 0 });
+      expect(brain.episodic.recent(-1).map((event) => event.summary)).toEqual([
+        'protected audit 2',
+        'protected audit 1',
+      ]);
+    });
+
+    it('advances bounded checkpoint scans past a protected floor row', () => {
+      brain.recovery.checkpoint({
+        runId: 'expired-before-floor',
+        phase: 'execution',
+        step: 1,
+        context: {},
+        timestamp: '2026-01-02T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'expired-after-floor',
+        phase: 'execution',
+        step: 2,
+        context: {},
+        timestamp: '2026-01-03T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'protected-floor-with-old-state-time',
+        phase: 'execution',
+        step: 3,
+        context: {},
+        timestamp: '2026-01-01T00:00:00.000Z',
+      });
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 1,
+      });
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 1,
+      });
+
+      expect(first.deleted.checkpoints).toBe(0);
+      expect(second.deleted.checkpoints).toBe(1);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('protected-floor-with-old-state-time');
+    });
+
+    it('rewinds to unselected checkpoint candidates when episodic deletion uses the batch budget', () => {
+      for (let day = 2; day <= 4; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `checkpoint-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      brain.enforceMemoryRetention({
+        now: '2026-01-04T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 3,
+      });
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'oldest expired episodic candidate',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const first = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 3,
+      });
+      for (let day = 5; day <= 7; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `new-checkpoint-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const second = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 3,
+      });
+
+      expect(first.deleted).toEqual({ episodic: 1, checkpoints: 0 });
+      expect(second.report.compactionCandidates.map((entry) => entry.key)).toContain('1');
+      expect(brain.recovery.listCheckpoints().map((checkpoint) => checkpoint.id)).not.toContain('1');
+    });
+
+    it('bounds working-memory rows in bounded retention reports', () => {
+      brain.working.set('working.a', 'a');
+      brain.working.set('working.b', 'b');
+      brain.working.set('working.c', 'c');
+      brain.flush();
+
+      const report = brain.memoryRetentionReport({
+        now: '2026-01-20T00:00:00.000Z',
+        maxScanRows: 2,
+      });
+
+      expect(report.entries.filter((entry) => entry.store === 'working')).toHaveLength(2);
+    });
+
+    it('projects only retention columns during bounded episodic scans', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'expired candidate',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const originalPrepare = db.prepare.bind(db);
+      const preparedSql: string[] = [];
+      db.prepare = ((sql: string) => {
+        preparedSql.push(sql);
+        return originalPrepare(sql);
+      }) as typeof db.prepare;
+      try {
+        brain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 1,
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      const episodicRetentionQueries = preparedSql.filter((sql) => sql.includes('FROM episodic_events'));
+      expect(episodicRetentionQueries).not.toContainEqual(expect.stringMatching(/SELECT\s+\*/));
+    });
+
+    it('uses a composite keyset seek when a retention cursor lands inside a timestamp tie', () => {
+      for (let id = 1; id <= 4; id += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `tied protected audit ${id}`,
+          details: { memoryClass: 'audit_record' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        });
+      }
+
+      brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const originalPrepare = db.prepare.bind(db);
+      const preparedSql: string[] = [];
+      db.prepare = ((sql: string) => {
+        preparedSql.push(sql);
+        return originalPrepare(sql);
+      }) as typeof db.prepare;
+      try {
+        brain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 2,
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      expect(preparedSql).toContainEqual(expect.stringContaining(
+        'WHERE created_at = ? AND id > ?',
+      ));
+      expect(preparedSql).not.toContainEqual(expect.stringContaining(
+        'WHERE created_at > ? OR (created_at = ? AND id > ?)',
+      ));
+    });
+
+    it('resumes bounded episodic scans after reopening a scheduled brain', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-cursor-'));
+      const dbPath = join(dir, 'brain.db');
+      let scheduledBrain: SqliteBrain | undefined;
+
+      try {
+        scheduledBrain = new SqliteBrain(dbPath);
+        for (const id of [1, 2]) {
+          scheduledBrain.episodic.record({
+            type: 'observation',
+            summary: `protected audit ${id}`,
+            details: { memoryClass: 'audit_record' },
+            createdAt: `2026-01-0${id}T00:00:00.000Z`,
+          });
+        }
+        scheduledBrain.episodic.record({
+          type: 'observation',
+          summary: 'expired candidate beyond the first scan window',
+          details: { memoryClass: 'transient_observation' },
+          createdAt: '2026-01-03T00:00:00.000Z',
+        });
+
+        expect(scheduledBrain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 2,
+        }).deleted.episodic).toBe(0);
+        scheduledBrain.close();
+
+        scheduledBrain = new SqliteBrain(dbPath);
+        expect(scheduledBrain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 2,
+        }).deleted.episodic).toBe(1);
+        expect(scheduledBrain.episodic.recent(-1).map((event) => event.summary)).not.toContain(
+          'expired candidate beyond the first scan window',
+        );
+      } finally {
+        scheduledBrain?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not scan report-only working memory while holding the enforcement writer lock', () => {
+      brain.working.set('corrupt.working.row', 'initially valid');
+      brain.flush();
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'expired episodic candidate',
+        details: { memoryClass: 'transient_observation' },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+        '{',
+        'corrupt.working.row',
+      );
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+
+      expect(result.deleted).toEqual({ episodic: 1, checkpoints: 0 });
+      expect(result.report.entries.some((entry) => entry.store === 'working')).toBe(false);
+    });
+
+    it('fails closed when a bounded scan cannot identify a usable checkpoint floor', () => {
+      for (let day = 1; day <= 4; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `run-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE checkpoints SET state = ? WHERE id > 1`).run('{');
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 2,
+      });
+
+      expect(result.deleted.checkpoints).toBe(0);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('run-1');
+    });
+
+    it('advances bounded rollback-floor discovery past corrupt newest checkpoints', () => {
+      for (let day = 1; day <= 5; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `run-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE checkpoints SET state = ? WHERE id > 1`).run('{');
+
+      const batches = Array.from({ length: 4 }, () => brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 2,
+      }));
+
+      expect(batches.slice(0, 3).every((batch) => batch.deleted.checkpoints === 0)).toBe(true);
+      expect(batches[3]?.deleted.checkpoints).toBeGreaterThan(0);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('run-1');
+    });
+
+    it('shares the checkpoint scan cap with rollback-floor discovery', () => {
+      for (let day = 1; day <= 4; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `run-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const originalPrepare = db.prepare.bind(db);
+      const checkpointScanQueries: string[] = [];
+      db.prepare = ((sql: string) => {
+        if (/SELECT id, state, created_at FROM checkpoints/i.test(sql)) {
+          checkpointScanQueries.push(sql);
+        }
+        return originalPrepare(sql);
+      }) as typeof db.prepare;
+      try {
+        brain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 10,
+          maxScanRows: 2,
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      expect(checkpointScanQueries).toHaveLength(1);
+    });
+
+    it('preserves the newest usable checkpoint when a newer row is corrupt', () => {
+      brain.recovery.checkpoint({
+        runId: 'usable-run',
+        phase: 'execution',
+        step: 1,
+        context: {},
+        timestamp: '2026-01-01T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'corrupt-run',
+        phase: 'execution',
+        step: 2,
+        context: {},
+        timestamp: '2026-01-02T00:00:00.000Z',
+      });
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE checkpoints SET state = ? WHERE id = 2`).run('{');
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-10T00:00:00.000Z',
+        maxDeletes: 10,
+      });
+
+      expect(result.deleted.checkpoints).toBe(1);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('usable-run');
+      expect(brain.recovery.listCheckpoints()).toEqual([
+        { id: '1', timestamp: '2026-01-01T00:00:00.000Z' },
+      ]);
+    });
+
+    it('rediscovers the rollback floor after right-to-forget deletes the cached checkpoint', () => {
+      brain.recovery.checkpoint({
+        runId: 'older-usable-run',
+        phase: 'execution',
+        step: 1,
+        context: { note: 'retain this recovery point' },
+        timestamp: '2026-01-01T00:00:00.000Z',
+      });
+      brain.recovery.checkpoint({
+        runId: 'cached-floor-run',
+        phase: 'execution',
+        step: 2,
+        context: { note: 'forget cached floor marker' },
+        timestamp: '2026-01-02T00:00:00.000Z',
+      });
+
+      brain.enforceMemoryRetention({
+        now: '2026-01-02T00:00:00.000Z',
+        maxDeletes: 1,
+        maxScanRows: 2,
+      });
+      brain.rightToForget({ query: 'forget cached floor marker' });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 2,
+      });
+
+      expect(result.deleted.checkpoints).toBe(0);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('older-usable-run');
+    });
+
+    it('preserves learning evidence until its stored cooldown expires', () => {
+      brain.episodic.recordLearning({
+        type: 'observation',
+        summary: 'Reuse focused verification for retention changes',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }, { key: 'retention-verification', cooldownMs: 30 * 24 * 60 * 60 * 1000 });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-10T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 10,
+      });
+      const duplicate = brain.episodic.recordLearning({
+        type: 'observation',
+        summary: 'Same learning during its cooldown',
+        createdAt: '2026-01-10T00:00:00.000Z',
+      }, { key: 'retention-verification', cooldownMs: 30 * 24 * 60 * 60 * 1000 });
+
+      expect(result.deleted.episodic).toBe(0);
+      expect(result.report.entries.find((entry) => entry.store === 'episodic')).toMatchObject({
+        action: 'protect',
+        protected: true,
+      });
+      expect(duplicate.recorded).toBe(false);
+    });
+
+    it('does not protect ordinary events that only contain cooldown-shaped metadata', () => {
+      brain.episodic.record({
+        type: 'observation',
+        summary: 'ordinary expired observation',
+        details: {
+          memoryClass: 'transient_observation',
+          learningCooldownMs: 30 * 24 * 60 * 60 * 1000,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-10T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 10,
+      });
+
+      expect(result.deleted.episodic).toBe(1);
+      expect(brain.episodic.recent(-1)).toEqual([]);
+    });
+
+    it('enforces maxEntries against rows outside the bounded scan page', () => {
+      for (let index = 0; index < 4; index += 1) {
+        brain.episodic.record({
+          type: 'observation',
+          summary: `fresh bounded observation ${index}`,
+          details: { memoryClass: 'transient_observation' },
+          createdAt: `2026-01-0${index + 1}T00:00:00.000Z`,
+        });
+      }
+
+      const result = brain.enforceMemoryRetention({
+        now: '2026-01-05T00:00:00.000Z',
+        expiryHorizonMs: 30 * 24 * 60 * 60 * 1000,
+        maxEntries: 3,
+        maxDeletes: 10,
+        maxScanRows: 2,
+      });
+
+      expect(result.deleted.episodic).toBe(1);
+      expect(brain.episodic.count()).toBe(3);
+    });
+
+    it('restores all retention scan state with one indexed audit lookup after reopening', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-retention-state-'));
+      const dbPath = join(dir, 'brain.db');
+      let scheduledBrain: SqliteBrain | undefined;
+
+      try {
+        scheduledBrain = new SqliteBrain(dbPath);
+        scheduledBrain.episodic.record({
+          type: 'observation',
+          summary: 'protected retention cursor marker',
+          details: { memoryClass: 'audit_record' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+        });
+        scheduledBrain.enforceMemoryRetention({
+          now: '2026-01-10T00:00:00.000Z',
+          maxDeletes: 1,
+          maxScanRows: 1,
+        });
+        scheduledBrain.close();
+
+        scheduledBrain = new SqliteBrain(dbPath);
+        const db = (scheduledBrain as unknown as { db: Database.Database }).db;
+        const originalPrepare = db.prepare.bind(db);
+        const preparedSql: string[] = [];
+        db.prepare = ((sql: string) => {
+          preparedSql.push(sql);
+          return originalPrepare(sql);
+        }) as typeof db.prepare;
+        try {
+          scheduledBrain.enforceMemoryRetention({
+            now: '2026-01-10T00:00:00.000Z',
+            maxDeletes: 1,
+            maxScanRows: 1,
+          });
+          scheduledBrain.enforceMemoryRetention({
+            now: '2026-01-10T00:00:00.000Z',
+            maxDeletes: 1,
+            maxScanRows: 1,
+          });
+        } finally {
+          db.prepare = originalPrepare as typeof db.prepare;
+        }
+
+        expect(preparedSql.filter((sql) => (
+          sql.includes('FROM memory_access_audit_events')
+          && sql.includes("operation = 'retention.enforce'")
+        ))).toHaveLength(1);
+        const queryPlan = db.prepare(
+          `EXPLAIN QUERY PLAN SELECT details
+           FROM memory_access_audit_events
+           WHERE store = 'retention'
+             AND operation = 'retention.enforce'
+             AND outcome = 'success'
+           ORDER BY id DESC
+           LIMIT 1`,
+        ).all() as Array<{ detail: string }>;
+        expect(queryPlan.some(({ detail }) => (
+          detail.includes('idx_memory_access_audit_retention_success')
+        ))).toBe(true);
+      } finally {
+        scheduledBrain?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('documents policy ordering and protects user preferences from compaction', () => {
       brain.working.set('user.preference.response-style', 'concise');
       brain.working.set('env.node.version', { value: '20.x', memoryClass: 'environment_fact' });
@@ -6595,6 +7307,7 @@ describe('SqliteBrain', () => {
           db.exec(`
             DROP INDEX IF EXISTS idx_episodic_events_type_created_at;
             DROP INDEX IF EXISTS idx_episodic_events_created_at;
+            DROP INDEX IF EXISTS idx_episodic_events_retention;
           `);
           db.close();
         };

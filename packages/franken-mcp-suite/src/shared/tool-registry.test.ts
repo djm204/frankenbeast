@@ -111,10 +111,14 @@ describe('TOOL_REGISTRY', () => {
     };
     const handler = TOOL_REGISTRY.get('fbeast_memory_retention_report')!.makeHandler({ brain } as unknown as AdapterSet);
 
-    const result = await handler({ expiryHorizonMs: '1000', maxEntries: '5' });
+    const result = await handler({ expiryHorizonMs: '1000', maxEntries: '5', maxScanRows: '25' });
 
     expect(result.isError).not.toBe(true);
-    expect(brain.memoryRetentionReport).toHaveBeenCalledWith(expect.objectContaining({ expiryHorizonMs: 1000, maxEntries: 5 }));
+    expect(brain.memoryRetentionReport).toHaveBeenCalledWith(expect.objectContaining({
+      expiryHorizonMs: 1000,
+      maxEntries: 5,
+      maxScanRows: 25,
+    }));
   });
 
   it('rejects invalid observer log arguments before invoking the registry adapter handler', async () => {

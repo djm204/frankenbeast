@@ -419,6 +419,23 @@ vi.mock("better-sqlite3", () => ({
 }));
 
 vi.mock("@franken/brain", () => ({
+  compareMemoryRetentionCompactionCandidates: (
+    left: { policy: { compactPriority: number }; ageDays?: number; store: string; key: string },
+    right: { policy: { compactPriority: number }; ageDays?: number; store: string; key: string },
+  ) => {
+    const priority = right.policy.compactPriority - left.policy.compactPriority;
+    if (priority !== 0) return priority;
+    const age = (right.ageDays ?? -1) - (left.ageDays ?? -1);
+    if (age !== 0) return age;
+    const store = left.store.localeCompare(right.store);
+    if (store !== 0) return store;
+    const leftId = Number(left.key);
+    const rightId = Number(right.key);
+    if (Number.isSafeInteger(leftId) && Number.isSafeInteger(rightId)) {
+      return leftId - rightId;
+    }
+    return left.key.localeCompare(right.key);
+  },
   DEFAULT_WORKING_MEMORY_LIMITS: {
     maxEntries: 10_000,
     maxValueBytes: 5 * 1024 * 1024,
@@ -1225,6 +1242,66 @@ describe("createBrainAdapter", () => {
     });
   });
 
+  it("marks capped scoped retention reports partial when hidden rows can consume the scan", async () => {
+    const brain = createBrainAdapter("/tmp/scoped-retention-scan.db");
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-21T00:00:00.000Z",
+      policies: [],
+      counts: { total: 1, protected: 0, expired: 1, nearingExpiry: 0, compactionCandidates: 0 },
+      entries: [{
+        store: "episodic",
+        key: "1",
+        agentId: "other-agent",
+        class: "transient_observation",
+        action: "expired",
+        policy: { class: "transient_observation", retentionDays: 7, compactPriority: 80, protected: false, description: "transient" },
+        protected: false,
+        reason: "retention window elapsed",
+      }],
+      compactionCandidates: [],
+    });
+
+    const report = await brain.memoryRetentionReport({
+      readScope: "agent",
+      agentId: "current-agent",
+      maxScanRows: 1,
+    });
+
+    expect(brainInstances[0].memoryRetentionReport).toHaveBeenCalledWith({ maxScanRows: 1 });
+    expect(report.entries).toEqual([]);
+    expect(report.scan).toEqual({
+      maxRowsPerStore: 1,
+      truncated: true,
+      scopeFilterAppliedAfterScan: true,
+    });
+  });
+
+  it("preserves priority and oldest-first candidate ordering after scope filtering", async () => {
+    const brain = createBrainAdapter("/tmp/retention-order.db");
+    const policy = {
+      class: "transient_observation" as const,
+      retentionDays: 7,
+      compactPriority: 90,
+      protected: false,
+      description: "transient",
+    };
+    const entries = [
+      { store: "episodic" as const, key: "10", class: "transient_observation" as const, action: "compact" as const, policy, protected: false, ageDays: 8, reason: "old" },
+      { store: "episodic" as const, key: "2", class: "transient_observation" as const, action: "compact" as const, policy, protected: false, ageDays: 10, reason: "older" },
+    ];
+    brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
+      generatedAt: "2026-07-21T00:00:00.000Z",
+      policies: [policy],
+      counts: { total: 2, protected: 0, expired: 0, nearingExpiry: 0, compactionCandidates: 2 },
+      entries,
+      compactionCandidates: entries,
+    });
+
+    const report = await brain.memoryRetentionReport({ readScope: "shared" });
+
+    expect(report.compactionCandidates.map((entry) => entry.key)).toEqual(["2", "10"]);
+  });
+
   it("hides quarantined episodic rows from scoped retention reports", async () => {
     const brain = createBrainAdapter("/tmp/quarantined-retention.db");
     brainInstances[0].memoryRetentionReport.mockReturnValueOnce({
@@ -1280,10 +1357,15 @@ describe("createBrainAdapter", () => {
       compactionCandidates: [],
     });
 
-    const report = await brain.memoryRetentionReport({ readScope: "all", maxEntries: 1 });
+    const report = await brain.memoryRetentionReport({
+      readScope: "all",
+      maxEntries: 1,
+      maxScanRows: 25,
+    });
 
     expect(brainInstances[0].memoryRetentionReport).toHaveBeenCalledWith({
       maxEntries: Number.MAX_SAFE_INTEGER,
+      maxScanRows: 25,
     });
     expect(report.entries).toEqual([
       expect.objectContaining({ key: "shared.visible", action: "retain" }),
@@ -2011,7 +2093,7 @@ describe("createBrainAdapter", () => {
       agentId: "agent-retention",
       tool: "fbeast_memory_retention_report",
       operation: "read",
-      targetStore: "working|episodic",
+      targetStore: "working|episodic|checkpoint",
       targetClass: "memory-retention-report",
       decision: "approved",
     });

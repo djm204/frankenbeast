@@ -1040,6 +1040,7 @@ describe('createMcpServer', () => {
         now: '2026-07-16T00:00:00.000Z',
         expiryHorizonMs: 1000,
         maxEntries: 10,
+        maxScanRows: 25,
         extra: 'sensitive detail',
       })).toEqual({
         readScope: 'agent',
@@ -1047,6 +1048,7 @@ describe('createMcpServer', () => {
         now: '2026-07-16T00:00:00.000Z',
         expiryHorizonMs: 1000,
         maxEntries: 10,
+        maxScanRows: 25,
         extra: '[memory-retention-report-args-redacted]',
       });
     });
