@@ -534,6 +534,62 @@ describe('SqliteBrain', () => {
       expect(brain.recovery.lastCheckpoint()?.runId).toBe('run-1');
     });
 
+    it('advances bounded rollback-floor discovery past corrupt newest checkpoints', () => {
+      for (let day = 1; day <= 5; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `run-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      db.prepare(`UPDATE checkpoints SET state = ? WHERE id > 1`).run('{');
+
+      const batches = Array.from({ length: 4 }, () => brain.enforceMemoryRetention({
+        now: '2026-01-20T00:00:00.000Z',
+        maxDeletes: 10,
+        maxScanRows: 2,
+      }));
+
+      expect(batches.slice(0, 3).every((batch) => batch.deleted.checkpoints === 0)).toBe(true);
+      expect(batches[3]?.deleted.checkpoints).toBeGreaterThan(0);
+      expect(brain.recovery.lastCheckpoint()?.runId).toBe('run-1');
+    });
+
+    it('shares the checkpoint scan cap with rollback-floor discovery', () => {
+      for (let day = 1; day <= 4; day += 1) {
+        brain.recovery.checkpoint({
+          runId: `run-${day}`,
+          phase: 'execution',
+          step: day,
+          context: {},
+          timestamp: `2026-01-0${day}T00:00:00.000Z`,
+        });
+      }
+      const db = (brain as unknown as { db: Database.Database }).db;
+      const originalPrepare = db.prepare.bind(db);
+      const checkpointScanQueries: string[] = [];
+      db.prepare = ((sql: string) => {
+        if (/SELECT id, state, created_at FROM checkpoints/i.test(sql)) {
+          checkpointScanQueries.push(sql);
+        }
+        return originalPrepare(sql);
+      }) as typeof db.prepare;
+      try {
+        brain.enforceMemoryRetention({
+          now: '2026-01-20T00:00:00.000Z',
+          maxDeletes: 10,
+          maxScanRows: 2,
+        });
+      } finally {
+        db.prepare = originalPrepare as typeof db.prepare;
+      }
+
+      expect(checkpointScanQueries).toHaveLength(1);
+    });
+
     it('preserves the newest usable checkpoint when a newer row is corrupt', () => {
       brain.recovery.checkpoint({
         runId: 'usable-run',

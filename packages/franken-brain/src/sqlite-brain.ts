@@ -2784,6 +2784,10 @@ interface MemoryRetentionEnforcementScanState {
   episodicRows?: EpisodicRow[];
   checkpointCursor?: MemoryRetentionScanCursor;
   nextCheckpointCursor?: MemoryRetentionScanCursor;
+  checkpointFloorSearchCursorId?: number;
+  nextCheckpointFloorSearchCursorId?: number;
+  checkpointRollbackFloorId?: number;
+  nextCheckpointRollbackFloorId?: number;
 }
 
 type CorruptEpisodicDetailsReporter = (eventId: number) => void;
@@ -6003,6 +6007,8 @@ export class SqliteBrain implements IBrain {
   private readonly auditRecorder: MemoryAccessAuditRecorder;
   private retentionEpisodicScanCursor: MemoryRetentionScanCursor | undefined;
   private retentionCheckpointScanCursor: MemoryRetentionScanCursor | undefined;
+  private retentionCheckpointFloorSearchCursorId: number | undefined;
+  private retentionCheckpointRollbackFloorId: number | undefined;
 
   /** Attach the governor-backed action faculty used by orchestrator gating paths. */
   attachActionFaculty(faculty: IActionFaculty): void {
@@ -6464,6 +6470,20 @@ export class SqliteBrain implements IBrain {
       : undefined;
   }
 
+  private persistedRetentionScanNumber(key: string): number | undefined {
+    const row = this.db.prepare(
+      `SELECT details
+       FROM memory_access_audit_events
+       WHERE store = 'retention'
+         AND operation = 'retention.enforce'
+         AND outcome = 'success'
+       ORDER BY id DESC
+       LIMIT 1`,
+    ).get() as Pick<MemoryAccessAuditRow, 'details'> | undefined;
+    const value = parseMemoryAccessDetails(row?.details ?? null)?.[key];
+    return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
+  }
+
   private buildMemoryRetentionReport(
     options: MemoryRetentionReportOptions,
     includeWorking: boolean,
@@ -6630,7 +6650,25 @@ export class SqliteBrain implements IBrain {
     }
 
     let checkpointRows: CheckpointRow[];
-    if (maxScanRows !== undefined && enforcementScanState?.checkpointCursor !== undefined) {
+    const discoveringCheckpointFloor = maxScanRows !== undefined
+      && enforcementScanState !== undefined
+      && enforcementScanState.checkpointRollbackFloorId === undefined;
+    if (discoveringCheckpointFloor) {
+      const floorSearchCursorId = enforcementScanState.checkpointFloorSearchCursorId;
+      checkpointRows = floorSearchCursorId === undefined
+        ? this.db
+            .prepare(
+              `SELECT id, state, created_at FROM checkpoints
+               ORDER BY id DESC LIMIT ?`,
+            )
+            .all(maxScanRows) as CheckpointRow[]
+        : this.db
+            .prepare(
+              `SELECT id, state, created_at FROM checkpoints
+               WHERE id < ? ORDER BY id DESC LIMIT ?`,
+            )
+            .all(floorSearchCursorId, maxScanRows) as CheckpointRow[];
+    } else if (maxScanRows !== undefined && enforcementScanState?.checkpointCursor !== undefined) {
       const cursor = enforcementScanState.checkpointCursor;
       checkpointRows = [];
       const appendCheckpointRows = (sql: string, parameters: Array<string | number>): void => {
@@ -6666,15 +6704,22 @@ export class SqliteBrain implements IBrain {
       checkpointRows = this.db
         .prepare(`SELECT id, state, created_at FROM checkpoints ORDER BY id ASC`)
         .all() as CheckpointRow[];
-    } else {
+    } else if (enforcementScanState !== undefined) {
       checkpointRows = this.db
         .prepare(
           `SELECT id, state, created_at FROM checkpoints
            ORDER BY created_at ASC, id ASC LIMIT ?`,
         )
         .all(maxScanRows) as CheckpointRow[];
+    } else {
+      checkpointRows = this.db
+        .prepare(
+          `SELECT id, state, created_at FROM checkpoints
+           ORDER BY id DESC LIMIT ?`,
+        )
+        .all(maxScanRows) as CheckpointRow[];
     }
-    if (enforcementScanState !== undefined) {
+    if (enforcementScanState !== undefined && !discoveringCheckpointFloor) {
       const lastRow = checkpointRows.at(-1);
       if (lastRow === undefined) {
         delete enforcementScanState.nextCheckpointCursor;
@@ -6685,23 +6730,45 @@ export class SqliteBrain implements IBrain {
         };
       }
     }
-    const newestCheckpointProbeRows = maxScanRows === undefined
-      ? checkpointRows.slice().reverse()
-      : this.db
-          .prepare(`SELECT id, state, created_at FROM checkpoints ORDER BY id DESC LIMIT ?`)
-          .all(maxScanRows + 1) as CheckpointRow[];
-    const checkpointValidationWasTruncated = maxScanRows !== undefined
-      && newestCheckpointProbeRows.length > maxScanRows;
-    const newestCheckpointRows = maxScanRows === undefined
-      ? newestCheckpointProbeRows
-      : newestCheckpointProbeRows.slice(0, maxScanRows);
-    let newestUsableCheckpointId: number | undefined;
-    for (const checkpoint of newestCheckpointRows) {
-      if (parseCheckpointState(checkpoint, this.encryption) !== null) {
-        newestUsableCheckpointId = checkpoint.id;
-        break;
+    let newestUsableCheckpointId = enforcementScanState?.checkpointRollbackFloorId;
+    const usableCheckpointIds = checkpointRows
+      .filter((checkpoint) => parseCheckpointState(checkpoint, this.encryption) !== null)
+      .map((checkpoint) => checkpoint.id)
+      .filter((id) => newestUsableCheckpointId === undefined || id > newestUsableCheckpointId);
+    if (usableCheckpointIds.length > 0) {
+      newestUsableCheckpointId = Math.max(...usableCheckpointIds);
+    }
+    if (enforcementScanState !== undefined) {
+      if (newestUsableCheckpointId !== undefined) {
+        enforcementScanState.nextCheckpointRollbackFloorId = newestUsableCheckpointId;
+        delete enforcementScanState.nextCheckpointFloorSearchCursorId;
+      } else if (discoveringCheckpointFloor && checkpointRows.length === maxScanRows) {
+        const lastCheckpointId = checkpointRows.at(-1)?.id;
+        if (lastCheckpointId === undefined) {
+          delete enforcementScanState.nextCheckpointFloorSearchCursorId;
+        } else {
+          enforcementScanState.nextCheckpointFloorSearchCursorId = lastCheckpointId;
+        }
+        delete enforcementScanState.nextCheckpointRollbackFloorId;
+      } else {
+        delete enforcementScanState.nextCheckpointFloorSearchCursorId;
+        delete enforcementScanState.nextCheckpointRollbackFloorId;
+      }
+      if (discoveringCheckpointFloor) {
+        const rollbackFloor = newestUsableCheckpointId === undefined
+          ? undefined
+          : checkpointRows.find((checkpoint) => checkpoint.id === newestUsableCheckpointId);
+        if (rollbackFloor === undefined) {
+          delete enforcementScanState.nextCheckpointCursor;
+        } else {
+          enforcementScanState.nextCheckpointCursor = {
+            createdAt: rollbackFloor.created_at,
+            id: rollbackFloor.id,
+          };
+        }
       }
     }
+    const checkpointFloorIsUnknown = newestUsableCheckpointId === undefined;
 
     for (const checkpoint of checkpointRows) {
       const className: MemoryRetentionClass = 'transient_observation';
@@ -6715,8 +6782,7 @@ export class SqliteBrain implements IBrain {
         expiryHorizonMs,
       });
       const isNewestCheckpoint = checkpoint.id === newestUsableCheckpointId;
-      const protectForUnknownFloor = newestUsableCheckpointId === undefined
-        && checkpointValidationWasTruncated;
+      const protectForUnknownFloor = checkpointFloorIsUnknown;
       entries.push({
         store: 'checkpoint',
         key: String(checkpoint.id),
@@ -6788,6 +6854,10 @@ export class SqliteBrain implements IBrain {
       ?? this.persistedRetentionScanCursor('episodic');
     const checkpointCursor = this.retentionCheckpointScanCursor
       ?? this.persistedRetentionScanCursor('checkpoint');
+    const checkpointFloorSearchCursorId = this.retentionCheckpointFloorSearchCursorId
+      ?? this.persistedRetentionScanNumber('checkpointFloorSearchCursorId');
+    const checkpointRollbackFloorId = this.retentionCheckpointRollbackFloorId
+      ?? this.persistedRetentionScanNumber('checkpointRollbackFloorId');
     const scanState: MemoryRetentionEnforcementScanState = {
       ...(episodicCursor === undefined
         ? {}
@@ -6795,6 +6865,12 @@ export class SqliteBrain implements IBrain {
       ...(checkpointCursor === undefined
         ? {}
         : { checkpointCursor }),
+      ...(checkpointFloorSearchCursorId === undefined
+        ? {}
+        : { checkpointFloorSearchCursorId }),
+      ...(checkpointRollbackFloorId === undefined
+        ? {}
+        : { checkpointRollbackFloorId }),
     };
     const enforce = this.db.transaction((): MemoryRetentionEnforcementResult => {
       const report = this.buildMemoryRetentionReport(
@@ -6858,6 +6934,10 @@ export class SqliteBrain implements IBrain {
           checkpointScanCursorCreatedAt:
             scanState.nextCheckpointCursor?.createdAt ?? null,
           checkpointScanCursorId: scanState.nextCheckpointCursor?.id ?? null,
+          checkpointFloorSearchCursorId:
+            scanState.nextCheckpointFloorSearchCursorId ?? null,
+          checkpointRollbackFloorId:
+            scanState.nextCheckpointRollbackFloorId ?? null,
         },
       });
       return { report, deleted };
@@ -6866,6 +6946,9 @@ export class SqliteBrain implements IBrain {
       const result = enforce.immediate() as MemoryRetentionEnforcementResult;
       this.retentionEpisodicScanCursor = scanState.nextEpisodicCursor;
       this.retentionCheckpointScanCursor = scanState.nextCheckpointCursor;
+      this.retentionCheckpointFloorSearchCursorId =
+        scanState.nextCheckpointFloorSearchCursorId;
+      this.retentionCheckpointRollbackFloorId = scanState.nextCheckpointRollbackFloorId;
       return result;
     } catch (error) {
       this.auditRecorder({
