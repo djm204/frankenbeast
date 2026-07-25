@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -122,6 +122,38 @@ describe('HiveMindStore', () => {
     }
   });
 
+  it('purges deleted payload bytes from the database and WAL', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-secure-delete-'));
+    const dbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const secret = `hive-secret-${'sensitive-payload-'.repeat(128)}`;
+    const store = new HiveMindStore(dbPath);
+    try {
+      store.publish(namespace, 'publisher-a', {
+        kind: 'episode',
+        event: {
+          type: 'failure',
+          summary: secret,
+          createdAt: '2026-07-25T10:00:00.000Z',
+        },
+      });
+      expect(store.deletePublishedWhere(namespace, 'publisher-a', () => true)).toBe(1);
+    } finally {
+      store.close();
+    }
+
+    try {
+      const sqliteBytes = [dbPath, `${dbPath}-wal`]
+        .filter(existsSync)
+        .map(path => readFileSync(path))
+        .map(buffer => buffer.toString('utf8'))
+        .join('');
+      expect(sqliteBytes).not.toContain(secret);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('filters by kind before applying the newest-entry bound', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-kind-bound-'));
     const store = new HiveMindStore(join(root, 'hive.db'));
@@ -181,6 +213,122 @@ describe('HiveMindStore', () => {
     } finally {
       publisherRegistry.close();
       consumerRegistry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not publish an approved lesson below the hive confidence floor', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-confidence-floor-'));
+    const hiveDbPath = join(root, 'hive.db');
+    const registry = new BrainRegistry(join(root, 'brains'), hiveDbPath, 'publisher-a');
+    const brain = registry.forAgentType('coder');
+    try {
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'Low confidence build timeout one',
+        createdAt: '2026-07-25T10:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'Low confidence build timeout two',
+        createdAt: '2026-07-25T10:01:00.000Z',
+      });
+      const [candidate] = brain.learning.consolidate({ threshold: 2 });
+      expect(candidate?.value.confidence).toBeLessThan(0.65);
+      brain.memoryReview.approve(candidate!.id);
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(hiveMindAgentTypeNamespace('coder'), { kind: 'lesson' })).toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves an approved hive lesson when its pending revision is rejected', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-reject-revision-'));
+    const hiveDbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const registry = new BrainRegistry(join(root, 'brains'), hiveDbPath, 'publisher-a');
+    const brain = registry.forAgentType('coder');
+    try {
+      recordCluster(brain, 'RevisionMarker build timeout');
+      const [baseline] = brain.learning.consolidate({ threshold: 3 });
+      brain.memoryReview.approve(baseline!.id);
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'RevisionMarker build timeout failure 3',
+        createdAt: '2026-07-25T10:00:03.000Z',
+      });
+      const [revision] = brain.learning.consolidate({ threshold: 3 });
+      expect(revision?.key).toBe(baseline?.key);
+
+      brain.memoryReview.reject(revision!.id);
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace, { kind: 'lesson' })).toEqual([
+          expect.objectContaining({ key: baseline!.key, status: 'approved' }),
+        ]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('revokes every approved hive lesson absorbed by a bridging revision', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-bridge-revision-'));
+    const hiveDbPath = join(root, 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const registry = new BrainRegistry(join(root, 'brains'), hiveDbPath, 'publisher-a');
+    const brain = registry.forAgentType('coder');
+    try {
+      for (const [summary, createdAt] of [
+        ['AlphaOnlyMarker parser timeout crash', '2026-07-25T10:00:00.000Z'],
+        ['AlphaOnlyMarker parser timeout crash', '2026-07-25T10:01:00.000Z'],
+        ['AlphaOnlyMarker parser timeout crash', '2026-07-25T10:02:00.000Z'],
+        ['OmegaOnlyMarker cache mismatch overflow', '2026-07-25T10:03:00.000Z'],
+        ['OmegaOnlyMarker cache mismatch overflow', '2026-07-25T10:04:00.000Z'],
+        ['OmegaOnlyMarker cache mismatch overflow', '2026-07-25T10:05:00.000Z'],
+      ] as const) {
+        brain.episodic.record({ type: 'failure', summary, createdAt });
+      }
+      const initial = brain.learning.consolidate({
+        threshold: 3,
+        similarityThreshold: 0.5,
+      });
+      expect(initial).toHaveLength(2);
+      for (const candidate of initial) brain.memoryReview.approve(candidate.id);
+
+      brain.episodic.record({
+        type: 'failure',
+        summary: 'AlphaOnlyMarker parser timeout crash OmegaOnlyMarker cache mismatch overflow',
+        createdAt: '2026-07-25T10:06:00.000Z',
+      });
+      const [revision] = brain.learning.consolidate({
+        threshold: 3,
+        similarityThreshold: 0.5,
+      });
+      expect(revision?.replaces).toHaveLength(1);
+      brain.memoryReview.resolveConflict(revision!.id, { resolution: 'replace_existing' });
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace, { kind: 'lesson' })).toEqual([
+          expect.objectContaining({ candidateId: revision!.id, status: 'approved' }),
+        ]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      registry.close();
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -268,6 +416,60 @@ describe('HiveMindStore', () => {
     }
   });
 
+  it('revokes hive lessons derived from forgotten episodic evidence', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-forget-derived-'));
+    const hiveDbPath = join(root, 'hive.db');
+    const registry = new BrainRegistry(join(root, 'brains'), hiveDbPath, 'publisher-a');
+    const brain = registry.forAgentType('coder');
+    try {
+      recordCluster(brain, 'DerivedPrivateMarker build timeout');
+      const [candidate] = brain.learning.consolidate({ threshold: 3 });
+      brain.memoryReview.approve(candidate!.id);
+
+      brain.rightToForget({ type: 'episodic', query: 'DerivedPrivateMarker' });
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(hiveMindAgentTypeNamespace('coder'), { kind: 'lesson' })).toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      registry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves durable publisher ownership across registry restarts', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-restart-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    try {
+      const firstRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+      const firstBrain = firstRegistry.forAgentType('coder');
+      firstBrain.episodic.record({
+        type: 'failure',
+        summary: 'restart-private-token request failed',
+        createdAt: '2026-07-25T10:00:00.000Z',
+      });
+      firstRegistry.close();
+
+      const secondRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+      const secondBrain = secondRegistry.forAgentType('coder');
+      secondBrain.rightToForget({ query: 'restart-private-token' });
+      secondRegistry.close();
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(hiveMindAgentTypeNamespace('coder'))).toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps encrypted and hive-unavailable local brains operational without publishing plaintext', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-additive-'));
     const namespace = hiveMindAgentTypeNamespace('coder');
@@ -306,6 +508,43 @@ describe('HiveMindStore', () => {
       expect(unavailableHive.episodic.count()).toBe(1);
     } finally {
       unavailableHive.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('allows encrypted brains to read peer lessons without publishing local plaintext', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-encrypted-peer-'));
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const hiveDbPath = join(root, 'hive.db');
+    const publisher = new HiveMindStore(hiveDbPath);
+    publisher.publish(namespace, 'peer-run', {
+      kind: 'lesson',
+      key: 'lesson:peer-timeout',
+      status: 'approved',
+      lesson: lessonValue('peer build timeout recovery'),
+    });
+    publisher.close();
+
+    const encrypted = new SqliteBrain(join(root, 'encrypted.db'), undefined, {
+      encryption: { enabled: true, key: 'hive-encrypted-peer-test-key' },
+      hiveMind: { dbPath: hiveDbPath, namespace, publisherId: 'encrypted-run' },
+    });
+    try {
+      expect(encrypted.learning.relevantLessons('peer build timeout')).toEqual([
+        expect.objectContaining({ key: 'lesson:peer-timeout', source: 'peer' }),
+      ]);
+      recordCluster(encrypted, 'encrypted local secret');
+      encrypted.learning.consolidate({ threshold: 3 });
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace).filter(({ publisherId }) => publisherId === 'encrypted-run'))
+          .toEqual([]);
+      } finally {
+        observer.close();
+      }
+    } finally {
+      encrypted.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

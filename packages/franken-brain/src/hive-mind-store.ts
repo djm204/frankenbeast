@@ -24,6 +24,8 @@ const WINDOWS_RESERVED_AGENT_TYPE_ID =
 
 export interface HiveMindLessonPublishEntry {
   readonly kind: 'lesson';
+  /** Stable review-candidate identity used for precise revision revocation. */
+  readonly candidateId?: string;
   readonly key: string;
   readonly status: 'pending' | 'approved';
   readonly lesson: ConsolidatedLesson;
@@ -139,6 +141,7 @@ function parseRow(row: HiveMindRow): HiveMindEntry {
     const lessonPayload = payload as HiveMindLessonPublishEntry;
     if (
       typeof lessonPayload.key !== 'string'
+      || (lessonPayload.candidateId !== undefined && typeof lessonPayload.candidateId !== 'string')
       || (lessonPayload.status !== 'pending' && lessonPayload.status !== 'approved')
       || !lessonPayload.lesson
       || lessonPayload.lesson.kind !== 'consolidated-lesson'
@@ -171,7 +174,10 @@ export class HiveMindStore {
   private readonly db: Database.Database;
   private readonly maxEntriesPerNamespace: number;
 
-  constructor(dbPath = '.fbeast/hive/hive.db', options: HiveMindStoreOptions = {}) {
+  constructor(
+    private readonly dbPath = '.fbeast/hive/hive.db',
+    options: HiveMindStoreOptions = {},
+  ) {
     this.maxEntriesPerNamespace = options.maxEntriesPerNamespace ?? DEFAULT_MAX_ENTRIES_PER_NAMESPACE;
     if (
       !Number.isSafeInteger(this.maxEntriesPerNamespace)
@@ -185,6 +191,7 @@ export class HiveMindStore {
     if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.pragma('busy_timeout = 5000');
+    if (dbPath !== ':memory:') this.db.pragma('secure_delete = ON');
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(`
@@ -302,6 +309,21 @@ export class HiveMindStore {
     );
   }
 
+  deleteLessonPublication(
+    namespace: HiveMindNamespace,
+    publisherId: string,
+    candidateId: string,
+    key: string,
+  ): number {
+    return this.deletePublishedWhere(
+      namespace,
+      publisherId,
+      entry => entry.kind === 'lesson'
+        && (entry.candidateId === candidateId
+          || (entry.candidateId === undefined && entry.key === key && entry.status === 'pending')),
+    );
+  }
+
   deletePublishedWhere(
     namespace: HiveMindNamespace,
     publisherId: string,
@@ -323,6 +345,10 @@ export class HiveMindStore {
       for (const id of ids) statement.run(id);
     });
     remove.immediate();
+    if (this.dbPath !== ':memory:') {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+      this.db.exec('VACUUM');
+    }
     return ids.length;
   }
 

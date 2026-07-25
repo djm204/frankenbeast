@@ -3941,7 +3941,11 @@ export class SqliteMemoryReviewQueue {
     private encryption?: MemoryCipher,
     private audit?: MemoryAccessAuditRecorder,
     private expireWorkingKeys?: (keys: readonly string[]) => void,
-    private reviewDecision?: (candidate: MemoryCandidate, wasConsolidatedLesson: boolean) => void,
+    private reviewDecision?: (
+      candidate: MemoryCandidate,
+      wasConsolidatedLesson: boolean,
+      retiredLessonKeys: readonly string[],
+    ) => void,
   ) {
     this.backfillCandidateKinds();
   }
@@ -4370,7 +4374,7 @@ export class SqliteMemoryReviewQueue {
       this.expireWorkingKeys?.(retiredLessonKeys);
     }
     const result = approvedCandidate ?? this.requireCandidate(id);
-    this.reviewDecision?.(result, wasConsolidatedLesson);
+    this.reviewDecision?.(result, wasConsolidatedLesson, retiredLessonKeys);
     return result;
   }
 
@@ -4444,7 +4448,7 @@ export class SqliteMemoryReviewQueue {
       purgeDeletedSqliteContent(this.db, this.dbPath);
     }
     const result = rejectedCandidate ?? this.requireCandidate(id, 'rejected');
-    this.reviewDecision?.(result, wasConsolidatedLesson);
+    this.reviewDecision?.(result, wasConsolidatedLesson, []);
     return result;
   }
 
@@ -4517,7 +4521,7 @@ export class SqliteMemoryReviewQueue {
     finalizeWorkingFlush?.();
     purgeDeletedSqliteContent(this.db, this.dbPath);
     const result = neverStoredCandidate ?? this.requireCandidate(id, 'never_store');
-    this.reviewDecision?.(result, wasConsolidatedLesson);
+    this.reviewDecision?.(result, wasConsolidatedLesson, []);
     return result;
   }
 
@@ -6535,6 +6539,7 @@ export class SqliteBrain implements IBrain {
   private readonly hiveMindStore: HiveMindStore | undefined;
   private readonly hiveMindNamespace: HiveMindNamespace | undefined;
   private readonly hiveMindPublisherId: string | undefined;
+  private readonly hiveMindPublishingEnabled: boolean;
   private retentionEpisodicScanCursor: MemoryRetentionScanCursor | undefined;
   private retentionCheckpointScanCursor: MemoryRetentionScanCursor | undefined;
   private retentionCheckpointFloorSearchCursorId: number | undefined;
@@ -6634,7 +6639,8 @@ export class SqliteBrain implements IBrain {
       encryption,
       (event) => this.auditRecorder(event),
       (keys) => SqliteBrain.expireLivePrunedWorkingKeys(this.dbPath, keys),
-      (candidate, wasConsolidatedLesson) => this.handleHiveReviewDecision(candidate, wasConsolidatedLesson),
+      (candidate, wasConsolidatedLesson, retiredLessonKeys) =>
+        this.handleHiveReviewDecision(candidate, wasConsolidatedLesson, retiredLessonKeys),
     );
     if (options.conversationWorkspaceId !== null) {
       try {
@@ -6647,9 +6653,10 @@ export class SqliteBrain implements IBrain {
         throw error;
       }
     }
-    const hiveMind = encryption ? undefined : options.hiveMind;
+    const hiveMind = options.hiveMind;
     this.hiveMindNamespace = hiveMind?.namespace;
     this.hiveMindPublisherId = hiveMind?.publisherId;
+    this.hiveMindPublishingEnabled = !encryption;
     let hiveMindStore: HiveMindStore | undefined;
     try {
       hiveMindStore = hiveMind ? new HiveMindStore(hiveMind.dbPath) : undefined;
@@ -7034,6 +7041,7 @@ export class SqliteBrain implements IBrain {
       if (lesson.value.confidence < HIVE_MIN_LESSON_CONFIDENCE) continue;
       this.publishHiveEntry({
         kind: 'lesson',
+        candidateId: lesson.id,
         key: lesson.key,
         status: lesson.status,
         lesson: lesson.value,
@@ -7142,6 +7150,7 @@ export class SqliteBrain implements IBrain {
   private handleHiveReviewDecision(
     candidate: MemoryCandidate,
     wasConsolidatedLesson: boolean,
+    retiredLessonKeys: readonly string[],
   ): void {
     if (
       !wasConsolidatedLesson
@@ -7150,14 +7159,36 @@ export class SqliteBrain implements IBrain {
       || !this.hiveMindPublisherId
     ) return;
     try {
-      this.hiveMindStore.deleteLesson(
-        this.hiveMindNamespace,
-        this.hiveMindPublisherId,
-        candidate.key,
-      );
-      if (candidate.status === 'approved' && isConsolidatedLesson(candidate.value)) {
+      if (candidate.status === 'approved') {
+        this.hiveMindStore.deleteLesson(
+          this.hiveMindNamespace,
+          this.hiveMindPublisherId,
+          candidate.key,
+        );
+        for (const key of retiredLessonKeys) {
+          this.hiveMindStore.deleteLesson(
+            this.hiveMindNamespace,
+            this.hiveMindPublisherId,
+            key,
+          );
+        }
+      } else {
+        this.hiveMindStore.deleteLessonPublication(
+          this.hiveMindNamespace,
+          this.hiveMindPublisherId,
+          candidate.id,
+          candidate.key,
+        );
+      }
+      if (
+        candidate.status === 'approved'
+        && isConsolidatedLesson(candidate.value)
+        && candidate.value.confidence >= HIVE_MIN_LESSON_CONFIDENCE
+        && this.hiveMindPublishingEnabled
+      ) {
         this.hiveMindStore.publish(this.hiveMindNamespace, this.hiveMindPublisherId, {
           kind: 'lesson',
+          candidateId: candidate.id,
           key: candidate.key,
           status: 'approved',
           lesson: candidate.value,
@@ -7169,7 +7200,12 @@ export class SqliteBrain implements IBrain {
   }
 
   private publishHiveEntry(entry: Parameters<HiveMindStore['publish']>[2]): void {
-    if (!this.hiveMindStore || !this.hiveMindNamespace || !this.hiveMindPublisherId) return;
+    if (
+      !this.hiveMindPublishingEnabled
+      || !this.hiveMindStore
+      || !this.hiveMindNamespace
+      || !this.hiveMindPublisherId
+    ) return;
     try {
       this.hiveMindStore.publish(this.hiveMindNamespace, this.hiveMindPublisherId, entry);
     } catch {
@@ -7180,12 +7216,13 @@ export class SqliteBrain implements IBrain {
   private deleteHiveMindMatches(
     selector: NormalizedRightToForgetSelector,
     memoryType: RightToForgetMemoryType,
+    dependentLessonKeys: ReadonlySet<string> = new Set(),
   ): number {
     if (!this.hiveMindStore || !this.hiveMindNamespace || !this.hiveMindPublisherId) return 0;
     return this.hiveMindStore.deletePublishedWhere(
       this.hiveMindNamespace,
       this.hiveMindPublisherId,
-      entry => hiveMindEntryMatchesSelector(entry, selector, memoryType),
+      entry => hiveMindEntryMatchesSelector(entry, selector, memoryType, dependentLessonKeys),
     );
   }
 
@@ -8141,6 +8178,7 @@ export class SqliteBrain implements IBrain {
     let runtimeWorkingKeysToDelete = new Set<string>();
     const dependentWorkingKeysToDelete = new Set<string>();
     const dependentWorkingKeysToRefresh = new Set<string>();
+    const dependentHiveLessonKeys = new Set<string>();
     let episodicMatchCount = 0;
     let checkpointMatchCount = 0;
     let reviewMatchCount = 0;
@@ -8233,6 +8271,7 @@ export class SqliteBrain implements IBrain {
           ? []
           : this.matchingReviewPayloads(normalizedSelector);
         const dependentLessons = this.lessonCandidatesDependingOn(episodicMatches);
+        for (const candidate of dependentLessons) dependentHiveLessonKeys.add(candidate.key);
         const dependentReviewRows = this.lessonReviewRowsDependingOn(dependentLessons);
         for (const key of this.reviewWorkingKeysToDelete(reviewMatches)) {
           persistedWorkingMatches.add(key);
@@ -8330,7 +8369,7 @@ export class SqliteBrain implements IBrain {
         return Number(result.lastInsertRowid);
       });
       const auditEventId = tx() as number;
-      this.deleteHiveMindMatches(normalizedSelector, memoryType);
+      this.deleteHiveMindMatches(normalizedSelector, memoryType, dependentHiveLessonKeys);
       if (deletedWorkingKeys.size > 0 || episodicMatchCount > 0 || checkpointMatchCount > 0 || reviewMatchCount > 0) {
         finalizePersistedWorkingDelete?.();
         this.working.deleteRuntimeKeys(Array.from(runtimeWorkingKeysToDelete));
@@ -9890,10 +9929,11 @@ function hiveMindEntryMatchesSelector(
   entry: HiveMindEntry,
   selector: NormalizedRightToForgetSelector,
   memoryType: RightToForgetMemoryType,
+  dependentLessonKeys: ReadonlySet<string>,
 ): boolean {
   if (entry.kind === 'lesson') {
-    return memoryType !== 'episodic'
-      && workingEntryMatchesSelector(entry.key, entry.lesson, selector);
+    return dependentLessonKeys.has(entry.key)
+      || (memoryType !== 'episodic' && workingEntryMatchesSelector(entry.key, entry.lesson, selector));
   }
   return memoryType !== 'working'
     && episodicRowMatchesSelector(

@@ -63,7 +63,7 @@ export class BrainRegistry {
   constructor(
     private readonly brainsDir = join('.fbeast', 'brains'),
     private readonly hiveDbPath = join(dirname(brainsDir), 'hive', 'hive.db'),
-    private readonly publisherId: string = randomUUID(),
+    private readonly publisherId?: string,
   ) {}
 
   forAgentType(agentTypeId: string, dbPath?: string): SqliteBrain {
@@ -88,6 +88,10 @@ export class BrainRegistry {
 
     const requestedDbPath = dbPath ?? join(this.brainsDir, `${agentTypeId}.db`);
     const resolvedDbPath = requestedDbPath === ':memory:' ? requestedDbPath : resolve(requestedDbPath);
+    const publisherId = this.publisherId
+      ?? (resolvedDbPath === ':memory:'
+        ? randomUUID()
+        : createHash('sha256').update(resolvedDbPath).digest('hex'));
     const existing = agentBrains?.get(resolvedDbPath);
     if (existing) {
       if (dbPath !== undefined) this.preferredDbPaths.set(registryKey, resolvedDbPath);
@@ -101,7 +105,7 @@ export class BrainRegistry {
       hiveMind: {
         dbPath: resolvedDbPath === ':memory:' ? ':memory:' : this.hiveDbPath,
         namespace: hiveMindAgentTypeNamespace(agentTypeId),
-        publisherId: this.publisherId,
+        publisherId,
       },
     });
     const paths = agentBrains ?? new Map<string, SqliteBrain>();
