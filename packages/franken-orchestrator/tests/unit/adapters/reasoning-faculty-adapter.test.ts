@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SqliteBrain } from '@franken/brain';
+import type { LessonConsolidationOptions } from '@franken/types';
 import { ReasoningFacultyAdapter } from '../../../src/adapters/reasoning-faculty-adapter.js';
+import {
+  consolidateFacultyNegativeOutcome,
+  drainFacultyConsolidation,
+} from '../../../src/adapters/faculty-learning.js';
 import type { CritiqueResult, ICritiqueModule, PlanGraph } from '../../../src/deps.js';
 
 describe('ReasoningFacultyAdapter', () => {
@@ -191,6 +196,77 @@ describe('ReasoningFacultyAdapter', () => {
         dependsOn: [],
       }, unreadTask],
     })).resolves.toEqual({ verdict: 'pass', findings: [], score: 1 });
+  });
+
+  it('caps objective inspection when empty objectives do not consume characters', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const critique: ICritiqueModule = {
+      reviewPlan: vi.fn(async () => ({ verdict: 'pass' as const, findings: [], score: 1 })),
+    };
+    const faculty = new ReasoningFacultyAdapter(critique, brain, () => new Date());
+    const tasks = Array.from({ length: 100 }, (_, index) => ({
+      id: `empty-${index}`,
+      objective: '',
+      requiredSkills: [],
+      dependsOn: [],
+    }));
+    tasks.push({
+      id: 'unread',
+      get objective(): string {
+        throw new Error('task beyond inspection cap was read');
+      },
+      requiredSkills: [],
+      dependsOn: [],
+    });
+
+    await expect(faculty.reviewPlan({ tasks })).resolves.toMatchObject({ verdict: 'pass' });
+  });
+
+  it('does not consolidate halted critique failures as plan lessons', async () => {
+    const brain = new SqliteBrain();
+    brains.push(brain);
+    const consolidate = vi.fn((options?: LessonConsolidationOptions) => brain.learning.consolidate(options));
+    const critique: ICritiqueModule = {
+      reviewPlan: vi.fn(async () => ({
+        verdict: 'fail' as const,
+        findings: [],
+        score: 0,
+        halted: true,
+        haltReason: 'budget',
+      })),
+    };
+    const faculty = new ReasoningFacultyAdapter(critique, {
+      episodic: brain.episodic,
+      learning: {
+        kind: 'learning',
+        configured: true,
+        consolidate,
+        relevantLessons: (query, options) => brain.learning.relevantLessons(query, options),
+      },
+    }, () => new Date());
+
+    await faculty.reviewPlan({ tasks: [] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consolidate).not.toHaveBeenCalled();
+    expect(brain.episodic.recent(1)[0]?.details).toEqual(expect.objectContaining({ outcome: 'halted' }));
+  });
+
+  it('drains one pending coalesced consolidation before shutdown', async () => {
+    const consolidate = vi.fn(() => []);
+    const learning = {
+      kind: 'learning' as const,
+      configured: true,
+      consolidate,
+      relevantLessons: vi.fn(() => []),
+    };
+
+    consolidateFacultyNegativeOutcome(learning);
+    drainFacultyConsolidation(learning);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consolidate).toHaveBeenCalledOnce();
   });
 
   it('can delegate without recording when memory is disabled', async () => {

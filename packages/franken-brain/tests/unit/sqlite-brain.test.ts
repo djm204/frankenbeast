@@ -1732,6 +1732,44 @@ describe('SqliteBrain', () => {
       expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
     });
 
+    it('uses event id as the stable faculty-outcome lookback tie-breaker', () => {
+      for (const index of [1, 2, 3]) {
+        brain.episodic.record({
+          type: 'decision',
+          step: 'reasoning:critique',
+          summary: `Reasoning verdict: fail — workspace failure ${index}`,
+          details: {
+            category: 'reasoning-lifecycle',
+            outcome: 'negative',
+            lessonContext: 'workspace declaration failure',
+          },
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+      }
+
+      const [candidate] = brain.learning.consolidate({ threshold: 2, lookback: 2 });
+
+      expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
+    });
+
+    it('clusters faculty outcomes by their context rather than lifecycle boilerplate', () => {
+      for (const context of ['frontend', 'backend', 'storage']) {
+        brain.episodic.record({
+          type: 'decision',
+          step: 'reasoning:critique',
+          summary: `Reasoning verdict: fail — ${context}`,
+          details: {
+            category: 'reasoning-lifecycle',
+            outcome: 'negative',
+            lessonContext: context,
+          },
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+      }
+
+      expect(brain.learning.consolidate({ threshold: 3, lookback: 10 })).toEqual([]);
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',

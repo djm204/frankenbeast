@@ -3,6 +3,7 @@ import type { CritiqueResult, ICritiqueModule, PlanGraph } from '../deps.js';
 import {
   consolidateFacultyNegativeOutcome,
   consultFacultyLessons,
+  FACULTY_LESSON_POLICY,
   MAX_LESSON_QUERY_INPUT_CHARS,
   prepareFacultyLessonQuery,
 } from './faculty-learning.js';
@@ -41,7 +42,10 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
       summary: `Reasoning verdict: ${result.verdict}${result.verdict === 'fail' ? ` — ${query}` : ''}`,
       details: {
         category: 'reasoning-lifecycle',
-        outcome: result.verdict === 'fail' ? 'negative' : 'positive',
+        outcome: result.halted === true
+          ? 'halted'
+          : result.verdict === 'fail' ? 'negative' : 'positive',
+        lessonContext: query,
         verdict: result.verdict,
         score: result.score,
         findingCount: result.findings.length,
@@ -51,7 +55,7 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
       },
       createdAt: this.clock().toISOString(),
     });
-    if (result.verdict === 'fail') {
+    if (result.verdict === 'fail' && result.halted !== true) {
       consolidateFacultyNegativeOutcome(this.brain.learning);
     }
     return result;
@@ -68,7 +72,7 @@ export class ReasoningFacultyAdapter implements ICritiqueModule, IReasoningFacul
 
 function reasoningLessonQuery(plan: PlanGraph): string {
   let query = '';
-  for (const task of plan.tasks) {
+  for (const task of plan.tasks.slice(0, FACULTY_LESSON_POLICY.objectiveLimit)) {
     const separator = query.length === 0 ? '' : ' ';
     const remaining = MAX_LESSON_QUERY_INPUT_CHARS - query.length - separator.length;
     if (remaining <= 0) break;

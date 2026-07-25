@@ -3276,7 +3276,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     try {
       const quarantinedEventIds = new Set<number>();
       const stmt = this.db.prepare(
-        `SELECT * FROM episodic_events ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+        `SELECT * FROM episodic_events ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
       );
       const result = collectRowsToEvents(
         (limit, offset) => stmt.all(limit, offset) as EpisodicRow[],
@@ -6128,6 +6128,12 @@ function normalizeSemanticMemoryToken(token: string): string {
 }
 
 function lessonEventText(event: EpisodicEvent): string {
+  if (isConsolidatableFacultyNegativeOutcome(event)) {
+    const lessonContext = event.details?.lessonContext;
+    if (typeof lessonContext === 'string' && lessonContext.trim().length > 0) {
+      return lessonContext;
+    }
+  }
   return event.summary;
 }
 

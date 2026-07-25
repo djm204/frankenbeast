@@ -3,10 +3,11 @@ import { redactSensitiveText } from '../logging/redaction.js';
 
 export const MAX_LESSON_QUERY_INPUT_CHARS = 2_048;
 const MAX_LESSON_QUERY_BYTES = 512;
-const scheduledConsolidations = new WeakSet<ILearningFaculty>();
+const scheduledConsolidations = new WeakMap<ILearningFaculty, ReturnType<typeof setTimeout>>();
 
 export const FACULTY_LESSON_POLICY = Object.freeze({
   consultationLimit: 5,
+  objectiveLimit: 100,
   consolidation: Object.freeze({
     threshold: 3,
     lookback: 100,
@@ -53,22 +54,37 @@ export function consolidateFacultyNegativeOutcome(
   learning: ILearningFaculty | undefined,
 ): void {
   if (!learning || scheduledConsolidations.has(learning)) return;
-  scheduledConsolidations.add(learning);
-  setTimeout(() => {
-    scheduledConsolidations.delete(learning);
-    try {
-      learning.consolidate(FACULTY_LESSON_POLICY.consolidation);
-    } catch {
-      // Consolidation is review/telemetry work and must not replace a faculty result.
-    }
-  }, 0);
+  const timer = setTimeout(() => runFacultyConsolidation(learning), 0);
+  scheduledConsolidations.set(learning, timer);
+}
+
+export function drainFacultyConsolidation(learning: ILearningFaculty | undefined): void {
+  if (!learning) return;
+  const timer = scheduledConsolidations.get(learning);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  runFacultyConsolidation(learning);
 }
 
 export function prepareFacultyLessonQuery(query: string): string {
-  const redacted = redactSensitiveText(query.slice(0, MAX_LESSON_QUERY_INPUT_CHARS))
+  const boundedInput = redactTruncatedPem(query.slice(0, MAX_LESSON_QUERY_INPUT_CHARS));
+  const redacted = redactSensitiveText(boundedInput)
     .replace(/\s+/gu, ' ')
     .trim();
   return truncateUtf8(redacted, MAX_LESSON_QUERY_BYTES);
+}
+
+function redactTruncatedPem(value: string): string {
+  return value.replace(/-----BEGIN [^-\r\n]+-----[\s\S]*$/giu, '<redacted>');
+}
+
+function runFacultyConsolidation(learning: ILearningFaculty): void {
+  scheduledConsolidations.delete(learning);
+  try {
+    learning.consolidate(FACULTY_LESSON_POLICY.consolidation);
+  } catch {
+    // Consolidation is review/telemetry work and must not replace a faculty result.
+  }
 }
 
 function capitalize(value: string): string {

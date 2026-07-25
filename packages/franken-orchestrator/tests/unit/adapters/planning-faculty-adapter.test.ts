@@ -137,6 +137,28 @@ describe('PlanningFacultyAdapter', () => {
     expect(consultation?.details?.query).toBe(query);
   });
 
+  it('redacts a private key whose closing delimiter is beyond the input cap', async () => {
+    const brain = makeBrain();
+    const relevantLessons = vi.fn((_query: string) => []);
+    const delegate: IPlannerModule = { createPlan: vi.fn().mockResolvedValue({ tasks: [] }) };
+    const faculty = new PlanningFacultyAdapter(delegate, brain.episodic, {
+      learning: {
+        kind: 'learning',
+        configured: true,
+        consolidate: vi.fn(() => []),
+        relevantLessons,
+      },
+    });
+
+    await faculty.createPlan({
+      goal: `-----BEGIN PRIVATE KEY-----\n${'A'.repeat(3_000)}\n-----END PRIVATE KEY-----`,
+    });
+
+    const query = relevantLessons.mock.calls[0]?.[0] ?? '';
+    expect(query).toContain('<redacted>');
+    expect(query).not.toContain('AAAA');
+  });
+
   it('does not record a created episode when the delegated planner rejects', async () => {
     const delegate: IPlannerModule = {
       createPlan: vi.fn().mockRejectedValue(new Error('planner unavailable')),

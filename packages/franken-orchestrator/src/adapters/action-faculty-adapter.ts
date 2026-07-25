@@ -1,6 +1,9 @@
 import type { IEpisodicMemory, IActionFaculty, ILearningFaculty } from '@franken/types';
 import type { ApprovalOutcome, ApprovalPayload, IGovernorModule } from '../deps.js';
-import { consolidateFacultyNegativeOutcome } from './faculty-learning.js';
+import {
+  consolidateFacultyNegativeOutcome,
+  prepareFacultyLessonQuery,
+} from './faculty-learning.js';
 
 /**
  * Makes governor decisions available through the brain action faculty while
@@ -32,6 +35,9 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
         details: {
           category: 'action-lifecycle',
           outcome: outcome.decision === 'approved' ? 'positive' : 'negative',
+          ...(outcome.decision === 'approved'
+            ? {}
+            : { lessonContext: prepareFacultyLessonQuery(request.summary) }),
           taskId: request.taskId,
           ...(request.skillId === undefined ? {} : { skillId: request.skillId }),
           requiresHitl: request.requiresHitl,

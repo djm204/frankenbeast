@@ -483,22 +483,27 @@ Lessons-aware pruning is intentionally outside this path.
 
 `createBeastDeps()` wires the planning and reasoning adapters to the same
 agent-scoped `SqliteBrain.learning` port. Before delegating, each adapter calls
-`relevantLessons()` with a deterministic query (the planning goal or joined plan
-objectives) and a hard limit of five. It records an advisory
+`relevantLessons()` with a deterministic query (the planning goal or bounded plan
+objectives) and a hard limit of five. Query assembly inspects at most 100
+objectives and 2,048 characters, removes truncated PEM spans before general
+redaction, and records an advisory
 `<faculty>:lesson-consultation` observation containing the redacted,
 512-byte-bounded query, match count, and stable lesson keys. This makes
 consultation observable without changing the planner/critique result or
 injecting lesson text into an LLM prompt.
 
 Consolidation is event-triggered rather than timer- or run-boundary-based. After
-a successfully recorded negative reasoning verdict or rejected/aborted governor
+a successfully recorded non-halted negative reasoning verdict or rejected/aborted governor
 decision, the adapter asynchronously schedules the existing
 `learning.consolidate()` core with a threshold of three, a 100-event lookback,
 and similarity threshold `0.5`. Bursts coalesce into one pending pass so review
-queue work does not block faculty results.
+queue work does not block faculty results; CLI shutdown drains that pass before
+closing SQLite.
 `SqliteBrain` includes those explicitly marked negative faculty decisions beside
 ordinary failure events, while retaining the existing exclusions for planning
-lifecycle and skill-evolution rows. Each trigger is deterministic, scans bounded
+lifecycle and skill-evolution rows. Faculty outcomes cluster on their bounded
+objective/request context rather than lifecycle boilerplate, and equal timestamps
+use descending event IDs. Each trigger is deterministic, scans bounded
 episodic windows, remains best-effort relative to the authoritative faculty
 result, and continues to propose lessons through operator review rather than
 approving them.
