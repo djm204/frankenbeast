@@ -28,3 +28,7 @@
 - Final focused observer verification: 22/22 passed; focused orchestrator verification: 56/56 passed.
 - Final package verification: observer 902/902 passed; orchestrator 4,506/4,506 passed after adding required token-measurement fixtures to two existing Martin-loop telemetry tests.
 - Final root `npm run lint`, `npm run typecheck`, and `npm run build`: passed (pre-existing lint warnings only).
+- Codex round 4 findings addressed: compaction rows are pruned outside a 24-hour window, run identity participates in the SQLite primary key with a legacy-schema migration, and consolidated provider overrides are validated before observer storage opens.
+- Round 4 focused verification: observer 25/25 passed; dependency-factory provider wiring 52/52 passed.
+- Round 4 package verification: observer 905/905 passed; orchestrator 4,507/4,507 passed.
+- Round 4 root `npm run lint`, `npm run typecheck`, and `npm run build`: passed (pre-existing lint warnings only).
