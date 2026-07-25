@@ -46,7 +46,18 @@ frankenbeast dr dead-letter-list .fbeast/dead-letter-actions.json
 frankenbeast dr dead-letter-replay-dry-run .fbeast/dead-letter-actions.json <entry-id>
 frankenbeast chat-server
 frankenbeast beasts-daemon
+frankenbeast brain show <agent-type-id>
+frankenbeast brain lessons <agent-type-id> --json
 ```
+
+Brain inspection is local and read-only. `brain show` reports at most 100
+working-memory keys plus aggregate episodic, recovery, faculty, capability, and
+lesson-availability state. `brain lessons` reports at most 10 real pending or
+approved consolidated lesson candidates. Both commands open only an existing
+`.fbeast/brains/<agentTypeId>.db`; invalid or unknown identifiers fail instead
+of creating state. Because this follows the CLI's direct-local inspection
+pattern, no daemon token is required; the equivalent `/v1/brain/*` HTTP routes
+remain operator-token authenticated.
 
 For local development from the monorepo, build and link the CLI from the root:
 

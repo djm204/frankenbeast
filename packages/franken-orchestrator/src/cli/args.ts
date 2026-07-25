@@ -14,6 +14,7 @@ export type Subcommand =
   | 'chat'
   | 'chat-server'
   | 'beasts-daemon'
+  | 'brain'
   | 'network'
   | 'memory'
   | 'dr'
@@ -52,6 +53,7 @@ export type BeastAction =
 
 export type SkillAction = 'list' | 'add' | 'scaffold' | 'remove' | 'enable' | 'disable' | 'info' | undefined;
 export type SecurityAction = 'status' | 'set' | undefined;
+export type BrainAction = 'show' | 'lessons' | undefined;
 export type MemoryAction = 'snapshot-diff' | 'verify-backup' | 'duplicate-report' | undefined;
 export type DrAction =
   | 'backup'
@@ -71,6 +73,8 @@ export interface CliArgs {
   subcommand: Subcommand;
   beastAction?: BeastAction;
   beastTarget?: string | undefined;
+  brainAction?: BrainAction;
+  brainTarget?: string | undefined;
   networkAction?: NetworkAction;
   networkTarget?: string | undefined;
   memoryAction?: MemoryAction;
@@ -131,7 +135,7 @@ export interface CliArgs {
   moduleConfig?: import('../beasts/types.js').ModuleConfig | undefined;
 }
 
-const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'issues', 'chat', 'chat-server', 'beasts-daemon', 'network', 'memory', 'dr', 'skill', 'security']);
+const VALID_SUBCOMMANDS = new Set(['init', 'interview', 'plan', 'run', 'beasts', 'beasts-daemon', 'brain', 'issues', 'chat', 'chat-server', 'network', 'memory', 'dr', 'skill', 'security']);
 const VALID_NETWORK_ACTIONS = new Set(['up', 'down', 'status', 'health', 'start', 'stop', 'restart', 'logs', 'config', 'credentials', 'help']);
 const VALID_MEMORY_ACTIONS = new Set(['snapshot-diff', 'verify-backup', 'duplicate-report']);
 const VALID_DR_ACTIONS = new Set([
@@ -150,6 +154,7 @@ const VALID_DR_ACTIONS = new Set([
 const VALID_BEAST_ACTIONS = new Set(['catalog', 'create', 'spawn', 'list', 'status', 'logs', 'stop', 'kill', 'restart', 'resume', 'delete', 'maintenance']);
 const VALID_SKILL_ACTIONS = new Set(['list', 'add', 'scaffold', 'remove', 'enable', 'disable', 'info']);
 const VALID_SECURITY_ACTIONS = new Set(['status', 'set']);
+const VALID_BRAIN_ACTIONS = new Set(['show', 'lessons']);
 const STRING_OPTIONS = new Set([
   'base-dir', 'base-branch', 'budget', 'provider', 'providers', 'design-doc', 'plan-dir', 'plan-name', 'output-dir',
   'goal', 'output', 'config', 'host', 'port', 'allow-origin', 'label', 'milestone', 'search', 'assignee', 'limit',
@@ -209,6 +214,7 @@ Subcommands:
   chat                    Interactive chat REPL with ConversationEngine
   chat-server             Run the local HTTP+WebSocket chat server for franken-web
   beasts-daemon           Run the standalone Beast control-plane daemon
+  brain                   Inspect persisted agent-type brain and lesson state
   network                 Manage Frankenbeast request-serving services
   memory                  Inspect persisted BrainSnapshot JSON artifacts and SQLite backups
   dr                      Disaster-recovery encrypted backup and restore utilities
@@ -316,6 +322,10 @@ Beast Commands:
   beasts delete <agent-id>            Soft-delete a tracked agent
   beasts maintenance [status|on|off]  Show, activate, or deactivate dispatch maintenance mode
 
+Brain Commands:
+  brain show <agent-type-id> [--json]     Show a bounded persisted brain summary
+  brain lessons <agent-type-id> [--json] Show up to 10 consolidated lesson candidates
+
 Skill Commands:
   skill list                          List installed skills
   skill add <name> <command> [args]   Install a custom skill with runnable MCP command
@@ -351,6 +361,8 @@ Examples:
   frankenbeast init                         # guided init wizard
   frankenbeast init --verify                # verify init readiness
   frankenbeast beasts spawn martin-loop     # spawn a martin-loop beast
+  frankenbeast brain show martin-loop       # inspect persisted brain state
+  frankenbeast brain lessons martin-loop --json
   frankenbeast chat-server                  # local chat server
   frankenbeast chat-server --port 4242      # local chat server on custom port
   frankenbeast beasts-daemon                # standalone Beast API on port 4050
@@ -498,6 +510,11 @@ function maxBeastPositionals(action: BeastAction): number {
   return 1;
 }
 
+function maxBrainPositionals(action: BrainAction): number {
+  if (action === 'show' || action === 'lessons') return 2;
+  return 0;
+}
+
 function maxSkillPositionals(action: SkillAction): number {
   if (action === 'add') return 3;
   if (action === 'scaffold' || action === 'remove' || action === 'enable' || action === 'disable' || action === 'info') return 2;
@@ -582,6 +599,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   let networkTarget: string | undefined;
   let beastAction: BeastAction;
   let beastTarget: string | undefined;
+  let brainAction: BrainAction;
+  let brainTarget: string | undefined;
   let memoryAction: MemoryAction;
   let memorySnapshotBefore: string | undefined;
   let memorySnapshotAfter: string | undefined;
@@ -618,6 +637,16 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     }
     assertNoExtraPositionals('beasts', positionals, maxBeastPositionals(beastAction));
     beastTarget = positionals[1];
+  } else if (subcommand === 'brain') {
+    const actionCandidate = positionals[0];
+    if (actionCandidate !== undefined) {
+      if (!VALID_BRAIN_ACTIONS.has(actionCandidate)) {
+        throw new TypeError(`Unknown brain action: ${actionCandidate}`);
+      }
+      brainAction = actionCandidate as BrainAction;
+    }
+    assertNoExtraPositionals('brain', positionals, maxBrainPositionals(brainAction));
+    brainTarget = positionals[1];
   } else if (subcommand === 'memory') {
     const actionCandidate = positionals[0];
     if (actionCandidate !== undefined) {
@@ -800,6 +829,8 @@ export function parseArgs(argv: string[] = process.argv.slice(2)): CliArgs {
     subcommand,
     beastAction,
     beastTarget,
+    brainAction,
+    brainTarget,
     networkAction,
     networkTarget,
     memoryAction,
