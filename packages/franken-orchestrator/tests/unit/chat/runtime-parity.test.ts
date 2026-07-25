@@ -235,6 +235,29 @@ describe('chat runtime parity', () => {
     expect(result.displayMessages[0]).toMatchObject({ kind: 'approval', content: 'Rejected.' });
   });
 
+  it('clears Beast context for textual approval rejection', async () => {
+    const runtime = createChatRuntime({
+      chatLlm: { complete: vi.fn().mockResolvedValue('chat ignored') },
+      projectName: 'test-project',
+    });
+
+    const result = await runtime.runtime.run('Action rejected by user: stop', {
+      sessionId: 'session-1',
+      pendingApproval: true,
+      projectId: 'test-project',
+      transcript: [],
+      beastContext: {
+        definitionId: 'martin-loop',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      },
+    });
+
+    expect(result.state).toBe('rejected');
+    expect(result.pendingApproval).toBe(false);
+    expect(result.beastContext).toBeNull();
+  });
+
   it('surfaces real token usage and truncation on the runtime result when the llm reports it', async () => {
     const usage = { inputTokens: 120, outputTokens: 30, totalTokens: 150 };
     const llm = {

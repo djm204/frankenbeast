@@ -132,9 +132,10 @@ export class ChatRuntime {
 
     if (state.pendingApproval && command !== '/approve' && command !== '/reject' && !isApprovedReplay) {
       if (trimmed.toLowerCase().startsWith('action rejected by user:')) {
-        return this.result({ ...state, pendingApproval: false }, [
+        return this.result({ ...state, pendingApproval: false, beastContext: null }, [
           { kind: 'approval', content: 'Rejected.' },
         ], {
+          beastContext: null,
           state: 'rejected',
         });
       }
