@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ObserverPortAdapter } from '../../../src/adapters/observer-adapter.js';
+import {
+  ObserverPortAdapter,
+  type CostCalculatorPort,
+} from '../../../src/adapters/observer-adapter.js';
 
 const makeTrace = () => ({
   id: 'trace-1',
@@ -94,7 +97,13 @@ describe('ObserverPortAdapter', () => {
       }),
       endSpan: vi.fn(),
     };
-    const costCalculator = { calculate: vi.fn().mockReturnValue(0.5) };
+    const calculate = vi.fn<(entry: Parameters<CostCalculatorPort['calculate']>[0]) => number>();
+    const costCalculator: CostCalculatorPort = {
+      calculate(entry) {
+        calculate(entry);
+        return entry.cacheCreation1hTokens ?? 0;
+      },
+    };
     const adapter = new ObserverPortAdapter({ traceContext, costCalculator });
     adapter.startTrace('session-1');
     adapter.startSpan('task:1').end({
@@ -110,9 +119,9 @@ describe('ObserverPortAdapter', () => {
       inputTokens: 20,
       outputTokens: 5,
       totalTokens: 25,
-      estimatedCostUsd: 0.5,
+      estimatedCostUsd: 1,
     });
-    expect(costCalculator.calculate).toHaveBeenCalledWith({
+    expect(calculate).toHaveBeenCalledWith({
       model: 'claude-sonnet-4-6',
       promptTokens: 10,
       completionTokens: 5,

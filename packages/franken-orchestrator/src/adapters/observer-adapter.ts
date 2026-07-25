@@ -14,6 +14,7 @@ export interface CostCalculatorPort {
     completionTokens: number;
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
+    cacheCreation1hTokens?: number;
   }): number;
 }
 
