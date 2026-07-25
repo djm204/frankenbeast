@@ -186,7 +186,7 @@ Provider-native session continuation is now an optimization only:
 - if the provider changes or its native state is lost, the next provider replays from the canonical chunk session
 - before compaction, MartinLoop writes a snapshot to `.fbeast/.build/chunk-session-snapshots/`
 - at `>= 85%` rendered context usage, the loop compacts transcript history into a `compaction_summary` and resumes from that compacted state
-- after a successful compaction, `ChunkSessionCompactor` emits the operational record through `CliObserverBridge`; the in-memory session counter remains the CLI display source while SQLite provides the queryable export path
+- after a successful compaction is persisted, `MartinLoop` asks `ChunkSessionCompactor` to emit the operational record through `CliObserverBridge`; telemetry is best-effort so observer storage failures cannot roll back the canonical session, while the in-memory session counter remains the CLI display source and SQLite provides the queryable export path
 
 **Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
 

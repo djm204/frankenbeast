@@ -22,3 +22,4 @@
 - `npm run build`: passed.
 - `git diff --check`: passed.
 - Scope audit: branch is based directly on `origin/main`; no TokenCounter, CostCalculator, provider, Hive Brain, Brain Vitals API/UI, or #3727 cache-accounting changes are present.
+- Codex round 1 findings addressed with RED→GREEN coverage: telemetry is emitted only after canonical-session persistence, SQLite failures are best-effort, and before/after token estimates measure the same appended transcript boundary.

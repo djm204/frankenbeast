@@ -887,7 +887,7 @@ describe('MartinLoop', () => {
       renderer: new ChunkSessionRenderer(),
       compactor: new ChunkSessionCompactor({
         summarize: async () => 'Compacted summary',
-        measureCompactedTokens: () => 120,
+        measureSessionTokens: session => session.compactionGeneration === 0 ? 900 : 120,
         onCompaction: event => bridge.recordCompaction(event),
       }),
       contextUsage: () => ({
@@ -914,6 +914,82 @@ describe('MartinLoop', () => {
     ]);
 
     await bridge.close();
+  });
+
+  it('keeps a committed compaction when telemetry persistence fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-compact-observer-failure-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(join(root, 'sessions'));
+    const snapshotStore = new FileChunkSessionSnapshotStore(join(root, 'snapshots'));
+
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await expect(loop.run(baseConfig({
+      planName: 'telemetry-failure-plan',
+      taskId: 'impl:telemetry-failure',
+      chunkId: 'telemetry-failure',
+      sessionStore,
+      snapshotStore,
+      renderer: new ChunkSessionRenderer(),
+      compactor: new ChunkSessionCompactor({
+        summarize: async () => 'Compacted summary',
+        onCompaction: async () => { throw new Error('traces database is locked'); },
+      }),
+      contextUsage: () => ({
+        usedTokens: 900,
+        maxTokens: 1000,
+        usageRatio: 0.9,
+        threshold: 0.85,
+        shouldCompact: true,
+      }),
+      maxIterations: 1,
+    }))).resolves.toMatchObject({ completed: true });
+
+    expect(sessionStore.load(
+      'telemetry-failure-plan',
+      'telemetry-failure',
+      'impl:telemetry-failure',
+    )?.compactionGeneration).toBe(1);
+  });
+
+  it('does not record telemetry when cancellation rolls back a compaction', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-compact-observer-abort-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(join(root, 'sessions'));
+    const snapshotStore = new FileChunkSessionSnapshotStore(join(root, 'snapshots'));
+    const abortController = new AbortController();
+    const onCompaction = vi.fn(async () => undefined);
+
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await expect(loop.run(baseConfig({
+      planName: 'telemetry-abort-plan',
+      taskId: 'impl:telemetry-abort',
+      chunkId: 'telemetry-abort',
+      sessionStore,
+      snapshotStore,
+      renderer: new ChunkSessionRenderer(),
+      compactor: new ChunkSessionCompactor({
+        summarize: async () => {
+          abortController.abort('cancelled after compaction summary');
+          return 'Compacted summary';
+        },
+        onCompaction,
+      }),
+      contextUsage: () => ({
+        usedTokens: 900,
+        maxTokens: 1000,
+        usageRatio: 0.9,
+        threshold: 0.85,
+        shouldCompact: true,
+      }),
+      abortSignal: abortController.signal,
+      maxIterations: 1,
+    }))).rejects.toThrow('cancelled after compaction summary');
+
+    expect(onCompaction).not.toHaveBeenCalled();
   });
 
   it('falls back to replay when provider changes after a failure', async () => {

@@ -14,7 +14,7 @@ export interface ChunkCompactionObservation {
 
 export interface ChunkSessionCompactorDeps {
   summarize(prompt: string): Promise<string>;
-  measureCompactedTokens?: ((session: ChunkSession) => number) | undefined;
+  measureSessionTokens?: ((session: ChunkSession) => number) | undefined;
   onCompaction?: ((event: ChunkCompactionObservation) => Promise<void>) | undefined;
 }
 
@@ -34,10 +34,7 @@ export class ChunkSessionCompactor {
     ].join('\n\n');
   }
 
-  async compact(
-    session: ChunkSession,
-    triggerReason: ChunkCompactionTriggerReason = 'manual',
-  ): Promise<ChunkSession> {
+  async compact(session: ChunkSession): Promise<ChunkSession> {
     const summary = await this.deps.summarize(this.buildCompactionPrompt(session));
     const now = isoNow();
     const retained = this.retainCriticalTranscript(session.transcript);
@@ -62,18 +59,23 @@ export class ChunkSessionCompactor {
       updatedAt: now,
     };
 
-    if (this.deps.onCompaction) {
-      await this.deps.onCompaction({
-        sessionId: compacted.sessionId,
-        generation: compacted.compactionGeneration,
-        triggerReason,
-        tokensBefore: session.contextWindow.usedTokens,
-        tokensAfter: this.deps.measureCompactedTokens?.(compacted) ?? compacted.contextWindow.usedTokens,
-        timestamp: Date.parse(now),
-      });
-    }
-
     return compacted;
+  }
+
+  async recordCompaction(
+    previous: ChunkSession,
+    compacted: ChunkSession,
+    triggerReason: ChunkCompactionTriggerReason = 'manual',
+  ): Promise<void> {
+    if (!this.deps.onCompaction) return;
+    await this.deps.onCompaction({
+      sessionId: compacted.sessionId,
+      generation: compacted.compactionGeneration,
+      triggerReason,
+      tokensBefore: this.deps.measureSessionTokens?.(previous) ?? previous.contextWindow.usedTokens,
+      tokensAfter: this.deps.measureSessionTokens?.(compacted) ?? compacted.contextWindow.usedTokens,
+      timestamp: Date.parse(compacted.updatedAt),
+    });
   }
 
   private retainCriticalTranscript(entries: readonly ChunkTranscriptEntry[]): ChunkTranscriptEntry[] {

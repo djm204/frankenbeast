@@ -978,7 +978,7 @@ function createCliExecutorDeps(
           });
           return response.trim();
         },
-        measureCompactedTokens: (session) => {
+        measureSessionTokens: (session) => {
           const providerName = session.activeProvider ?? session.contextWindow.provider;
           const rendered = stack.chunkSessionRenderer.render(session, stack.registry.get(providerName));
           return observer.observerBridge.estimateContextWindow({
