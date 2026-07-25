@@ -346,6 +346,26 @@ export class HiveMindStore {
     );
   }
 
+  /** Purge every legacy publication in one namespace before durable ownership is adopted. */
+  deleteNamespace(namespace: HiveMindNamespace): number {
+    assertNamespace(namespace);
+    this.retryPendingSecureDelete();
+    const remove = this.db.transaction(() => {
+      const result = this.db.prepare(`
+        DELETE FROM hive_mind_entries WHERE namespace = ?
+      `).run(namespace);
+      if (result.changes > 0 && this.dbPath !== ':memory:') {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO hive_mind_metadata (key, value) VALUES (?, '1')
+        `).run(SECURE_DELETE_PENDING_KEY);
+      }
+      return result.changes;
+    });
+    const removed = remove.immediate();
+    if (removed > 0 && this.dbPath !== ':memory:') this.purgeDeletedContent();
+    return removed;
+  }
+
   deletePublishedWhere(
     namespace: HiveMindNamespace,
     publisherId: string,

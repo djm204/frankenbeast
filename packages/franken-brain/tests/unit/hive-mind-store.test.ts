@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -609,13 +608,14 @@ describe('HiveMindStore', () => {
     }
   });
 
-  it('migrates publications owned by the preceding path-derived publisher identity', () => {
+  it('purges publications owned by the preceding process-random publisher identity', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-migration-'));
     const brainsDir = join(root, 'brains');
     const hiveDbPath = join(root, 'hive', 'hive.db');
     const durableDbPath = join(brainsDir, 'coder.db');
     const namespace = hiveMindAgentTypeNamespace('coder');
-    const legacyPublisherId = createHash('sha256').update(durableDbPath).digest('hex');
+    const unrelatedNamespace = hiveMindAgentTypeNamespace('reviewer');
+    const legacyPublisherId = 'legacy-process-random-publisher';
     try {
       mkdirSync(brainsDir, { recursive: true });
       const legacyBrain = new SqliteBrain(durableDbPath);
@@ -634,6 +634,14 @@ describe('HiveMindStore', () => {
           createdAt: '2026-07-25T10:00:00.000Z',
         },
       });
+      publisher.publish(unrelatedNamespace, 'unrelated-publisher', {
+        kind: 'episode',
+        event: {
+          type: 'failure',
+          summary: 'unrelated publication remains available',
+          createdAt: '2026-07-25T10:00:00.000Z',
+        },
+      });
       publisher.close();
 
       const registry = new BrainRegistry(brainsDir, hiveDbPath);
@@ -644,6 +652,9 @@ describe('HiveMindStore', () => {
       const observer = new HiveMindStore(hiveDbPath);
       try {
         expect(observer.poll(namespace)).toEqual([]);
+        expect(observer.poll(unrelatedNamespace)).toEqual([
+          expect.objectContaining({ publisherId: 'unrelated-publisher' }),
+        ]);
       } finally {
         observer.close();
       }

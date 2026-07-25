@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import Database from 'better-sqlite3';
 
-import { hiveMindAgentTypeNamespace } from './hive-mind-store.js';
+import { HiveMindStore, hiveMindAgentTypeNamespace, type HiveMindNamespace } from './hive-mind-store.js';
 import { SqliteBrain } from './sqlite-brain.js';
 
 const MAX_AGENT_TYPE_ID_BYTES = 255;
@@ -15,7 +15,11 @@ const WINDOWS_RESERVED_AGENT_TYPE_ID =
   /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 const HIVE_PUBLISHER_ID_METADATA_KEY = 'hive-publisher-id';
 
-function durablePublisherId(dbPath: string): string {
+function durablePublisherId(
+  dbPath: string,
+  hiveDbPath: string,
+  namespace: HiveMindNamespace,
+): string {
   const db = new Database(dbPath);
   try {
     db.pragma('busy_timeout = 5000');
@@ -25,18 +29,35 @@ function durablePublisherId(dbPath: string): string {
         value TEXT NOT NULL
       )
     `);
-    db.prepare(`
-      INSERT OR IGNORE INTO brain_registry_metadata (key, value)
-      VALUES (?, ?)
-    `).run(
-      HIVE_PUBLISHER_ID_METADATA_KEY,
-      createHash('sha256').update(dbPath).digest('hex'),
-    );
-    const row = db.prepare(`
+    const selectPublisherId = db.prepare(`
       SELECT value FROM brain_registry_metadata WHERE key = ?
-    `).get(HIVE_PUBLISHER_ID_METADATA_KEY) as { value: string } | undefined;
-    if (!row) throw new Error('Durable brain publisher identity could not be initialized');
-    return row.value;
+    `);
+    const existing = selectPublisherId.get(HIVE_PUBLISHER_ID_METADATA_KEY) as
+      { value: string } | undefined;
+    if (existing) return existing.value;
+
+    const initializePublisherId = db.transaction(() => {
+      const concurrent = selectPublisherId.get(HIVE_PUBLISHER_ID_METADATA_KEY) as
+        { value: string } | undefined;
+      if (concurrent) return concurrent.value;
+
+      const hiveStore = new HiveMindStore(hiveDbPath);
+      try {
+        // Previous releases used process-random publisher IDs, so ownership cannot
+        // be reconstructed safely. Purge only this agent-type namespace before
+        // adopting a durable identity; otherwise right-to-forget cannot reach it.
+        hiveStore.deleteNamespace(namespace);
+      } finally {
+        hiveStore.close();
+      }
+
+      const publisherId = randomUUID();
+      db.prepare(`
+        INSERT INTO brain_registry_metadata (key, value) VALUES (?, ?)
+      `).run(HIVE_PUBLISHER_ID_METADATA_KEY, publisherId);
+      return publisherId;
+    });
+    return initializePublisherId.immediate();
   } finally {
     db.close();
   }
@@ -126,15 +147,16 @@ export class BrainRegistry {
     if (resolvedDbPath !== ':memory:') {
       mkdirSync(dirname(resolvedDbPath), { recursive: true });
     }
+    const namespace = hiveMindAgentTypeNamespace(agentTypeId);
     const publisherId = this.publisherId
       ?? (resolvedDbPath === ':memory:'
         ? randomUUID()
-        : durablePublisherId(resolvedDbPath));
+        : durablePublisherId(resolvedDbPath, this.hiveDbPath, namespace));
     const brain = new SqliteBrain(resolvedDbPath, undefined, {
       conversationWorkspaceId: null,
       hiveMind: {
         dbPath: resolvedDbPath === ':memory:' ? ':memory:' : this.hiveDbPath,
-        namespace: hiveMindAgentTypeNamespace(agentTypeId),
+        namespace,
         publisherId,
       },
     });
