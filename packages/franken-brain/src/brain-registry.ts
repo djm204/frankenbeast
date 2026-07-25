@@ -34,7 +34,19 @@ function durablePublisherId(
     `);
     const existing = selectPublisherId.get(HIVE_PUBLISHER_ID_METADATA_KEY) as
       { value: string } | undefined;
-    if (existing) return existing.value;
+    if (existing) {
+      try {
+        const hiveStore = new HiveMindStore(hiveDbPath);
+        try {
+          hiveStore.completeLegacyPublisherMigration(namespace, false);
+        } finally {
+          hiveStore.close();
+        }
+      } catch {
+        // Hive sharing is additive; an outage must not block an existing local brain.
+      }
+      return existing.value;
+    }
 
     const initializePublisherId = db.transaction(() => {
       const concurrent = selectPublisherId.get(HIVE_PUBLISHER_ID_METADATA_KEY) as
@@ -44,9 +56,9 @@ function durablePublisherId(
       const hiveStore = new HiveMindStore(hiveDbPath);
       try {
         // Previous releases used process-random publisher IDs, so ownership cannot
-        // be reconstructed safely. Purge only this agent-type namespace before
-        // adopting a durable identity; otherwise right-to-forget cannot reach it.
-        hiveStore.deleteNamespace(namespace);
+        // be reconstructed safely. The shared marker makes this purge atomic and
+        // once-only across distinct durable brain databases for the same type.
+        hiveStore.completeLegacyPublisherMigration(namespace, true);
       } finally {
         hiveStore.close();
       }

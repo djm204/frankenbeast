@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
 
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
@@ -608,6 +610,95 @@ describe('HiveMindStore', () => {
     }
   });
 
+  it('reopens an existing durable brain when its additive Hive store is unavailable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-restart-outage-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    try {
+      const firstRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+      firstRegistry.forAgentType('coder').episodic.record({
+        type: 'observation',
+        summary: 'local state survives hive outage',
+        createdAt: '2026-07-25T10:00:00.000Z',
+      });
+      firstRegistry.close();
+      rmSync(join(root, 'hive'), { recursive: true, force: true });
+      mkdirSync(hiveDbPath, { recursive: true });
+
+      const restartedRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+      try {
+        expect(restartedRegistry.forAgentType('coder').episodic.recent()[0]?.summary)
+          .toBe('local state survives hive outage');
+      } finally {
+        restartedRegistry.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps same-type publications when a second durable brain adopts its own publisher identity', () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-multi-brain-publisher-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const firstRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+    const secondRegistry = new BrainRegistry(brainsDir, hiveDbPath);
+    try {
+      firstRegistry.forAgentType('coder', join(brainsDir, 'coder-a.db')).episodic.record({
+        type: 'failure',
+        summary: 'first durable brain publication survives peer initialization',
+        createdAt: '2026-07-25T10:00:00.000Z',
+      });
+      const before = new HiveMindStore(hiveDbPath);
+      try {
+        expect(before.poll(namespace)).toHaveLength(1);
+      } finally {
+        before.close();
+      }
+
+      secondRegistry.forAgentType('coder', join(brainsDir, 'coder-b.db')).episodic.record({
+        type: 'failure',
+        summary: 'second durable brain has distinct ownership',
+        createdAt: '2026-07-25T10:01:00.000Z',
+      });
+
+      const after = new HiveMindStore(hiveDbPath);
+      try {
+        const publications = after.poll(namespace);
+        expect(publications).toHaveLength(2);
+        expect(new Set(publications.map(({ publisherId }) => publisherId)).size).toBe(2);
+      } finally {
+        after.close();
+      }
+
+      firstRegistry.close();
+      secondRegistry.close();
+      const restartedFirst = new BrainRegistry(brainsDir, hiveDbPath);
+      const restartedSecond = new BrainRegistry(brainsDir, hiveDbPath);
+      restartedFirst.forAgentType('coder', join(brainsDir, 'coder-a.db'))
+        .rightToForget({ query: 'first durable brain publication' });
+      restartedSecond.forAgentType('coder', join(brainsDir, 'coder-b.db'));
+      restartedFirst.close();
+      restartedSecond.close();
+
+      const afterRestart = new HiveMindStore(hiveDbPath);
+      try {
+        expect(afterRestart.poll(namespace)).toEqual([
+          expect.objectContaining({
+            event: expect.objectContaining({ summary: 'second durable brain has distinct ownership' }),
+          }),
+        ]);
+      } finally {
+        afterRestart.close();
+      }
+    } finally {
+      firstRegistry.close();
+      secondRegistry.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('purges publications owned by the preceding process-random publisher identity', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-migration-'));
     const brainsDir = join(root, 'brains');
@@ -662,6 +753,129 @@ describe('HiveMindStore', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('serializes legacy migration across concurrent durable brain initialization', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-concurrent-migration-'));
+    const brainsDir = join(root, 'brains');
+    const hiveDbPath = join(root, 'hive', 'hive.db');
+    const namespace = hiveMindAgentTypeNamespace('coder');
+    const unrelatedNamespace = hiveMindAgentTypeNamespace('reviewer');
+    const workers: Worker[] = [];
+    const sourcePath = fileURLToPath(new URL('../../src/brain-registry.ts', import.meta.url));
+    const vitestConfigPath = fileURLToPath(new URL('../../vitest.config.ts', import.meta.url));
+    const workerScript = String.raw`
+      const { parentPort, workerData } = require('node:worker_threads');
+      void (async () => {
+        const { createServer } = await import('vite');
+        const vite = await createServer({
+          configFile: workerData.vitestConfigPath,
+          logLevel: 'silent',
+          server: { middlewareMode: true, hmr: false, watch: null },
+        });
+        const { BrainRegistry } = await vite.ssrLoadModule(workerData.sourcePath);
+        parentPort.postMessage({ type: 'ready' });
+        parentPort.once('message', async (message) => {
+          if (message?.type !== 'start') return;
+          try {
+            const registry = new BrainRegistry(workerData.brainsDir, workerData.hiveDbPath);
+            registry.forAgentType('coder', workerData.brainDbPath);
+            registry.close();
+            await vite.close();
+            parentPort.postMessage({ type: 'done' });
+          } catch (error) {
+            await vite.close();
+            parentPort.postMessage({
+              type: 'error',
+              message: error instanceof Error ? error.stack ?? error.message : String(error),
+            });
+          }
+        });
+      })().catch((error) => parentPort.postMessage({
+        type: 'error',
+        message: error instanceof Error ? error.stack ?? error.message : String(error),
+      }));
+    `;
+
+    try {
+      const publisher = new HiveMindStore(hiveDbPath);
+      publisher.publish(namespace, 'legacy-process-random-publisher', {
+        kind: 'episode',
+        event: {
+          type: 'failure',
+          summary: 'legacy publication is purged exactly once',
+          createdAt: '2026-07-25T10:00:00.000Z',
+        },
+      });
+      publisher.publish(unrelatedNamespace, 'unrelated-publisher', {
+        kind: 'episode',
+        event: {
+          type: 'observation',
+          summary: 'unrelated publication survives concurrent migration',
+          createdAt: '2026-07-25T10:01:00.000Z',
+        },
+      });
+      publisher.close();
+
+      const controls = Array.from({ length: 2 }, (_, index) => {
+        const worker = new Worker(workerScript, {
+          eval: true,
+          workerData: {
+            brainDbPath: join(brainsDir, `coder-${index}.db`),
+            brainsDir,
+            hiveDbPath,
+            sourcePath,
+            vitestConfigPath,
+          },
+        });
+        workers.push(worker);
+        let readyResolve: (() => void) | undefined;
+        let doneResolve: (() => void) | undefined;
+        let reject: ((error: Error) => void) | undefined;
+        const ready = new Promise<void>((resolve) => { readyResolve = resolve; });
+        const done = new Promise<void>((resolve, fail) => {
+          doneResolve = resolve;
+          reject = fail;
+        });
+        worker.on('message', (message: { type?: string; message?: string }) => {
+          if (message.type === 'ready') readyResolve?.();
+          if (message.type === 'done') doneResolve?.();
+          if (message.type === 'error') reject?.(new Error(message.message ?? 'worker failed'));
+        });
+        worker.on('error', error => reject?.(
+          error instanceof Error ? error : new Error(String(error)),
+        ));
+        return { worker, ready, done };
+      });
+
+      await Promise.all(controls.map(({ ready }) => ready));
+      for (const { worker } of controls) worker.postMessage({ type: 'start' });
+      await Promise.all(controls.map(({ done }) => done));
+
+      const observer = new HiveMindStore(hiveDbPath);
+      try {
+        expect(observer.poll(namespace)).toEqual([]);
+        expect(observer.poll(unrelatedNamespace)).toEqual([
+          expect.objectContaining({ publisherId: 'unrelated-publisher' }),
+        ]);
+      } finally {
+        observer.close();
+      }
+      const publisherIds = Array.from({ length: 2 }, (_, index) => {
+        const db = new Database(join(brainsDir, `coder-${index}.db`), { readonly: true });
+        try {
+          return (db.prepare(`
+            SELECT value FROM brain_registry_metadata WHERE key = 'hive-publisher-id'
+          `).get() as { value: string }).value;
+        } finally {
+          db.close();
+        }
+      });
+      expect(new Set(publisherIds)).toHaveLength(2);
+    } finally {
+      await Promise.all(workers.map(worker => worker.terminate()));
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   it('returns a cached durable brain without reopening its locked database', () => {
     const root = mkdtempSync(join(tmpdir(), 'franken-hive-publisher-cache-'));

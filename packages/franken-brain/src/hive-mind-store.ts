@@ -19,6 +19,10 @@ const MAX_POLL_LIMIT = 1_000;
 const DEFAULT_MAX_ENTRIES_PER_NAMESPACE = 10_000;
 const MAX_CONFIGURED_ENTRIES_PER_NAMESPACE = 1_000_000;
 const SECURE_DELETE_PENDING_KEY = 'secure-delete-pending';
+const MIGRATION_SECURE_DELETE_PENDING_VALUE = 'migration';
+const LEGACY_PUBLISHER_MIGRATION_KEY_PREFIX = 'legacy-publisher-migration:';
+const MIGRATION_CHECKPOINT_RETRY_MS = 10;
+const MIGRATION_CHECKPOINT_TIMEOUT_MS = 5_000;
 const UNSAFE_AGENT_TYPE_ID_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f\u007f]/u;
 const WINDOWS_RESERVED_AGENT_TYPE_ID =
   /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
@@ -84,6 +88,17 @@ function truncateWalOrThrow(db: Database.Database): void {
   if (!result || result.busy !== 0) {
     throw new Error('Secure deletion could not truncate the Hive WAL because a reader is active');
   }
+}
+
+function truncateWalAfterConcurrentMigrationOrThrow(db: Database.Database): void {
+  const deadline = Date.now() + MIGRATION_CHECKPOINT_TIMEOUT_MS;
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  do {
+    const [result] = db.pragma('wal_checkpoint(TRUNCATE)') as WalCheckpointResult[];
+    if (result?.busy === 0) return;
+    Atomics.wait(waitBuffer, 0, 0, MIGRATION_CHECKPOINT_RETRY_MS);
+  } while (Date.now() < deadline);
+  throw new Error('Secure deletion could not truncate the Hive WAL because a reader is active');
 }
 
 function assertSafeAgentTypeId(agentTypeId: string): void {
@@ -366,6 +381,43 @@ export class HiveMindStore {
     return removed;
   }
 
+  /**
+   * Record durable publisher adoption once per namespace, optionally purging
+   * publications from the preceding process-random ownership model.
+   */
+  completeLegacyPublisherMigration(
+    namespace: HiveMindNamespace,
+    purgeLegacyPublications: boolean,
+  ): boolean {
+    assertNamespace(namespace);
+    this.retryPendingSecureDelete();
+    const migrationKey = `${LEGACY_PUBLISHER_MIGRATION_KEY_PREFIX}${namespace}`;
+    const migrate = this.db.transaction(() => {
+      const migrated = this.db.prepare(`
+        SELECT 1 FROM hive_mind_metadata WHERE key = ?
+      `).get(migrationKey);
+      if (migrated) return { completed: false, removed: 0 };
+
+      const removed = purgeLegacyPublications
+        ? this.db.prepare('DELETE FROM hive_mind_entries WHERE namespace = ?').run(namespace).changes
+        : 0;
+      this.db.prepare(`
+        INSERT INTO hive_mind_metadata (key, value) VALUES (?, '1')
+      `).run(migrationKey);
+      if (removed > 0 && this.dbPath !== ':memory:') {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO hive_mind_metadata (key, value) VALUES (?, ?)
+        `).run(SECURE_DELETE_PENDING_KEY, MIGRATION_SECURE_DELETE_PENDING_VALUE);
+      }
+      return { completed: true, removed };
+    });
+    const result = migrate.immediate();
+    if (result.removed > 0 && this.dbPath !== ':memory:') {
+      this.purgeDeletedContent();
+    }
+    return result.completed;
+  }
+
   deletePublishedWhere(
     namespace: HiveMindNamespace,
     publisherId: string,
@@ -416,7 +468,14 @@ export class HiveMindStore {
   }
 
   private purgeDeletedContent(): void {
-    truncateWalOrThrow(this.db);
+    const pending = this.db.prepare(`
+      SELECT value FROM hive_mind_metadata WHERE key = ?
+    `).get(SECURE_DELETE_PENDING_KEY) as { value: string } | undefined;
+    if (pending?.value === MIGRATION_SECURE_DELETE_PENDING_VALUE) {
+      truncateWalAfterConcurrentMigrationOrThrow(this.db);
+    } else {
+      truncateWalOrThrow(this.db);
+    }
     this.db.prepare('DELETE FROM hive_mind_metadata WHERE key = ?').run(SECURE_DELETE_PENDING_KEY);
   }
 
