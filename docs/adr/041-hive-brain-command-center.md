@@ -225,10 +225,12 @@ using the current chat and Beast failure contracts.
 command turns still enter `ChatRuntime`, the existing `BeastDispatchPort`, and
 `BeastDispatchService.createRun`; no Brain repository or faculty starts an
 executor. The integration proof alternates two transport sessions bound to one
-canonical conversation, verifies one persisted Beast run reaches the existing
-executor's `pending_approval` outcome, then independently exercises the normal
-chat-level canonical `pending_approval` gate. That gate blocks the sibling
-session before a second service call and projects denial to both bindings. Beast
+canonical conversation, invokes the real `BeastLoop` executor seam with a
+rejecting HITL governor, and verifies the governor request is recorded, the
+protected skill is not executed, and the denied run fails. It then independently
+exercises the normal chat-level canonical `pending_approval` gate. That gate
+blocks the sibling session before a second service call and projects denial to
+both bindings. Beast
 run approval remains owned by the existing governor/executor rather than the chat
 approval endpoint. This is the same chat approval gate
 and Beast service/execution path used by legacy per-session callers, not a

@@ -222,10 +222,16 @@ describe('chat runtime parity', () => {
       pendingApprovalContext: { tool: 'execution', command: 'deploy staging', sessionId: 'session-1' },
       projectId: 'test-project',
       transcript: [],
+      beastContext: {
+        definitionId: 'martin-loop',
+        interviewSessionId: 'interview-1',
+        status: 'interviewing',
+      },
     });
 
     expect(result.state).toBe('rejected');
     expect(result.pendingApproval).toBe(false);
+    expect(result.beastContext).toBeNull();
     expect(result.displayMessages[0]).toMatchObject({ kind: 'approval', content: 'Rejected.' });
   });
 

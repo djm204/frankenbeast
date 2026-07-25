@@ -236,18 +236,22 @@ export class ChatRuntime {
         ], {
           state: state.pendingApproval ? 'approved' : 'active',
         });
-      case '/reject':
+      case '/reject': {
+        const beastContext = state.pendingApproval ? null : state.beastContext;
         return this.result({
           ...state,
           pendingApproval: false,
+          beastContext,
         }, [
           {
             kind: state.pendingApproval ? 'approval' : 'status',
             content: state.pendingApproval ? 'Rejected.' : 'Nothing pending.',
           },
         ], {
+          beastContext,
           state: state.pendingApproval ? 'rejected' : 'active',
         });
+      }
       default:
         return this.result(state, []);
     }

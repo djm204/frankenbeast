@@ -30,6 +30,7 @@ import {
 } from '../../../src/chat/session-store.js';
 
 import { testCredential } from '../../support/test-credentials.js';
+import { createTestOrchestrator } from '../../helpers/test-orchestrator-factory.js';
 
 const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -568,12 +569,33 @@ describe('Chat HTTP Routes', () => {
     const agents = new AgentService(repository);
     const eventBus = new BeastEventBus();
     const interviews = new BeastInterviewService(repository, catalog);
-    const approvalPausedExecutor = {
+    const governedExecution = createTestOrchestrator({
+      planner: {
+        planFactory: () => ({
+          tasks: [{
+            id: 'task-1',
+            objective: 'Write governed output',
+            requiredSkills: ['file-write'],
+            dependsOn: [],
+          }],
+        }),
+      },
+      governor: { defaultDecision: 'rejected' },
+    });
+    const governorGatedExecutor = {
       start: vi.fn(async (run: Parameters<BeastExecutor['start']>[0]) => (
-        repository.createAttempt(run.id, {
-          status: 'pending_approval',
-          startedAt: '2026-07-25T00:00:00.000Z',
-          executorMetadata: { backend: 'governor-gated-test' },
+        governedExecution.loop.run({
+          projectId: 'proj',
+          userInput: 'Write governed output',
+        }).then((result) => {
+          expect(result.taskResults).toEqual([
+            expect.objectContaining({ status: 'skipped' }),
+          ]);
+          return repository.createAttempt(run.id, {
+            status: 'failed',
+            startedAt: '2026-07-25T00:00:00.000Z',
+            executorMetadata: { backend: 'governor-gated-test' },
+          });
         })
       )),
       stop: vi.fn(async () => { throw new Error('not used'); }),
@@ -582,7 +604,7 @@ describe('Chat HTTP Routes', () => {
     const dispatch = new BeastDispatchService(
       repository,
       catalog,
-      { process: approvalPausedExecutor, container: approvalPausedExecutor },
+      { process: governorGatedExecutor, container: governorGatedExecutor },
       metrics,
       logStore,
       { eventBus },
@@ -606,7 +628,7 @@ describe('Chat HTTP Routes', () => {
           runs: new BeastRunService(
             repository,
             catalog,
-            { process: approvalPausedExecutor, container: approvalPausedExecutor },
+            { process: governorGatedExecutor, container: governorGatedExecutor },
             metrics,
             logStore,
           ),
@@ -653,18 +675,20 @@ describe('Chat HTTP Routes', () => {
       await expect(dispatchResponse.json()).resolves.toMatchObject({
         data: {
           outcome: {
-            content: expect.stringContaining('pending_approval'),
+            content: expect.stringContaining('Status: failed'),
           },
         },
       });
 
       expect(createRun).toHaveBeenCalledOnce();
-      expect(approvalPausedExecutor.start).toHaveBeenCalledOnce();
+      expect(governorGatedExecutor.start).toHaveBeenCalledOnce();
+      expect(governedExecution.ports.governor.requests).toHaveLength(1);
+      expect(governedExecution.ports.skills.executions).toHaveLength(0);
       expect(repository.listRuns()).toEqual([
         expect.objectContaining({
           dispatchedBy: 'chat',
           dispatchedByUser: `chat-session:${second.id}`,
-          status: 'pending_approval',
+          status: 'failed',
         }),
       ]);
 
@@ -697,7 +721,7 @@ describe('Chat HTTP Routes', () => {
         error: { code: 'APPROVAL_PENDING' },
       });
       expect(createRun).toHaveBeenCalledOnce();
-      expect(approvalPausedExecutor.start).toHaveBeenCalledOnce();
+      expect(governorGatedExecutor.start).toHaveBeenCalledOnce();
 
       const denied = await app.request(`/v1/chat/sessions/${second.id}/approve`, {
         method: 'POST',
