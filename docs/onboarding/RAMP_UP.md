@@ -37,7 +37,7 @@ npm run check:package-manager
 | Package | Purpose |
 |---------|---------|
 | `packages/franken-types/` | Branded IDs, Result monad, Severity, ILlmClient, RationaleBlock, FrankenContext |
-| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches planning to the supplied planner, reasoning to the real critique chain, and action to the real governor, while learning remains an addressing stub |
+| `packages/franken-brain/` | SQLite working/episodic/recovery memory, review/audit surfaces, and a process-local agent-type `BrainRegistry` with durable `.fbeast/brains/<agentTypeId>.db` defaults; the local CLI attaches planning to the supplied planner, reasoning to the real critique chain, and action to the real governor, while the built-in learning faculty clusters similar failures into review-gated lesson candidates |
 | `packages/franken-planner/` | DAG planning, CoT reasoning, plan versioning, recovery |
 | `packages/franken-observer/` | Traces, cost tracking, circuit breakers, evals, OTEL/Prometheus/Langfuse adapters |
 | `packages/franken-critique/` | Self-critique pipeline, evaluators, lesson recording |
@@ -65,6 +65,7 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
 - `ReasoningFacultyAdapter`: preserves the enabled `ICritiqueModule` result and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
 - `ActionFacultyAdapter`: preserves governor approval outcomes and records real gating decisions as queryable episodic context without approval tokens; synthetic health probes do not create episodes
+- Learning faculty: `consolidate()` runs a bounded normalized-token clustering pass over recent failures and proposes patterns through `memoryReview`; `relevantLessons()` returns pending/approved matches with occurrence counts and confidence. No planning/reasoning consumer is wired until #3699.
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)

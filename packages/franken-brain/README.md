@@ -109,6 +109,37 @@ if (skillReview) {
   });
 }
 
+// The built-in learning faculty clusters differently worded failure episodes
+// with a bounded normalized-token similarity pass. Threshold-crossing patterns
+// enter the existing review queue; they do not bypass operator review.
+brain.learning.consolidate({
+  threshold: 3,
+  lookback: 100,
+  similarityThreshold: 0.5,
+});
+const relevantLessons = brain.learning.relevantLessons('workspace TypeScript build', {
+  limit: 5,
+  minConfidence: 0.5,
+});
+for (const lesson of relevantLessons) {
+  console.log(`${lesson.occurrenceCount} occurrences (${lesson.confidence} confidence): ${lesson.pattern}`);
+}
+
+// Consolidation is deterministic and local: it lowercases alphanumeric tokens,
+// drops common stop words, applies the package's small synonym/stemming map, and
+// links summaries whose Jaccard/containment score crosses similarityThreshold;
+// workflow steps remain metadata so lifecycle labels cannot merge root causes.
+// Connected failures form one cluster. The shortest summary is the pattern,
+// shared tokens are keywords, and confidence starts at 0.35 then adds 0.15 per
+// additional occurrence up to 0.95. Re-running consolidation refreshes a pending
+// candidate's evidence and confidence while preserving reviewer-edited pattern
+// fields. Review keys hash shared normalized keywords rather than an event row;
+// overlapping evidence or semantic matches retain an existing key as a connected
+// cluster evolves or a reviewer rewrites its pattern. Rejected keys remain
+// suppressed, approved lessons are returned only while live provenance matches
+// their durable value. Skill-evolution and planning-lifecycle duplicates stay in
+// their dedicated gates rather than inflating generic lesson occurrence counts.
+
 // Candidate durable memories stay user-visible until reviewed. They are not
 // written to working memory until approval, and approvals retain provenance.
 const candidate = brain.memoryReview.propose({
@@ -295,13 +326,15 @@ SqliteBrain
 ├── memoryReview  SQLite candidate/provenance/suppression queue for consented writes
 ├── episodic      SQLite `episodic_events` table with recent/query/failure recall
 ├── recovery      SQLite `checkpoints` table for execution state recovery
-└── faculties     planning/learning stubs plus attachable reasoning/action faculties
+└── faculties     learning consolidation plus attachable planning/reasoning/action faculties
 
 BrainRegistry
 └── agentTypeId → stable `.fbeast/brains/<agentTypeId>.db` SqliteBrain instance
 ```
 
-Faculty properties start inert (`configured: false`). The orchestrator's local CLI attaches configured reasoning and action adapters: reasoning delegates to the existing critique chain and records compact verdict episodes, while `brain.action.requestApproval()` delegates to the existing governor unchanged and records approved/rejected/aborted decisions as recallable episodic events. `SqliteBrain` does not import or reimplement critique or governor logic. Planning and learning remain inert pending their adapters. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
+The learning faculty is built into `SqliteBrain`: `consolidate()` performs a bounded O(n²) connected-component pass over recent failure episodes using normalized-token similarity, then proposes threshold-crossing patterns through `memoryReview`; `relevantLessons()` searches pending and approved patterns and reports occurrence-derived confidence. The heuristic requires at least three shared meaningful tokens for multi-event clustering, so paraphrases with little lexical overlap require a future embedding-backed implementation. Single occurrences are 0.35 confidence, each additional occurrence adds 0.15, and confidence caps at 0.95.
+
+The orchestrator's local CLI attaches configured planning, reasoning, and action adapters. Planning delegates to the existing planner and records lifecycle episodes; reasoning delegates to the existing critique chain and records compact verdict episodes; `brain.action.requestApproval()` delegates to the existing governor unchanged and records approved/rejected/aborted decisions as recallable episodic events. `SqliteBrain` does not import or reimplement planner, critique, or governor logic. Lesson retrieval is not wired into planning/reasoning consumers here; that remains #3699. Existing working, episodic, recovery, review, audit, serialization, and deletion behavior is unchanged.
 
 The package creates the required SQLite schema in its constructor and enables WAL mode. `BrainRegistry` validates agent-type IDs as portable path components and defaults each one to `.fbeast/brains/<agentTypeId>.db`; `forAgentType(id, ':memory:')` remains the explicit ephemeral opt-out. Spawned Beast runtime config carries the canonical catalog `definitionId` into orchestrator dependency construction, so repeated runs of one agent type reopen the same database while different definitions remain isolated. An explicit `brain.dbPath` still overrides the registry default. The repository ignores the entire `.fbeast/` state tree, including SQLite WAL/SHM sidecars.
 

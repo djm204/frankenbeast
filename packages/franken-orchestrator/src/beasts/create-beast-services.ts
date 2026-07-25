@@ -86,7 +86,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
         planning: moduleEnabled(modules?.planner, 'FRANKENBEAST_MODULE_PLANNER'),
         reasoning: moduleEnabled(modules?.critique, 'FRANKENBEAST_MODULE_CRITIQUE'),
         action: moduleEnabled(modules?.governor, 'FRANKENBEAST_MODULE_GOVERNOR'),
-        learning: false,
+        learning: true,
       },
     };
   };

@@ -193,7 +193,7 @@ describe('createBeastServices', () => {
           planning: true,
           reasoning: true,
           action: false,
-          learning: false,
+          learning: true,
         },
       });
       expect(services.resolveBrainContext('default-modules')).toEqual({
@@ -202,7 +202,7 @@ describe('createBeastServices', () => {
           planning: false,
           reasoning: false,
           action: false,
-          learning: false,
+          learning: true,
         },
       });
       expect(services.resolveBrainContext('worktree-path')).toMatchObject({

@@ -13,7 +13,7 @@ Unless a section explicitly says otherwise, diagrams should use current package 
 
 | Package | Role |
 |---------|------|
-|| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` whose safe agent-type IDs default to durable `.fbeast/brains/<agentTypeId>.db` files, and an additive planning/reasoning/action/learning faculty addressing surface. The local Beast CLI attaches the reasoning faculty to the existing critique chain; the other faculties are not wired yet. |
+|| `@franken/brain` | SQLite-backed memory plus a process-local `BrainRegistry` whose safe agent-type IDs default to durable `.fbeast/brains/<agentTypeId>.db` files, and planning/reasoning/action/learning faculty surfaces. The local Beast CLI attaches the existing planner, critique chain, and governor; the built-in learning faculty clusters similar failure episodes into review-gated lesson candidates and exposes occurrence-aware retrieval without consumer wiring. |
 | `@franken/planner` | DAG planning primitives, planning strategies, HITL plan export, recovery task insertion. |
 | `@franken/observer` | Tracing, spans, token/cost tracking, loop detection, circuit breakers, export adapters. |
 | `@franken/critique` | Critique pipeline and correction-request loop. The caller applies regenerated input; MOD-06 does not call the actor itself. |
@@ -520,7 +520,7 @@ This diagram shows the logical/target module topology using current package or i
             MEM_WORK["Working Memory<br/>In-process key/value"]
             MEM_EPIS["Episodic Memory<br/>SQLite events"]
             MEM_RECOV["Recovery Memory<br/>SQLite checkpoints"]
-            MEM_FAC["Faculty surfaces<br/>planning adapter wired<br/>reasoning • action • learning<br/>(inert pending adapters)"]
+            MEM_FAC["Faculty surfaces<br/>planning • reasoning • action adapters<br/>learning clustering + review gate"]
             MEM_REG --> MEM_BRAIN
             MEM_ADAPT --> MEM_BRAIN
             MEM_BRAIN --> MEM_WORK
