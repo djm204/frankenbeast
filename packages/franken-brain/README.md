@@ -157,6 +157,15 @@ for (const lesson of relevantLessons) {
 // suppressed, approved lessons are returned only while live provenance matches
 // their durable value. Skill-evolution and planning-lifecycle duplicates stay in
 // their dedicated gates rather than inflating generic lesson occurrence counts.
+// In the orchestrator wiring, planning and reasoning consult at most five
+// relevant lessons before delegating and record the consulted lesson keys plus a
+// redacted, 512-byte-bounded query as an episodic observation. A recorded negative
+// non-halted reasoning verdict or rejected/aborted action asynchronously schedules this same
+// consolidate() implementation with threshold 3, lookback 100, and similarity
+// 0.5. Bursts coalesce into one pending pass that CLI shutdown drains. Objective
+// scans, episodic inputs, and persisted query bytes stay bounded, and faculty
+// outcomes cluster on objective/request context rather than lifecycle boilerplate.
+// Review remains mandatory; lesson text is not injected into provider prompts.
 
 // Candidate durable memories stay user-visible until reviewed. They are not
 // written to working memory until approval, and approvals retain provenance.

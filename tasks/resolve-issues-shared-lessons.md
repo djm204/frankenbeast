@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-25 — Faculty lesson consultation must stay bounded before lookup
+- Apply input caps while iterating plan objectives, before `map()`/`join()` or redaction; truncating only after concatenation still allows adversarial plans to cause unbounded synchronous work. Skip query construction entirely when episode recording and lesson consultation are disabled.
+- Keep automatic consolidation off the planning/reasoning/action return path and coalesce pending triggers per learning port. Persist stable lesson keys—not full lesson text—in consultation telemetry so the consulted set stays observable without duplicating reviewed memory content.
+
 ## 2026-07-25 — Canonical workspace conversations over legacy session projections
 - Keep workspace Hive brains in a registry namespace disjoint from agent-type brains, and hash externally sourced workspace IDs for filenames rather than weakening the existing portable agent-type path contract.
 - Commit the canonical conversation aggregate and session-binding metadata in one SQLite transaction. Treat legacy session files as a repairable compatibility projection, leave unbound records unchanged, and use non-creating lookups on reads so inspecting old sessions does not materialize empty Hive databases.

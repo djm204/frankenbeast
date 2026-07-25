@@ -187,6 +187,7 @@ export function createBeastDeps(
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
   const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic, {
+    learning: brain.learning,
     ...(config.planning?.recordEpisodes !== undefined
       ? { recordEpisodes: config.planning.recordEpisodes }
       : {}),
@@ -215,6 +216,7 @@ export function createBeastDeps(
           'brain.action',
         ),
         config.action?.recordEpisodes !== false,
+        brain.learning,
       )
     : undefined;
   if (actionFaculty) brain.attachActionFaculty(actionFaculty);

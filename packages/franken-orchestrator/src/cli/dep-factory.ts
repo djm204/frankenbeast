@@ -16,6 +16,7 @@ import { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
 import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
+import { drainFacultyConsolidation } from '../adapters/faculty-learning.js';
 import { CachedCliLlmClient, type LlmCacheHint } from '../cache/cached-cli-llm-client.js';
 import { CritiquePortAdapter } from '../adapters/critique-adapter.js';
 import { bridgeToBeastConfig, bridgeToExistingDeps } from './dep-bridge.js';
@@ -1116,6 +1117,7 @@ function appendAuditFinalize(
 ): () => Promise<void> {
   return async () => {
     const runId = observer.runSessionId;
+    drainFacultyConsolidation(consolidated.sqliteBrain?.learning);
     try {
       consolidated.persistAuditTrail?.(runId);
       const bridgeManifest = observer.observerBridge.getReplayManifest();

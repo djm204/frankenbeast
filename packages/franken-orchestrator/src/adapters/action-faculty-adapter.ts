@@ -1,5 +1,9 @@
-import type { IEpisodicMemory, IActionFaculty } from '@franken/types';
+import type { IEpisodicMemory, IActionFaculty, ILearningFaculty } from '@franken/types';
 import type { ApprovalOutcome, ApprovalPayload, IGovernorModule } from '../deps.js';
+import {
+  consolidateFacultyNegativeOutcome,
+  prepareFacultyLessonQuery,
+} from './faculty-learning.js';
 
 /**
  * Makes governor decisions available through the brain action faculty while
@@ -15,6 +19,7 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
     private readonly clock: () => Date = () => new Date(),
     private readonly onRecordError: (error: unknown) => void = () => undefined,
     private readonly recordEpisodes = true,
+    private readonly learning?: ILearningFaculty,
   ) {}
 
   async requestApproval(request: ApprovalPayload): Promise<ApprovalOutcome> {
@@ -28,6 +33,11 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
         step: 'action:governor',
         summary: `Action decision (${outcome.decision}): ${request.summary}`,
         details: {
+          category: 'action-lifecycle',
+          outcome: outcome.decision === 'approved' ? 'positive' : 'negative',
+          ...(outcome.decision === 'approved'
+            ? {}
+            : { lessonContext: prepareFacultyLessonQuery(request.summary) }),
           taskId: request.taskId,
           ...(request.skillId === undefined ? {} : { skillId: request.skillId }),
           requiresHitl: request.requiresHitl,
@@ -36,6 +46,9 @@ export class ActionFacultyAdapter implements IActionFaculty, IGovernorModule {
         },
         createdAt: this.clock().toISOString(),
       });
+      if (outcome.decision !== 'approved') {
+        consolidateFacultyNegativeOutcome(this.learning);
+      }
     } catch (error) {
       // Observability must never replace or bypass the governor's decision.
       try {

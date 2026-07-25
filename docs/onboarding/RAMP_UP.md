@@ -63,9 +63,9 @@ User Input → [Ingestion] → [Planning] → [Execution] → [Closure] → Beas
 ## Key API Patterns
 
 - Brain `ILlmClient`: `complete(prompt: string): Promise<string>`
-- `ReasoningFacultyAdapter`: preserves the enabled `ICritiqueModule` result and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
+- `ReasoningFacultyAdapter`: consults up to five relevant lesson keys before critique, preserves the enabled `ICritiqueModule` result, and records its verdict as a queryable episodic decision when memory is enabled; disabled critique remains an inert faculty and health probes do not create episodes
 - `ActionFacultyAdapter`: preserves governor approval outcomes and records real gating decisions as queryable episodic context without approval tokens; synthetic health probes do not create episodes
-- Learning faculty: `consolidate()` runs a bounded normalized-token clustering pass over recent failures and proposes patterns through `memoryReview`; `relevantLessons()` returns pending/approved matches with occurrence counts and confidence. No planning/reasoning consumer is wired until #3699.
+- Learning faculty: `consolidate()` clusters bounded episodic inputs and proposes patterns through `memoryReview`; `relevantLessons()` returns pending/approved matches with occurrence counts and confidence. Planning and reasoning record observable consultations with redacted 512-byte queries. Negative reasoning/action outcomes asynchronously schedule the existing consolidation core with threshold 3, lookback 100, and similarity 0.5, coalescing bursts into one pending pass; this remains review-gated and does not inject lesson text into prompts.
 - `GovernorCritiqueAdapter`: passes rationale as `unknown` to evaluators
 - `BudgetTrigger()`, `SkillTrigger()`: parameterless constructors
 - `TriggerRegistry.evaluateAll()` (not `.evaluate()`)

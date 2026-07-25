@@ -282,8 +282,15 @@ deterministic normalized-token connected-component heuristic, proposes
 consolidated patterns through the existing memory-review queue, refreshes pending
 candidates as evidence grows, and exposes occurrence/confidence-aware retrieval.
 Confidence is evidence-count based and capped rather than presented as model
-certainty. It does not inject lessons into planning or reasoning (#3699), share
-them across brains (#3689), or change the dispatch boundaries above.
+certainty. Agent-scoped planning and reasoning now consult at most five relevant
+lesson keys before delegation and record that consultation as an episodic
+observation with a redacted, 512-byte-bounded query. Negative reasoning/action
+decisions asynchronously schedule the same consolidation core with the fixed
+input policy (threshold 3, lookback 100, similarity 0.5); bursts coalesce into one
+pending pass and CLI shutdown drains it. Halted critiques are excluded, query
+assembly is capped before redaction, and clustering uses objective/request context
+rather than lifecycle boilerplate. This does not inject lesson text into prompts, share lessons across
+brains (#3689), or change the dispatch boundaries above.
 
 ## Consequences
 

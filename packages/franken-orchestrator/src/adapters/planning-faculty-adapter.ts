@@ -1,9 +1,16 @@
-import type { EpisodicEvent, IEpisodicMemory, IPlanningFaculty } from '@franken/types';
+import type {
+  EpisodicEvent,
+  IEpisodicMemory,
+  ILearningFaculty,
+  IPlanningFaculty,
+} from '@franken/types';
 import { isoNow } from '@franken/types';
 import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js';
+import { consultFacultyLessons } from './faculty-learning.js';
 
 export interface PlanningFacultyAdapterOptions {
   recordEpisodes?: boolean;
+  learning?: ILearningFaculty;
 }
 
 /**
@@ -21,6 +28,15 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
   ) {}
 
   async createPlan(intent: PlanIntent): Promise<PlanGraph> {
+    if (this.options.recordEpisodes !== false) {
+      consultFacultyLessons(
+        'planning',
+        intent.goal,
+        this.episodic,
+        this.options.learning,
+        isoNow(),
+      );
+    }
     const plan = await this.delegate.createPlan(intent);
     this.recordPlanCreated(intent, plan);
     return plan;

@@ -169,15 +169,15 @@ describe('createBeastDeps', () => {
     expect(result).toBe(verdict);
     expect(critique.reviewPlan).toHaveBeenCalledWith(plan, { source: 'test' });
     expect(deps.sqliteBrain!.reasoning.configured).toBe(true);
-    expect(deps.sqliteBrain!.episodic.recall('reasoning verdict warn')).toEqual([
-      expect.objectContaining({
-        type: 'decision',
-        step: 'reasoning:critique',
-        summary: 'Reasoning verdict: warn',
-        details: expect.objectContaining({ verdict: 'warn', score: 0.75, findingCount: 1 }),
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    ]);
+    expect(deps.sqliteBrain!.episodic.recall('reasoning verdict warn').find(
+      (episode) => episode.step === 'reasoning:critique',
+    )).toEqual(expect.objectContaining({
+      type: 'decision',
+      step: 'reasoning:critique',
+      summary: 'Reasoning verdict: warn',
+      details: expect.objectContaining({ verdict: 'warn', score: 0.75, findingCount: 1 }),
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }));
   });
 
   it('leaves the reasoning faculty inert when critique is disabled', async () => {
