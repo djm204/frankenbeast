@@ -100,6 +100,9 @@ export class CliObserverBridge implements IObserverModule {
         completionTokens: t.completionTokens,
         cacheReadTokens: t.cacheReadTokens,
         cacheCreationTokens: t.cacheCreationTokens,
+        ...(t.cacheCreation1hTokens !== undefined
+          ? { cacheCreation1hTokens: t.cacheCreation1hTokens }
+          : {}),
       };
     });
     const estimatedCostUsd = this.costCalc.totalCost(entries);
@@ -142,7 +145,7 @@ export class CliObserverBridge implements IObserverModule {
         TraceContext.startSpan(t, opts),
       endSpan: (span: Span, opts?: { status?: string; errorMessage?: string }, loopDetector?: LoopDetector) =>
         TraceContext.endSpan(span, opts as { status?: 'completed' | 'error'; errorMessage?: string }, loopDetector),
-      recordTokenUsage: (span: Span, usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; model?: string }, counter?: TokenCounter) =>
+      recordTokenUsage: (span: Span, usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; cacheCreation1hTokens?: number; model?: string }, counter?: TokenCounter) =>
         SpanLifecycle.recordTokenUsage(span, usage, counter),
       setMetadata: (span: Span, data: Record<string, unknown>) =>
         SpanLifecycle.setMetadata(span, data),
@@ -164,7 +167,7 @@ export class CliObserverBridge implements IObserverModule {
       startSpan: (_t: Trace, opts: { name: string; parentSpanId?: string }) =>
         createDisabledSpan(traceId, opts),
       endSpan: () => {},
-      recordTokenUsage: (_span: Span, usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; model?: string }, counter?: TokenCounter) => {
+      recordTokenUsage: (_span: Span, usage: { promptTokens: number; completionTokens: number; cacheReadTokens?: number; cacheCreationTokens?: number; cacheCreation1hTokens?: number; model?: string }, counter?: TokenCounter) => {
         (counter ?? this.counter).record({
           model: usage.model ?? 'unknown',
           promptTokens: usage.promptTokens,
@@ -174,6 +177,9 @@ export class CliObserverBridge implements IObserverModule {
             : {}),
           ...(usage.cacheCreationTokens !== undefined
             ? { cacheCreationTokens: usage.cacheCreationTokens }
+            : {}),
+          ...(usage.cacheCreation1hTokens !== undefined
+            ? { cacheCreation1hTokens: usage.cacheCreation1hTokens }
             : {}),
         });
       },

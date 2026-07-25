@@ -112,6 +112,7 @@ describe('CliObserverBridge', () => {
         completionTokens: 1_000_000,
         cacheReadTokens: 1_000_000,
         cacheCreationTokens: 1_000_000,
+        cacheCreation1hTokens: 400_000,
         model: 'claude-sonnet-4-6',
       }, deps.counter);
       deps.endSpan(span);
@@ -120,7 +121,7 @@ describe('CliObserverBridge', () => {
       expect(spend.inputTokens).toBe(3_000_000);
       expect(spend.outputTokens).toBe(1_000_000);
       expect(spend.totalTokens).toBe(4_000_000);
-      expect(spend.estimatedCostUsd).toBeCloseTo(22.05, 8);
+      expect(spend.estimatedCostUsd).toBeCloseTo(22.95, 8);
     });
 
     it('returns zeros when startTrace has not been called', async () => {

@@ -87,6 +87,7 @@ export interface TokenRecord {
   readonly completionTokens: number;
   readonly cacheReadTokens?: number;
   readonly cacheCreationTokens?: number;
+  readonly cacheCreation1hTokens?: number;
 }
 
 export interface TokenUsage {
@@ -94,6 +95,7 @@ export interface TokenUsage {
   readonly completionTokens: number;
   readonly cacheReadTokens?: number;
   readonly cacheCreationTokens?: number;
+  readonly cacheCreation1hTokens?: number;
   readonly model?: string;
 }
 
