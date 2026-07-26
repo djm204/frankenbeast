@@ -54,6 +54,11 @@ export { TraceServer } from './ui/TraceServer.js'
 export { generateGrafanaDashboard } from './grafana/GrafanaDashboard.js'
 export { CompactionMetrics } from './compaction-metrics.js'
 export {
+  BrainHealthScorer,
+  DEFAULT_BRAIN_HEALTH_WEIGHTS,
+  calculateBrainHealthScore,
+} from './brain-health.js'
+export {
   DEFAULT_IDLE_WATTS,
   DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS,
   DEFAULT_TDP_WATTS,
@@ -79,6 +84,14 @@ export type {
   CompactionRate,
   CompactionTriggerReason,
 } from './compaction-metrics.js'
+export type {
+  BrainHealthHistoryWindow,
+  BrainHealthSample,
+  BrainHealthSampleAdapter,
+  BrainHealthSampleQuery,
+  BrainHealthSignals,
+  BrainHealthWeights,
+} from './brain-health.js'
 export type {
   ProcessPowerModel,
   ProcessResourceSample,

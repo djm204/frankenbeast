@@ -8,6 +8,12 @@ import { wallClockNow } from '@franken/types'
 import type { Trace, Span } from '../../core/types.js'
 import type { ExportAdapter, TraceSummary } from '../../export/ExportAdapter.js'
 import type {
+  BrainHealthSample,
+  BrainHealthSampleQuery,
+  BrainHealthSignals,
+  BrainHealthWeights,
+} from '../../brain-health.js'
+import type {
   ProcessResourceSample,
   ProcessResourceSampleQuery,
 } from '../../resource/ProcessResourceSampler.js'
@@ -30,6 +36,7 @@ import {
   DELETE_COMPACTIONS_BY_RUN,
   DELETE_COMPACTIONS_BEFORE,
   DELETE_RESOURCE_SAMPLES_BEFORE,
+  DELETE_BRAIN_HEALTH_SCORES_BEFORE,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
@@ -38,6 +45,8 @@ import {
   SELECT_RESOURCE_SAMPLES_BY_AGENT,
   SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN,
   SELECT_RESOURCE_SAMPLES_BY_RUN,
+  INSERT_BRAIN_HEALTH_SCORE,
+  SELECT_BRAIN_HEALTH_SCORES,
 } from './schema.js'
 
 interface TraceRow {
@@ -70,6 +79,14 @@ interface TraceSummaryRow {
   spanCount: number
 }
 
+interface BrainHealthScoreRow {
+  brainId: string
+  score: number
+  signals: string
+  weights: string
+  timestamp: number
+}
+
 interface FlushedSpanState {
   status: Span['status']
   endedAt: number | undefined
@@ -92,6 +109,18 @@ function normalizeResourceSample(sample: ProcessResourceSample): ProcessResource
   if (agentId.length === 0) throw new TypeError('resource sample agentId must not be empty')
   if (runId.length === 0) throw new TypeError('resource sample runId must not be empty')
   return { ...sample, agentId, runId }
+}
+
+function normalizeBrainHealthSample(sample: BrainHealthSample): BrainHealthSample {
+  const brainId = sample.brainId.trim()
+  if (brainId.length === 0) throw new TypeError('health score brainId must not be empty')
+  if (!Number.isFinite(sample.score) || sample.score < 0 || sample.score > 100) {
+    throw new RangeError('health score must be between 0 and 100')
+  }
+  if (!Number.isSafeInteger(sample.timestamp) || sample.timestamp < 0) {
+    throw new RangeError('health score timestamp must be a non-negative safe integer')
+  }
+  return { ...sample, brainId }
 }
 
 export interface SQLiteAdapterOptions {
@@ -159,6 +188,9 @@ type SQLiteWorkerOperation =
   | 'recordResourceSample'
   | 'queryResourceSamples'
   | 'deleteResourceSamplesBefore'
+  | 'recordHealthScore'
+  | 'queryHealthScores'
+  | 'deleteHealthScoresBefore'
 
 interface SQLiteWorkerResponse {
   id: number
@@ -265,6 +297,13 @@ function execute(operation, payload) {
           : sql.selectResourceSamplesByAgentAndRun
       return db.prepare(statement).all(query)
     }
+    case 'recordHealthScore':
+      db.prepare(sql.insertBrainHealthScore).run(payload.sample)
+      return undefined
+    case 'queryHealthScores':
+      return db.prepare(sql.selectBrainHealthScores).all(payload.query)
+    case 'deleteHealthScoresBefore':
+      return db.prepare(sql.deleteBrainHealthScoresBefore).run(payload.before).changes
     default:
       throw new Error('Unknown SQLite worker operation: ' + operation)
   }
@@ -347,6 +386,9 @@ class SQLiteWorkerClient {
             selectResourceSamplesByAgent: SELECT_RESOURCE_SAMPLES_BY_AGENT,
             selectResourceSamplesByAgentAndRun: SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN,
             selectResourceSamplesByRun: SELECT_RESOURCE_SAMPLES_BY_RUN,
+            insertBrainHealthScore: INSERT_BRAIN_HEALTH_SCORE,
+            selectBrainHealthScores: SELECT_BRAIN_HEALTH_SCORES,
+            deleteBrainHealthScoresBefore: DELETE_BRAIN_HEALTH_SCORES_BEFORE,
           },
         },
       },
@@ -640,6 +682,16 @@ function rowToSpan(row: SpanRow): Span {
   }
 }
 
+function rowToBrainHealthSample(row: BrainHealthScoreRow): BrainHealthSample {
+  return {
+    brainId: row.brainId,
+    score: row.score,
+    signals: safeParse<BrainHealthSignals>(row.signals, {} as BrainHealthSignals, `brain ${row.brainId} health signals`),
+    weights: safeParse<BrainHealthWeights>(row.weights, {} as BrainHealthWeights, `brain ${row.brainId} health weights`),
+    timestamp: row.timestamp,
+  }
+}
+
 /**
  * Persistent SQLite-backed export adapter.
  * Uses WAL journal mode for safe concurrent reads and batched
@@ -680,6 +732,9 @@ export class SQLiteAdapter implements ExportAdapter {
         const resourceTableInfo = this.db.pragma("table_info('process_resource_samples')") as Array<{ name?: unknown }>
         const resourceSchemaInitialized = Array.isArray(resourceTableInfo)
           && resourceTableInfo.some(column => column.name === 'id')
+        const healthTableInfo = this.db.pragma("table_info('brain_health_scores')") as Array<{ name?: unknown }>
+        const healthSchemaInitialized = Array.isArray(healthTableInfo)
+          && healthTableInfo.some(column => column.name === 'id')
         if (schemaInitialized) {
           const rawTableInfo = this.db.pragma("table_info('compaction_events')") as unknown
           const tableInfo = (Array.isArray(rawTableInfo) ? rawTableInfo : []) as Array<{
@@ -697,9 +752,9 @@ export class SQLiteAdapter implements ExportAdapter {
             this.db.exec(MIGRATE_COMPACTION_EVENT_IDENTITY)
           }
         }
-        if (!schemaInitialized || !resourceSchemaInitialized) {
+        if (!schemaInitialized || !resourceSchemaInitialized || !healthSchemaInitialized) {
           // CREATE TABLE IF NOT EXISTS also upgrades databases created before
-          // process resource telemetry was introduced.
+          // process resource telemetry or brain health scoring was introduced.
           this.db.exec(CREATE_TABLES)
         }
       })
@@ -1129,6 +1184,71 @@ export class SQLiteAdapter implements ExportAdapter {
           : SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN
       return this.withSqliteLockRetry('query process resource samples', () => (
         this.db.prepare(statement).all(params) as ProcessResourceSample[]
+      ))
+    })
+  }
+
+  async recordHealthScore(sample: BrainHealthSample): Promise<void> {
+    const normalized = normalizeBrainHealthSample(sample)
+    const row = {
+      brainId: normalized.brainId,
+      score: normalized.score,
+      signals: JSON.stringify(normalized.signals),
+      weights: JSON.stringify(normalized.weights),
+      timestamp: normalized.timestamp,
+    }
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        await this.withSqliteLockRetry('record brain health score', () => (
+          this.workerClient!.request<void>('recordHealthScore', { sample: row })
+        ))
+        return
+      }
+      await this.withSqliteLockRetry('record brain health score', () => {
+        this.db.prepare(INSERT_BRAIN_HEALTH_SCORE).run(row)
+      })
+    })
+  }
+
+  async queryHealthScores(query: BrainHealthSampleQuery): Promise<BrainHealthSample[]> {
+    const brainId = query.brainId.trim()
+    if (brainId.length === 0) {
+      return Promise.reject(new TypeError('health score query brainId must not be empty'))
+    }
+    const since = query.since ?? 0
+    const before = query.before ?? Number.MAX_SAFE_INTEGER
+    if (!Number.isSafeInteger(since) || !Number.isSafeInteger(before) || since < 0 || before < since) {
+      return Promise.reject(new RangeError('health score time range must contain safe integers with before >= since'))
+    }
+    const requestedLimit = query.limit ?? 100
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit <= 0) {
+      return Promise.reject(new RangeError('health score limit must be a positive safe integer'))
+    }
+    const params = { brainId, since, before, limit: Math.min(1_000, requestedLimit) }
+    return this.enqueueSqliteOperation(async () => {
+      const rows = this.workerClient !== undefined
+        ? await this.withSqliteLockRetry('query brain health scores', () => (
+            this.workerClient!.request<BrainHealthScoreRow[]>('queryHealthScores', { query: params })
+          ))
+        : await this.withSqliteLockRetry('query brain health scores', () => (
+            this.db.prepare(SELECT_BRAIN_HEALTH_SCORES).all(params) as BrainHealthScoreRow[]
+          ))
+      return rows.map(rowToBrainHealthSample)
+    })
+  }
+
+  async deleteHealthScoresBefore(before: number): Promise<number> {
+    if (!Number.isSafeInteger(before) || before < 0) {
+      return Promise.reject(new RangeError('health score retention cutoff must be a non-negative safe integer'))
+    }
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('delete old brain health scores', () => (
+          this.workerClient!.request<number>('deleteHealthScoresBefore', { before })
+        ))
+      }
+      return this.withSqliteLockRetry('delete old brain health scores', () => (
+        this.db.prepare(DELETE_BRAIN_HEALTH_SCORES_BEFORE).run(before).changes
       ))
     })
   }
