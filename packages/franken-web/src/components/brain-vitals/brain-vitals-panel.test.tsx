@@ -193,6 +193,64 @@ describe('BrainVitalsPanel', () => {
     expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
   });
 
+  it('does not truncate a real one-minute activity rate at an arbitrary buffer size', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const cacheNode = await screen.findByRole('button', { name: /Cache activity:/ });
+    const now = Date.now();
+    act(() => {
+      for (let index = 0; index < 201; index += 1) {
+        pushActivity({
+          dimension: 'cache',
+          kind: 'cache.hit',
+          runId: 'run-1',
+          timestamp: now - index,
+        });
+      }
+    });
+
+    await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('201'));
+  });
+
+  it('ignores activity callbacks from a superseded brain subscription', async () => {
+    const activityCallbacks = new Map<string, (activity: BrainVitalsActivity) => void>();
+    const reviewerRun = detail.run;
+    const workerRun = { ...detail.run, id: 'run-2', definitionId: 'worker' };
+    const api = client({
+      listBrainVitalsRuns: vi.fn().mockResolvedValue({
+        runs: [reviewerRun, workerRun],
+        nextCursor: undefined,
+      }),
+      subscribeToBrainVitals: vi.fn((brainId, _onSnapshot, _onError, onActivity) => {
+        activityCallbacks.set(brainId, onActivity!);
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const selector = await screen.findByRole('combobox', { name: 'Brain' });
+    await waitFor(() => expect(activityCallbacks.has('reviewer')).toBe(true));
+    fireEvent.change(selector, { target: { value: 'worker' } });
+    await waitFor(() => expect(activityCallbacks.has('worker')).toBe(true));
+
+    act(() => activityCallbacks.get('reviewer')!({
+      dimension: 'compaction',
+      kind: 'compaction.completed',
+      runId: 'run-1',
+      timestamp: Date.now(),
+    }));
+
+    const compactionNode = await screen.findByRole('button', { name: /Compaction activity:/ });
+    expect(compactionNode.getAttribute('data-activity-count')).toBe('0');
+  });
+
   it('offers a selector when multiple brain definitions have runs', async () => {
     const api = client({
       listBrainVitalsRuns: vi.fn().mockResolvedValue({

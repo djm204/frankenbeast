@@ -274,14 +274,24 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         setStreamError(describeError(subscriptionError));
       },
       (activity) => {
+        if (!active || generationRef.current !== generation) return;
+        const receivedAt = Date.now();
         setActivities((current) => {
-          const duplicate = current.some((candidate) => (
+          const recent = current.filter((candidate) => (
+            candidate.timestamp >= receivedAt - 60_000
+            && candidate.timestamp <= receivedAt + 5_000
+          ));
+          if (
+            activity.timestamp < receivedAt - 60_000
+            || activity.timestamp > receivedAt + 5_000
+          ) return recent;
+          const duplicate = recent.some((candidate) => (
             candidate.dimension === activity.dimension
             && candidate.kind === activity.kind
             && candidate.runId === activity.runId
             && candidate.timestamp === activity.timestamp
           ));
-          return duplicate ? current : [...current, activity].slice(-200);
+          return duplicate ? recent : [...recent, activity];
         });
         if (
           activity.dimension !== 'churn'
