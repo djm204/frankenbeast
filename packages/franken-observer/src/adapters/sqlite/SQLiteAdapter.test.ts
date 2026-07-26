@@ -51,6 +51,7 @@ describe('SQLiteAdapter', () => {
       'foreign_keys = ON',
       "index_list('compaction_events')",
       "table_info('process_resource_samples')",
+      "table_info('brain_health_scores')",
     ])
     expect(execMock).toHaveBeenCalledTimes(1)
 
@@ -65,6 +66,9 @@ describe('SQLiteAdapter', () => {
           : [{ name: 'idx_compaction_events_session_timestamp' }]
       }
       if (statement === "table_info('process_resource_samples')") {
+        return execMock.mock.calls.length === 0 ? [] : [{ name: 'id' }]
+      }
+      if (statement === "table_info('brain_health_scores')") {
         return execMock.mock.calls.length === 0 ? [] : [{ name: 'id' }]
       }
       return undefined

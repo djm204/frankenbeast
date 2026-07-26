@@ -58,6 +58,18 @@ export const CREATE_TABLES = `
     ON process_resource_samples(agentId, timestamp);
   CREATE INDEX IF NOT EXISTS idx_process_resource_samples_run_timestamp
     ON process_resource_samples(runId, timestamp);
+
+  CREATE TABLE IF NOT EXISTS brain_health_scores (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    brainId    TEXT    NOT NULL,
+    score      REAL    NOT NULL CHECK (score >= 0 AND score <= 100),
+    signals    TEXT    NOT NULL,
+    weights    TEXT    NOT NULL,
+    timestamp  INTEGER NOT NULL CHECK (timestamp >= 0)
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS idx_brain_health_scores_brain_timestamp
+    ON brain_health_scores(brainId, timestamp);
 `
 
 export const MIGRATE_COMPACTION_EVENT_IDENTITY = `
@@ -195,4 +207,17 @@ export const SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN = `
   ${RESOURCE_SAMPLE_COLUMNS}
   WHERE agentId = @agentId AND runId = @runId
   ${RESOURCE_SAMPLE_RANGE_AND_ORDER}
+`
+
+export const INSERT_BRAIN_HEALTH_SCORE = `
+  INSERT INTO brain_health_scores (brainId, score, signals, weights, timestamp)
+  VALUES (@brainId, @score, @signals, @weights, @timestamp)
+`
+
+export const SELECT_BRAIN_HEALTH_SCORES = `
+  SELECT brainId, score, signals, weights, timestamp
+  FROM brain_health_scores
+  WHERE brainId = @brainId AND timestamp >= @since AND timestamp <= @before
+  ORDER BY timestamp DESC, id DESC
+  LIMIT @limit
 `

@@ -18,6 +18,7 @@ npm install @franken/observer
 - [Quick start](#quick-start)
 - [Core tracing](#core-tracing)
 - [Token & cost tracking](#token--cost-tracking)
+- [Brain health scoring](#brain-health-scoring)
 - [Process resource telemetry](#process-resource-telemetry)
 - [Decision outcome attribution](#decision-outcome-attribution)
 - [Export backends](#export-backends)
@@ -294,6 +295,49 @@ attribution.report()
 //     { model: 'claude-opus-4-6',   totalCalls: 1, successfulCalls: 0, failedCalls: 1, successRate: 0.0, totalCostUsd: 0.0105 },
 //   ]
 ```
+
+---
+
+## Brain health scoring
+
+`calculateBrainHealthScore` combines six caller-normalized signals into a deterministic 0–100 score. Higher is healthier. V1 uses these replaceable defaults:
+
+| Signal | Weight | Healthy direction |
+|---|---:|---|
+| Task success rate | 30% | Higher |
+| Cache-hit ratio | 15% | Higher |
+| Compaction pressure | 15% | Lower |
+| Lifecycle churn/discard pressure | 15% | Lower |
+| Resource pressure | 10% | Lower |
+| Budget burn ratio | 15% | Lower |
+
+The formula is `100 × (0.30×success + 0.15×cache + 0.15×(1−compaction) + 0.15×(1−churn) + 0.10×(1−resource) + 0.15×(1−budget burn))`. Task outcomes receive the largest weight because completing useful work is the primary health signal. Resource pressure receives the smallest weight because the current power telemetry is estimated rather than hardware-measured. The remaining operational signals are balanced equally for a tuneable v1 baseline. Every signal must be normalized to `0..1`; operators define the unhealthy ceilings used to convert raw compactions/hour, CPU/RSS, orphan counts, and budget data into pressure ratios.
+
+`BrainHealthScorer` computes and persists snapshots on demand. This avoids a hidden background timer and lets the orchestrator choose a cadence that matches its task and telemetry windows. `brainId` accepts the current definition/agent identifier and can later carry a Brain Registry id without changing the score model.
+
+```ts
+import { BrainHealthScorer, SQLiteAdapter } from '@franken/observer'
+
+const db = new SQLiteAdapter('./traces.db')
+const health = new BrainHealthScorer(db)
+
+await health.computeAndPersist('definition-42', {
+  taskSuccessRate: 0.9,
+  cacheHitRatio: 0.7,
+  compactionPressure: 0.2,
+  churnRatio: 0.1,
+  resourcePressure: 0.4,
+  budgetBurnRatio: 0.5,
+})
+
+const latest = await health.getHealthScore('definition-42')
+const history = await health.getHealthHistory('definition-42', {
+  since: Date.now() - 24 * 60 * 60 * 1_000,
+  before: Date.now(),
+})
+```
+
+The SQLite history is indexed by brain id and timestamp. Query results are newest-first and include the exact normalized signals and weights used for each score.
 
 ---
 
