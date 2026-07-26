@@ -240,6 +240,14 @@ export class CliObserverBridge implements IObserverModule {
   async close(): Promise<void> {
     try {
       if (this.trace?.status === 'active') {
+        for (const span of this.trace.spans) {
+          if (span.status === 'active') {
+            TraceContext.endSpan(span, {
+              status: 'error',
+              errorMessage: 'Span was still active during observer shutdown',
+            });
+          }
+        }
         TraceContext.endTrace(this.trace);
       }
       if (this.trace) {

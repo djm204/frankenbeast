@@ -6,6 +6,7 @@ import {
   CircuitBreaker,
   LoopDetector,
   type CompactionEventAdapter,
+  type Trace,
 } from '@franken/observer';
 import { CliObserverBridge } from '../../../src/adapters/cli-observer-bridge.js';
 import type { IObserverModule } from '../../../src/deps.js';
@@ -301,6 +302,22 @@ describe('CliObserverBridge', () => {
   });
 
   describe('close()', () => {
+    it('closes leaked spans and still flushes the production trace', async () => {
+      const flush = vi.fn(async (_trace: Trace) => undefined);
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        traceAdapter: { flush },
+      });
+      bridge.startTrace('run-with-leaked-span');
+      bridge.startSpan('leaked-span');
+
+      await bridge.close();
+
+      expect(flush).toHaveBeenCalledOnce();
+      expect(flush.mock.calls[0]?.[0].status).toBe('completed');
+      expect(flush.mock.calls[0]?.[0].spans[0]?.status).toBe('error');
+    });
+
     it('keeps observer adapter shutdown failures best-effort', async () => {
       const close = vi.fn(async () => { throw new Error('SQLite worker close timed out'); });
       const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {

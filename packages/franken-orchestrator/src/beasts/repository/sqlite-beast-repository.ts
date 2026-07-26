@@ -227,6 +227,12 @@ export interface BeastRunPageOptions extends CorruptJsonRecoveryOptions {
   readonly cursor?: string | undefined;
 }
 
+export interface BeastRunDefinitionWindowOptions {
+  readonly definitionId: string;
+  readonly since: string;
+  readonly limit: number;
+}
+
 export interface BeastRunPage {
   readonly runs: BeastRun[];
   readonly nextCursor?: string | undefined;
@@ -443,6 +449,34 @@ export class SQLiteBeastRepository {
   listRuns(options: CorruptJsonRecoveryOptions = {}): BeastRun[] {
     const rows = this.db.prepare('SELECT * FROM beast_runs ORDER BY created_at DESC, id DESC').all() as BeastRunRow[];
     return mapRowsRecoveringCorruptJson(rows, mapRun, options);
+  }
+
+  listRunsForDefinitionWindow(options: BeastRunDefinitionWindowOptions): BeastRun[] {
+    const { definitionId, since, limit } = options;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_BEAST_RUN_PAGE_LIMIT) {
+      throw new RangeError(`Beast run window limit must be between 1 and ${MAX_BEAST_RUN_PAGE_LIMIT}`);
+    }
+    if (!Number.isFinite(Date.parse(since))) {
+      throw new RangeError('Beast run window start must be an ISO timestamp');
+    }
+    const activeRows = this.db.prepare(
+      `SELECT * FROM beast_runs INDEXED BY idx_beast_runs_definition_status_created_at_id
+        WHERE definition_id = ? AND status IN ('queued', 'running')
+        ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).all(definitionId, limit) as BeastRunRow[];
+    const recentRows = this.db.prepare(
+      `SELECT * FROM beast_runs INDEXED BY idx_beast_runs_definition_activity_at_id
+        WHERE definition_id = ?
+          AND COALESCE(finished_at, last_heartbeat_at, started_at, created_at) >= ?
+        ORDER BY COALESCE(finished_at, last_heartbeat_at, started_at, created_at) DESC, id DESC
+        LIMIT ?`,
+    ).all(definitionId, since, limit) as BeastRunRow[];
+    const rows = [...new Map(
+      [...activeRows, ...recentRows].map((row) => [row.id, row] as const),
+    ).values()]
+      .sort((left, right) => right.created_at.localeCompare(left.created_at) || right.id.localeCompare(left.id))
+      .slice(0, limit);
+    return mapRowsRecoveringCorruptJson(rows, mapRun, {});
   }
 
   listRunPage(options: BeastRunPageOptions): BeastRunPage {

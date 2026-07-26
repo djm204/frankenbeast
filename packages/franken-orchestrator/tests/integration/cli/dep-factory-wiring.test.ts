@@ -143,7 +143,6 @@ describe('dep-factory wiring integration', () => {
         noPr: true,
         verbose: false,
         reset: false,
-        orchestratorConfig: { enableTracing: true } as never,
       });
       expect(observerBridge.getActiveSessionId()).toBe('beast-run-wiring');
       observerBridge.startSpan('production-work').end({ promptTokens: 10, completionTokens: 2 });

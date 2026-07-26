@@ -38,6 +38,7 @@ const HEALTH_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const HEALTH_HISTORY_SAMPLE_MS = 60_000;
 const RESOURCE_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const RUN_EVENT_LIMIT = 100;
+const SNAPSHOT_RUN_LIMIT = 200;
 const BRAIN_VITALS_SSE_TICKET_COOKIE = 'frankenbeast_brain_vitals_sse_ticket';
 
 interface BrainVitalsObserver extends BrainHealthSampleAdapter {
@@ -63,6 +64,11 @@ interface BrainVitalsObserver extends BrainHealthSampleAdapter {
 
 interface BrainVitalsRunStore {
   listRuns(): BeastRun[];
+  listRunsForDefinitionWindow?(options: {
+    definitionId: string;
+    since: string;
+    limit: number;
+  }): BeastRun[];
   getRun(runId: string): BeastRun | undefined;
   listEvents?(runId: string, options?: { limit?: number }): BeastRunEvent[];
   listEventPageForResponse?(runId: string, afterSequence: number, limit: number): {
@@ -124,12 +130,18 @@ export class BrainVitalsService {
       await this.options.observer.deleteResourceSamplesBefore(now - RESOURCE_RETENTION_MS);
       this.lastResourcePruneAt = now;
     }
-    const allBrainRuns = this.options.runs.listRuns().filter((run) => run.definitionId === brainId);
-    const runs = allBrainRuns.filter((run) => (
-      run.status === 'queued'
-      || run.status === 'running'
-      || latestRunActivityAt(run) >= since
-    ));
+    const runs = this.options.runs.listRunsForDefinitionWindow?.({
+      definitionId: brainId,
+      since: new Date(since).toISOString(),
+      limit: SNAPSHOT_RUN_LIMIT,
+    }) ?? this.options.runs.listRuns()
+      .filter((run) => run.definitionId === brainId)
+      .filter((run) => (
+        run.status === 'queued'
+        || run.status === 'running'
+        || latestRunActivityAt(run) >= since
+      ))
+      .slice(0, SNAPSHOT_RUN_LIMIT);
     const lifecycle = this.options.lifecycleMetrics.query({
       from: new Date(since).toISOString(),
       to: new Date(now).toISOString(),
@@ -385,7 +397,7 @@ export class BrainVitalsService {
     for (const [index, run] of runs.entries()) {
       const telemetry = details[index];
       if (!telemetry) continue;
-      const latestResource = telemetry.resources.at(-1) ?? null;
+      const latestResource = telemetry.resources.at(0) ?? null;
       const budget = readBudget(run);
       const current: ActivityFingerprint = {
         promptTokens: telemetry.tokens.promptTokens,

@@ -555,7 +555,7 @@ async function createObserverDeps(
     compactionAdapter: telemetryAdapter,
     traceAdapter: telemetryAdapter,
   });
-  if (config.enableTracing) {
+  if (config.enableTracing || processRunSessionId !== undefined) {
     observerBridge.startTrace(runSessionId);
   }
   const traceViewerHandle = options.verbose

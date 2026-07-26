@@ -161,12 +161,12 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       await services.runs.kill(liveRunId, actor);
     })())
       .catch(() => undefined)
-      .finally(() => {
+      .finally(async () => {
         try {
-          services.dispose();
+          await services.dispose();
         } finally {
           if (ownsControl) {
-            control?.dispose?.();
+            await control?.dispose?.();
           }
           process.exit(exitCodeForSignal(signal));
         }
@@ -297,10 +297,10 @@ export async function handleBeastCommand(deps: BeastCommandDeps): Promise<void> 
       process.off('SIGINT', onSigint);
       process.off('SIGTERM', onSigterm);
       process.off('SIGHUP', onSighup);
-      services.dispose();
+      await services.dispose();
     }
     if (ownsControl && !keepServicesAlive) {
-      control?.dispose?.();
+      await control?.dispose?.();
     }
   }
 }

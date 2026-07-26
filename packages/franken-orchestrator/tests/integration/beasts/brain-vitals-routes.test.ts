@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -242,6 +242,19 @@ describe('brain vitals routes', () => {
 
     expect(snapshot.cache.promptTokens).toBe(100);
     expect(details?.tokens.promptTokens).toBe(1_000);
+  });
+
+  it('loads snapshot runs through the bounded definition-window query', async () => {
+    const { repository, service } = createFixture();
+    repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    const listRuns = vi.spyOn(repository, 'listRuns');
+
+    await service.snapshot('reviewer');
+
+    expect(listRuns).not.toHaveBeenCalled();
   });
 
   it('serializes concurrent health persistence and prunes expired resource samples', async () => {
@@ -600,6 +613,16 @@ describe('brain vitals routes', () => {
     Object.assign(span, { startedAt: NOW - 1_000, endedAt: NOW - 1_000 });
     TraceContext.endTrace(trace);
     await observer.flush(trace);
+    await observer.recordResourceSample({
+      agentId: 'reviewer-agent',
+      runId: run.id,
+      pid: process.pid,
+      cpuPercent: 10,
+      rssBytes: 64 * 1024 * 1024,
+      estimatedWatts: 10,
+      estimatedEnergyWh: 0.01,
+      timestamp: NOW - 2,
+    });
     await observer.recordResourceSample({
       agentId: 'reviewer-agent',
       runId: run.id,

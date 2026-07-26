@@ -19,4 +19,5 @@
 - [x] RED→GREEN: filter telemetry windows, serialize health persistence, and prune resource retention.
 - [x] Deduplicate/resiliently stream SSE status events and attribute vitals activity to the producing run.
 - [x] Propagate run/agent identity through CLI phases, telemetry, and resource sampling.
+- [x] RED→GREEN: bound/index per-second snapshot run reads by brain and activity window.
 - [ ] Merge the PR, verify issue #3732 closes, and record final evidence.

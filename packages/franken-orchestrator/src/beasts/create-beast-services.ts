@@ -54,7 +54,7 @@ export interface BeastServiceBundle {
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
   brainVitals: BrainVitalsService;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 type BrainContextRepository = Pick<
@@ -249,11 +249,11 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     eventBus,
     ticketStore,
     brainVitals,
-    dispose: () => {
+    dispose: async () => {
       hiveStatus.close();
       brains.close();
       ticketStore.destroy();
-      void observerAdapter.close();
+      await observerAdapter.close();
       repository.close();
     },
   };

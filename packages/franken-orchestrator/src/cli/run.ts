@@ -1726,7 +1726,7 @@ export async function main(): Promise<void> {
   const session = new Session({
     paths,
     baseBranch,
-    budget: args.budget,
+    budget: runConfig?.budget ?? args.budget,
     provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,

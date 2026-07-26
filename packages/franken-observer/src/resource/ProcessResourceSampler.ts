@@ -2,6 +2,7 @@ import { promisify } from 'node:util';
 import { wallClockNow } from '@franken/types';
 
 export const DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS = 5_000;
+export const DEFAULT_RESOURCE_RETENTION_MS = 24 * 60 * 60 * 1_000;
 export const DEFAULT_IDLE_WATTS = 10;
 export const DEFAULT_TDP_WATTS = 65;
 
@@ -28,6 +29,7 @@ export interface ProcessResourceSampleQuery {
 
 export interface ProcessResourceSampleAdapter {
   recordResourceSample(sample: ProcessResourceSample): Promise<void>;
+  deleteResourceSamplesBefore?(timestamp: number): Promise<number>;
 }
 
 export interface ProcessPowerModel {
@@ -104,6 +106,7 @@ export class ProcessResourceSampler {
   private previousSampleAt: bigint | undefined;
   private previousCpuUsage = process.cpuUsage();
   private previousCpuAt = process.hrtime.bigint();
+  private lastPrunedAt: number | undefined;
 
   constructor(options: ProcessResourceSamplerOptions) {
     if (!Number.isSafeInteger(options.pid) || options.pid <= 0) {
@@ -158,6 +161,13 @@ export class ProcessResourceSampler {
       timestamp,
     };
     this.previousSampleAt = sampledAt;
+    if (
+      this.adapter?.deleteResourceSamplesBefore
+      && (this.lastPrunedAt === undefined || timestamp - this.lastPrunedAt >= DEFAULT_RESOURCE_RETENTION_MS)
+    ) {
+      await this.adapter.deleteResourceSamplesBefore(timestamp - DEFAULT_RESOURCE_RETENTION_MS);
+      this.lastPrunedAt = timestamp;
+    }
     await this.adapter?.recordResourceSample(sample);
     await this.onSample?.(sample);
     return sample;
