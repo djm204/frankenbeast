@@ -140,6 +140,14 @@ describe('LessonEffectivenessTelemetry', () => {
       scope: 'task',
       allowedRepos: undefined,
       allowedTasks: ['task-scoped'],
+      auditTrail: [
+        {
+          changedAt: '2026-07-01T00:00:00.000Z',
+          actor: 'reviewer',
+          toScope: 'task',
+          reason: 'Approved for one-task attribution.',
+        },
+      ],
     };
 
     telemetry.record({
@@ -196,5 +204,91 @@ describe('LessonEffectivenessTelemetry', () => {
         },
       ],
     });
+  });
+
+  it('requires a true majority before recommending promotion or retirement', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const observations = [
+      { taskId: 'task-majority-positive', blockersBefore: 1, blockersAfter: 0 },
+      {
+        taskId: 'task-majority-neutral-a',
+        blockersBefore: 0,
+        blockersAfter: 0,
+      },
+      {
+        taskId: 'task-majority-neutral-b',
+        blockersBefore: 0,
+        blockersAfter: 0,
+      },
+    ] as const;
+
+    for (const [index, observation] of observations.entries()) {
+      telemetry.record({
+        lessonId: 'lesson-majority',
+        lessonScope,
+        injectionContext: {
+          repo: 'djm204/frankenbeast',
+          taskId: observation.taskId,
+        },
+        observedAt: `2026-07-2${index}T00:00:00.000Z`,
+        taskSucceeded: true,
+        blockersBefore: observation.blockersBefore,
+        blockersAfter: observation.blockersAfter,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      });
+    }
+
+    expect(telemetry.report().lessons[0]).toMatchObject({
+      positive: 1,
+      neutral: 2,
+      negative: 0,
+      lifecycleRecommendation: 'monitor',
+    });
+  });
+
+  it('keeps aggregation immutable when a caller mutates the returned event', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const event = telemetry.record({
+      lessonId: 'lesson-immutable',
+      lessonScope,
+      injectionContext: {
+        repo: 'djm204/frankenbeast',
+        taskId: 'task-immutable',
+      },
+      observedAt: '2026-07-23T00:00:00.000Z',
+      taskSucceeded: true,
+      blockersBefore: 1,
+      blockersAfter: 0,
+      reviewFindingCount: 0,
+      userCorrection: false,
+    });
+
+    (event as { outcome: 'negative' }).outcome = 'negative';
+
+    expect(telemetry.report().lessons[0]).toMatchObject({
+      positive: 1,
+      negative: 0,
+      lifecycleRecommendation: 'promote',
+    });
+  });
+
+  it('rejects attribution from a context outside the reviewed lesson scope', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+
+    expect(() =>
+      telemetry.record({
+        lessonId: 'lesson-repo-a-only',
+        lessonScope,
+        injectionContext: { repo: 'other/repo', taskId: 'task-wrong-repo' },
+        observedAt: '2026-07-24T00:00:00.000Z',
+        taskSucceeded: true,
+        blockersBefore: 1,
+        blockersAfter: 0,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      }),
+    ).toThrow('injection context is outside the reviewed lesson scope');
+    expect(telemetry.report().totalEvents).toBe(0);
   });
 });

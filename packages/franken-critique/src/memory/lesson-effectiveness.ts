@@ -1,4 +1,5 @@
 import type {
+  CritiqueLesson,
   LessonEffectivenessEvent,
   LessonEffectivenessOutcome,
   LessonEffectivenessReport,
@@ -8,6 +9,8 @@ import type {
   LessonScopeKind,
   LessonScopeMetadata,
 } from '../types/contracts.js';
+import type { TaskId } from '../types/common.js';
+import { isLessonApplicable } from './lesson-recorder.js';
 
 const LESSON_SCOPE_KINDS: readonly LessonScopeKind[] = [
   'global',
@@ -58,6 +61,13 @@ export class LessonEffectivenessTelemetry {
     const lessonId = requireNonEmptyString(input.lessonId, 'lessonId');
     const lessonScope = normalizeLessonScope(input.lessonScope?.scope);
     const observedAt = normalizeTimestamp(input.observedAt, 'observedAt');
+    const injectionContext = normalizeInjectionContext(input.injectionContext);
+    requireApplicableScope(
+      lessonId,
+      input.lessonScope,
+      injectionContext,
+      observedAt,
+    );
     const blockersBefore = requireCount(input.blockersBefore, 'blockersBefore');
     const blockersAfter = requireCount(input.blockersAfter, 'blockersAfter');
     const reviewFindingCount = requireCount(
@@ -82,7 +92,7 @@ export class LessonEffectivenessTelemetry {
       schemaVersion: 'lesson-effectiveness-event-v1',
       lessonId,
       lessonScope,
-      injectionContext: normalizeInjectionContext(input.injectionContext),
+      injectionContext,
       observedAt,
       outcome,
       signals: {
@@ -93,7 +103,11 @@ export class LessonEffectivenessTelemetry {
         userCorrection: input.userCorrection,
       },
     };
-    this.events.push(event);
+    this.events.push({
+      ...event,
+      injectionContext: { ...event.injectionContext },
+      signals: { ...event.signals },
+    });
     return event;
   }
 
@@ -184,9 +198,38 @@ function toPublicTrend(
 function recommendLifecycle(
   trend: MutableLessonEffectivenessTrend,
 ): LessonLifecycleRecommendation {
-  if (trend.negative > trend.positive) return 'retire';
-  if (trend.positive > trend.negative) return 'promote';
+  if (trend.negative * 2 > trend.observations) return 'retire';
+  if (trend.positive * 2 > trend.observations) return 'promote';
   return 'monitor';
+}
+
+function requireApplicableScope(
+  lessonId: string,
+  lessonScope: LessonScopeMetadata,
+  injectionContext: Omit<LessonInjectionContext, 'now'>,
+  observedAt: string,
+): void {
+  const attributionLesson: CritiqueLesson = {
+    evaluatorName: 'lesson-effectiveness-attribution',
+    failureDescription: lessonId,
+    correctionApplied: 'Effectiveness observation',
+    taskId: (injectionContext.taskId ??
+      lessonScope.provenance.taskId ??
+      'lesson-effectiveness-attribution') as TaskId,
+    timestamp: observedAt,
+    lifecycleStatus: 'active',
+    lessonScope,
+  };
+  if (
+    !isLessonApplicable(attributionLesson, {
+      ...injectionContext,
+      now: observedAt,
+    })
+  ) {
+    throw new RangeError(
+      'Lesson effectiveness injection context is outside the reviewed lesson scope.',
+    );
+  }
 }
 
 function normalizeInjectionContext(
