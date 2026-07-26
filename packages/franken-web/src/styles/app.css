@@ -846,7 +846,6 @@ button {
 .brain-pulse-map header p,
 .brain-pulse-map header small,
 .brain-pulse-map__node small,
-.brain-pulse-map__faculties small,
 .brain-pulse-map__detail small {
   color: var(--text-muted);
   font-size: 0.76rem;
@@ -918,20 +917,6 @@ button {
     box-shadow: 0 0 16px color-mix(in srgb, currentColor 65%, transparent);
     transform: scale(1.025);
   }
-}
-
-.brain-pulse-map__faculties {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-  gap: 0.5rem;
-}
-
-.brain-pulse-map__faculties > span {
-  display: grid;
-  padding: 0.55rem;
-  color: var(--text-subtle);
-  border: 1px dashed var(--border);
-  border-radius: 0.65rem;
 }
 
 .brain-pulse-map__detail {

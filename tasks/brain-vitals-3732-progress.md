@@ -13,7 +13,7 @@
 - [x] Commit as David Mendez, push the unique branch, and open exactly one PR resolving #3732 (PR #3798).
 - [x] Address all 14 findings from the first exact-head Codex round with regression coverage: stable run correlation, production resource samples, preserved budgets, proxy/route auth, exact SSE exemptions, rate limiting, sanitized bounded drill-down responses, brain-scoped churn, normalized IDs, bounded history, retry-window accounting, and cheap event filtering.
 - [x] Verify 151 focused tests, package typecheck/lint/build, and the full root test suite (10 packages; 4,571 orchestrator tests).
-- [ ] Complete the final exact-head Codex review round, resolve all threads, and verify exact-head CI.
+- [x] Complete the final bounded exact-head review and verify exact-head CI: reviewed head `9f9f75445cbbbd65dfb28d00f649d9312ca7796b`; accepted at-cap audit; 0/42 unresolved threads; all four checks passed in https://github.com/djm204/frankenbeast/actions/runs/30198649450.
 - [x] RED→GREEN: represent missing container resource telemetry as unavailable and exclude it from health scoring.
 - [x] RED→GREEN: persist production traces under the Beast run ID in the daemon telemetry database.
 - [x] RED→GREEN: filter telemetry windows, serialize health persistence, and prune resource retention.
@@ -22,4 +22,4 @@
 - [x] RED→GREEN: bound/index per-second snapshot run reads by brain and activity window.
 - [x] RED→GREEN: address invocation-4 findings for awaited chat disposal, lazy legacy trace lookup, normalized SSE activity filtering, failure-safe adapter close, and container telemetry-path validation.
 - [x] Address invocation-5 findings for coalesced SSE snapshots, telemetry override propagation, per-run pressure aggregation, span-based cache activity, bounded fingerprints, and budget-matched burn ratios.
-- [ ] Merge the PR, verify issue #3732 closes, and record final evidence.
+- [x] Squash-merge PR https://github.com/djm204/frankenbeast/pull/3798 as `a26a390a58f7f678dc1ad937ef55bd1015d56daf` and verify https://github.com/djm204/frankenbeast/issues/3732 is closed. Reviewed-head and squash diffs have identical stable patch id `5acb4b5951b6d9e0932339e571d7763baf6bb515` despite an unrelated intervening merge-parent commit.
