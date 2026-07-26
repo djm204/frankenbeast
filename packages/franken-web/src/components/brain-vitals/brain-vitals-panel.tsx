@@ -155,13 +155,16 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         let nextRuns = newestPage.runs;
         let backfillError: unknown;
         if (initial) nextRunCursorRef.current = newestPage.nextCursor;
-        else if (nextRunCursorRef.current) {
-          try {
-            const backfillPage = await client.listBrainVitalsRuns(100, nextRunCursorRef.current);
-            nextRunCursorRef.current = backfillPage.nextCursor;
-            nextRuns = [...nextRuns, ...backfillPage.runs];
-          } catch (loadError) {
-            backfillError = loadError;
+        else {
+          if (!nextRunCursorRef.current) nextRunCursorRef.current = newestPage.nextCursor;
+          if (nextRunCursorRef.current) {
+            try {
+              const backfillPage = await client.listBrainVitalsRuns(100, nextRunCursorRef.current);
+              nextRunCursorRef.current = backfillPage.nextCursor;
+              nextRuns = [...nextRuns, ...backfillPage.runs];
+            } catch (loadError) {
+              backfillError = loadError;
+            }
           }
         }
         if (!active || generationRef.current !== generation) return;

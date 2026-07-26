@@ -194,11 +194,12 @@ describe('BrainVitalsPanel', () => {
       if (timeout === 10_000) poll = callback as () => void;
       return 1 as unknown as ReturnType<typeof setInterval>;
     });
-    const api = client({
-      listBrainVitalsRuns: vi.fn()
-        .mockResolvedValueOnce({ runs: [] })
-        .mockResolvedValue({ runs: [detail.run] }),
-    });
+    const plannerRun = { ...detail.run, id: 'run-2', definitionId: 'planner' };
+    const listBrainVitalsRuns = vi.fn()
+      .mockResolvedValueOnce({ runs: [] })
+      .mockResolvedValueOnce({ runs: [detail.run], nextCursor: 'page-2' })
+      .mockResolvedValueOnce({ runs: [plannerRun] });
+    const api = client({ listBrainVitalsRuns });
     render(<BrainVitalsPanel client={api} />);
 
     expect(await screen.findByText(/No Beast runs exist yet/)).toBeTruthy();
@@ -207,7 +208,9 @@ describe('BrainVitalsPanel', () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole('region', { name: 'Brain Vitals for reviewer' })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'Brain Vitals for planner' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'reviewer' })).toBeTruthy();
+    expect(listBrainVitalsRuns).toHaveBeenLastCalledWith(100, 'page-2');
   });
 
   it('discovers paginated runs one bounded page per refresh and preserves earlier pages', async () => {
@@ -296,6 +299,37 @@ describe('BrainVitalsPanel', () => {
     now += 10_001;
     act(() => pushActivity({ dimension: 'churn', kind: 'run.completed', runId: 'run-1', timestamp: 4 }));
     await waitFor(() => expect(listBrainVitalsRuns).toHaveBeenCalledTimes(2));
+  });
+
+  it('cycles historical pages so cached run statuses keep updating', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, timeout) => {
+      if (timeout === 10_000) poll = callback as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const newestRun = { ...detail.run, id: 'run-new' };
+    const olderRunning = { ...detail.run, id: 'run-old', status: 'running' as const };
+    const olderCompleted = { ...olderRunning, status: 'completed' as const };
+    let backfillCount = 0;
+    const listBrainVitalsRuns = vi.fn(async (_limit?: number, cursor?: string) => {
+      if (!cursor) return { runs: [newestRun], nextCursor: 'page-2' };
+      backfillCount += 1;
+      return { runs: [backfillCount === 1 ? olderRunning : olderCompleted] };
+    });
+    render(<BrainVitalsPanel client={client({ listBrainVitalsRuns })} />);
+    await screen.findByRole('button', { name: 'Open vitals for run run-new' });
+
+    await act(async () => {
+      poll?.();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'Open vitals for run run-old' }).closest('li')?.textContent).toContain('running');
+
+    await act(async () => {
+      poll?.();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'Open vitals for run run-old' }).closest('li')?.textContent).toContain('completed');
   });
 
   it('clears a recovered run-discovery error', async () => {
