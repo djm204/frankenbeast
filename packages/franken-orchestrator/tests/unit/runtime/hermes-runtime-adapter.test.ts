@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { HermesRuntimeAdapter } from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
-import { RuntimeCursorError, RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
+import {
+  RuntimeActionRequestSchema,
+  RuntimeCursorError,
+  RuntimeSnapshotSchema,
+} from '../../../src/runtime/index.js';
 
 const tempHomes: string[] = [];
 const inheritedKanbanDb = process.env['HERMES_KANBAN_DB'];
@@ -112,6 +116,151 @@ describe('HermesRuntimeAdapter', () => {
     const snapshot = await new HermesRuntimeAdapter({ env: { HOME: home } }).getSnapshot();
 
     expect(snapshot.state).toBe('ready');
+  });
+
+  it('executes supported blocker actions with fixed argv and verifies the postcondition', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    let status = 'ready';
+    const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
+    const runCommand = async (command: string, args: readonly string[], options: unknown) => {
+      calls.push({ command, args, options });
+      if (args.includes('block')) status = 'blocked';
+      return args.includes('show')
+        ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+        : { stdout: '', stderr: '', exitCode: 0 };
+    };
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, runCommand });
+
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      capabilities: expect.objectContaining({
+        blockers: { status: 'supported' },
+        approvals: { status: 'unsupported', reason: expect.any(String) },
+      }),
+    }));
+    const result = await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:one',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'needs-input', reason: 'Operator requested input',
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'applied',
+      audit: expect.objectContaining({ previousState: 'ready', currentState: 'blocked' }),
+    }));
+    expect(calls.map(({ command, args }) => [command, args])).toEqual([
+      ['hermes', ['kanban', 'show', '--json', 't_deadbeef']],
+      ['hermes', ['kanban', 'block', '--kind', 'needs_input', 't_deadbeef', 'Operator requested input']],
+      ['hermes', ['kanban', 'show', '--json', 't_deadbeef']],
+    ]);
+    expect(calls.every(({ options }) => JSON.stringify(options).includes(home))).toBe(true);
+    expect(JSON.stringify(calls)).not.toContain('shell');
+  });
+
+  it('resolves blockers through Hermes unblock and verifies the task is no longer blocked', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    let status = 'blocked';
+    const calls: string[][] = [];
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        calls.push([...args]);
+        if (args.includes('unblock')) status = 'ready';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    const result = await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'unblock:t_deadbeef:one',
+      action: {
+        type: 'blocker.resolve', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        reason: 'Input supplied',
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'applied', audit: expect.objectContaining({ previousState: 'blocked', currentState: 'ready' }),
+    }));
+    expect(calls).toContainEqual(['kanban', 'unblock', '--reason', 'Input supplied', 't_deadbeef']);
+  });
+
+  it('translates task pause into the supported Hermes schedule operation', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    let status = 'ready';
+    const calls: string[][] = [];
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        calls.push([...args]);
+        if (args.includes('schedule')) status = 'scheduled';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    const result = await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'pause:t_deadbeef:one',
+      action: {
+        type: 'task.pause', workspaceId: 'hermes:alpha', taskId: 'hermes:alpha:t_deadbeef',
+        reason: 'Maintenance window',
+      },
+    }));
+
+    expect(result).toEqual(expect.objectContaining({ status: 'applied' }));
+    expect(calls).toContainEqual(['kanban', '--board', 'alpha', 'schedule', 't_deadbeef', 'Maintenance window']);
+  });
+
+  it('maps resume, cancellation, and the allowlisted promotion policy to fixed Hermes operations', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    let status = 'scheduled';
+    const calls: string[][] = [];
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        calls.push([...args]);
+        if (args.includes('unblock')) status = 'ready';
+        if (args.includes('archive')) status = 'archived';
+        if (args.includes('promote')) status = 'ready';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+    const base = {
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'runtime:t_deadbeef:one',
+    };
+
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      ...base,
+      action: { type: 'task.resume', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef' },
+    }));
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      ...base,
+      action: { type: 'task.cancel', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef' },
+    }));
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      ...base,
+      action: {
+        type: 'policy.apply', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        policy: 'promote-task', reason: 'Dependencies satisfied',
+      },
+    }));
+
+    expect(calls).toContainEqual(['kanban', 'unblock', 't_deadbeef']);
+    expect(calls).toContainEqual(['kanban', 'archive', 't_deadbeef']);
+    expect(calls).toContainEqual(['kanban', 'promote', '--json', 't_deadbeef', 'Dependencies satisfied']);
   });
 
   it('reports missing configuration and incompatible schemas honestly instead of throwing', async () => {
@@ -1738,7 +1887,7 @@ describe('HermesRuntimeAdapter', () => {
         snapshot: { status: 'supported' },
         streaming: { status: 'supported' },
         approvals: { status: 'unsupported' },
-        pause: { status: 'unsupported' },
+        pause: { status: 'supported' },
       },
     });
     expect(snapshot.state).toBe('ready');

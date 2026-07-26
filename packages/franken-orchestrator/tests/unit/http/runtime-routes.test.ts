@@ -6,6 +6,7 @@ import {
   RuntimeAdapterRegistry,
   RuntimeCursorError,
   RuntimeEventPageSchema,
+  RuntimeActionResultSchema,
   RuntimeProviderSchema,
   RuntimeSnapshotSchema,
   type RuntimeAdapter,
@@ -52,6 +53,18 @@ function runtimeAdapter(): RuntimeAdapter {
     getEvents: vi.fn(async ({ cursor } = {}) => RuntimeEventPageSchema.parse(
       cursor ? { events: [], nextCursor: cursor } : { events: [event], nextCursor: event.cursor },
     )),
+    executeAction: vi.fn(async (request) => RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: 'hermes',
+      correlationId: request.correlationId,
+      reason: 'Approval decisions are unavailable',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'unsupported',
+      },
+    })),
     validateEventCursor: vi.fn((cursor) => {
       if (cursor === 'malformed') {
         throw Object.assign(new Error('Invalid runtime event cursor'), { code: 'INVALID_CURSOR' });
@@ -64,8 +77,12 @@ function createRoutes() {
   const ticketStore = new SseConnectionTicketStore();
   stores.push(ticketStore);
   const adapter = runtimeAdapter();
+  const actionAudit = vi.fn();
+  const actionGovernor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
   return {
     adapter,
+    actionAudit,
+    actionGovernor,
     app: createRuntimeRoutes({
       registry: new RuntimeAdapterRegistry([adapter]),
       operatorToken: 'operator-secret',
@@ -73,6 +90,8 @@ function createRoutes() {
       ticketStore,
       pollIntervalMs: 10,
       heartbeatIntervalMs: 20,
+      actionAudit,
+      actionGovernor,
     }),
   };
 }
@@ -82,6 +101,126 @@ function authHeaders(): Record<string, string> {
 }
 
 describe('smart-swarm runtime routes', () => {
+  it('fails closed through the governor before destructive runtime actions', async () => {
+    const { app, adapter, actionGovernor, actionAudit } = createRoutes();
+    const describe = await adapter.describe();
+    vi.mocked(adapter.describe).mockResolvedValue({
+      ...describe,
+      capabilities: { ...describe.capabilities, cancellation: { status: 'supported' } },
+    });
+    actionGovernor.requestApproval.mockResolvedValueOnce({ decision: 'rejected', reason: 'Human approval denied' });
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'cancel:t_deadbeef:one',
+        action: {
+          type: 'task.cancel', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          reason: 'token=must-not-enter-governor',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: expect.objectContaining({ status: 'rejected' }) });
+    expect(actionGovernor.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'hermes:global:t_deadbeef', requiresHitl: true,
+    }));
+    expect(JSON.stringify(actionGovernor.requestApproval.mock.calls)).not.toContain('must-not-enter-governor');
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'rejected' }));
+  });
+
+  it('deduplicates concurrent action retries and emits redacted causation-aware audit evidence', async () => {
+    const { app, adapter, actionAudit } = createRoutes();
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'hermes',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied', previousState: 'ready', currentState: 'blocked',
+      },
+    }));
+    const body = JSON.stringify({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      idempotencyKey: 'block:t_deadbeef:one',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'needs-input', reason: 'token=do-not-log',
+      },
+    });
+    const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+    });
+
+    const [first, replay] = await Promise.all([request(), request()]);
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({ replayed: true }) });
+    expect(actionAudit).toHaveBeenCalledOnce();
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      actionType: 'blocker.add',
+    }));
+    expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-log');
+  });
+
+  it('checks adapter action support and returns a typed unsupported response without side effects', async () => {
+    const { app, adapter } = createRoutes();
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'approval:one',
+        action: {
+          type: 'approval.resolve',
+          workspaceId: 'hermes:global',
+          approvalId: 'approval-1',
+          decision: 'approve',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({ status: 'unsupported', correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566' }),
+    });
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('returns a redacted typed failure and audits failed provider mutations', async () => {
+    const { app, adapter, actionAudit } = createRoutes();
+    vi.mocked(adapter.executeAction).mockRejectedValueOnce(new Error('secret command output API_KEY=do-not-leak'));
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:failed',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: expect.objectContaining({
+      status: 'failed', reason: 'Runtime provider action failed',
+    }) });
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+    expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-leak');
+  });
+
   it('requires operator auth and serves provider-neutral provider and snapshot DTOs', async () => {
     const { app, adapter } = createRoutes();
     expect((await app.request('/v1/smart-swarm/providers')).status).toBe(401);

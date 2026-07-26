@@ -15,6 +15,10 @@ export type {
 } from './codex/codex-runtime-adapter.js';
 export {
   RuntimeAgentSchema,
+  RuntimeActionAuditSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
+  RuntimeActionSchema,
   RuntimeApprovalSchema,
   RuntimeBlockerSchema,
   RuntimeCapabilitiesSchema,
@@ -31,6 +35,10 @@ export {
 } from './runtime-schemas.js';
 export type {
   RuntimeEvent,
+  RuntimeAction,
+  RuntimeActionAudit,
+  RuntimeActionRequest,
+  RuntimeActionResult,
   RuntimeEventPage,
   RuntimeAgent,
   RuntimeApproval,

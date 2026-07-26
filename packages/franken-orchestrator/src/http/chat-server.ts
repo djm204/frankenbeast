@@ -18,6 +18,8 @@ import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
+import type { RuntimeActionAuditEvent } from './routes/runtime-routes.js';
+import type { IGovernorModule } from '../deps.js';
 import { attachChatWebSocketServer, type AttachChatWebSocketServerOptions, type ChatSocketMessageRateLimitOptions } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -74,6 +76,8 @@ export interface StartChatServerOptions {
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
   chatRateLimit?: ChatRateLimitOptions;
   chatMessageRateLimit?: ChatSocketMessageRateLimitOptions;
+  runtimeActionGovernor?: IGovernorModule;
+  runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
 }
 
 export interface ChatServerHandle {
@@ -397,6 +401,8 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
     ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+    ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
+    ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
     chatRateLimiter,
     chatMutationAdmission,
     approvalAuditLog,
