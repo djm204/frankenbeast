@@ -158,6 +158,18 @@ describe('smart-swarm runtime routes', () => {
 
     expect(first.status).toBe(401);
     expect(second.status).toBe(429);
+
+    const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
+    const { connectionId } = await ticketResponse.json() as { connectionId: string };
+    const valid = await app.request(`/v1/smart-swarm/providers/hermes/events/${connectionId}`, {
+      headers: { cookie },
+    });
+    expect(valid.status).toBe(200);
+    await valid.body!.cancel();
   });
 
   it('rejects a malformed SSE cursor before consuming its one-shot ticket', async () => {

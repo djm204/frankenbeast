@@ -122,14 +122,17 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     }
     return auth(c, next);
   });
-  app.use('/v1/smart-swarm/*', requireBeastRateLimit(
+  const sharedRateLimit = requireBeastRateLimit(
     limiter,
-    (authHeader, path) => authHeader
-      ? `${authHeader}:${path}`
-      : isStreamPath(path)
-        ? 'ticket:runtime-stream'
-        : `ticket:${path}`,
-  ));
+    (authHeader, path) => authHeader ? `${authHeader}:${path}` : `ticket:${path}`,
+  );
+  app.use('/v1/smart-swarm/*', async (c, next) => {
+    if (c.req.method === 'GET' && isStreamPath(new URL(c.req.url).pathname)) {
+      await next();
+      return;
+    }
+    return sharedRateLimit(c, next);
+  });
 
   app.get(BASE_PATH, async (c) => c.json({ data: runtimeResponse(await deps.registry.list()) }));
 
@@ -186,6 +189,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const adapter = adapterOr404(deps.registry, providerId);
     const ticket = getCookie(c, TICKET_COOKIE);
     if (!ticket) {
+      if (!limiter.take('ticket:runtime-stream:invalid').allowed) {
+        throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+      }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
     const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
@@ -193,6 +199,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const ticketStatus = deps.ticketStore.consume(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
     if (ticketStatus === 'reused') return c.body(null, 204);
     if (ticketStatus === 'invalid') {
+      if (!limiter.take('ticket:runtime-stream:invalid').allowed) {
+        throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+      }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
     const workspaceId = c.req.query('workspaceId');
@@ -212,7 +221,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           }));
           for (const event of page.events) {
             await stream.writeSSE({
-              id: event.cursor,
+              id: page.nextCursor ?? event.cursor,
               event: 'activity',
               data: JSON.stringify(runtimeResponse(event)),
             });
