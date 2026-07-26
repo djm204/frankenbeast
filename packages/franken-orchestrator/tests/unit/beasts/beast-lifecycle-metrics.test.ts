@@ -37,6 +37,11 @@ describe('BeastLifecycleMetrics', () => {
       status: 'completed',
       startedAt: '2026-07-25T00:10:01.000Z',
       finishedAt: '2026-07-25T00:10:06.000Z',
+      priorAttempts: [{
+        status: 'failed',
+        startedAt: '2026-07-25T00:08:00.000Z',
+        finishedAt: '2026-07-25T00:08:03.000Z',
+      }],
     });
     createRun(repository, {
       definitionId: 'alpha',
@@ -72,8 +77,13 @@ describe('BeastLifecycleMetrics', () => {
       startedAt: '2026-07-24T23:59:01.000Z',
       finishedAt: '2026-07-24T23:59:02.000Z',
     });
+    createRun(repository, {
+      definitionId: 'alpha',
+      createdAt: '2026-07-25T00:40:00.000Z',
+      status: 'queued',
+    });
 
-    const metrics = new BeastLifecycleMetrics(() => repository!.listRuns());
+    const metrics = new BeastLifecycleMetrics(window => repository!.listLifecycleAttempts(window));
     const result = metrics.query({
       from: '2026-07-25T00:00:00.000Z',
       to: '2026-07-25T01:00:00.000Z',
@@ -82,19 +92,19 @@ describe('BeastLifecycleMetrics', () => {
     expect(result.definitions).toEqual([
       {
         definitionId: 'alpha',
-        spawnCount: 5,
-        spawnRatePerMinute: 5 / 60,
+        spawnCount: 6,
+        spawnRatePerMinute: 6 / 60,
         completionCount: 2,
-        failureCount: 1,
+        failureCount: 2,
         stopCount: 1,
         activeCount: 1,
-        completionRate: 0.4,
-        failureRate: 0.2,
-        stopRate: 0.2,
+        completionRate: 2 / 6,
+        failureRate: 2 / 6,
+        stopRate: 1 / 6,
         runDurationMs: {
-          count: 4,
+          count: 5,
           min: 1_000,
-          p50: 2_000,
+          p50: 3_000,
           p95: 5_000,
           max: 5_000,
         },
@@ -127,6 +137,8 @@ describe('BeastLifecycleMetrics', () => {
 
     expect(() => metrics.query({ from: 'not-a-date', to: '2026-07-25T01:00:00.000Z' }))
       .toThrow(/valid ISO timestamps/i);
+    expect(() => metrics.query({ from: '07/25/2026', to: '2026-07-25T01:00:00.000Z' }))
+      .toThrow(/valid ISO timestamps/i);
     expect(() => metrics.query({
       from: '2026-07-25T01:00:00.000Z',
       to: '2026-07-25T00:00:00.000Z',
@@ -158,7 +170,9 @@ describe('BeastLifecycleMetrics', () => {
   });
 
   it('does not silently discard orphan sweeps from a selected window', () => {
-    const metrics = new BeastLifecycleMetrics(() => []);
+    const metrics = new BeastLifecycleMetrics(() => [], {
+      now: () => '2026-07-25T00:31:00.000Z',
+    });
     for (let index = 0; index < 10_001; index += 1) {
       metrics.recordOrphanProcessSwept('2026-07-25T00:30:00.000Z');
     }
@@ -167,6 +181,20 @@ describe('BeastLifecycleMetrics', () => {
       from: '2026-07-25T00:00:00.000Z',
       to: '2026-07-25T01:00:00.000Z',
     }).orphanedProcessCount).toBe(10_001);
+  });
+
+  it('evicts orphan sweep timestamps outside the configured retention window', () => {
+    const metrics = new BeastLifecycleMetrics(() => [], {
+      now: () => '2026-07-26T00:00:00.000Z',
+      orphanRetentionMs: 60 * 60 * 1_000,
+    });
+    metrics.recordOrphanProcessSwept('2026-07-25T22:00:00.000Z');
+    metrics.recordOrphanProcessSwept('2026-07-25T23:30:00.000Z');
+
+    expect(metrics.query({
+      from: '2026-07-25T00:00:00.000Z',
+      to: '2026-07-26T00:00:01.000Z',
+    }).orphanedProcessCount).toBe(1);
   });
 });
 
@@ -178,6 +206,11 @@ function createRun(
     status: BeastRunStatus;
     startedAt?: string;
     finishedAt?: string;
+    priorAttempts?: Array<{
+      status: BeastRunStatus;
+      startedAt: string;
+      finishedAt: string;
+    }>;
   },
 ): void {
   const run = repository.createRun({
@@ -189,9 +222,26 @@ function createRun(
     dispatchedByUser: 'test',
     createdAt: input.createdAt,
   });
-  repository.updateRun(run.id, {
-    status: input.status,
-    ...(input.startedAt ? { startedAt: input.startedAt } : {}),
-    ...(input.finishedAt ? { finishedAt: input.finishedAt } : {}),
-  });
+  for (const prior of input.priorAttempts ?? []) {
+    const attempt = repository.createAttempt(run.id, {
+      status: 'running',
+      startedAt: prior.startedAt,
+    });
+    repository.updateAttempt(attempt.id, {
+      status: prior.status,
+      finishedAt: prior.finishedAt,
+    });
+  }
+  if (input.startedAt) {
+    const attempt = repository.createAttempt(run.id, {
+      status: input.status,
+      startedAt: input.startedAt,
+    });
+    if (input.finishedAt) {
+      repository.updateAttempt(attempt.id, {
+        status: input.status,
+        finishedAt: input.finishedAt,
+      });
+    }
+  }
 }

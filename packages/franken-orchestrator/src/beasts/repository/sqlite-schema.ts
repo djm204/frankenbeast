@@ -39,6 +39,8 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_beast_run_attempts_run_id_attempt_number
     ON beast_run_attempts(run_id, attempt_number)`,
+  `CREATE INDEX IF NOT EXISTS idx_beast_run_attempts_started_at_run_id
+    ON beast_run_attempts(started_at, run_id) WHERE started_at IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS beast_run_events (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,

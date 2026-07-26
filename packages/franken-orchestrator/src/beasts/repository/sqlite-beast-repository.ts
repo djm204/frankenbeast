@@ -6,6 +6,7 @@ import type {
   BeastDispatchSource,
   BeastExecutionMode,
   BeastInterviewSession,
+  BeastLifecycleAttempt,
   BeastRun,
   BeastRunAttempt,
   BeastRunEvent,
@@ -134,6 +135,13 @@ type BeastAttemptRow = {
   exit_code: number | null;
   stop_reason: string | null;
   executor_metadata: string | null;
+};
+
+type BeastLifecycleAttemptRow = {
+  definition_id: string;
+  status: BeastRunStatus;
+  started_at: string;
+  finished_at: string | null;
 };
 
 type BeastEventRow = {
@@ -497,6 +505,22 @@ export class SQLiteBeastRepository {
       'SELECT * FROM beast_run_attempts WHERE run_id = ? ORDER BY attempt_number ASC',
     ).all(runId) as BeastAttemptRow[];
     return mapRowsRecoveringCorruptJson(rows, mapAttempt, options);
+  }
+
+  listLifecycleAttempts(window: { readonly from: string; readonly to: string }): BeastLifecycleAttempt[] {
+    const rows = this.db.prepare(
+      `SELECT runs.definition_id, attempts.status, attempts.started_at, attempts.finished_at
+         FROM beast_run_attempts AS attempts
+         JOIN beast_runs AS runs ON runs.id = attempts.run_id
+        WHERE attempts.started_at >= ? AND attempts.started_at < ?
+        ORDER BY attempts.started_at ASC, attempts.id ASC`,
+    ).all(window.from, window.to) as BeastLifecycleAttemptRow[];
+    return rows.map(row => ({
+      definitionId: row.definition_id,
+      status: row.status,
+      startedAt: row.started_at,
+      ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+    }));
   }
 
   getAttempt(attemptId: string, options: CorruptJsonRecoveryOptions = {}): BeastRunAttempt | undefined {

@@ -1,4 +1,4 @@
-import type { BeastRun } from '../types.js';
+import type { BeastLifecycleAttempt } from '../types.js';
 
 export interface BeastLifecycleMetricsWindow {
   readonly from: string;
@@ -35,6 +35,7 @@ export interface BeastLifecycleMetricsSnapshot {
 
 export interface BeastLifecycleMetricsOptions {
   readonly now?: (() => string) | undefined;
+  readonly orphanRetentionMs?: number | undefined;
 }
 
 interface ParsedWindow {
@@ -44,48 +45,58 @@ interface ParsedWindow {
 }
 
 const isoNow = (): string => new Date().toISOString();
+const DEFAULT_ORPHAN_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const ISO_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
 /**
- * Computes lifecycle churn from persisted Beast run records and process-local
- * orphan-sweep observations. Runs are grouped into creation-time cohorts so
- * outcome rates always use the matching spawn count as their denominator.
+ * Computes lifecycle churn from persisted Beast attempts and process-local
+ * orphan-sweep observations. Attempts are grouped into start-time cohorts so
+ * retries and outcome rates use the matching spawn count as their denominator.
  */
 export class BeastLifecycleMetrics {
   private readonly orphanSweepTimes: number[] = [];
   private readonly now: () => string;
+  private readonly orphanRetentionMs: number;
 
   constructor(
-    private readonly listRuns: () => readonly BeastRun[],
+    private readonly listAttempts: (window: BeastLifecycleMetricsWindow) => readonly BeastLifecycleAttempt[],
     options: BeastLifecycleMetricsOptions = {},
   ) {
     this.now = options.now ?? isoNow;
+    this.orphanRetentionMs = options.orphanRetentionMs ?? DEFAULT_ORPHAN_RETENTION_MS;
+    if (!Number.isFinite(this.orphanRetentionMs) || this.orphanRetentionMs <= 0) {
+      throw new RangeError('Orphan sweep retention must be a positive number of milliseconds');
+    }
   }
 
   recordOrphanProcessSwept(at: string = this.now()): void {
-    const timestamp = Date.parse(at);
-    if (!Number.isFinite(timestamp)) {
+    const timestamp = parseIsoTimestamp(at);
+    if (timestamp === undefined) {
       throw new RangeError('Orphan sweep timestamp must be a valid ISO timestamp');
     }
     this.orphanSweepTimes.push(timestamp);
+    this.pruneOrphanSweeps();
   }
 
   query(window: BeastLifecycleMetricsWindow): BeastLifecycleMetricsSnapshot {
     const parsedWindow = parseWindow(window);
-    const cohorts = new Map<string, BeastRun[]>();
+    const cohorts = new Map<string, BeastLifecycleAttempt[]>();
 
-    for (const run of this.listRuns()) {
-      const createdAt = Date.parse(run.createdAt);
-      if (!Number.isFinite(createdAt) || createdAt < parsedWindow.from || createdAt >= parsedWindow.to) {
+    for (const attempt of this.listAttempts(window)) {
+      const startedAt = parseIsoTimestamp(attempt.startedAt);
+      if (startedAt === undefined || startedAt < parsedWindow.from || startedAt >= parsedWindow.to) {
         continue;
       }
-      const cohort = cohorts.get(run.definitionId) ?? [];
-      cohort.push(run);
-      cohorts.set(run.definitionId, cohort);
+      const cohort = cohorts.get(attempt.definitionId) ?? [];
+      cohort.push(attempt);
+      cohorts.set(attempt.definitionId, cohort);
     }
 
     const definitions = [...cohorts.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([definitionId, runs]) => aggregateDefinition(definitionId, runs, parsedWindow.durationMinutes));
+      .map(([definitionId, attempts]) => aggregateDefinition(definitionId, attempts, parsedWindow.durationMinutes));
+
+    this.pruneOrphanSweeps();
 
     return {
       window,
@@ -95,12 +106,27 @@ export class BeastLifecycleMetrics {
       ).length,
     };
   }
+
+  private pruneOrphanSweeps(): void {
+    const now = parseIsoTimestamp(this.now());
+    if (now === undefined) {
+      throw new RangeError('Lifecycle metrics clock must return a valid ISO timestamp');
+    }
+    const cutoff = now - this.orphanRetentionMs;
+    let retainedFrom = 0;
+    while (retainedFrom < this.orphanSweepTimes.length && this.orphanSweepTimes[retainedFrom]! < cutoff) {
+      retainedFrom += 1;
+    }
+    if (retainedFrom > 0) {
+      this.orphanSweepTimes.splice(0, retainedFrom);
+    }
+  }
 }
 
 function parseWindow(window: BeastLifecycleMetricsWindow): ParsedWindow {
-  const from = Date.parse(window.from);
-  const to = Date.parse(window.to);
-  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+  const from = parseIsoTimestamp(window.from);
+  const to = parseIsoTimestamp(window.to);
+  if (from === undefined || to === undefined) {
     throw new RangeError('Lifecycle metrics window must contain valid ISO timestamps');
   }
   if (from >= to) {
@@ -111,16 +137,19 @@ function parseWindow(window: BeastLifecycleMetricsWindow): ParsedWindow {
 
 function aggregateDefinition(
   definitionId: string,
-  runs: readonly BeastRun[],
+  attempts: readonly BeastLifecycleAttempt[],
   durationMinutes: number,
 ): BeastDefinitionLifecycleAggregate {
-  const spawnCount = runs.length;
-  const completionCount = countStatus(runs, 'completed');
-  const failureCount = countStatus(runs, 'failed');
-  const stopCount = countStatus(runs, 'stopped');
-  const durations = runs.flatMap(run => {
-    if (!run.startedAt || !run.finishedAt) return [];
-    const duration = Date.parse(run.finishedAt) - Date.parse(run.startedAt);
+  const spawnCount = attempts.length;
+  const completionCount = countStatus(attempts, 'completed');
+  const failureCount = countStatus(attempts, 'failed');
+  const stopCount = countStatus(attempts, 'stopped');
+  const durations = attempts.flatMap(attempt => {
+    if (!attempt.finishedAt) return [];
+    const startedAt = parseIsoTimestamp(attempt.startedAt);
+    const finishedAt = parseIsoTimestamp(attempt.finishedAt);
+    if (startedAt === undefined || finishedAt === undefined) return [];
+    const duration = finishedAt - startedAt;
     return Number.isFinite(duration) && duration >= 0 ? [duration] : [];
   });
 
@@ -139,8 +168,16 @@ function aggregateDefinition(
   };
 }
 
-function countStatus(runs: readonly BeastRun[], status: BeastRun['status']): number {
-  return runs.filter(run => run.status === status).length;
+function countStatus(attempts: readonly BeastLifecycleAttempt[], status: BeastLifecycleAttempt['status']): number {
+  return attempts.filter(attempt => attempt.status === status).length;
+}
+
+function parseIsoTimestamp(value: string): number | undefined {
+  if (!ISO_UTC_PATTERN.test(value)) return undefined;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  const normalized = value.includes('.') ? value : value.replace('Z', '.000Z');
+  return new Date(timestamp).toISOString() === normalized ? timestamp : undefined;
 }
 
 function durationDistribution(values: readonly number[]): BeastRunDurationDistribution {

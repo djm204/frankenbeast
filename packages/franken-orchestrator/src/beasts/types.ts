@@ -83,6 +83,14 @@ export interface BeastRunAttempt {
   readonly executorMetadata?: Readonly<Record<string, unknown>> | undefined;
 }
 
+/** Lightweight persisted attempt fields used by lifecycle telemetry queries. */
+export interface BeastLifecycleAttempt {
+  readonly definitionId: string;
+  readonly status: BeastRunStatus;
+  readonly startedAt: string;
+  readonly finishedAt?: string | undefined;
+}
+
 export interface BeastRunEvent {
   readonly id: string;
   readonly runId: string;

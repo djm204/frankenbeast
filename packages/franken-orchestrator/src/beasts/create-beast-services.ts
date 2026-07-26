@@ -121,7 +121,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
-  const lifecycleMetrics = new BeastLifecycleMetrics(() => repository.listRuns({ recoverCorruptJson: true }));
+  const lifecycleMetrics = new BeastLifecycleMetrics(window => repository.listLifecycleAttempts(window));
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
