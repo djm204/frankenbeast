@@ -14,9 +14,18 @@ function isAbsoluteHostPath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\');
 }
 
+const EMBEDDED_HOST_PATH_RE = /(^|\s)(\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+
+function redactEmbeddedAbsoluteHostPaths(value: string): string {
+  return value.replace(
+    EMBEDDED_HOST_PATH_RE,
+    (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
+  );
+}
+
 export function redactAbsoluteHostPathValues(value: unknown): unknown {
   if (typeof value === 'string') {
-    return isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : value;
+    return isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : redactEmbeddedAbsoluteHostPaths(value);
   }
   if (Array.isArray(value)) {
     return value.map(redactAbsoluteHostPathValues);

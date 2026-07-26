@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -124,9 +124,43 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot).toEqual(expect.objectContaining({
       state: 'ready',
       tasks: expect.objectContaining({ data: [expect.objectContaining({ id: 'hermes:global:legacy-task' })] }),
-      runs: expect.objectContaining({ data: [expect.objectContaining({ id: 'hermes:global:run:1' })] }),
+      runs: expect.objectContaining({
+        data: [expect.objectContaining({ id: 'hermes:global:run:1', state: 'queued' })],
+      }),
     }));
     expect(existsSync(`${dbPath}-wal`)).toBe(false);
+  });
+
+  it('reports unreadable database content as unavailable rather than schema incompatible', async () => {
+    const home = await createHome();
+    await writeFile(join(home, 'kanban.db'), 'not a sqlite database');
+
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'unavailable' }),
+    }));
+    await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({ state: 'unavailable' }));
+  });
+
+  it('does not advertise log support when canonical log records are not exposed', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+
+    await expect(new HermesRuntimeAdapter({ hermesHome: home }).describe()).resolves.toEqual(
+      expect.objectContaining({
+        capabilities: expect.objectContaining({
+          logs: expect.objectContaining({ status: 'unsupported' }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects malformed event cursors with the provider-neutral cursor error code', async () => {
+    const adapter = new HermesRuntimeAdapter({ env: {} });
+
+    await expect(adapter.getEvents({ cursor: 'malformed' })).rejects.toMatchObject({
+      code: 'INVALID_CURSOR',
+    });
   });
 
   it('degrades a workspace with corrupt required timestamps instead of fabricating epoch activity', async () => {
