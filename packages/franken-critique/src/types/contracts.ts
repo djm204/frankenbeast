@@ -430,6 +430,56 @@ export interface LessonInjectionContext {
   readonly now?: string;
 }
 
+/** Outcome attributed after an active lesson was injected into a task context. */
+export type LessonEffectivenessOutcome = 'positive' | 'neutral' | 'negative';
+
+/** Transcript-free signals used to attribute an injected lesson's outcome. */
+export interface LessonEffectivenessSignals {
+  readonly taskSucceeded: boolean;
+  /** blockersAfter - blockersBefore; negative values mean blockers were reduced. */
+  readonly blockerDelta: number;
+  readonly blockerReduced: boolean;
+  readonly reviewFindingCount: number;
+  readonly userCorrection: boolean;
+}
+
+/** Transcript-free telemetry event connecting a lesson injection to later outcomes. */
+export interface LessonEffectivenessEvent {
+  readonly schemaVersion: 'lesson-effectiveness-event-v1';
+  readonly lessonId: string;
+  readonly lessonScope: LessonScopeKind;
+  readonly injectionContext: Omit<LessonInjectionContext, 'now'>;
+  readonly observedAt: string;
+  readonly outcome: LessonEffectivenessOutcome;
+  readonly signals: LessonEffectivenessSignals;
+}
+
+export type LessonLifecycleRecommendation = 'promote' | 'monitor' | 'retire';
+
+/** Aggregated trend for one stable lesson id and scope. */
+export interface LessonEffectivenessTrend {
+  readonly lessonId: string;
+  readonly lessonScope: LessonScopeKind;
+  readonly observations: number;
+  readonly positive: number;
+  readonly neutral: number;
+  readonly negative: number;
+  /** Normalized range from -1 (all negative) to 1 (all positive). */
+  readonly effectivenessScore: number;
+  readonly correctionSignals: number;
+  readonly blockerReductions: number;
+  readonly blockerRegressions: number;
+  readonly lifecycleRecommendation: LessonLifecycleRecommendation;
+}
+
+/** Aggregate report that never stores raw prompts, findings, or correction text. */
+export interface LessonEffectivenessReport {
+  readonly schemaVersion: 'lesson-effectiveness-report-v1';
+  readonly generatedAt: string;
+  readonly totalEvents: number;
+  readonly lessons: readonly LessonEffectivenessTrend[];
+}
+
 /** Cooldown metadata attached to a recorded lesson so PM/liveness tooling can prevent churn. */
 export interface LessonCooldownMetadata {
   /** Stable key used to deduplicate equivalent lessons across task ids during the cooldown window. */

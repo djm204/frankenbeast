@@ -65,6 +65,12 @@ export type {
   LessonCritiqueAgentFinding,
   LessonMultiAgentCritique,
   LessonInjectionContext,
+  LessonEffectivenessOutcome,
+  LessonEffectivenessSignals,
+  LessonEffectivenessEvent,
+  LessonLifecycleRecommendation,
+  LessonEffectivenessTrend,
+  LessonEffectivenessReport,
   LessonScopeAuditEntry,
   LessonScopeKind,
   LessonScopeMetadata,
@@ -143,6 +149,8 @@ export type {
   LessonHumanFeedbackRequest,
   LessonScopeReviewRequest,
 } from './memory/lesson-recorder.js';
+export { LessonEffectivenessTelemetry } from './memory/lesson-effectiveness.js';
+export type { LessonEffectivenessRecordInput } from './memory/lesson-effectiveness.js';
 
 // Evaluators
 export { SafetyEvaluator } from './evaluators/safety.js';
