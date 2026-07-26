@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { delimiter, isAbsolute, resolve, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { redactSensitiveText } from '../../logging/redaction.js';
 import {
@@ -434,10 +435,26 @@ const defaultCommandRunner: HermesCommandRunner = (command, args, options) => ne
   });
 });
 
+function resolveCommandPath(command: string, pathValue: string | undefined): string {
+  if (isAbsolute(command) || command.includes(sep)) return command;
+  for (const directory of pathValue?.split(delimiter) ?? []) {
+    if (!directory) continue;
+    const candidate = resolve(directory, command);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Continue searching the executable path without passing it to the child.
+    }
+  }
+  return command;
+}
+
 export class HermesRuntimeAdapter implements RuntimeAdapter {
   readonly id = 'hermes';
   private readonly home: string | undefined;
   private readonly kanbanDbPath: string | undefined;
+  private readonly env: NodeJS.ProcessEnv;
   private readonly now: () => Date;
   private readonly busyTimeoutMs: number;
   private readonly sourceInspectionCache = new Map<string, {
@@ -450,9 +467,13 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   constructor(options: HermesRuntimeAdapterOptions = {}) {
     this.home = optionalHome(options);
     this.kanbanDbPath = optionalKanbanDbPath(options);
+    this.env = { ...options.env };
     this.now = options.now ?? (() => new Date());
     this.busyTimeoutMs = options.busyTimeoutMs ?? 2000;
-    this.command = options.command ?? 'hermes';
+    const command = options.command ?? 'hermes';
+    this.command = options.runCommand
+      ? command
+      : resolveCommandPath(command, options.env?.['PATH'] ?? process.env['PATH']);
     this.runCommand = options.runCommand ?? defaultCommandRunner;
   }
 
@@ -492,7 +513,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         approvals: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical approval-request source' },
         pause: { status: 'supported' },
         resume: { status: 'supported' },
-        cancellation: { status: 'supported' },
+        cancellation: {
+          status: 'unsupported',
+          reason: 'Hermes Kanban has no supported operation that cancels an active task run',
+        },
         policyActions: { status: 'supported' },
       },
       metadata: { discoveredWorkspaceCount: inspected.length },
@@ -680,12 +704,15 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   async executeAction(request: RuntimeActionRequest): Promise<RuntimeActionResult> {
-    if (request.action.type === 'approval.resolve') {
+    if (request.action.type === 'approval.resolve' || request.action.type === 'task.cancel') {
+      const reason = request.action.type === 'approval.resolve'
+        ? 'Hermes does not expose a canonical approval-decision operation'
+        : 'Hermes Kanban has no supported operation that cancels an active task run';
       return RuntimeActionResultSchema.parse({
         status: 'unsupported',
         providerId: this.id,
         correlationId: request.correlationId,
-        reason: 'Hermes does not expose a canonical approval-decision operation',
+        reason,
         audit: this.actionAudit(request.action, 'unsupported'),
       });
     }
@@ -764,7 +791,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           ...(action.reason ? ['--reason', action.reason] : []), taskId,
         ]);
       case 'task.cancel':
-        return this.commandArgs(action, 'archive', [taskId]);
+        throw new Error('Hermes task cancellation is unsupported');
       case 'policy.apply':
         return this.commandArgs(action, 'promote', ['--json', taskId, action.reason]);
     }
@@ -784,7 +811,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
 
   private async runHermes(args: string[]): Promise<HermesCommandResult> {
     const result = await this.runCommand(this.command, args, {
-      env: { ...process.env, HERMES_HOME: this.home! },
+      env: { ...this.env, HERMES_HOME: this.home! },
       timeoutMs: COMMAND_TIMEOUT_MS,
       maxOutputBytes: COMMAND_MAX_OUTPUT_BYTES,
     });
@@ -801,7 +828,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       case 'blocker.resolve': return status !== 'blocked';
       case 'task.pause': return status === 'scheduled';
       case 'task.resume': return status === 'ready' || status === 'todo';
-      case 'task.cancel': return status === 'archived';
+      case 'task.cancel': return false;
       case 'policy.apply': return status === 'ready' || status === 'running';
     }
   }

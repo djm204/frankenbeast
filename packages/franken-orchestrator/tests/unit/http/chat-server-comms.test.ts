@@ -106,6 +106,28 @@ describe('startChatServer comms pass-through', () => {
     expect(restartedStore!.consume(ticket, TEST_OPERATOR_TOKEN, 'session-1')).toBe('valid');
   });
 
+  it('provides durable runtime action state and the configured governor to the production app', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-runtime-actions-'));
+    tempDirs.push(projectDir);
+    const governor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(projectDir, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+      runtimeActionGovernor: governor,
+    });
+
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    expect(opts.runtimeActionGovernor).toBe(governor);
+    expect(opts.runtimeActionStore).toBeDefined();
+    expect(opts.runtimeActionStore!.listAuditEvents()).toEqual([]);
+    await expect(stat(join(projectDir, 'chat', 'runtime-actions', 'actions.sqlite'))).resolves.toBeDefined();
+  });
+
   it('closes analytics dependencies when the chat server shuts down', async () => {
     const analyticsClose = vi.fn();
     handle = await startChatServer({

@@ -20,6 +20,7 @@ import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
 import type { RuntimeActionAuditEvent } from './routes/runtime-routes.js';
 import type { IGovernorModule } from '../deps.js';
+import { RuntimeActionStore } from '../runtime/runtime-action-store.js';
 import { attachChatWebSocketServer, type AttachChatWebSocketServerOptions, type ChatSocketMessageRateLimitOptions } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -78,6 +79,7 @@ export interface StartChatServerOptions {
   chatMessageRateLimit?: ChatSocketMessageRateLimitOptions;
   runtimeActionGovernor?: IGovernorModule;
   runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
+  runtimeActionStore?: RuntimeActionStore;
 }
 
 export interface ChatServerHandle {
@@ -381,6 +383,12 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         });
       })()
     : undefined;
+  const ownedRuntimeActionStore = effectiveOperatorToken && !options.runtimeActionStore
+    ? new RuntimeActionStore({
+        databasePath: join(options.sessionStoreDir, 'runtime-actions', 'actions.sqlite'),
+      })
+    : undefined;
+  const runtimeActionStore = options.runtimeActionStore ?? ownedRuntimeActionStore;
   const app = createChatApp({
     sessionStore,
     engine: runtime.engine,
@@ -403,6 +411,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
     ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
     ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
+    ...(runtimeActionStore ? { runtimeActionStore } : {}),
     chatRateLimiter,
     chatMutationAdmission,
     approvalAuditLog,
@@ -458,6 +467,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       chatStreamTicketStore?.destroy();
+      ownedRuntimeActionStore?.destroy();
       await options.disposeBeastControl?.();
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();
