@@ -163,6 +163,77 @@ describe('HermesRuntimeAdapter', () => {
     });
   });
 
+  it('rejects event cursors whose timestamp is not a real normalized instant', async () => {
+    const cursor = Buffer.from(JSON.stringify({
+      occurredAt: 'not-a-date',
+      workspaceId: 'hermes:global',
+      source: 'event',
+      sourceId: 1,
+    })).toString('base64url');
+
+    await expect(new HermesRuntimeAdapter({ env: {} }).getEvents({ cursor })).rejects.toMatchObject({
+      code: 'INVALID_CURSOR',
+    });
+  });
+
+  it('assigns distinct workspace IDs to the global database and a board named global', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban', 'boards', 'global'), { recursive: true });
+    createCurrentKanban(join(home, 'kanban.db'));
+    createCurrentKanban(join(home, 'kanban', 'boards', 'global', 'kanban.db'));
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.workspaces.status !== 'available') throw new Error('Expected discovered workspaces');
+    const ids = snapshot.workspaces.data.map((workspace) => workspace.id);
+
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('continues returning healthy workspace events when another workspace read fails', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    createCurrentKanban(join(home, 'kanban.db'));
+    const boardPath = join(home, 'kanban', 'boards', 'alpha', 'kanban.db');
+    createCurrentKanban(boardPath);
+    const db = new Database(boardPath);
+    db.prepare('UPDATE task_events SET created_at = ?').run('not-a-timestamp');
+    db.close();
+
+    const page = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 10 });
+
+    expect(page.events).not.toHaveLength(0);
+    expect(page.events.every((event) => event.workspaceId === 'hermes:global')).toBe(true);
+  });
+
+  it('reports inaccessible board discovery as unavailable instead of throwing', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban'), { recursive: true });
+    await writeFile(join(home, 'kanban', 'boards'), 'not a directory');
+
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'unavailable' }),
+    }));
+    await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({ state: 'unavailable' }));
+  });
+
+  it('maps approval and HITL blockers to needs-input', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET block_kind = ? WHERE id = ?').run('approval', 't_child');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.blockers).toEqual(expect.objectContaining({
+      data: [expect.objectContaining({ taskId: 'hermes:global:t_child', category: 'needs-input' })],
+    }));
+  });
+
   it('degrades a workspace with corrupt required timestamps instead of fabricating epoch activity', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');

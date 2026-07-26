@@ -14,7 +14,7 @@ function isAbsoluteHostPath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\');
 }
 
-const EMBEDDED_HOST_PATH_RE = /(^|\s)(\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+const EMBEDDED_HOST_PATH_RE = /(^|\s)(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 
 function redactEmbeddedAbsoluteHostPaths(value: string): string {
   return value.replace(

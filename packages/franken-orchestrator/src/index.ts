@@ -157,6 +157,7 @@ export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from
 export {
   HermesRuntimeAdapter,
   RuntimeAdapterRegistry,
+  RuntimeCursorError,
   RuntimeAgentSchema,
   RuntimeCapabilitiesSchema,
   RuntimeCapabilitySchema,

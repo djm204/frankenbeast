@@ -42,6 +42,11 @@ interface InspectedSource extends DatabaseSource {
   message?: string | undefined;
 }
 
+interface SourceInspection {
+  sources: InspectedSource[];
+  discoveryMessage?: string | undefined;
+}
+
 type RuntimeRow = Record<string, unknown>;
 
 interface CursorValue {
@@ -147,6 +152,9 @@ function blockerCategory(value: unknown): 'dependency' | 'needs-input' | 'capabi
   switch (value) {
     case 'dependency': return 'dependency';
     case 'needs_input': return 'needs-input';
+    case 'approval':
+    case 'hitl':
+    case 'human_approval': return 'needs-input';
     case 'capability': return 'capability';
     case 'transient': return 'transient';
     default: return 'unknown';
@@ -171,6 +179,8 @@ function parseCursor(value: string | undefined): CursorValue | undefined {
     const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<CursorValue>;
     if (
       typeof decoded.occurredAt !== 'string'
+      || Number.isNaN(Date.parse(decoded.occurredAt))
+      || new Date(Date.parse(decoded.occurredAt)).toISOString() !== decoded.occurredAt
       || typeof decoded.workspaceId !== 'string'
       || (decoded.source !== 'event' && decoded.source !== 'comment')
       || !Number.isSafeInteger(decoded.sourceId)
@@ -202,7 +212,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   async describe(): Promise<RuntimeProvider> {
-    const inspected = await this.inspectSources();
+    const inspection = await this.inspectSources();
+    const inspected = inspection.sources;
     const compatible = inspected.filter((source) => source.status === 'compatible').length;
     const unavailable = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatible = inspected.filter((source) => source.status === 'schema-incompatible').length;
@@ -210,12 +221,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       ? 'No canonical Hermes Kanban database was found'
       : 'Hermes home is not configured; set HERMES_HOME or pass hermesHome';
     const health = inspected.length === 0
-      ? { state: 'unavailable' as const, checkedAt: nowIso(this.now), message: unavailableMessage }
+      ? {
+          state: 'unavailable' as const,
+          checkedAt: nowIso(this.now),
+          message: inspection.discoveryMessage ? boundedText(inspection.discoveryMessage) : unavailableMessage,
+        }
       : compatible === 0 && unavailable === inspected.length
         ? { state: 'unavailable' as const, checkedAt: nowIso(this.now), message: 'Discovered Hermes databases are unavailable' }
         : compatible === 0 && incompatible === inspected.length
           ? { state: 'schema-incompatible' as const, checkedAt: nowIso(this.now), message: 'No discovered Hermes database has a supported schema' }
-        : compatible < inspected.length
+        : inspection.discoveryMessage || compatible < inspected.length
           ? { state: 'degraded' as const, checkedAt: nowIso(this.now), message: 'One or more Hermes databases are unavailable or schema-incompatible' }
           : { state: 'connected' as const, checkedAt: nowIso(this.now) };
 
@@ -241,7 +256,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
 
   async getSnapshot(request: RuntimeSnapshotRequest = {}): Promise<RuntimeSnapshot> {
     const activityLimit = normalizeLimit(request.activityLimit);
-    const inspected = (await this.inspectSources()).filter((source) => (
+    const inspection = await this.inspectSources();
+    const inspected = inspection.sources.filter((source) => (
       request.workspaceId === undefined || source.workspaceId === request.workspaceId
     ));
     const workspaces: RuntimeWorkspace[] = inspected.map((source) => ({
@@ -277,18 +293,20 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const unavailableCount = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
     const state = inspected.length === 0
-      ? (this.home ? 'empty' as const : 'unavailable' as const)
+      ? (inspection.discoveryMessage || !this.home ? 'unavailable' as const : 'empty' as const)
       : compatibleCount === 0 && unavailableCount === inspected.length
         ? 'unavailable' as const
         : compatibleCount === 0 && incompatibleCount === inspected.length
           ? 'schema-incompatible' as const
-        : queryFailures > 0 || compatibleCount < inspected.length
+        : inspection.discoveryMessage || queryFailures > 0 || compatibleCount < inspected.length
           ? 'degraded' as const
           : tasks.length === 0 && runs.length === 0 && events.length === 0
             ? 'empty' as const
             : 'ready' as const;
     const message = state === 'unavailable'
-      ? (this.home ? 'Discovered Hermes databases are unavailable' : 'Hermes home is not configured')
+      ? (inspection.discoveryMessage
+          ? boundedText(inspection.discoveryMessage)
+          : this.home ? 'Discovered Hermes databases are unavailable' : 'Hermes home is not configured')
       : state === 'schema-incompatible'
         ? 'No selected Hermes database has a supported schema'
         : state === 'degraded'
@@ -319,14 +337,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
     const limit = normalizeLimit(request.limit);
     const after = parseCursor(request.cursor);
-    const inspected = (await this.inspectSources()).filter((source) => (
+    const inspected = (await this.inspectSources()).sources.filter((source) => (
       source.status === 'compatible' && (request.workspaceId === undefined || source.workspaceId === request.workspaceId)
     ));
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
     for (const source of inspected) {
-      for (const event of this.readEvents(source, after, limit + 1)) {
-        const decoded = parseCursor(event.cursor);
-        if (decoded) entries.push({ event, cursor: decoded });
+      try {
+        for (const event of this.readEvents(source, after, limit + 1)) {
+          const decoded = parseCursor(event.cursor);
+          if (decoded) entries.push({ event, cursor: decoded });
+        }
+      } catch {
+        // Preserve healthy workspace activity across transient or corrupt sibling sources.
       }
     }
     entries.sort((a, b) => eventOrder(a.cursor, b.cursor));
@@ -342,30 +364,42 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     parseCursor(cursor);
   }
 
-  private async discoverSources(): Promise<DatabaseSource[]> {
-    if (!this.home) return [];
+  private async discoverSources(): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
+    if (!this.home) return { sources: [] };
     const home = resolve(this.home);
     const sources: DatabaseSource[] = [];
+    let discoveryMessage: string | undefined;
     const globalPath = resolve(home, 'kanban.db');
-    if (await this.isSafeDatabase(home, globalPath)) {
-      sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: globalPath });
+    try {
+      if (await this.isSafeDatabase(home, globalPath)) {
+        sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: globalPath });
+      }
+    } catch (error) {
+      discoveryMessage = error instanceof Error ? error.message : 'Hermes database discovery failed';
     }
     const boardsRoot = resolve(home, 'kanban', 'boards');
     let entries;
     try {
       entries = await readdir(boardsRoot, { withFileTypes: true });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return sources;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        discoveryMessage = error instanceof Error ? error.message : 'Hermes board discovery failed';
+      }
+      return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
     }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       if (!entry.isDirectory() || !/^[A-Za-z0-9._-]+$/u.test(entry.name)) continue;
       const path = resolve(boardsRoot, entry.name, 'kanban.db');
-      if (await this.isSafeDatabase(home, path)) {
-        sources.push({ workspaceId: `hermes:${entry.name}`, name: entry.name, kind: 'board', path });
+      try {
+        if (await this.isSafeDatabase(home, path)) {
+          const workspaceId = entry.name === 'global' ? 'hermes:board:global' : `hermes:${entry.name}`;
+          sources.push({ workspaceId, name: entry.name, kind: 'board', path });
+        }
+      } catch (error) {
+        discoveryMessage ??= error instanceof Error ? error.message : 'Hermes board discovery failed';
       }
     }
-    return sources;
+    return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
   }
 
   private async isSafeDatabase(home: string, path: string): Promise<boolean> {
@@ -378,9 +412,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private async inspectSources(): Promise<InspectedSource[]> {
-    const sources = await this.discoverSources();
-    return sources.map((source) => {
+  private async inspectSources(): Promise<SourceInspection> {
+    const discovery = await this.discoverSources();
+    const sources = discovery.sources.map((source) => {
       try {
         const db = this.open(source.path);
         try {
@@ -399,6 +433,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         };
       }
     });
+    return { sources, ...(discovery.discoveryMessage ? { discoveryMessage: discovery.discoveryMessage } : {}) };
   }
 
   private open(path: string): Database.Database {

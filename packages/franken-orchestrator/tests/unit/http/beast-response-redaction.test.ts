@@ -16,6 +16,14 @@ describe('Beast response redaction', () => {
     });
   });
 
+  it('preserves slash commands and API routes while redacting embedded filesystem paths', () => {
+    expect(redactAbsoluteHostPathValues(
+      'Sent /plan --design-doc through GET /v1/smart-swarm after reading /home/alice/private-repo/config.json',
+    )).toBe(
+      'Sent /plan --design-doc through GET /v1/smart-swarm after reading [REDACTED_HOST_PATH]',
+    );
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',
