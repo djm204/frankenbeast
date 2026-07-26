@@ -231,6 +231,20 @@ describe('HermesRuntimeAdapter', () => {
     expect(replay.events).toEqual([]);
   });
 
+  it('keeps multi-workspace replay cursors below the default HTTP header limit', async () => {
+    const home = await createHome();
+    for (let index = 0; index < 75; index += 1) {
+      const boardDir = join(home, 'kanban', 'boards', `workspace-${String(index).padStart(3, '0')}`);
+      await mkdir(boardDir, { recursive: true });
+      createCurrentKanban(join(boardDir, 'kanban.db'));
+    }
+
+    const page = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 });
+
+    expect(page.nextCursor).not.toBeNull();
+    expect(page.nextCursor!.length).toBeLessThan(16 * 1024);
+  });
+
   it('preserves slash commands and API routes in normalized runtime text', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -290,6 +304,27 @@ describe('HermesRuntimeAdapter', () => {
       data: expect.arrayContaining([expect.objectContaining({
         id: 'hermes:global:t_parent',
         title: 'Call "/v1/users" after setup',
+      })]),
+    }));
+  });
+
+  it('redacts host paths rooted outside the common allowlist in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'failed under /data/hermes/private/file',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'failed under [REDACTED_HOST_PATH]',
       })]),
     }));
   });
@@ -378,6 +413,7 @@ describe('HermesRuntimeAdapter', () => {
     const insert = db.prepare('INSERT INTO tasks (id,title,status,created_at,workspace_kind) VALUES (?,?,?,?,?)');
     for (const [id, status] of Object.entries({
       complete: 'complete', success: 'success', error: 'error', timeout: 'timeout', canceled: 'canceled',
+      stopped: 'stopped', deleted: 'deleted',
     })) insert.run(id, id, status, 1_785_081_600, 'scratch');
     db.close();
 
@@ -386,7 +422,8 @@ describe('HermesRuntimeAdapter', () => {
     const states = Object.fromEntries(snapshot.tasks.data.map((task) => [task.id.split(':').at(-1), task.state]));
 
     expect(states).toEqual({
-      canceled: 'cancelled', complete: 'succeeded', error: 'failed', success: 'succeeded', timeout: 'failed',
+      canceled: 'cancelled', complete: 'succeeded', deleted: 'archived', error: 'failed',
+      stopped: 'cancelled', success: 'succeeded', timeout: 'failed',
     });
   });
 
@@ -433,12 +470,12 @@ describe('HermesRuntimeAdapter', () => {
     expect(JSON.stringify(snapshot)).not.toContain('1970-01-01T00:00:00.000Z');
   });
 
-  it('does not report an agent running solely because a historical run row remained stale', async () => {
+  it('does not report an agent running from a stale current-run pointer on a terminal task', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
     createCurrentKanban(dbPath);
     const db = new Database(dbPath);
-    db.prepare('UPDATE tasks SET status = ?, current_run_id = NULL WHERE id = ?').run('done', 't_parent');
+    db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('done', 't_parent');
     db.close();
 
     const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();

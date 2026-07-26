@@ -70,6 +70,7 @@ const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_SUMMARY_CHARS = 512;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+const POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 const API_ROUTE_RE = /^\/(?:api|v\d+)(?:\/|$)/u;
 
@@ -117,6 +118,9 @@ function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
   const redacted = redactSensitiveText(value)
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
+    .replace(POSIX_PATH_RE, (_match, prefix: string, path: string) => (
+      API_ROUTE_RE.test(path) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
+    ))
     .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string, path: string) => (
       API_ROUTE_RE.test(path) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
     ));
@@ -142,10 +146,16 @@ function mapTaskState(status: unknown): RuntimeTask['state'] {
     case 'error':
     case 'spawn_failed': return 'failed';
     case 'cancelled':
-    case 'canceled': return 'cancelled';
-    case 'archived': return 'archived';
+    case 'canceled':
+    case 'stopped': return 'cancelled';
+    case 'archived':
+    case 'deleted': return 'archived';
     default: return 'unknown';
   }
+}
+
+function isTerminalTaskStatus(status: unknown): boolean {
+  return ['succeeded', 'failed', 'cancelled', 'archived'].includes(mapTaskState(status));
 }
 
 function mapRunState(status: unknown, outcome: unknown): 'queued' | 'running' | 'blocked' | 'succeeded' | 'failed' | 'cancelled' | 'unknown' {
@@ -220,7 +230,29 @@ function parseCursor(value: string | undefined): CursorValue | undefined {
 function parseRequestCursor(value: string | undefined): RequestCursorState {
   if (!value) return { positions: new Map() };
   try {
-    const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as { positions?: unknown };
+    const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
+      p?: unknown;
+      positions?: unknown;
+    };
+    if (Array.isArray(decoded.p)) {
+      const positions = new Map<string, CursorValue>();
+      for (const entry of decoded.p) {
+        if (!Array.isArray(entry) || entry.length !== 4) throw new Error('invalid');
+        const [workspaceId, occurredAt, sourceCode, sourceId] = entry as unknown[];
+        const source = sourceCode === 0 ? 'event' : sourceCode === 1 ? 'comment' : undefined;
+        if (
+          typeof workspaceId !== 'string'
+          || typeof occurredAt !== 'string'
+          || Number.isNaN(Date.parse(occurredAt))
+          || new Date(Date.parse(occurredAt)).toISOString() !== occurredAt
+          || source === undefined
+          || !Number.isSafeInteger(sourceId)
+          || (sourceId as number) < 0
+        ) throw new Error('invalid');
+        positions.set(workspaceId, { workspaceId, occurredAt, source, sourceId: sourceId as number });
+      }
+      return { positions };
+    }
     if (decoded.positions && typeof decoded.positions === 'object' && !Array.isArray(decoded.positions)) {
       const positions = new Map<string, CursorValue>();
       for (const [workspaceId, encoded] of Object.entries(decoded.positions)) {
@@ -240,7 +272,12 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
 
 function cursorForPositions(positions: Map<string, CursorValue>): string {
   return Buffer.from(JSON.stringify({
-    positions: Object.fromEntries([...positions].map(([workspaceId, cursor]) => [workspaceId, cursorFor(cursor)])),
+    p: [...positions].map(([workspaceId, cursor]) => [
+      workspaceId,
+      cursor.occurredAt,
+      cursor.source === 'event' ? 0 : 1,
+      cursor.sourceId,
+    ]),
   })).toString('base64url');
 }
 
@@ -658,7 +695,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     for (const task of taskRows) {
       if (task['current_run_id'] == null) continue;
       const currentRunId = String(task['current_run_id']);
-      activeRunIds.add(currentRunId);
+      if (!isTerminalTaskStatus(task['status'])) activeRunIds.add(currentRunId);
       if (typeof task['session_id'] === 'string' && task['session_id']) {
         sessionByRunId.set(currentRunId, boundedText(task['session_id']));
       }
