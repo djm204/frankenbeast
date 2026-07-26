@@ -134,6 +134,16 @@ describe('BeastLifecycleMetrics', () => {
       from: '2026-07-25T00:05:01Z',
       to: '2026-07-25T00:05:02Z',
     }).definitions[0]?.spawnCount).toBe(1);
+    createRun(repository, {
+      definitionId: 'gamma',
+      createdAt: '2026-07-25T00:05:00.000Z',
+      status: 'running',
+      startedAt: '2026-07-25T00:05:01Z',
+    });
+    expect(metrics.query({
+      from: '2026-07-25T00:05:00.500Z',
+      to: '2026-07-25T00:05:01.500Z',
+    }).definitions.find(aggregate => aggregate.definitionId === 'gamma')?.spawnCount).toBe(1);
     expect(result.orphanedProcessCount).toBe(0);
   });
 

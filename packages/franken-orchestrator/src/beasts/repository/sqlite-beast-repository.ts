@@ -510,9 +510,11 @@ export class SQLiteBeastRepository {
   listLifecycleAttempts(window: { readonly from: string; readonly to: string }): BeastLifecycleAttempt[] {
     const rows = this.db.prepare(
       `SELECT runs.definition_id, attempts.status, attempts.started_at, attempts.finished_at
-         FROM beast_run_attempts AS attempts
+         FROM beast_run_attempts AS attempts INDEXED BY idx_beast_run_attempts_started_julianday_run_id
          JOIN beast_runs AS runs ON runs.id = attempts.run_id
-        WHERE attempts.started_at >= ? AND attempts.started_at < ?
+        WHERE attempts.started_at IS NOT NULL
+          AND julianday(attempts.started_at) >= julianday(?)
+          AND julianday(attempts.started_at) < julianday(?)
         ORDER BY attempts.started_at ASC, attempts.id ASC`,
     ).all(window.from, window.to) as BeastLifecycleAttemptRow[];
     return rows.map(row => ({
