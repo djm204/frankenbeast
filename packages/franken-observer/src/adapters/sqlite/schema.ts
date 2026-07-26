@@ -41,6 +41,23 @@ export const CREATE_TABLES = `
     ON compaction_events(sessionId, timestamp);
   CREATE INDEX IF NOT EXISTS idx_compaction_events_timestamp
     ON compaction_events(timestamp);
+
+  CREATE TABLE IF NOT EXISTS process_resource_samples (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    agentId            TEXT    NOT NULL,
+    runId              TEXT    NOT NULL,
+    pid                INTEGER NOT NULL CHECK (pid > 0),
+    cpuPercent         REAL    NOT NULL CHECK (cpuPercent >= 0),
+    rssBytes           INTEGER NOT NULL CHECK (rssBytes >= 0),
+    estimatedWatts     REAL    NOT NULL CHECK (estimatedWatts >= 0),
+    estimatedEnergyWh  REAL    NOT NULL CHECK (estimatedEnergyWh >= 0),
+    timestamp          INTEGER NOT NULL
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS idx_process_resource_samples_agent_timestamp
+    ON process_resource_samples(agentId, timestamp);
+  CREATE INDEX IF NOT EXISTS idx_process_resource_samples_run_timestamp
+    ON process_resource_samples(runId, timestamp);
 `
 
 export const MIGRATE_COMPACTION_EVENT_IDENTITY = `
@@ -114,6 +131,7 @@ export const SELECT_TRACE_SUMMARIES = `
 export const DELETE_SPANS_BY_TRACE = `DELETE FROM spans WHERE traceId = ?`
 export const DELETE_COMPACTIONS_BY_RUN = `DELETE FROM compaction_events WHERE runId = ?`
 export const DELETE_COMPACTIONS_BEFORE = `DELETE FROM compaction_events WHERE timestamp < ?`
+export const DELETE_RESOURCE_SAMPLES_BEFORE = `DELETE FROM process_resource_samples WHERE timestamp < ?`
 export const DELETE_TRACE = `DELETE FROM traces WHERE id = ?`
 
 export const UPSERT_COMPACTION_EVENT = `
@@ -140,4 +158,41 @@ export const SELECT_COMPACTION_AGGREGATE = `
   SELECT COUNT(*) AS count, MAX(timestamp) AS latestAt
   FROM compaction_events
   WHERE sessionId = @sessionId AND timestamp >= @since AND timestamp <= @before
+`
+
+export const INSERT_RESOURCE_SAMPLE = `
+  INSERT INTO process_resource_samples
+    (agentId, runId, pid, cpuPercent, rssBytes, estimatedWatts, estimatedEnergyWh, timestamp)
+  VALUES
+    (@agentId, @runId, @pid, @cpuPercent, @rssBytes, @estimatedWatts, @estimatedEnergyWh, @timestamp)
+`
+
+const RESOURCE_SAMPLE_COLUMNS = `
+  SELECT agentId, runId, pid, cpuPercent, rssBytes, estimatedWatts, estimatedEnergyWh, timestamp
+  FROM process_resource_samples
+`
+
+const RESOURCE_SAMPLE_RANGE_AND_ORDER = `
+    AND timestamp >= @since
+    AND timestamp <= @before
+  ORDER BY timestamp DESC, id DESC
+  LIMIT @limit
+`
+
+export const SELECT_RESOURCE_SAMPLES_BY_AGENT = `
+  ${RESOURCE_SAMPLE_COLUMNS}
+  WHERE agentId = @agentId
+  ${RESOURCE_SAMPLE_RANGE_AND_ORDER}
+`
+
+export const SELECT_RESOURCE_SAMPLES_BY_RUN = `
+  ${RESOURCE_SAMPLE_COLUMNS}
+  WHERE runId = @runId
+  ${RESOURCE_SAMPLE_RANGE_AND_ORDER}
+`
+
+export const SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN = `
+  ${RESOURCE_SAMPLE_COLUMNS}
+  WHERE agentId = @agentId AND runId = @runId
+  ${RESOURCE_SAMPLE_RANGE_AND_ORDER}
 `

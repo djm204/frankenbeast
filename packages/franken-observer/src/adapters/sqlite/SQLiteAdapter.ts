@@ -7,6 +7,10 @@ import { Worker } from 'node:worker_threads'
 import { wallClockNow } from '@franken/types'
 import type { Trace, Span } from '../../core/types.js'
 import type { ExportAdapter, TraceSummary } from '../../export/ExportAdapter.js'
+import type {
+  ProcessResourceSample,
+  ProcessResourceSampleQuery,
+} from '../../resource/ProcessResourceSampler.js'
 import {
   COMPACTION_RETENTION_MS,
   type CompactionEvent,
@@ -25,10 +29,15 @@ import {
   DELETE_SPANS_BY_TRACE,
   DELETE_COMPACTIONS_BY_RUN,
   DELETE_COMPACTIONS_BEFORE,
+  DELETE_RESOURCE_SAMPLES_BEFORE,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
   SELECT_COMPACTION_AGGREGATE,
+  INSERT_RESOURCE_SAMPLE,
+  SELECT_RESOURCE_SAMPLES_BY_AGENT,
+  SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN,
+  SELECT_RESOURCE_SAMPLES_BY_RUN,
 } from './schema.js'
 
 interface TraceRow {
@@ -76,6 +85,14 @@ interface FlushedSpanState {
 
 const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_compaction_events_session_timestamp'
 const COMPACTION_PRIMARY_KEY = ['runId', 'sessionId', 'generation']
+
+function normalizeResourceSample(sample: ProcessResourceSample): ProcessResourceSample {
+  const agentId = sample.agentId.trim()
+  const runId = sample.runId.trim()
+  if (agentId.length === 0) throw new TypeError('resource sample agentId must not be empty')
+  if (runId.length === 0) throw new TypeError('resource sample runId must not be empty')
+  return { ...sample, agentId, runId }
+}
 
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
@@ -139,6 +156,9 @@ type SQLiteWorkerOperation =
   | 'recordCompaction'
   | 'queryCompactions'
   | 'aggregateCompactions'
+  | 'recordResourceSample'
+  | 'queryResourceSamples'
+  | 'deleteResourceSamplesBefore'
 
 interface SQLiteWorkerResponse {
   id: number
@@ -231,6 +251,20 @@ function execute(operation, payload) {
         db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
         return db.prepare(sql.selectCompactionAggregate).get(query)
       })(payload.query, payload.retentionCutoff)
+    case 'recordResourceSample':
+      db.prepare(sql.insertResourceSample).run(payload.sample)
+      return undefined
+    case 'deleteResourceSamplesBefore':
+      return db.prepare(sql.deleteResourceSamplesBefore).run(payload.before).changes
+    case 'queryResourceSamples': {
+      const query = payload.query
+      const statement = query.agentId === null
+        ? sql.selectResourceSamplesByRun
+        : query.runId === null
+          ? sql.selectResourceSamplesByAgent
+          : sql.selectResourceSamplesByAgentAndRun
+      return db.prepare(statement).all(query)
+    }
     default:
       throw new Error('Unknown SQLite worker operation: ' + operation)
   }
@@ -304,10 +338,15 @@ class SQLiteWorkerClient {
             deleteSpansByTrace: DELETE_SPANS_BY_TRACE,
             deleteCompactionsByRun: DELETE_COMPACTIONS_BY_RUN,
             deleteCompactionsBefore: DELETE_COMPACTIONS_BEFORE,
+            deleteResourceSamplesBefore: DELETE_RESOURCE_SAMPLES_BEFORE,
             deleteTrace: DELETE_TRACE,
             upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
             selectCompactionEvents: SELECT_COMPACTION_EVENTS,
             selectCompactionAggregate: SELECT_COMPACTION_AGGREGATE,
+            insertResourceSample: INSERT_RESOURCE_SAMPLE,
+            selectResourceSamplesByAgent: SELECT_RESOURCE_SAMPLES_BY_AGENT,
+            selectResourceSamplesByAgentAndRun: SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN,
+            selectResourceSamplesByRun: SELECT_RESOURCE_SAMPLES_BY_RUN,
           },
         },
       },
@@ -638,9 +677,10 @@ export class SQLiteAdapter implements ExportAdapter {
         const compactionIndexes = this.db.pragma("index_list('compaction_events')") as Array<{ name?: unknown }>
         const schemaInitialized = Array.isArray(compactionIndexes)
           && compactionIndexes.some(index => index.name === SQLITE_SCHEMA_SENTINEL_INDEX)
-        if (!schemaInitialized) {
-          this.db.exec(CREATE_TABLES)
-        } else {
+        const resourceTableInfo = this.db.pragma("table_info('process_resource_samples')") as Array<{ name?: unknown }>
+        const resourceSchemaInitialized = Array.isArray(resourceTableInfo)
+          && resourceTableInfo.some(column => column.name === 'id')
+        if (schemaInitialized) {
           const rawTableInfo = this.db.pragma("table_info('compaction_events')") as unknown
           const tableInfo = (Array.isArray(rawTableInfo) ? rawTableInfo : []) as Array<{
             name?: unknown
@@ -656,6 +696,11 @@ export class SQLiteAdapter implements ExportAdapter {
           )) {
             this.db.exec(MIGRATE_COMPACTION_EVENT_IDENTITY)
           }
+        }
+        if (!schemaInitialized || !resourceSchemaInitialized) {
+          // CREATE TABLE IF NOT EXISTS also upgrades databases created before
+          // process resource telemetry was introduced.
+          this.db.exec(CREATE_TABLES)
         }
       })
       const isTransientDatabase = databasePath === ':memory:' || databasePath === ''
@@ -1014,6 +1059,77 @@ export class SQLiteAdapter implements ExportAdapter {
           latestAt: number | null
         }
       })())
+    })
+  }
+
+  async recordResourceSample(sample: ProcessResourceSample): Promise<void> {
+    const normalizedSample = normalizeResourceSample(sample)
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        await this.withSqliteLockRetry('record process resource sample', () => (
+          this.workerClient!.request<void>('recordResourceSample', { sample: normalizedSample })
+        ))
+        return
+      }
+      await this.withSqliteLockRetry('record process resource sample', () => {
+        this.db.prepare(INSERT_RESOURCE_SAMPLE).run(normalizedSample)
+      })
+    })
+  }
+
+  async deleteResourceSamplesBefore(before: number): Promise<number> {
+    if (!Number.isSafeInteger(before) || before < 0) {
+      return Promise.reject(new RangeError('resource sample retention cutoff must be a non-negative safe integer'))
+    }
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('delete old process resource samples', () => (
+          this.workerClient!.request<number>('deleteResourceSamplesBefore', { before })
+        ))
+      }
+      return this.withSqliteLockRetry('delete old process resource samples', () => (
+        this.db.prepare(DELETE_RESOURCE_SAMPLES_BEFORE).run(before).changes
+      ))
+    })
+  }
+
+  async queryResourceSamples(query: ProcessResourceSampleQuery): Promise<ProcessResourceSample[]> {
+    const agentId = query.agentId?.trim() || undefined
+    const runId = query.runId?.trim() || undefined
+    if (!agentId && !runId) {
+      return Promise.reject(new TypeError('queryResourceSamples requires agentId or runId'))
+    }
+    const since = query.since ?? 0
+    const before = query.before ?? Number.MAX_SAFE_INTEGER
+    if (!Number.isSafeInteger(since) || !Number.isSafeInteger(before) || since < 0 || before < since) {
+      return Promise.reject(new RangeError('resource sample time range must contain safe integers with before >= since'))
+    }
+    const requestedLimit = query.limit ?? 100
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit <= 0) {
+      return Promise.reject(new RangeError('resource sample limit must be a positive safe integer'))
+    }
+    const limit = Math.min(1_000, requestedLimit)
+    const params = {
+      agentId: agentId ?? null,
+      runId: runId ?? null,
+      since,
+      before,
+      limit,
+    }
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('query process resource samples', () => (
+          this.workerClient!.request<ProcessResourceSample[]>('queryResourceSamples', { query: params })
+        ))
+      }
+      const statement = params.agentId === null
+        ? SELECT_RESOURCE_SAMPLES_BY_RUN
+        : params.runId === null
+          ? SELECT_RESOURCE_SAMPLES_BY_AGENT
+          : SELECT_RESOURCE_SAMPLES_BY_AGENT_AND_RUN
+      return this.withSqliteLockRetry('query process resource samples', () => (
+        this.db.prepare(statement).all(params) as ProcessResourceSample[]
+      ))
     })
   }
 
