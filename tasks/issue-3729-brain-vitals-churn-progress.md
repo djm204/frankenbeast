@@ -10,8 +10,8 @@
 - [x] Implement the minimal production changes and verify GREEN.
 - [x] Run focused tests and relevant package typecheck/build gates.
 - [x] Review diff for scope, correctness, and real-data-only behavior.
-- [ ] Commit and push with David Mendez <me@davidmendez.dev> identity.
-- [ ] Open one PR closing #3729.
+- [x] Commit and push with David Mendez <me@davidmendez.dev> identity.
+- [x] Open one PR closing #3729.
 - [ ] Obtain exact-head Codex all-clear, zero unresolved threads, and green CI.
 - [ ] Merge PR and verify issue closure, merge SHA, and clean worktree.
 - [ ] Record durable Kanban handoff evidence.
