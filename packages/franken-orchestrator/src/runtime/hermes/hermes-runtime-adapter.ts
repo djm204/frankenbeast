@@ -604,6 +604,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         audit: this.actionAudit(request.action, 'unsupported'),
       });
     }
+    const workspace = (await this.inspectSources()).sources.find((source) => (
+      source.workspaceId === request.action.workspaceId && source.status === 'compatible'
+    ));
+    if (!workspace) {
+      return RuntimeActionResultSchema.parse({
+        status: 'failed',
+        providerId: this.id,
+        correlationId: request.correlationId,
+        reason: 'Hermes workspace is unavailable or incompatible',
+        audit: this.actionAudit(request.action, 'failed'),
+      });
+    }
 
     const previousState = await this.readTaskStatus(request.action);
     await this.runHermes(this.mutationArgs(request.action));
@@ -627,7 +639,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     parseRequestCursor(cursor);
   }
 
-  private actionAudit(action: RuntimeAction, outcome: 'applied' | 'unsupported') {
+  private actionAudit(action: RuntimeAction, outcome: 'applied' | 'unsupported' | 'failed') {
     return {
       requestedBy: 'authenticated-operator' as const,
       actionType: action.type,

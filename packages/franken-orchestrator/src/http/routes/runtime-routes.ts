@@ -182,11 +182,11 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   const actionStore = deps.actionStore ?? new RuntimeActionStore();
   const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
 
-  const recordActionAudit = async (
+  const recordActionAudit = (
     providerId: string,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
     audit: RuntimeActionAudit,
-  ): Promise<void> => {
+  ): void => {
     const event = {
       ...audit,
       providerId,
@@ -194,7 +194,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       ...(request.causationId ? { causationId: request.causationId } : {}),
     };
     actionStore.recordAudit(event);
-    await Promise.resolve(deps.actionAudit?.(event)).catch(() => {});
+    void Promise.resolve().then(() => deps.actionAudit?.(event)).catch(() => {});
   };
 
   const executeAction = async (
@@ -242,7 +242,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         audit: actionAudit(request.action, 'failed'),
       });
     }
-    await recordActionAudit(adapter.id, request, result.audit);
+    recordActionAudit(adapter.id, request, result.audit);
     return result;
   };
 
@@ -333,11 +333,14 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
-    const result = executeAction(adapter, request);
+    const result = actionStore.track((async () => {
+      const completed = await executeAction(adapter, request);
+      actionStore.complete(key, fingerprint, completed);
+      return completed;
+    })());
     inFlightActions.set(key, result);
     try {
       const completed = await result;
-      actionStore.complete(key, fingerprint, completed);
       return c.json({ data: runtimeResponse(completed) });
     } finally {
       inFlightActions.delete(key);
