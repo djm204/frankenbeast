@@ -193,6 +193,20 @@ describe('BrainVitalsPanel', () => {
     expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
   });
 
+  it('marks cost health unavailable when the brain has no budget', async () => {
+    const api = client({
+      fetchBrainVitalsSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        cost: { ...snapshot.cost, budgetUsd: null },
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+
+    const costNode = await screen.findByRole('button', { name: /Cost activity: unavailable/ });
+    expect(costNode.textContent).toContain('Telemetry unavailable');
+  });
+
   it('does not truncate a real one-minute activity rate at an arbitrary buffer size', async () => {
     let pushActivity!: (activity: BrainVitalsActivity) => void;
     const api = client({

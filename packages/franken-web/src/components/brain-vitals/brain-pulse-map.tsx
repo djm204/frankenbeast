@@ -39,7 +39,9 @@ function healthValue(snapshot: BrainVitalsSnapshot, dimension: BrainVitalsDimens
     case 'resource': return snapshot.resource.availability === 'available'
       ? 1 - snapshot.health.signals.resourcePressure
       : null;
-    case 'cost': return 1 - snapshot.health.signals.budgetBurnRatio;
+    case 'cost': return snapshot.cost.budgetUsd === null
+      ? null
+      : 1 - snapshot.health.signals.budgetBurnRatio;
   }
 }
 
