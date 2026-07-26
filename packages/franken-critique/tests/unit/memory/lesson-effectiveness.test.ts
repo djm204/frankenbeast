@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LessonEffectivenessTelemetry } from '../../../src/memory/lesson-effectiveness.js';
+import { createTaskId } from '../../../src/types/common.js';
 import type { LessonScopeMetadata } from '../../../src/types/contracts.js';
 
 const lessonScope: LessonScopeMetadata = {
@@ -30,6 +31,7 @@ describe('LessonEffectivenessTelemetry', () => {
         profile: 'default',
         taskId: 'task-positive',
       },
+      injectedAt: '2026-07-20T00:00:00.000Z',
       observedAt: '2026-07-20T00:00:00.000Z',
       taskSucceeded: true,
       blockersBefore: 2,
@@ -48,6 +50,7 @@ describe('LessonEffectivenessTelemetry', () => {
         profile: 'default',
         taskId: 'task-positive',
       },
+      injectedAt: '2026-07-20T00:00:00.000Z',
       outcome: 'positive',
       signals: {
         taskSucceeded: true,
@@ -75,6 +78,7 @@ describe('LessonEffectivenessTelemetry', () => {
       lessonId: 'lesson-cache-verification',
       lessonScope,
       injectionContext: { repo: 'djm204/frankenbeast', taskId: 'task-neutral' },
+      injectedAt: '2026-07-21T00:00:00.000Z',
       observedAt: '2026-07-21T00:00:00.000Z',
       taskSucceeded: true,
       blockersBefore: 0,
@@ -103,6 +107,7 @@ describe('LessonEffectivenessTelemetry', () => {
         repo: 'djm204/frankenbeast',
         taskId: 'task-negative',
       },
+      injectedAt: '2026-07-22T00:00:00.000Z',
       observedAt: '2026-07-22T00:00:00.000Z',
       taskSucceeded: false,
       blockersBefore: 1,
@@ -154,6 +159,7 @@ describe('LessonEffectivenessTelemetry', () => {
       lessonId: 'lesson-a',
       lessonScope,
       injectionContext: { repo: 'djm204/frankenbeast', taskId: 'task-a' },
+      injectedAt: '2026-07-20T00:00:00.000Z',
       observedAt: '2026-07-20T00:00:00.000Z',
       taskSucceeded: true,
       blockersBefore: 1,
@@ -165,6 +171,7 @@ describe('LessonEffectivenessTelemetry', () => {
       lessonId: 'lesson-a',
       lessonScope,
       injectionContext: { repo: 'djm204/frankenbeast', taskId: 'task-b' },
+      injectedAt: '2026-07-21T00:00:00.000Z',
       observedAt: '2026-07-21T00:00:00.000Z',
       taskSucceeded: false,
       blockersBefore: 0,
@@ -176,6 +183,7 @@ describe('LessonEffectivenessTelemetry', () => {
       lessonId: 'lesson-b',
       lessonScope: taskScope,
       injectionContext: { taskId: 'task-scoped' },
+      injectedAt: '2026-07-22T00:00:00.000Z',
       observedAt: '2026-07-22T00:00:00.000Z',
       taskSucceeded: true,
       blockersBefore: 0,
@@ -230,6 +238,7 @@ describe('LessonEffectivenessTelemetry', () => {
           repo: 'djm204/frankenbeast',
           taskId: observation.taskId,
         },
+        injectedAt: `2026-07-2${index}T00:00:00.000Z`,
         observedAt: `2026-07-2${index}T00:00:00.000Z`,
         taskSucceeded: true,
         blockersBefore: observation.blockersBefore,
@@ -256,6 +265,7 @@ describe('LessonEffectivenessTelemetry', () => {
         repo: 'djm204/frankenbeast',
         taskId: 'task-immutable',
       },
+      injectedAt: '2026-07-23T00:00:00.000Z',
       observedAt: '2026-07-23T00:00:00.000Z',
       taskSucceeded: true,
       blockersBefore: 1,
@@ -281,6 +291,7 @@ describe('LessonEffectivenessTelemetry', () => {
         lessonId: 'lesson-repo-a-only',
         lessonScope,
         injectionContext: { repo: 'other/repo', taskId: 'task-wrong-repo' },
+        injectedAt: '2026-07-24T00:00:00.000Z',
         observedAt: '2026-07-24T00:00:00.000Z',
         taskSucceeded: true,
         blockersBefore: 1,
@@ -290,5 +301,68 @@ describe('LessonEffectivenessTelemetry', () => {
       }),
     ).toThrow('injection context is outside the reviewed lesson scope');
     expect(telemetry.report().totalEvents).toBe(0);
+  });
+
+  it('validates expiry at injection time rather than later outcome time', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const expiringScope: LessonScopeMetadata = {
+      ...lessonScope,
+      expiresAt: '2026-07-24T00:30:00.000Z',
+    };
+
+    expect(() =>
+      telemetry.record({
+        lessonId: 'lesson-expiring',
+        lessonScope: expiringScope,
+        injectionContext: {
+          repo: 'djm204/frankenbeast',
+          taskId: 'task-long-running',
+        },
+        injectedAt: '2026-07-24T00:00:00.000Z',
+        observedAt: '2026-07-24T01:00:00.000Z',
+        taskSucceeded: true,
+        blockersBefore: 1,
+        blockersAfter: 0,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      }),
+    ).not.toThrow();
+    expect(telemetry.report().totalEvents).toBe(1);
+  });
+
+  it('normalizes incidental whitespace in task IDs before scope validation', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const taskScope: LessonScopeMetadata = {
+      schemaVersion: 'lesson-scope-v1',
+      scope: 'task',
+      allowedTasks: [createTaskId('task-scoped')],
+      provenance: {
+        source: 'human-review',
+        taskId: createTaskId('source-task'),
+      },
+      auditTrail: [
+        {
+          changedAt: '2026-07-01T00:00:00.000Z',
+          actor: 'reviewer',
+          toScope: 'task',
+          reason: 'Approved for one task.',
+        },
+      ],
+    };
+
+    const event = telemetry.record({
+      lessonId: 'lesson-task-scoped',
+      lessonScope: taskScope,
+      injectionContext: { taskId: createTaskId('  task-scoped  ') },
+      injectedAt: '2026-07-24T00:00:00.000Z',
+      observedAt: '2026-07-24T00:01:00.000Z',
+      taskSucceeded: true,
+      blockersBefore: 1,
+      blockersAfter: 0,
+      reviewFindingCount: 0,
+      userCorrection: false,
+    });
+
+    expect(event.injectionContext.taskId).toBe('task-scoped');
   });
 });

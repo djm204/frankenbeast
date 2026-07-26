@@ -24,6 +24,7 @@ export interface LessonEffectivenessRecordInput {
   readonly lessonId: string;
   readonly lessonScope: LessonScopeMetadata;
   readonly injectionContext: Omit<LessonInjectionContext, 'now'>;
+  readonly injectedAt: string;
   readonly observedAt: string;
   readonly taskSucceeded: boolean;
   readonly blockersBefore: number;
@@ -60,13 +61,14 @@ export class LessonEffectivenessTelemetry {
   record(input: LessonEffectivenessRecordInput): LessonEffectivenessEvent {
     const lessonId = requireNonEmptyString(input.lessonId, 'lessonId');
     const lessonScope = normalizeLessonScope(input.lessonScope?.scope);
+    const injectedAt = normalizeTimestamp(input.injectedAt, 'injectedAt');
     const observedAt = normalizeTimestamp(input.observedAt, 'observedAt');
     const injectionContext = normalizeInjectionContext(input.injectionContext);
     requireApplicableScope(
       lessonId,
       input.lessonScope,
       injectionContext,
-      observedAt,
+      injectedAt,
     );
     const blockersBefore = requireCount(input.blockersBefore, 'blockersBefore');
     const blockersAfter = requireCount(input.blockersAfter, 'blockersAfter');
@@ -93,6 +95,7 @@ export class LessonEffectivenessTelemetry {
       lessonId,
       lessonScope,
       injectionContext,
+      injectedAt,
       observedAt,
       outcome,
       signals: {
@@ -207,7 +210,7 @@ function requireApplicableScope(
   lessonId: string,
   lessonScope: LessonScopeMetadata,
   injectionContext: Omit<LessonInjectionContext, 'now'>,
-  observedAt: string,
+  injectedAt: string,
 ): void {
   const attributionLesson: CritiqueLesson = {
     evaluatorName: 'lesson-effectiveness-attribution',
@@ -216,14 +219,14 @@ function requireApplicableScope(
     taskId: (injectionContext.taskId ??
       lessonScope.provenance.taskId ??
       'lesson-effectiveness-attribution') as TaskId,
-    timestamp: observedAt,
+    timestamp: injectedAt,
     lifecycleStatus: 'active',
     lessonScope,
   };
   if (
     !isLessonApplicable(attributionLesson, {
       ...injectionContext,
-      now: observedAt,
+      now: injectedAt,
     })
   ) {
     throw new RangeError(
@@ -278,8 +281,9 @@ function requireNonEmptyString(value: string, label: string): string {
 function requireTaskId(
   value: NonNullable<LessonInjectionContext['taskId']>,
 ): NonNullable<LessonInjectionContext['taskId']> {
-  requireNonEmptyString(value, 'injectionContext.taskId');
-  return value;
+  return requireNonEmptyString(value, 'injectionContext.taskId') as NonNullable<
+    LessonInjectionContext['taskId']
+  >;
 }
 
 function requireCount(value: number, label: string): number {

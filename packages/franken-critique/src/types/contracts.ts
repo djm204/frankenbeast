@@ -449,6 +449,8 @@ export interface LessonEffectivenessEvent {
   readonly lessonId: string;
   readonly lessonScope: LessonScopeKind;
   readonly injectionContext: Omit<LessonInjectionContext, 'now'>;
+  /** Timestamp when the lesson was injected; scope expiry is evaluated here. */
+  readonly injectedAt: string;
   readonly observedAt: string;
   readonly outcome: LessonEffectivenessOutcome;
   readonly signals: LessonEffectivenessSignals;

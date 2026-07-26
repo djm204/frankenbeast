@@ -174,7 +174,7 @@ Report items identify their source as `recorded-lesson`, `blocker-pattern`, or `
 
 ## Lesson effectiveness telemetry
 
-`LessonEffectivenessTelemetry` correlates an injected lesson with the task result that follows it. Call `record()` after the task outcome is known with the stable lesson id, reviewed lesson scope, injection context, task success, blocker counts before/after injection, review-finding count, and whether the user corrected the result. The emitted `lesson-effectiveness-event-v1` contains only those bounded signals; its schema deliberately has no raw prompt, reviewer finding text, or correction text fields.
+`LessonEffectivenessTelemetry` correlates an injected lesson with the task result that follows it. Call `record()` after the task outcome is known with the stable lesson id, reviewed lesson scope, injection context, injection/outcome timestamps, task success, blocker counts before/after injection, review-finding count, and whether the user corrected the result. Scope expiry is validated at the injection timestamp so a valid lesson remains attributable when a long-running task finishes after expiry. The emitted `lesson-effectiveness-event-v1` contains only those bounded signals; its schema deliberately has no raw prompt, reviewer finding text, or correction text fields.
 
 Outcome attribution is deterministic:
 
