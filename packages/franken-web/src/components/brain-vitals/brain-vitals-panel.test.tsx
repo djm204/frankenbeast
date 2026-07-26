@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   BrainVitalsRunDetail,
@@ -110,7 +110,10 @@ function client(overrides: Partial<DashboardApiClient> = {}): DashboardApiClient
 }
 
 describe('BrainVitalsPanel', () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it('renders real aggregate vitals, updates a graph from SSE, and drills into a real run', async () => {
     let pushSnapshot!: (next: BrainVitalsSnapshot) => void;
@@ -127,6 +130,7 @@ describe('BrainVitalsPanel', () => {
     expect(await screen.findByLabelText('Health score 88')).toBeTruthy();
     expect(screen.getByText('25%')).toBeTruthy();
     expect(screen.getByLabelText('Resource usage trend').getAttribute('data-point-count')).toBe('1');
+    expect(screen.getByLabelText('Cost trend').getAttribute('data-point-count')).toBe('1');
 
     pushSnapshot({
       ...snapshot,
@@ -170,5 +174,38 @@ describe('BrainVitalsPanel', () => {
       expect(api.fetchBrainVitalsSnapshot).toHaveBeenCalledWith('planner');
       expect(api.subscribeToBrainVitals).toHaveBeenCalledWith('planner', expect.any(Function), expect.any(Function), expect.any(Function));
     });
+  });
+
+  it('does not misreport missing per-run resource telemetry as measured zero usage', async () => {
+    const api = client({
+      fetchBrainVitalsRun: vi.fn().mockResolvedValue({ ...detail, resources: [] }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Open vitals for run run-1/ }));
+
+    expect(await screen.findByText('Resource telemetry unavailable')).toBeTruthy();
+  });
+
+  it('discovers the first run after an initially empty result without a remount', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, timeout) => {
+      if (timeout === 10_000) poll = callback as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const api = client({
+      listBrainVitalsRuns: vi.fn()
+        .mockResolvedValueOnce({ runs: [] })
+        .mockResolvedValue({ runs: [detail.run] }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+
+    expect(await screen.findByText(/No Beast runs exist yet/)).toBeTruthy();
+    await act(async () => {
+      poll?.();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole('region', { name: 'Brain Vitals for reviewer' })).toBeTruthy();
   });
 });

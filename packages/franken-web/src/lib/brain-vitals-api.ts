@@ -108,10 +108,25 @@ export class BrainVitalsApiClient {
   constructor(private readonly baseUrl: string) {}
 
   async listRuns(limit = 100): Promise<{ runs: BeastRunSummary[]; nextCursor?: string }> {
-    const response = await this.fetchJson<{ data: { runs: BeastRunSummary[]; nextCursor?: string } }>(
-      `/v1/beasts/runs?limit=${limit}`,
-    );
-    return response.data;
+    const runs: BeastRunSummary[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+
+    do {
+      const query = new URLSearchParams({ limit: String(limit) });
+      if (cursor) query.set('cursor', cursor);
+      const response = await this.fetchJson<{ data: { runs: BeastRunSummary[]; nextCursor?: string } }>(
+        `/v1/beasts/runs?${query.toString()}`,
+      );
+      runs.push(...response.data.runs);
+      cursor = response.data.nextCursor;
+      if (cursor && seenCursors.has(cursor)) {
+        throw new Error('Beast run pagination returned a repeated cursor.');
+      }
+      if (cursor) seenCursors.add(cursor);
+    } while (cursor);
+
+    return { runs };
   }
 
   async fetchSnapshot(brainId: string): Promise<BrainVitalsSnapshot> {
@@ -193,7 +208,14 @@ export class BrainVitalsApiClient {
       });
     };
 
-    await connect();
+    try {
+      await connect();
+    } catch (error) {
+      if (!closed) {
+        onError?.(new Error(`Brain Vitals stream connection failed. ${toError(error).message}`));
+        scheduleReconnect();
+      }
+    }
     return () => {
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);

@@ -93,6 +93,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
+    let active = true;
     setLoading(true);
     setError(null);
     setRuns([]);
@@ -102,20 +103,34 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setHistory([]);
     setLivePoints([]);
 
-    void client.listBrainVitalsRuns(100).then(({ runs: nextRuns }) => {
-      if (generationRef.current !== generation) return;
-      const nextBrainIds = [...new Set(nextRuns.map((run) => run.definitionId))].sort();
-      setRuns(nextRuns);
-      setBrainIds(nextBrainIds);
-      setSelectedBrainId(nextBrainIds[0] ?? null);
-      if (nextBrainIds.length === 0) setLoading(false);
-    }).catch((loadError) => {
-      if (generationRef.current !== generation) return;
-      setError(`Unable to discover Brain Vitals runs. ${describeError(loadError)}`);
-      setLoading(false);
-    });
+    const refreshRuns = async (initial: boolean) => {
+      try {
+        const { runs: nextRuns } = await client.listBrainVitalsRuns(100);
+        if (!active || generationRef.current !== generation) return;
+        const nextBrainIds = [...new Set(nextRuns.map((run) => run.definitionId))].sort();
+        setRuns(nextRuns);
+        setBrainIds(nextBrainIds);
+        setSelectedBrainId((current) => current && nextBrainIds.includes(current) ? current : nextBrainIds[0] ?? null);
+        if (nextBrainIds.length === 0) setLoading(false);
+        if (!initial) setError(null);
+      } catch (loadError) {
+        if (!active || generationRef.current !== generation) return;
+        const message = `Unable to discover Brain Vitals runs. ${describeError(loadError)}`;
+        if (initial) {
+          setError(message);
+          setLoading(false);
+        } else {
+          setStreamError(message);
+        }
+      }
+    };
+
+    void refreshRuns(true);
+    const discoveryTimer = setInterval(() => void refreshRuns(false), 10_000);
 
     return () => {
+      active = false;
+      clearInterval(discoveryTimer);
       generationRef.current += 1;
     };
   }, [client]);
@@ -274,9 +289,10 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
               <small>{snapshot.resource.availability === 'available' && latestPoint ? `${Math.round(latestPoint.cpuPercent)}% CPU · ${Math.round(latestPoint.rssMb)} MB RSS` : 'Resource telemetry unavailable'}</small>
             </article>
             <article>
-              <h4>Token / cost trend</h4>
-              <TrendChart label="Token and cost trend" values={livePoints.map((point) => point.totalTokens)} pointCount={livePoints.length} />
-              <small>{latestPoint?.totalTokens.toLocaleString() ?? '0'} tokens · ${(latestPoint?.estimatedUsd ?? 0).toFixed(4)}</small>
+              <h4>Input/cache token and cost trends</h4>
+              <TrendChart label="Input and cache token trend" values={livePoints.map((point) => point.totalTokens)} pointCount={livePoints.length} />
+              <TrendChart label="Cost trend" values={livePoints.map((point) => point.estimatedUsd)} pointCount={livePoints.length} />
+              <small>{latestPoint?.totalTokens.toLocaleString() ?? '0'} observed input/cache tokens · ${(latestPoint?.estimatedUsd ?? 0).toFixed(4)}</small>
             </article>
             <article>
               <h4>Agent churn</h4>
@@ -348,7 +364,7 @@ function RunDetail({ detail }: { detail: BrainVitalsRunDetail }) {
         <div><dt>Cache split</dt><dd>{detail.tokens.cacheReadTokens.toLocaleString()} read / {detail.tokens.cacheCreationTokens.toLocaleString()} created</dd></div>
         <div><dt>Cost</dt><dd>${detail.cost.estimatedUsd.toFixed(4)}{detail.cost.budgetUsd === null ? '' : ` / $${detail.cost.budgetUsd.toFixed(2)} budget`}</dd></div>
         <div><dt>Compaction</dt><dd>{detail.compactions.length} {detail.compactions.length === 1 ? 'compaction' : 'compactions'}</dd></div>
-        <div><dt>Resources</dt><dd>{Math.round(peakCpu)}% peak CPU · {Math.round(peakRss / 1024 / 1024)} MB peak RSS</dd></div>
+        <div><dt>Resources</dt><dd>{detail.resources.length === 0 ? 'Resource telemetry unavailable' : `${Math.round(peakCpu)}% peak CPU · ${Math.round(peakRss / 1024 / 1024)} MB peak RSS`}</dd></div>
       </dl>
       <section>
         <h4>Resource samples</h4>
