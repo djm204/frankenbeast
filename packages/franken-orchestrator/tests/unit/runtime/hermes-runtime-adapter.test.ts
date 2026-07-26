@@ -217,6 +217,20 @@ describe('HermesRuntimeAdapter', () => {
     expect(replay.events.some((event) => event.workspaceId === 'hermes:alpha')).toBe(true);
   });
 
+  it('seeds initial cursors for healthy workspaces whose older events fall outside the page', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    createCurrentKanban(join(home, 'kanban.db'));
+    createCurrentKanban(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+
+    const first = await adapter.getEvents({ limit: 1 });
+    const replay = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+
+    expect(first.events).toHaveLength(1);
+    expect(replay.events).toEqual([]);
+  });
+
   it('preserves slash commands and API routes in normalized runtime text', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -272,6 +286,46 @@ describe('HermesRuntimeAdapter', () => {
     ]);
   });
 
+  it('orders equal-timestamp snapshot events across workspaces by cursor order', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    const globalPath = join(home, 'kanban.db');
+    const alphaPath = join(home, 'kanban', 'boards', 'alpha', 'kanban.db');
+    createCurrentKanban(globalPath);
+    createCurrentKanban(alphaPath);
+    for (const dbPath of [globalPath, alphaPath]) {
+      const db = new Database(dbPath);
+      db.prepare('DELETE FROM task_comments').run();
+      db.close();
+    }
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({ activityLimit: 1 });
+    if (snapshot.events.status !== 'available') throw new Error('Expected events');
+
+    expect(snapshot.events.data.map((event) => event.id)).toEqual(['hermes:global:event:10']);
+  });
+
+  it('uses the latest lifecycle timestamp for completed tasks, runs, and agents', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET status = ?, completed_at = ?, last_heartbeat_at = ? WHERE id = ?')
+      .run('done', 1_785_081_900, 1_785_081_620, 't_parent');
+    db.prepare('UPDATE task_runs SET status = ?, ended_at = ?, last_heartbeat_at = ? WHERE id = ?')
+      .run('done', 1_785_081_900, 1_785_081_620, 1);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    const expected = new Date(1_785_081_900 * 1000).toISOString();
+    if (snapshot.tasks.status !== 'available' || snapshot.runs.status !== 'available'
+      || snapshot.agents.status !== 'available') throw new Error('Expected runtime data');
+
+    expect(snapshot.tasks.data.find((task) => task.id.endsWith('t_parent'))?.updatedAt).toBe(expected);
+    expect(snapshot.runs.data[0]?.finishedAt).toBe(expected);
+    expect(snapshot.agents.data.find((agent) => agent.id.endsWith('worker-a'))?.lastActiveAt).toBe(expected);
+  });
+
   it('normalizes established terminal Kanban task aliases', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -301,9 +355,11 @@ describe('HermesRuntimeAdapter', () => {
 
     const adapter = new HermesRuntimeAdapter({ hermesHome: home });
 
-    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+    const provider = await adapter.describe();
+    expect(provider).toEqual(expect.objectContaining({
       health: expect.objectContaining({ state: 'unavailable' }),
     }));
+    expect(provider.health.message).not.toContain(home);
     await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({ state: 'unavailable' }));
   });
 

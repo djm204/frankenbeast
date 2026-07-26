@@ -170,6 +170,14 @@ describe('smart-swarm runtime routes', () => {
     });
     expect(valid.status).toBe(200);
     await valid.body!.cancel();
+
+    const secondConnectionId = 'second-valid';
+    const secondTicket = ticketStore.issue('operator-secret', `hermes:${secondConnectionId}`);
+    const secondValid = await app.request(`/v1/smart-swarm/providers/hermes/events/${secondConnectionId}`, {
+      headers: { cookie: `frankenbeast_runtime_sse_ticket=${secondTicket}` },
+    });
+    expect(secondValid.status).toBe(429);
+    if (secondValid.body) await secondValid.body.cancel();
   });
 
   it('rejects a malformed SSE cursor before consuming its one-shot ticket', async () => {
@@ -191,7 +199,20 @@ describe('smart-swarm runtime routes', () => {
   });
 
   it('uses one-shot scoped cookies for cursor-replay SSE and emits normalized events', async () => {
-    const { app } = createRoutes();
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+      events: [
+        {
+          id: 'event-1', workspaceId: 'hermes:global', taskId: 'task-1', runId: null, type: 'lifecycle',
+          occurredAt: '2026-07-26T12:00:00.000Z', cursor: 'cursor-1', summary: 'first', metadata: {},
+        },
+        {
+          id: 'event-2', workspaceId: 'hermes:global', taskId: 'task-1', runId: null, type: 'lifecycle',
+          occurredAt: '2026-07-26T12:00:01.000Z', cursor: 'cursor-2', summary: 'second', metadata: {},
+        },
+      ],
+      nextCursor: 'cursor-final',
+    }));
     const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
       method: 'POST',
       headers: { authorization: 'Bearer operator-secret' },
@@ -209,9 +230,25 @@ describe('smart-swarm runtime routes', () => {
     });
     expect(response.status).toBe(200);
     const reader = response.body!.getReader();
-    const first = await reader.read();
-    expect(new TextDecoder().decode(first.value)).toContain('event: activity');
-    expect(new TextDecoder().decode(first.value)).toContain('cursor-1');
+    let output = '';
+    while (!output.includes('cursor-2')) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      output += new TextDecoder().decode(chunk.value);
+    }
+    expect(output).toContain('event: activity');
+    expect(output).toContain('id: cursor-1');
+    expect(output).toContain('id: cursor-2');
+    expect(output).not.toContain('id: cursor-final');
     await reader.cancel();
+  });
+
+  it('accepts large cursors that a runtime adapter can emit', async () => {
+    const { app } = createRoutes();
+    const cursor = 'x'.repeat(70_000);
+    const response = await app.request(`/v1/smart-swarm/providers/hermes/events?cursor=${cursor}`, {
+      headers: authHeaders(),
+    });
+    expect(response.status).toBe(200);
   });
 });

@@ -70,6 +70,7 @@ const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_SUMMARY_CHARS = 512;
 const ABSOLUTE_PATH_RE = /(?:^|\s)(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 
 function nowIso(now: () => Date): string {
   return now().toISOString();
@@ -106,10 +107,16 @@ function requiredTimestamp(value: unknown): string {
   return normalized;
 }
 
+function latestTimestamp(...values: unknown[]): string | null {
+  const normalized = values.map(timestamp).filter((value): value is string => value !== null);
+  return normalized.sort().at(-1) ?? null;
+}
+
 function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
   const redacted = redactSensitiveText(value)
-    .replace(ABSOLUTE_PATH_RE, (match, path: string) => match.replace(path, '[REDACTED_HOST_PATH]'));
+    .replace(ABSOLUTE_PATH_RE, (match, path: string) => match.replace(path, '[REDACTED_HOST_PATH]'))
+    .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string) => `${quote}[REDACTED_HOST_PATH]`);
   return redacted.length <= MAX_SUMMARY_CHARS ? redacted : `${redacted.slice(0, MAX_SUMMARY_CHARS - 1)}…`;
 }
 
@@ -241,6 +248,12 @@ function eventOrder(a: CursorValue, b: CursorValue): number {
     || a.sourceId - b.sourceId;
 }
 
+function runtimeEventOrder(a: RuntimeEvent, b: RuntimeEvent): number {
+  const left = parseCursor(a.cursor);
+  const right = parseCursor(b.cursor);
+  return left && right ? eventOrder(left, right) : a.id.localeCompare(b.id);
+}
+
 export class HermesRuntimeAdapter implements RuntimeAdapter {
   readonly id = 'hermes';
   private readonly home: string | undefined;
@@ -370,7 +383,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       agents: dataStatus ?? { status: 'available', data: [...agentsById.values()].sort((a, b) => a.id.localeCompare(b.id)) },
       tasks: dataStatus ?? { status: 'available', data: tasks.sort((a, b) => a.id.localeCompare(b.id)) },
       runs: dataStatus ?? { status: 'available', data: runs.sort((a, b) => a.id.localeCompare(b.id)) },
-      events: dataStatus ?? { status: 'available', data: events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)).slice(-activityLimit) },
+      events: dataStatus ?? { status: 'available', data: events.sort(runtimeEventOrder).slice(-activityLimit) },
       blockers: dataStatus ?? { status: 'available', data: blockers.sort((a, b) => a.id.localeCompare(b.id)) },
       approvals: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical approval-request source' },
     });
@@ -383,13 +396,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       source.status === 'compatible' && (request.workspaceId === undefined || source.workspaceId === request.workspaceId)
     ));
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
+    const sourceLatest = new Map<string, CursorValue>();
     for (const source of inspected) {
       const after = cursorState.positions.get(source.workspaceId) ?? cursorState.legacy;
       try {
-        for (const event of this.readEvents(source, after, limit + 1)) {
+        const events = this.readEvents(source, after, limit + 1);
+        for (const event of events) {
           const decoded = parseCursor(event.cursor);
           if (decoded) entries.push({ event, cursor: decoded });
         }
+        const latest = events.at(-1);
+        const latestCursor = latest ? parseCursor(latest.cursor) : undefined;
+        if (latestCursor) sourceLatest.set(source.workspaceId, latestCursor);
       } catch {
         // Preserve healthy workspace activity across transient or corrupt sibling sources.
       }
@@ -404,10 +422,19 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     if (cursorState.legacy) {
       for (const source of inspected) positions.set(source.workspaceId, cursorState.legacy);
     }
-    for (const entry of page) positions.set(entry.cursor.workspaceId, entry.cursor);
+    if (!request.cursor) {
+      const pageWorkspaces = new Set(page.map((entry) => entry.cursor.workspaceId));
+      for (const [workspaceId, latest] of sourceLatest) {
+        if (!pageWorkspaces.has(workspaceId)) positions.set(workspaceId, latest);
+      }
+    }
+    const events = page.map((entry) => {
+      positions.set(entry.cursor.workspaceId, entry.cursor);
+      return { ...entry.event, cursor: cursorForPositions(positions) };
+    });
     return RuntimeEventPageSchema.parse({
-      events: page.map((entry) => entry.event),
-      nextCursor: page.length > 0 ? cursorForPositions(positions) : request.cursor ?? null,
+      events,
+      nextCursor: events.at(-1)?.cursor ?? request.cursor ?? null,
     });
   }
 
@@ -608,7 +635,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       const rawId = String(task['id']);
       const owner = typeof task['assignee'] === 'string' && task['assignee'] ? [agentId(source.workspaceId, task['assignee'])] : [];
       const parents = dependencies.get(rawId) ?? [];
-      const updatedAt = timestamp(task['last_heartbeat_at']) ?? timestamp(task['completed_at']) ?? timestamp(task['started_at']);
+      const updatedAt = latestTimestamp(task['last_heartbeat_at'], task['completed_at'], task['started_at']);
       return {
         id: taskId(source.workspaceId, rawId),
         workspaceId: source.workspaceId,
@@ -645,7 +672,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         state: mapRunState(run['status'], run['outcome']),
         startedAt: requiredTimestamp(run['started_at']),
         finishedAt: timestamp(run['ended_at']),
-        lastActiveAt: timestamp(run['last_heartbeat_at']) ?? timestamp(run['ended_at']) ?? timestamp(run['started_at']),
+        lastActiveAt: latestTimestamp(run['last_heartbeat_at'], run['ended_at'], run['started_at']),
         summary: typeof run['summary'] === 'string' ? boundedText(run['summary']) : null,
         metadata: {
           runtimeStatus: String(run['status']),
@@ -658,7 +685,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       if (typeof task['assignee'] !== 'string' || !task['assignee']) continue;
       const current = agentInputs.get(task['assignee']) ?? { states: [], timestamps: [] };
       current.states.push(String(task['status']));
-      const active = timestamp(task['last_heartbeat_at']) ?? timestamp(task['completed_at']) ?? timestamp(task['started_at']);
+      const active = latestTimestamp(task['last_heartbeat_at'], task['completed_at'], task['started_at']);
       if (active) current.timestamps.push(active);
       agentInputs.set(task['assignee'], current);
     }
@@ -667,7 +694,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       if (typeof run['profile'] !== 'string' || !run['profile']) continue;
       const current = agentInputs.get(run['profile']) ?? { states: [], timestamps: [] };
       current.states.push(String(run['status']));
-      const active = timestamp(run['last_heartbeat_at']) ?? timestamp(run['ended_at']) ?? timestamp(run['started_at']);
+      const active = latestTimestamp(run['last_heartbeat_at'], run['ended_at'], run['started_at']);
       if (active) current.timestamps.push(active);
       agentInputs.set(run['profile'], current);
     }
@@ -722,7 +749,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         metadata: { source: 'task-comment', author: boundedText(comment['author']) },
       });
     }
-    normalizedEvents.sort((a, b) => eventOrder(parseCursor(a.cursor)!, parseCursor(b.cursor)!));
+    normalizedEvents.sort(runtimeEventOrder);
     return { tasks, runs, events: normalizedEvents.slice(-activityLimit), blockers, agents };
   }
 }
