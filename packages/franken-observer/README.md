@@ -161,15 +161,23 @@ import { TokenCounter } from '@franken/observer'
 
 const counter = new TokenCounter()
 
-counter.record({ model: 'claude-sonnet-4-6', promptTokens: 500, completionTokens: 200 })
+counter.record({
+  model: 'claude-sonnet-4-6',
+  promptTokens: 500,
+  completionTokens: 200,
+  cacheReadTokens: 1_000,
+  cacheCreationTokens: 100,
+})
 counter.record({ model: 'claude-sonnet-4-6', promptTokens: 300, completionTokens: 100 })
 counter.record({ model: 'claude-opus-4-6',   promptTokens: 100, completionTokens:  50 })
 
 counter.totalsFor('claude-sonnet-4-6')
-// → { promptTokens: 800, completionTokens: 300, totalTokens: 1100 }
+// → { promptTokens: 800, completionTokens: 300, cacheReadTokens: 1000,
+//     cacheCreationTokens: 100, totalTokens: 2200 }
 
 counter.grandTotal()
-// → { promptTokens: 900, completionTokens: 350, totalTokens: 1250 }
+// → { promptTokens: 900, completionTokens: 350, cacheReadTokens: 1000,
+//     cacheCreationTokens: 100, totalTokens: 2350 }
 
 counter.allModels()  // → ['claude-sonnet-4-6', 'claude-opus-4-6']
 counter.reset()
@@ -179,7 +187,13 @@ Pass a `TokenCounter` to `SpanLifecycle.recordTokenUsage` to feed it automatical
 
 ```ts
 const counter = new TokenCounter()
-SpanLifecycle.recordTokenUsage(span, { promptTokens: 500, completionTokens: 200, model: 'claude-sonnet-4-6' }, counter)
+SpanLifecycle.recordTokenUsage(span, {
+  promptTokens: 500,
+  completionTokens: 200,
+  cacheReadTokens: 1_000,
+  cacheCreationTokens: 100,
+  model: 'claude-sonnet-4-6',
+}, counter)
 ```
 
 ### `CostCalculator`
@@ -191,8 +205,14 @@ import { CostCalculator, DEFAULT_PRICING } from '@franken/observer'
 
 const calc = new CostCalculator(DEFAULT_PRICING)
 
-calc.calculate({ model: 'claude-sonnet-4-6', promptTokens: 1_000_000, completionTokens: 500_000 })
-// → 10.5  (1M × $3 + 0.5M × $15)
+calc.calculate({
+  model: 'claude-sonnet-4-6',
+  promptTokens: 1_000_000,
+  completionTokens: 500_000,
+  cacheReadTokens: 1_000_000,
+  cacheCreationTokens: 1_000_000,
+})
+// → 14.55  ($3 fresh input + $7.50 output + $0.30 cache read + $3.75 cache write)
 
 // Sum across all models from a TokenCounter snapshot.
 // totalCost expects per-model TokenRecord entries, not grandTotal().
@@ -200,6 +220,8 @@ const records = counter.allModels().map((model) => ({
   model,
   promptTokens: counter.totalsFor(model).promptTokens,
   completionTokens: counter.totalsFor(model).completionTokens,
+  cacheReadTokens: counter.totalsFor(model).cacheReadTokens,
+  cacheCreationTokens: counter.totalsFor(model).cacheCreationTokens,
 }))
 calc.totalCost(records)
 
@@ -215,20 +237,22 @@ const myPricing = { ...DEFAULT_PRICING, 'my-local-model': { promptPerMillion: 0,
 const customCalc = new CostCalculator(myPricing)
 ```
 
-Default pricing (USD, 2025-Q4):
+`cacheHitRatio({ promptTokens, cacheReadTokens })` returns the fraction of reusable input served from cache. It returns `0` when both counts are zero.
 
-| Model | Prompt / M | Completion / M |
-|---|---|---|
-| `claude-opus-4-6` | $15.00 | $75.00 |
-| `claude-sonnet-4-6` | $3.00 | $15.00 |
-| `claude-haiku-4-5` | $0.80 | $4.00 |
-| `claude` (alias for sonnet) | $3.00 | $15.00 |
-| `gpt-4o` | $5.00 | $15.00 |
-| `gpt-4o-mini` | $0.15 | $0.60 |
-| `gemini-2.0-flash` | $0.10 | $0.40 |
-| `gemini` (alias for flash) | $0.10 | $0.40 |
-| `codex` | $5.00 | $15.00 |
-| `aider` (uses sonnet by default) | $3.00 | $15.00 |
+Default pricing (USD, verified 2026-07-25):
+
+| Model | Prompt / M | Completion / M | Cache read / M | Cache creation 5m / M | Cache creation 1h / M |
+|---|---:|---:|---:|---:|---:|
+| `claude-opus-4-6` | $5.00 | $25.00 | $0.50 | $6.25 | $10.00 |
+| `claude-sonnet-4-6` | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
+| `claude-haiku-4-5` | $1.00 | $5.00 | $0.10 | $1.25 | $2.00 |
+| `claude` (alias for sonnet) | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
+| `gpt-4o` | $2.50 | $10.00 | $1.25 | prompt fallback | prompt fallback |
+| `gpt-4o-mini` | $0.15 | $0.60 | $0.075 | prompt fallback | prompt fallback |
+| `gemini-2.0-flash` | $0.10 | $0.40 | prompt fallback | prompt fallback | prompt fallback |
+| `gemini` (alias for flash) | $0.10 | $0.40 | prompt fallback | prompt fallback | prompt fallback |
+| `codex` | $5.00 | $15.00 | prompt fallback | prompt fallback | prompt fallback |
+| `aider` (uses sonnet by default) | $3.00 | $15.00 | $0.30 | $3.75 | $6.00 |
 
 ### `CircuitBreaker`
 

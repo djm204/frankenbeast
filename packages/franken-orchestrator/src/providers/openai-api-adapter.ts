@@ -9,7 +9,9 @@ import type {
   ProviderAuthMethod,
   ToolDefinition,
   BrainSnapshot,
+  TokenUsage,
 } from '@franken/types';
+import { TokenUsageSchema } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { createEgressGuardedFetch, type EgressAuditSink, type EgressPolicyConfig } from '../network/egress-policy.js';
 
@@ -135,11 +137,7 @@ export class OpenAiApiAdapter implements ILlmProvider {
         if (chunk.usage) {
           yield {
             type: 'done',
-            usage: {
-              inputTokens: chunk.usage.prompt_tokens ?? 0,
-              outputTokens: chunk.usage.completion_tokens ?? 0,
-              totalTokens: chunk.usage.total_tokens ?? 0,
-            },
+            usage: this.translateUsage(chunk.usage),
           };
           return;
         }
@@ -224,5 +222,26 @@ export class OpenAiApiAdapter implements ILlmProvider {
         parameters: t.inputSchema,
       },
     }));
+  }
+
+  translateUsage(usage: NonNullable<OpenAI.ChatCompletionChunk['usage']>): TokenUsage {
+    const promptTokens = usage.prompt_tokens ?? 0;
+    const outputTokens = usage.completion_tokens ?? 0;
+    const cacheReadTokens = usage.prompt_tokens_details?.cached_tokens ?? 0;
+    if (cacheReadTokens > promptTokens) {
+      throw new RangeError('OpenAI cached prompt tokens cannot exceed total prompt tokens');
+    }
+    const parsed = TokenUsageSchema.parse({
+      inputTokens: promptTokens - cacheReadTokens,
+      outputTokens,
+      cacheReadTokens,
+      totalTokens: usage.total_tokens ?? promptTokens + outputTokens,
+    });
+    return {
+      inputTokens: parsed.inputTokens,
+      outputTokens: parsed.outputTokens,
+      cacheReadTokens,
+      totalTokens: parsed.totalTokens,
+    };
   }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { TokenCounter } from './TokenCounter.js'
+import { cacheHitRatio, TokenCounter } from './TokenCounter.js'
 
 describe('TokenCounter', () => {
   let counter: TokenCounter
@@ -26,6 +26,40 @@ describe('TokenCounter', () => {
       expect(totals.totalTokens).toBe(600)
     })
 
+    it('accumulates cache-read and cache-creation tokens and defaults missing cache fields to zero', () => {
+      counter.record({
+        model: 'claude-sonnet-4-6',
+        promptTokens: 100,
+        completionTokens: 25,
+        cacheReadTokens: 80,
+        cacheCreationTokens: 20,
+      })
+      counter.record({ model: 'claude-sonnet-4-6', promptTokens: 50, completionTokens: 10 })
+
+      expect(counter.totalsFor('claude-sonnet-4-6')).toEqual({
+        promptTokens: 150,
+        completionTokens: 35,
+        cacheReadTokens: 80,
+        cacheCreationTokens: 20,
+        totalTokens: 285,
+      })
+    })
+
+    it('preserves the one-hour cache-creation subset for cost calculation', () => {
+      counter.record({
+        model: 'claude-sonnet-4-6',
+        promptTokens: 0,
+        completionTokens: 0,
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      })
+
+      expect(counter.totalsFor('claude-sonnet-4-6')).toMatchObject({
+        cacheCreationTokens: 100,
+        cacheCreation1hTokens: 40,
+      })
+    })
+
     it('tracks multiple models independently', () => {
       counter.record({ model: 'claude-opus-4-6', promptTokens: 100, completionTokens: 50 })
       counter.record({ model: 'gpt-4o', promptTokens: 200, completionTokens: 80 })
@@ -45,6 +79,8 @@ describe('TokenCounter', () => {
       expect(boundedCounter.grandTotal()).toEqual({
         promptTokens: 30,
         completionTokens: 15,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         totalTokens: 45,
       })
     })
@@ -59,6 +95,8 @@ describe('TokenCounter', () => {
       expect(boundedCounter.totalsFor('model-a')).toEqual({
         promptTokens: 30,
         completionTokens: 15,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         totalTokens: 45,
       })
     })
@@ -96,6 +134,8 @@ describe('TokenCounter', () => {
       expect(counter.grandTotal()).toEqual({
         promptTokens: 2_000,
         completionTokens: 3_000,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         totalTokens: 5_000,
       })
 
@@ -104,6 +144,8 @@ describe('TokenCounter', () => {
       expect(counter.grandTotal()).toEqual({
         promptTokens: 0,
         completionTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         totalTokens: 0,
       })
     })
@@ -161,6 +203,8 @@ describe('TokenCounter', () => {
       expect(counter.totalsFor('m')).toEqual({
         promptTokens: 0,
         completionTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         totalTokens: 0,
       })
     })
@@ -176,8 +220,37 @@ describe('TokenCounter', () => {
       expect(counter.grandTotal()).toEqual({
         promptTokens: Number.MAX_SAFE_INTEGER,
         completionTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
         totalTokens: Number.MAX_SAFE_INTEGER,
       })
     })
+  })
+})
+
+describe('cacheHitRatio()', () => {
+  it.each([
+    ['no prompt activity', { promptTokens: 0, cacheReadTokens: 0 }, 0],
+    ['all cached', { promptTokens: 0, cacheReadTokens: 100 }, 1],
+    ['all fresh', { promptTokens: 100, cacheReadTokens: 0 }, 0],
+    ['mixed', { promptTokens: 25, cacheReadTokens: 75 }, 0.75],
+  ] as const)('returns the expected ratio for %s', (_name, record, expected) => {
+    expect(cacheHitRatio(record)).toBe(expected)
+  })
+
+  it.each([
+    ['negative', { promptTokens: -1, cacheReadTokens: 1 }],
+    ['fractional', { promptTokens: 1.5, cacheReadTokens: 1 }],
+    ['non-finite', { promptTokens: Number.POSITIVE_INFINITY, cacheReadTokens: 1 }],
+    ['unsafe', { promptTokens: Number.MAX_SAFE_INTEGER + 1, cacheReadTokens: 0 }],
+  ])('rejects %s token counts', (_name, record) => {
+    expect(() => cacheHitRatio(record)).toThrow(RangeError)
+  })
+
+  it('rejects a denominator outside the safe-integer range', () => {
+    expect(() => cacheHitRatio({
+      promptTokens: Number.MAX_SAFE_INTEGER,
+      cacheReadTokens: 1,
+    })).toThrow(RangeError)
   })
 })

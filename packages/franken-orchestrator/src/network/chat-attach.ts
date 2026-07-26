@@ -10,7 +10,7 @@ import {
   CHAT_SOCKET_PROTOCOL,
   CHAT_SOCKET_TOKEN_PROTOCOL_PREFIX,
 } from '../http/ws-chat-server.js';
-import { deterministicUuid, type ProviderContext, type TokenUsage } from '@franken/types';
+import { deterministicUuid, TokenUsageSchema, type ProviderContext, type TokenUsage } from '@franken/types';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from './network-url.js';
 
 const ZERO_USAGE: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
@@ -19,6 +19,21 @@ function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
   return {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
+    ...(
+      a.cacheReadTokens !== undefined || b.cacheReadTokens !== undefined
+        ? { cacheReadTokens: (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0) }
+        : {}
+    ),
+    ...(
+      a.cacheCreationTokens !== undefined || b.cacheCreationTokens !== undefined
+        ? { cacheCreationTokens: (a.cacheCreationTokens ?? 0) + (b.cacheCreationTokens ?? 0) }
+        : {}
+    ),
+    ...(
+      a.cacheCreation1hTokens !== undefined || b.cacheCreation1hTokens !== undefined
+        ? { cacheCreation1hTokens: (a.cacheCreation1hTokens ?? 0) + (b.cacheCreation1hTokens ?? 0) }
+        : {}
+    ),
     totalTokens: a.totalTokens + b.totalTokens,
   };
 }
@@ -254,15 +269,17 @@ export interface RemoteReplyOutcome {
 }
 
 function parseTokenUsage(value: unknown): TokenUsage | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const usage = value as Record<string, unknown>;
-  const inputTokens = usage['inputTokens'];
-  const outputTokens = usage['outputTokens'];
-  const totalTokens = usage['totalTokens'];
-  if (typeof inputTokens === 'number' && typeof outputTokens === 'number' && typeof totalTokens === 'number') {
-    return { inputTokens, outputTokens, totalTokens };
-  }
-  return undefined;
+  const parsed = TokenUsageSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const usage = parsed.data;
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+    ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
+    ...(usage.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens: usage.cacheCreation1hTokens } : {}),
+    totalTokens: usage.totalTokens,
+  };
 }
 
 function parseProviderContext(value: unknown): ProviderContext | undefined {
@@ -375,6 +392,7 @@ function sendManagedChatInput(socket: WebSocket, input: string): void {
 }
 
 export const __chatAttachTestHooks = {
+  addUsage,
   awaitRemoteReply,
   createRemoteSession,
   parseManagedChatMessage,

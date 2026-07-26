@@ -34,11 +34,17 @@ export class ObserverMetadataParseError extends Error {
 export interface ObserverCostSummary {
   totalPromptTokens: number;
   totalCompletionTokens: number;
+  totalCacheReadTokens?: number;
+  totalCacheCreationTokens?: number;
+  totalCacheCreation1hTokens?: number;
   totalCostUsd: number;
   byModel: Array<{
     model: string;
     promptTokens: number;
     completionTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    cacheCreation1hTokens?: number;
     costUsd: number;
     unknownModel?: boolean;
   }>;
@@ -69,6 +75,9 @@ export interface ObserverCostInput {
   model: string;
   promptTokens: number;
   completionTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  cacheCreation1hTokens?: number;
   costUsd?: number;
 }
 
@@ -99,6 +108,17 @@ function shouldRepriceStoredCost(row: { cost_source: string; cost_usd: number; m
     return !hasDefaultPricing(row.model);
   }
   return true;
+}
+
+function addTokenCounts(left: number, right: number, label: string): number {
+  if (!Number.isSafeInteger(right) || right < 0) {
+    throw new RangeError(`${label} must contain non-negative safe integers`);
+  }
+  const sum = left + right;
+  if (!Number.isSafeInteger(sum)) {
+    throw new RangeError(`${label} total exceeds Number.MAX_SAFE_INTEGER (${Number.MAX_SAFE_INTEGER})`);
+  }
+  return sum;
 }
 
 export function createObserverAdapter(dbPath: string): ObserverAdapter {
@@ -162,18 +182,37 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         model: input.model,
         promptTokens: input.promptTokens,
         completionTokens: input.completionTokens,
+        cacheReadTokens: input.cacheReadTokens ?? 0,
+        cacheCreationTokens: input.cacheCreationTokens ?? 0,
+        cacheCreation1hTokens: input.cacheCreation1hTokens ?? 0,
       });
       store.db.prepare(`
-        INSERT INTO cost_ledger (session_id, model, prompt_tokens, completion_tokens, cost_usd, cost_source)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(input.sessionId, input.model, input.promptTokens, input.completionTokens, costUsd, input.costUsd === undefined ? 'computed' : 'explicit');
+        INSERT INTO cost_ledger (
+          session_id, model, prompt_tokens, completion_tokens,
+          cache_read_tokens, cache_creation_tokens, cache_creation_1h_tokens,
+          cost_usd, cost_source
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.sessionId,
+        input.model,
+        input.promptTokens,
+        input.completionTokens,
+        input.cacheReadTokens ?? 0,
+        input.cacheCreationTokens ?? 0,
+        input.cacheCreation1hTokens ?? 0,
+        costUsd,
+        input.costUsd === undefined ? 'computed' : 'explicit',
+      );
 
       return { costUsd, unknownModel };
     },
 
     async cost(input) {
       let sql = `
-        SELECT model, prompt_tokens, completion_tokens, cost_usd, cost_source
+        SELECT model, prompt_tokens, completion_tokens,
+               cache_read_tokens, cache_creation_tokens, cache_creation_1h_tokens,
+               cost_usd, cost_source
         FROM cost_ledger
       `;
       const params: unknown[] = [];
@@ -187,6 +226,9 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
         model: string;
         prompt_tokens: number;
         completion_tokens: number;
+        cache_read_tokens: number;
+        cache_creation_tokens: number;
+        cache_creation_1h_tokens: number;
         cost_usd: number;
         cost_source: string;
       }>;
@@ -201,8 +243,17 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
           costUsd: 0,
         };
 
-        current.promptTokens += row.prompt_tokens;
-        current.completionTokens += row.completion_tokens;
+        current.promptTokens = addTokenCounts(current.promptTokens, row.prompt_tokens, 'promptTokens');
+        current.completionTokens = addTokenCounts(current.completionTokens, row.completion_tokens, 'completionTokens');
+        if (row.cache_read_tokens > 0) {
+          current.cacheReadTokens = addTokenCounts(current.cacheReadTokens ?? 0, row.cache_read_tokens, 'cacheReadTokens');
+        }
+        if (row.cache_creation_tokens > 0) {
+          current.cacheCreationTokens = addTokenCounts(current.cacheCreationTokens ?? 0, row.cache_creation_tokens, 'cacheCreationTokens');
+        }
+        if (row.cache_creation_1h_tokens > 0) {
+          current.cacheCreation1hTokens = addTokenCounts(current.cacheCreation1hTokens ?? 0, row.cache_creation_1h_tokens, 'cacheCreation1hTokens');
+        }
         if (row.cost_source !== 'explicit' && row.cost_usd <= 0 && !hasDefaultPricing(row.model)) {
           current.unknownModel = true;
         }
@@ -211,6 +262,9 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
               model: row.model,
               promptTokens: row.prompt_tokens,
               completionTokens: row.completion_tokens,
+              cacheReadTokens: row.cache_read_tokens,
+              cacheCreationTokens: row.cache_creation_tokens,
+              cacheCreation1hTokens: row.cache_creation_1h_tokens,
             })
           : row.cost_usd;
 
@@ -218,9 +272,32 @@ export function createObserverAdapter(dbPath: string): ObserverAdapter {
       }
 
       const byModel = [...grouped.values()];
+      const totalPromptTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.promptTokens, 'totalPromptTokens'),
+        0,
+      );
+      const totalCompletionTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.completionTokens, 'totalCompletionTokens'),
+        0,
+      );
+      const totalCacheReadTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.cacheReadTokens ?? 0, 'totalCacheReadTokens'),
+        0,
+      );
+      const totalCacheCreationTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.cacheCreationTokens ?? 0, 'totalCacheCreationTokens'),
+        0,
+      );
+      const totalCacheCreation1hTokens = byModel.reduce(
+        (sum, row) => addTokenCounts(sum, row.cacheCreation1hTokens ?? 0, 'totalCacheCreation1hTokens'),
+        0,
+      );
       return {
-        totalPromptTokens: byModel.reduce((sum, row) => sum + row.promptTokens, 0),
-        totalCompletionTokens: byModel.reduce((sum, row) => sum + row.completionTokens, 0),
+        totalPromptTokens,
+        totalCompletionTokens,
+        ...(totalCacheReadTokens > 0 ? { totalCacheReadTokens } : {}),
+        ...(totalCacheCreationTokens > 0 ? { totalCacheCreationTokens } : {}),
+        ...(totalCacheCreation1hTokens > 0 ? { totalCacheCreation1hTokens } : {}),
         totalCostUsd: byModel.reduce((sum, row) => sum + row.costUsd, 0),
         byModel,
       };

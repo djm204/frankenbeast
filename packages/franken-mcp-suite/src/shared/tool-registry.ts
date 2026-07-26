@@ -1141,6 +1141,9 @@ const TOOLS: ToolFull[] = [
         model: { type: 'string', description: 'Model name (e.g. gpt-4o, claude-opus-4-5)', minLength: 1, maxLength: 256 },
         promptTokens: { type: 'number', description: 'Input/prompt token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         completionTokens: { type: 'number', description: 'Output/completion token count', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        cacheReadTokens: { type: 'number', description: 'Input tokens read from provider cache', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        cacheCreationTokens: { type: 'number', description: 'Input tokens written to provider cache', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+        cacheCreation1hTokens: { type: 'number', description: 'One-hour cache writes already included in cacheCreationTokens', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
         costUsd: { type: 'number', description: 'Actual cost in USD if known — omit to auto-calculate from pricing table', minimum: 0 },
       },
       required: ['sessionId', 'model', 'promptTokens', 'completionTokens'],
@@ -1150,10 +1153,22 @@ const TOOLS: ToolFull[] = [
       if (!parsedArgs.ok) {
         return { content: [{ type: 'text', text: `Error: fbeast_observer_log_cost ${parsedArgs.message}` }], isError: true };
       }
-      const { model, promptTokens, completionTokens } = parsedArgs.value;
+      const {
+        model,
+        promptTokens,
+        completionTokens,
+        cacheReadTokens = 0,
+        cacheCreationTokens = 0,
+        cacheCreation1hTokens = 0,
+      } = parsedArgs.value;
       const result = await observer.logCost(parsedArgs.value);
       const pricingNote = result.unknownModel ? ' (unknown model — not priced)' : '';
-      return { content: [{ type: 'text', text: `Logged cost: ${promptTokens}+${completionTokens} tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}` }] };
+      return {
+        content: [{
+          type: 'text',
+          text: `Logged cost: ${promptTokens} prompt + ${completionTokens} completion + ${cacheReadTokens} cache read + ${cacheCreationTokens} cache creation (${cacheCreation1hTokens} one-hour) tokens for ${model} = $${result.costUsd.toFixed(4)}${pricingNote}`,
+        }],
+      };
     },
   },
   {
@@ -1172,7 +1187,15 @@ const TOOLS: ToolFull[] = [
       if (summary.byModel.length === 0) {
         return { content: [{ type: 'text', text: 'No cost data recorded.' }] };
       }
-      const lines = [`## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`, '', ...summary.byModel.map((row) => `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`), '', `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion = $${summary.totalCostUsd.toFixed(4)}`];
+      const lines = [
+        `## Cost Summary${sessionId ? ` (session: ${sessionId})` : ''}`,
+        '',
+        ...summary.byModel.map((row) =>
+          `- ${row.model}: ${row.promptTokens} prompt + ${row.completionTokens} completion + ${row.cacheReadTokens ?? 0} cache read + ${row.cacheCreationTokens ?? 0} cache creation (${row.cacheCreation1hTokens ?? 0} one-hour) = $${row.costUsd.toFixed(4)}${row.unknownModel ? ' (unknown model — not priced)' : ''}`,
+        ),
+        '',
+        `**Total:** ${summary.totalPromptTokens} prompt + ${summary.totalCompletionTokens} completion + ${summary.totalCacheReadTokens ?? 0} cache read + ${summary.totalCacheCreationTokens ?? 0} cache creation (${summary.totalCacheCreation1hTokens ?? 0} one-hour) = $${summary.totalCostUsd.toFixed(4)}`,
+      ];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   },

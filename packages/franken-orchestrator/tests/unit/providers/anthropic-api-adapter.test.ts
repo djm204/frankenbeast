@@ -98,6 +98,41 @@ describe('AnthropicApiAdapter', () => {
     });
   });
 
+  describe('translateUsage()', () => {
+    it('preserves Anthropic cache-read and cache-creation usage by TTL', () => {
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-...ure' });
+
+      expect(adapter.translateUsage({
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_input_tokens: 80,
+        cache_creation_input_tokens: 50,
+        cache_creation: {
+          ephemeral_5m_input_tokens: 20,
+          ephemeral_1h_input_tokens: 30,
+        },
+      } as any)).toEqual({
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadTokens: 80,
+        cacheCreationTokens: 50,
+        cacheCreation1hTokens: 30,
+        totalTokens: 280,
+      });
+    });
+
+    it('rejects cache usage whose combined total is unsafe', () => {
+      const adapter = new AnthropicApiAdapter({ apiKey: 'test-...ure' });
+
+      expect(() => adapter.translateUsage({
+        input_tokens: Number.MAX_SAFE_INTEGER,
+        output_tokens: 0,
+        cache_read_input_tokens: 1,
+        cache_creation_input_tokens: 0,
+      } as any)).toThrow();
+    });
+  });
+
   describe('createEventTranslator()', () => {
     it('translates text_delta events', () => {
       const adapter = new AnthropicApiAdapter({ apiKey: 'test-api-key-fixture' });

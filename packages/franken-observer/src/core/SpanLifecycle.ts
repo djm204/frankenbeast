@@ -4,6 +4,9 @@ import type { TokenCounter } from '../cost/TokenCounter.js'
 export interface TokenUsage {
   promptTokens: number
   completionTokens: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
+  cacheCreation1hTokens?: number
   model?: string
 }
 
@@ -47,9 +50,20 @@ export const SpanLifecycle = {
     if (span.status !== 'active') {
       throw new Error(`Cannot record token usage on a ${span.status} span (id: ${span.id})`)
     }
+    const cacheReadTokens = usage.cacheReadTokens ?? 0
+    const cacheCreationTokens = usage.cacheCreationTokens ?? 0
+    const cacheCreation1hTokens = usage.cacheCreation1hTokens ?? 0
     assertValidTokenDelta(usage.promptTokens, 'promptTokens')
     assertValidTokenDelta(usage.completionTokens, 'completionTokens')
-    const totalTokens = safeAddTokenCounts(usage.promptTokens, usage.completionTokens)
+    assertValidTokenDelta(cacheReadTokens, 'cacheReadTokens')
+    assertValidTokenDelta(cacheCreationTokens, 'cacheCreationTokens')
+    assertValidTokenDelta(cacheCreation1hTokens, 'cacheCreation1hTokens')
+    if (cacheCreation1hTokens > cacheCreationTokens) {
+      throw new RangeError('SpanLifecycle: cacheCreation1hTokens must not exceed cacheCreationTokens')
+    }
+    const uncachedTokens = safeAddTokenCounts(usage.promptTokens, usage.completionTokens)
+    const cachedTokens = safeAddTokenCounts(cacheReadTokens, cacheCreationTokens)
+    const totalTokens = safeAddTokenCounts(uncachedTokens, cachedTokens)
 
     // Record to the counter next: it may throw if the new model/global totals
     // would overflow. Doing it before mutating the span keeps the rejection
@@ -59,12 +73,24 @@ export const SpanLifecycle = {
         model: usage.model,
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
+        cacheReadTokens,
+        cacheCreationTokens,
+        ...(usage.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens } : {}),
       })
     }
     const data: Record<string, unknown> = {
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
       totalTokens,
+    }
+    if (usage.cacheReadTokens !== undefined) {
+      data['cacheReadTokens'] = cacheReadTokens
+    }
+    if (usage.cacheCreationTokens !== undefined) {
+      data['cacheCreationTokens'] = cacheCreationTokens
+    }
+    if (usage.cacheCreation1hTokens !== undefined) {
+      data['cacheCreation1hTokens'] = cacheCreation1hTokens
     }
     if (usage.model !== undefined) {
       data['model'] = usage.model

@@ -26,8 +26,41 @@ import {
 } from '../src/index.js';
 
 describe('TokenUsageSchema', () => {
+  it('preserves the Anthropic one-hour cache-creation subset', () => {
+    expect(TokenUsageSchema.parse({
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 50,
+      cacheCreation1hTokens: 30,
+      totalTokens: 280,
+    })).toMatchObject({ cacheCreationTokens: 50, cacheCreation1hTokens: 30 })
+  })
+
+  it('rejects a one-hour cache-creation subset larger than total cache creation', () => {
+    expect(() => TokenUsageSchema.parse({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 10,
+      cacheCreation1hTokens: 11,
+      totalTokens: 10,
+    })).toThrow()
+  })
+
   it('validates well-formed usage', () => {
     const usage: TokenUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 };
+    expect(TokenUsageSchema.parse(usage)).toEqual(usage);
+  });
+
+  it('preserves provider-reported cache token counts', () => {
+    const usage = {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 20,
+      totalTokens: 250,
+    };
+
     expect(TokenUsageSchema.parse(usage)).toEqual(usage);
   });
 

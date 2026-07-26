@@ -1,6 +1,9 @@
 export interface ObserverCostNumbers {
   promptTokens: number;
   completionTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  cacheCreation1hTokens?: number;
   costUsd?: number;
 }
 
@@ -24,6 +27,16 @@ function parseNonNegativeIntegerArg(name: string, value: unknown): ParseResult<n
     return { ok: false, message: `${name} must be a finite safe non-negative integer` };
   }
   return { ok: true, value: parsed };
+}
+
+function parseOptionalNonNegativeIntegerArg(
+  name: string,
+  value: unknown,
+): ParseResult<number | undefined> {
+  if (value == null) {
+    return { ok: true, value: undefined };
+  }
+  return parseNonNegativeIntegerArg(name, value);
 }
 
 function parseOptionalNonNegativeNumberArg(name: string, value: unknown): ParseResult<number | undefined> {
@@ -51,6 +64,18 @@ export function validateObserverCostNumbers(input: ObserverCostNumbers): void {
   if (!Number.isFinite(input.completionTokens) || !Number.isSafeInteger(input.completionTokens) || input.completionTokens < 0) {
     throw new Error('completionTokens must be a finite safe non-negative integer');
   }
+  if (input.cacheReadTokens !== undefined && (!Number.isFinite(input.cacheReadTokens) || !Number.isSafeInteger(input.cacheReadTokens) || input.cacheReadTokens < 0)) {
+    throw new Error('cacheReadTokens must be a finite safe non-negative integer');
+  }
+  if (input.cacheCreationTokens !== undefined && (!Number.isFinite(input.cacheCreationTokens) || !Number.isSafeInteger(input.cacheCreationTokens) || input.cacheCreationTokens < 0)) {
+    throw new Error('cacheCreationTokens must be a finite safe non-negative integer');
+  }
+  if (input.cacheCreation1hTokens !== undefined && (!Number.isFinite(input.cacheCreation1hTokens) || !Number.isSafeInteger(input.cacheCreation1hTokens) || input.cacheCreation1hTokens < 0)) {
+    throw new Error('cacheCreation1hTokens must be a finite safe non-negative integer');
+  }
+  if ((input.cacheCreation1hTokens ?? 0) > (input.cacheCreationTokens ?? 0)) {
+    throw new Error('cacheCreation1hTokens must not exceed cacheCreationTokens');
+  }
   if (input.costUsd !== undefined && (!Number.isFinite(input.costUsd) || input.costUsd < 0)) {
     throw new Error('costUsd must be a finite non-negative number');
   }
@@ -65,6 +90,21 @@ export function parseObserverCostArgs(args: Record<string, unknown>): ParseResul
   if (!completionTokensArg.ok) {
     return { ok: false, message: 'completionTokens must be a finite safe non-negative integer' };
   }
+  const cacheReadTokensArg = parseOptionalNonNegativeIntegerArg('cacheReadTokens', args['cacheReadTokens']);
+  if (!cacheReadTokensArg.ok) {
+    return { ok: false, message: 'cacheReadTokens must be a finite safe non-negative integer' };
+  }
+  const cacheCreationTokensArg = parseOptionalNonNegativeIntegerArg('cacheCreationTokens', args['cacheCreationTokens']);
+  if (!cacheCreationTokensArg.ok) {
+    return { ok: false, message: 'cacheCreationTokens must be a finite safe non-negative integer' };
+  }
+  const cacheCreation1hTokensArg = parseOptionalNonNegativeIntegerArg('cacheCreation1hTokens', args['cacheCreation1hTokens']);
+  if (!cacheCreation1hTokensArg.ok) {
+    return { ok: false, message: 'cacheCreation1hTokens must be a finite safe non-negative integer' };
+  }
+  if ((cacheCreation1hTokensArg.value ?? 0) > (cacheCreationTokensArg.value ?? 0)) {
+    return { ok: false, message: 'cacheCreation1hTokens must not exceed cacheCreationTokens' };
+  }
   const costUsdArg = parseOptionalNonNegativeNumberArg('costUsd', args['costUsd']);
   if (!costUsdArg.ok) {
     return { ok: false, message: 'costUsd must be a finite non-negative number' };
@@ -75,6 +115,9 @@ export function parseObserverCostArgs(args: Record<string, unknown>): ParseResul
     model: String(args['model']),
     promptTokens: promptTokensArg.value,
     completionTokens: completionTokensArg.value,
+    ...(cacheReadTokensArg.value !== undefined ? { cacheReadTokens: cacheReadTokensArg.value } : {}),
+    ...(cacheCreationTokensArg.value !== undefined ? { cacheCreationTokens: cacheCreationTokensArg.value } : {}),
+    ...(cacheCreation1hTokensArg.value !== undefined ? { cacheCreation1hTokens: cacheCreation1hTokensArg.value } : {}),
     ...(costUsdArg.value !== undefined ? { costUsd: costUsdArg.value } : {}),
   };
   validateObserverCostNumbers(parsed);

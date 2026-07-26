@@ -52,13 +52,33 @@ export class CostCalculator {
   private static assertValidTokenAggregates(entries: TokenRecord[]): void {
     let promptTokens = 0
     let completionTokens = 0
+    let cacheReadTokens = 0
+    let cacheCreationTokens = 0
+    let cacheCreation1hTokens = 0
 
     for (const entry of entries) {
+      const cacheRead = entry.cacheReadTokens ?? 0
+      const cacheCreation = entry.cacheCreationTokens ?? 0
+      const cacheCreation1h = entry.cacheCreation1hTokens ?? 0
       CostCalculator.assertValidTokenCount(entry.promptTokens, 'promptTokens')
       CostCalculator.assertValidTokenCount(entry.completionTokens, 'completionTokens')
+      CostCalculator.assertValidTokenCount(cacheRead, 'cacheReadTokens')
+      CostCalculator.assertValidTokenCount(cacheCreation, 'cacheCreationTokens')
+      CostCalculator.assertValidTokenCount(cacheCreation1h, 'cacheCreation1hTokens')
+      if (cacheCreation1h > cacheCreation) {
+        throw new RangeError('CostCalculator: cacheCreation1hTokens must not exceed cacheCreationTokens')
+      }
       promptTokens = CostCalculator.safeAddTokenCounts(promptTokens, entry.promptTokens)
       completionTokens = CostCalculator.safeAddTokenCounts(completionTokens, entry.completionTokens)
-      CostCalculator.safeAddTokenCounts(promptTokens, completionTokens)
+      cacheReadTokens = CostCalculator.safeAddTokenCounts(cacheReadTokens, cacheRead)
+      cacheCreationTokens = CostCalculator.safeAddTokenCounts(cacheCreationTokens, cacheCreation)
+      cacheCreation1hTokens = CostCalculator.safeAddTokenCounts(
+        cacheCreation1hTokens,
+        cacheCreation1h,
+      )
+      const uncached = CostCalculator.safeAddTokenCounts(promptTokens, completionTokens)
+      const cached = CostCalculator.safeAddTokenCounts(cacheReadTokens, cacheCreationTokens)
+      CostCalculator.safeAddTokenCounts(uncached, cached)
     }
   }
 
@@ -67,8 +87,17 @@ export class CostCalculator {
   }
 
   calculateWithAttribution(entry: TokenRecord): CostCalculation {
+    const cacheReadTokens = entry.cacheReadTokens ?? 0
+    const cacheCreationTokens = entry.cacheCreationTokens ?? 0
+    const cacheCreation1hTokens = entry.cacheCreation1hTokens ?? 0
     CostCalculator.assertValidTokenCount(entry.promptTokens, 'promptTokens')
     CostCalculator.assertValidTokenCount(entry.completionTokens, 'completionTokens')
+    CostCalculator.assertValidTokenCount(cacheReadTokens, 'cacheReadTokens')
+    CostCalculator.assertValidTokenCount(cacheCreationTokens, 'cacheCreationTokens')
+    CostCalculator.assertValidTokenCount(cacheCreation1hTokens, 'cacheCreation1hTokens')
+    if (cacheCreation1hTokens > cacheCreationTokens) {
+      throw new RangeError('CostCalculator: cacheCreation1hTokens must not exceed cacheCreationTokens')
+    }
 
     const model = this.pricing[entry.model]
     if (model === undefined) {
@@ -81,7 +110,16 @@ export class CostCalculator {
     return {
       costUsd:
         (entry.promptTokens * model.promptPerMillion) / 1_000_000 +
-        (entry.completionTokens * model.completionPerMillion) / 1_000_000,
+        (entry.completionTokens * model.completionPerMillion) / 1_000_000 +
+        (cacheReadTokens * (model.cacheReadPerMillion ?? model.promptPerMillion)) / 1_000_000 +
+        ((cacheCreationTokens - cacheCreation1hTokens) *
+          (model.cacheCreationPerMillion ?? model.promptPerMillion)) /
+          1_000_000 +
+        (cacheCreation1hTokens *
+          (model.cacheCreation1hPerMillion ??
+            model.cacheCreationPerMillion ??
+            model.promptPerMillion)) /
+          1_000_000,
       unknownModel: false,
     }
   }

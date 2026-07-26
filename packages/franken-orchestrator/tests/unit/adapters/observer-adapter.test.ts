@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ObserverPortAdapter } from '../../../src/adapters/observer-adapter.js';
+import {
+  ObserverPortAdapter,
+  type CostCalculatorPort,
+} from '../../../src/adapters/observer-adapter.js';
 
 const makeTrace = () => ({
   id: 'trace-1',
@@ -80,6 +83,51 @@ describe('ObserverPortAdapter', () => {
       model: 'gpt-4o',
       promptTokens: 10,
       completionTokens: 5,
+    });
+  });
+
+  it('includes cache metadata in token spend and cost calculation', async () => {
+    const trace = makeTrace();
+    const traceContext = {
+      createTrace: vi.fn().mockReturnValue(trace),
+      startSpan: vi.fn().mockImplementation((_trace: any, options: any) => {
+        const span = makeSpan(trace.id, options.name);
+        trace.spans.push(span);
+        return span;
+      }),
+      endSpan: vi.fn(),
+    };
+    const calculate = vi.fn<(entry: Parameters<CostCalculatorPort['calculate']>[0]) => number>();
+    const costCalculator: CostCalculatorPort = {
+      calculate(entry) {
+        calculate(entry);
+        return entry.cacheCreation1hTokens ?? 0;
+      },
+    };
+    const adapter = new ObserverPortAdapter({ traceContext, costCalculator });
+    adapter.startTrace('session-1');
+    adapter.startSpan('task:1').end({
+      promptTokens: 10,
+      completionTokens: 5,
+      cacheReadTokens: 8,
+      cacheCreationTokens: 2,
+      cacheCreation1hTokens: 1,
+      model: 'claude-sonnet-4-6',
+    });
+
+    await expect(adapter.getTokenSpend('session-1')).resolves.toEqual({
+      inputTokens: 20,
+      outputTokens: 5,
+      totalTokens: 25,
+      estimatedCostUsd: 1,
+    });
+    expect(calculate).toHaveBeenCalledWith({
+      model: 'claude-sonnet-4-6',
+      promptTokens: 10,
+      completionTokens: 5,
+      cacheReadTokens: 8,
+      cacheCreationTokens: 2,
+      cacheCreation1hTokens: 1,
     });
   });
 

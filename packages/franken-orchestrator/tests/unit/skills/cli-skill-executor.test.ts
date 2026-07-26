@@ -179,9 +179,9 @@ function makeMockObserver(): MockObserver {
   return {
     trace: { id: 'trace-1' },
     counter: {
-      grandTotal: vi.fn<ObserverDeps['counter']['grandTotal']>().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+      grandTotal: vi.fn<ObserverDeps['counter']['grandTotal']>().mockReturnValue({ promptTokens: 0, completionTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0 }),
       allModels: vi.fn<ObserverDeps['counter']['allModels']>().mockReturnValue([]),
-      totalsFor: vi.fn<ObserverDeps['counter']['totalsFor']>().mockReturnValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+      totalsFor: vi.fn<ObserverDeps['counter']['totalsFor']>().mockReturnValue({ promptTokens: 0, completionTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 0 }),
     },
     costCalc: {
       totalCost: vi.fn<ObserverDeps['costCalc']['totalCost']>().mockReturnValue(0),
@@ -314,6 +314,30 @@ describe('CliSkillExecutor', () => {
   ) {
     return harness.execute(skillId, input, config, checkpoint, taskId, sanitizeResponse);
   }
+
+  it('includes cache tiers when computing current budget spend', () => {
+    observer.counter.allModels.mockReturnValue(['claude-sonnet-4-6']);
+    observer.counter.totalsFor.mockReturnValue({
+      promptTokens: 100,
+      completionTokens: 50,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 20,
+      cacheCreation1hTokens: 5,
+      totalTokens: 250,
+    });
+    observer.costCalc.totalCost.mockReturnValue(0.001);
+    const executor = harness.executor() as unknown as { computeCurrentCost(): number };
+
+    expect(executor.computeCurrentCost()).toBe(0.001);
+    expect(observer.costCalc.totalCost).toHaveBeenCalledWith([{
+      model: 'claude-sonnet-4-6',
+      promptTokens: 100,
+      completionTokens: 50,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 20,
+      cacheCreation1hTokens: 5,
+    }]);
+  });
 
   describe('successful execution (promise detected)', () => {
     it('records tool.call and tool.result replay records for the CLI skill execution', async () => {

@@ -307,6 +307,89 @@ describe('resolveManagedChatAttachment', () => {
     });
   });
 
+  it('preserves cache token usage reported by managed chat', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'hello',
+      usage: {
+        inputTokens: 15,
+        outputTokens: 10,
+        totalTokens: 34,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 4,
+        cacheCreation1hTokens: 2,
+      },
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({
+      usage: {
+        inputTokens: 15,
+        outputTokens: 10,
+        totalTokens: 34,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 4,
+        cacheCreation1hTokens: 2,
+      },
+    });
+  });
+
+  it('rejects cache-aware managed-chat usage with an inconsistent total', async () => {
+    stubManagedChatWebSocket();
+    const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');
+
+    const reply = __chatAttachTestHooks.awaitRemoteReply(socket as unknown as WebSocket, false);
+    socket.emitMessage(JSON.stringify({
+      type: 'assistant.message.complete',
+      messageId: 'm1',
+      content: 'hello',
+      usage: {
+        inputTokens: 15,
+        outputTokens: 10,
+        totalTokens: 30,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 4,
+        cacheCreation1hTokens: 2,
+      },
+      timestamp: new Date().toISOString(),
+    }));
+
+    await expect(reply).resolves.toEqual({});
+  });
+
+  it('accumulates managed-chat cache usage across turns', () => {
+    expect(__chatAttachTestHooks.addUsage(
+      {
+        inputTokens: 15,
+        outputTokens: 10,
+        totalTokens: 30,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 4,
+        cacheCreation1hTokens: 2,
+      },
+      {
+        inputTokens: 20,
+        outputTokens: 8,
+        totalTokens: 35,
+        cacheReadTokens: 7,
+        cacheCreationTokens: 3,
+        cacheCreation1hTokens: 1,
+      },
+    )).toEqual({
+      inputTokens: 35,
+      outputTokens: 18,
+      totalTokens: 65,
+      cacheReadTokens: 12,
+      cacheCreationTokens: 7,
+      cacheCreation1hTokens: 3,
+    });
+  });
+
   it('resolves with an empty outcome when the server has not opted the peer into usage-stats', async () => {
     stubManagedChatWebSocket();
     const socket = new MockManagedChatWebSocket('ws://127.0.0.1:4242/v1/chat/ws');

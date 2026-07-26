@@ -279,6 +279,24 @@ describe('CliObserverBridge', () => {
       expect(source).not.toContain('as unknown as Trace');
       expect(source).not.toContain('as unknown as Span');
     });
+
+    it('preserves one-hour cache writes when tracing is disabled', async () => {
+      const bridge = new CliObserverBridge(defaultConfig);
+      bridge.startTrace('session-disabled-cache');
+      const deps = bridge.disabledObserverDeps;
+
+      deps.recordTokenUsage(deps.startSpan(deps.trace, { name: 'disabled-cache' }), {
+        promptTokens: 1_000_000,
+        completionTokens: 1_000_000,
+        cacheReadTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+        cacheCreation1hTokens: 400_000,
+        model: 'claude-sonnet-4-6',
+      }, deps.counter);
+
+      const spend = await bridge.getTokenSpend('session-disabled-cache');
+      expect(spend.estimatedCostUsd).toBeCloseTo(22.95, 8);
+    });
   });
 
   // ── Integration (chunk 05) ──

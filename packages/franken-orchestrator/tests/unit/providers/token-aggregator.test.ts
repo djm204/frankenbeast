@@ -34,6 +34,58 @@ describe('TokenAggregator', () => {
     expect(usage.totalOutputTokens).toBe(50);
   });
 
+  it('aggregates cache usage while defaulting omitted cache fields to zero', () => {
+    aggregator.record('anthropic-api', {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 20,
+      totalTokens: 250,
+    });
+    aggregator.record('anthropic-api', {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+    });
+
+    expect(aggregator.getTotalUsage()).toMatchObject({
+      totalInputTokens: 210,
+      totalOutputTokens: 55,
+      totalCacheReadTokens: 80,
+      totalCacheCreationTokens: 20,
+      totalTokens: 265,
+    });
+    expect(aggregator.getTotalUsage().byProvider.get('anthropic-api')).toEqual({
+      inputTokens: 110,
+      outputTokens: 55,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 20,
+      totalTokens: 265,
+    });
+  });
+
+  it('rejects cumulative overflow without mutating provider totals', () => {
+    aggregator.record('anthropic-api', {
+      inputTokens: Number.MAX_SAFE_INTEGER,
+      outputTokens: 0,
+      totalTokens: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(() => aggregator.record('anthropic-api', {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 1,
+      totalTokens: 1,
+    })).toThrow(RangeError);
+    expect(aggregator.getTotalUsage().byProvider.get('anthropic-api')).toEqual({
+      inputTokens: Number.MAX_SAFE_INTEGER,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      totalTokens: Number.MAX_SAFE_INTEGER,
+    });
+  });
+
   it('accumulates multiple calls to the same provider', () => {
     aggregator.record('claude-cli', {
       inputTokens: 100,

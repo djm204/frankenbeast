@@ -8,6 +8,8 @@ describe('observer cost validation', () => {
       model: 'gpt-4o',
       promptTokens: 0,
       completionTokens: '25',
+      cacheCreationTokens: '20',
+      cacheCreation1hTokens: '5',
       costUsd: '0.001',
     })).toEqual({
       ok: true,
@@ -16,6 +18,8 @@ describe('observer cost validation', () => {
         model: 'gpt-4o',
         promptTokens: 0,
         completionTokens: 25,
+        cacheCreationTokens: 20,
+        cacheCreation1hTokens: 5,
         costUsd: 0.001,
       },
     });
@@ -33,6 +37,7 @@ describe('observer cost validation', () => {
       { field: 'completionTokens', args: { promptTokens: 0, completionTokens: -1 } },
       { field: 'completionTokens', args: { promptTokens: 0, completionTokens: 1.5 } },
       { field: 'completionTokens', args: { promptTokens: 0, completionTokens: Number.MAX_SAFE_INTEGER + 1 } },
+      { field: 'cacheCreation1hTokens', args: { promptTokens: 0, completionTokens: 0, cacheCreationTokens: 1, cacheCreation1hTokens: 2 } },
       { field: 'costUsd', args: { promptTokens: 0, completionTokens: 0, costUsd: 'NaN' } },
       { field: 'costUsd', args: { promptTokens: 0, completionTokens: 0, costUsd: 'Infinity' } },
       { field: 'costUsd', args: { promptTokens: 0, completionTokens: 0, costUsd: -0.01 } },

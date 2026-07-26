@@ -48,9 +48,20 @@ describe('Observer Server', () => {
       cost: vi.fn().mockResolvedValue({
         totalPromptTokens: 3000,
         totalCompletionTokens: 1300,
+        totalCacheReadTokens: 300,
+        totalCacheCreationTokens: 100,
+        totalCacheCreation1hTokens: 40,
         totalCostUsd: 0.129,
         byModel: [
-          { model: 'claude-opus-4', promptTokens: 3000, completionTokens: 1300, costUsd: 0.129 },
+          {
+            model: 'claude-opus-4',
+            promptTokens: 3000,
+            completionTokens: 1300,
+            cacheReadTokens: 300,
+            cacheCreationTokens: 100,
+            cacheCreation1hTokens: 40,
+            costUsd: 0.129,
+          },
         ],
       }),
       trail: vi.fn().mockResolvedValue([
@@ -85,11 +96,16 @@ describe('Observer Server', () => {
 
     const logCostResult = await logCostTool.handler({
       sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
+      cacheReadTokens: 300, cacheCreationTokens: 100, cacheCreation1hTokens: 40,
     });
     expect(observer.logCost).toHaveBeenCalledWith({
       sessionId: 'sess-1', model: 'gpt-4o', promptTokens: 1000, completionTokens: 200,
+      cacheReadTokens: 300, cacheCreationTokens: 100, cacheCreation1hTokens: 40,
     });
-    expect(logCostResult.content[0]!.text).toContain('1000');
+    expect(logCostResult.content[0]!.text).toContain('1000 prompt');
+    expect(logCostResult.content[0]!.text).toContain('300 cache read');
+    expect(logCostResult.content[0]!.text).toContain('100 cache creation (40 one-hour)');
+    expect(logCostResult.content[0]!.text).not.toContain('+ 40 one-hour cache creation');
     expect(logCostResult.content[0]!.text).toContain('$0.0000');
     expect(logCostResult.content[0]!.text).toContain('unknown model');
 
@@ -97,6 +113,9 @@ describe('Observer Server', () => {
     expect(observer.cost).toHaveBeenCalledWith({ sessionId: 'sess-1' });
     expect(costResult.content[0]!.text).toContain('3000');
     expect(costResult.content[0]!.text).toContain('1300');
+    expect(costResult.content[0]!.text).toContain('300 cache read');
+    expect(costResult.content[0]!.text).toContain('100 cache creation (40 one-hour)');
+    expect(costResult.content[0]!.text).not.toContain('+ 40 one-hour cache creation');
 
     const trailResult = await trailTool.handler({ sessionId: 'sess-1' });
     expect(observer.trail).toHaveBeenCalledWith('sess-1');
