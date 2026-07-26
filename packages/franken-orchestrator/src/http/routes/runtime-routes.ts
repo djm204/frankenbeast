@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
+import type { IGovernorModule } from '../../deps.js';
 import {
   InMemoryRateLimiter,
   requireBeastRateLimit,
@@ -10,10 +11,17 @@ import {
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
 import type { RuntimeAdapter } from '../../runtime/runtime-adapter.js';
-import { RuntimeEventPageSchema, RuntimeSnapshotSchema } from '../../runtime/runtime-schemas.js';
+import {
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
+  RuntimeEventPageSchema,
+  RuntimeSnapshotSchema,
+  type RuntimeAction,
+  type RuntimeActionAudit,
+} from '../../runtime/runtime-schemas.js';
 import { isSensitiveLogKey, redactSensitiveText } from '../../logging/redaction.js';
 import { redactAbsoluteHostPathValues } from '../beast-response-redaction.js';
-import { errorHandler, HttpError } from '../middleware.js';
+import { errorHandler, HttpError, requestSizeLimit } from '../middleware.js';
 import { requireOperatorAuth } from '../operator-auth.js';
 import type { TransportSecurityService } from '../security/transport-security.js';
 
@@ -25,6 +33,14 @@ export interface RuntimeRouteDeps {
   rateLimit?: BeastRateLimitOptions | undefined;
   pollIntervalMs?: number | undefined;
   heartbeatIntervalMs?: number | undefined;
+  actionAudit?: ((event: RuntimeActionAuditEvent) => void | Promise<void>) | undefined;
+  actionGovernor?: IGovernorModule | undefined;
+}
+
+export interface RuntimeActionAuditEvent extends RuntimeActionAudit {
+  providerId: string;
+  correlationId: string;
+  causationId?: string | undefined;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -32,6 +48,9 @@ const TICKET_COOKIE = 'frankenbeast_runtime_sse_ticket';
 const DEFAULT_RATE_LIMIT: BeastRateLimitOptions = { max: 120, windowMs: 60_000 };
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+const MAX_IDEMPOTENCY_ENTRIES = 1000;
+const IDEMPOTENCY_TTL_MS = 10 * 60_000;
+const MAX_ACTION_BODY_BYTES = 16 * 1024;
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -104,6 +123,35 @@ function runtimeResponse(value: unknown): unknown {
   return redactRuntimePaths(value);
 }
 
+function actionTarget(action: RuntimeAction): string {
+  return action.type === 'approval.resolve' ? action.approvalId : action.taskId;
+}
+
+function actionCapability(action: RuntimeAction): 'approvals' | 'blockers' | 'pause' | 'resume' | 'cancellation' | 'policyActions' {
+  switch (action.type) {
+    case 'approval.resolve': return 'approvals';
+    case 'blocker.add':
+    case 'blocker.resolve': return 'blockers';
+    case 'task.pause': return 'pause';
+    case 'task.resume': return 'resume';
+    case 'task.cancel': return 'cancellation';
+    case 'policy.apply': return 'policyActions';
+  }
+}
+
+function actionAudit(action: RuntimeAction, outcome: RuntimeActionAudit['outcome']): RuntimeActionAudit {
+  return {
+    requestedBy: 'authenticated-operator',
+    actionType: action.type,
+    targetId: actionTarget(action),
+    outcome,
+  };
+}
+
+function requiresGovernor(action: RuntimeAction): boolean {
+  return action.type === 'task.cancel' || action.type === 'policy.apply';
+}
+
 function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID_CURSOR' } {
   return error instanceof Error
     && 'code' in error
@@ -132,6 +180,73 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     deps.heartbeatIntervalMs,
     DEFAULT_HEARTBEAT_INTERVAL_MS,
   );
+  const actionResults = new Map<string, {
+    fingerprint: string;
+    expiresAt: number;
+    result: Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>;
+  }>();
+
+  const recordActionAudit = async (
+    providerId: string,
+    request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+    audit: RuntimeActionAudit,
+  ): Promise<void> => {
+    await deps.actionAudit?.({
+      ...audit,
+      providerId,
+      correlationId: request.correlationId,
+      ...(request.causationId ? { causationId: request.causationId } : {}),
+    });
+  };
+
+  const executeAction = async (
+    adapter: RuntimeAdapter,
+    request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+  ) => {
+    let result;
+    try {
+      const provider = await adapter.describe();
+      const capability = provider.capabilities[actionCapability(request.action)];
+      if (capability.status === 'unsupported') {
+        result = RuntimeActionResultSchema.parse({
+          status: 'unsupported',
+          providerId: adapter.id,
+          correlationId: request.correlationId,
+          reason: capability.reason,
+          audit: actionAudit(request.action, 'unsupported'),
+        });
+      } else if (requiresGovernor(request.action)) {
+        const outcome = deps.actionGovernor
+          ? await deps.actionGovernor.requestApproval({
+              taskId: actionTarget(request.action),
+              summary: `Governed runtime action ${request.action.type}`,
+              requiresHitl: true,
+            })
+          : { decision: 'rejected' as const, reason: 'Runtime action governor is unavailable' };
+        result = outcome.decision === 'approved'
+          ? RuntimeActionResultSchema.parse(await adapter.executeAction(request))
+          : RuntimeActionResultSchema.parse({
+            status: 'rejected',
+            providerId: adapter.id,
+            correlationId: request.correlationId,
+            reason: 'Runtime action was not approved by the governor',
+            audit: actionAudit(request.action, 'rejected'),
+          });
+      } else {
+        result = RuntimeActionResultSchema.parse(await adapter.executeAction(request));
+      }
+    } catch {
+      result = RuntimeActionResultSchema.parse({
+        status: 'failed',
+        providerId: adapter.id,
+        correlationId: request.correlationId,
+        reason: 'Runtime provider action failed',
+        audit: actionAudit(request.action, 'failed'),
+      });
+    }
+    await recordActionAudit(adapter.id, request, result.audit);
+    return result;
+  };
 
   app.onError(errorHandler);
   app.use('/v1/smart-swarm/*', async (c, next) => {
@@ -152,6 +267,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     }
     return sharedRateLimit(c, next);
   });
+  app.use(`${BASE_PATH}/:providerId/actions`, requestSizeLimit(MAX_ACTION_BODY_BYTES));
 
   app.get(BASE_PATH, async (c) => c.json({ data: runtimeResponse(await deps.registry.list()) }));
 
@@ -189,6 +305,37 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       }
       throw error;
     }
+  });
+
+  app.post(`${BASE_PATH}/:providerId/actions`, async (c) => {
+    const adapter = adapterOr404(deps.registry, c.req.param('providerId'));
+    const parsed = RuntimeActionRequestSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) {
+      throw new HttpError(422, 'INVALID_RUNTIME_ACTION', 'Runtime action payload is invalid');
+    }
+    const request = parsed.data;
+    const key = `${adapter.id}:${request.idempotencyKey}`;
+    const fingerprint = createHash('sha256').update(JSON.stringify(request.action)).digest('base64url');
+    const now = Date.now();
+    for (const [storedKey, entry] of actionResults) {
+      if (entry.expiresAt <= now) actionResults.delete(storedKey);
+    }
+    const existing = actionResults.get(key);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new HttpError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'Idempotency key was already used for a different action');
+      }
+      const result = await existing.result;
+      const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
+      return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
+    }
+    if (actionResults.size >= MAX_IDEMPOTENCY_ENTRIES) {
+      const oldest = actionResults.keys().next().value as string | undefined;
+      if (oldest) actionResults.delete(oldest);
+    }
+    const result = executeAction(adapter, request);
+    actionResults.set(key, { fingerprint, expiresAt: now + IDEMPOTENCY_TTL_MS, result });
+    return c.json({ data: runtimeResponse(await result) });
   });
 
   app.post(`${BASE_PATH}/:providerId/events/ticket`, (c) => {

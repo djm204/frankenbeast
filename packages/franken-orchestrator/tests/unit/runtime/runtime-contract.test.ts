@@ -8,6 +8,8 @@ import {
   RuntimeHealthSchema,
   RuntimeMetadataSchema,
   RuntimeProviderSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
   RuntimeRunSchema,
   RuntimeSnapshotSchema,
   RuntimeTaskSchema,
@@ -50,10 +52,52 @@ function adapter(id: string): RuntimeAdapter {
     })),
     getEvents: vi.fn(async () => ({ events: [], nextCursor: null })),
     validateEventCursor: vi.fn(),
+    executeAction: vi.fn(async (request) => RuntimeActionResultSchema.parse({
+      status: 'unsupported', providerId: id, correlationId: request.correlationId, reason: 'No mutations',
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'unsupported',
+      },
+    })),
   };
 }
 
 describe('provider-neutral runtime contract', () => {
+  it('validates normalized governed action requests and typed unsupported results', () => {
+    const request = RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      idempotencyKey: 'ui:block:t_deadbeef:1',
+      action: {
+        type: 'blocker.add',
+        workspaceId: 'hermes:global',
+        taskId: 'hermes:global:t_deadbeef',
+        category: 'needs-input',
+        reason: 'Operator input is required',
+      },
+    });
+
+    expect(request.action.type).toBe('blocker.add');
+    expect(RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: 'test',
+      correlationId: request.correlationId,
+      reason: 'Approval decisions are unavailable',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'approval.resolve',
+        targetId: 'approval-1',
+        outcome: 'unsupported',
+      },
+    })).toEqual(expect.objectContaining({ status: 'unsupported' }));
+
+    expect(() => RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, taskId: '$(touch /tmp/pwned)' },
+    })).toThrow();
+  });
+
   it('requires every capability to declare supported or unsupported state', async () => {
     const value = adapter('one').describe();
     await expect(value).resolves.toMatchObject({ id: 'one' });

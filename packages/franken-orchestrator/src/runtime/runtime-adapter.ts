@@ -1,4 +1,10 @@
-import type { RuntimeEventPage, RuntimeProvider, RuntimeSnapshot } from './runtime-schemas.js';
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeEventPage,
+  RuntimeProvider,
+  RuntimeSnapshot,
+} from './runtime-schemas.js';
 
 export interface RuntimeSnapshotRequest {
   workspaceId?: string | undefined;
@@ -26,4 +32,5 @@ export interface RuntimeAdapter {
   getSnapshot(request?: RuntimeSnapshotRequest): Promise<RuntimeSnapshot>;
   getEvents(request?: RuntimeEventRequest): Promise<RuntimeEventPage>;
   validateEventCursor(cursor: string): void;
+  executeAction(request: RuntimeActionRequest): Promise<RuntimeActionResult>;
 }

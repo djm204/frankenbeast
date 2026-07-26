@@ -6,6 +6,10 @@ export { HermesRuntimeAdapter } from './hermes/hermes-runtime-adapter.js';
 export type { HermesRuntimeAdapterOptions } from './hermes/hermes-runtime-adapter.js';
 export {
   RuntimeAgentSchema,
+  RuntimeActionAuditSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
+  RuntimeActionSchema,
   RuntimeApprovalSchema,
   RuntimeBlockerSchema,
   RuntimeCapabilitiesSchema,
@@ -22,6 +26,10 @@ export {
 } from './runtime-schemas.js';
 export type {
   RuntimeEvent,
+  RuntimeAction,
+  RuntimeActionAudit,
+  RuntimeActionRequest,
+  RuntimeActionResult,
   RuntimeEventPage,
   RuntimeAgent,
   RuntimeBlocker,
