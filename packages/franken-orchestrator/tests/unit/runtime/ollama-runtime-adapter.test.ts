@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OllamaRuntimeAdapter, RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
 
 const servers: Server[] = [];
@@ -122,6 +122,12 @@ async function malformedNumericServer(): Promise<string> {
 }
 
 describe('OllamaRuntimeAdapter', () => {
+  it('rejects empty endpoint identifiers during construction', () => {
+    expect(() => new OllamaRuntimeAdapter({
+      endpoints: [{ id: '', baseUrl: 'http://127.0.0.1:11434' }],
+    })).toThrow(/endpoint id/i);
+  });
+
   it('rejects event cursors because Ollama does not expose historical runtime events', () => {
     const adapter = new OllamaRuntimeAdapter();
 
@@ -337,6 +343,37 @@ describe('OllamaRuntimeAdapter', () => {
       endpoint.requestClosed,
       new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('request remained open')), 200)),
     ])).resolves.toBeUndefined();
+  });
+
+  it('starts a fresh poll instead of joining an aborted shared poll', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls += 1;
+      if (calls <= 3) {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            setTimeout(() => reject(new DOMException('aborted', 'AbortError')), 50);
+          }, { once: true });
+        });
+      }
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/version') return Response.json({ version: '0.11.4' });
+      return Response.json({ models: [] });
+    });
+    const controller = new AbortController();
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+      minimumPollIntervalMs: 0,
+    });
+
+    const cancelled = adapter.getSnapshot({ signal: controller.signal });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+
+    await expect(cancelled).resolves.toMatchObject({ state: 'unavailable' });
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({ state: 'ready' });
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
   });
 
   it('bounds stalled endpoint requests with a configurable timeout', async () => {

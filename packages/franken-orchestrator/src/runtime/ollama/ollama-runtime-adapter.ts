@@ -165,6 +165,11 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
     if (endpoints.length > MAX_ENDPOINTS) {
       throw new RangeError(`Ollama polling supports at most ${MAX_ENDPOINTS} endpoints`);
     }
+    for (const endpoint of endpoints) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(endpoint.id)) {
+        throw new OllamaEndpointError('Ollama endpoint id must be a non-empty identifier');
+      }
+    }
     this.endpoints = endpoints.map((endpoint) => ({ ...endpoint }));
     this.now = options.now ?? (() => new Date());
     this.minimumPollIntervalMs = boundedInteger('minimumPollIntervalMs', options.minimumPollIntervalMs, 1_000, 0, 60_000);
@@ -329,7 +334,13 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
   private async inspectEndpointsShared(): Promise<EndpointInspection[]> {
     const elapsed = Date.now() - this.lastPollAt;
     if (this.cachedInspection && elapsed < this.minimumPollIntervalMs) return this.cachedInspection;
-    if (this.pollInFlight) return await this.pollInFlight;
+    if (this.pollInFlight) {
+      if (this.pollController?.signal.aborted) {
+        await this.pollInFlight;
+        return await this.inspectEndpointsShared();
+      }
+      return await this.pollInFlight;
+    }
     const controller = new AbortController();
     this.pollController = controller;
     this.pollInFlight = this.pollEndpoints(controller.signal);

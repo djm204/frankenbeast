@@ -179,6 +179,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
   const runtimeRegistry = opts.runtimeRegistry ?? createDefaultRuntimeAdapterRegistry({
     ...(opts.hermesHome ? { hermesHome: opts.hermesHome } : {}),
+    ...(opts.networkControl
+      ? { egressPolicy: opts.networkControl.getConfig().network.egressPolicy }
+      : {}),
   });
   const chatRateLimiter = opts.chatRateLimiter
     ?? createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
