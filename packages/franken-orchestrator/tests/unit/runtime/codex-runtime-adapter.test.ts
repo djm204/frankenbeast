@@ -80,6 +80,38 @@ input.on('line', (line) => {
     ]));
   });
 
+  it('reports initialization protocol schema errors as incompatible', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-incompatible-'));
+    tempPaths.push(directory);
+    const command = join(directory, 'codex-incompatible.cjs');
+    await writeFile(command, `#!/usr/bin/env node
+const readline = require('node:readline');
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write(JSON.stringify({
+      id: message.id,
+      error: { code: -32601, message: 'unsupported initialization schema' }
+    }) + '\\n');
+  }
+});
+`);
+    await chmod(command, 0o700);
+    const adapter = new CodexRuntimeAdapter({
+      command,
+      env: { PATH: process.env['PATH'] ?? '' },
+      now: () => new Date('2026-07-26T12:00:00.000Z'),
+    });
+
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'schema-incompatible' }),
+    }));
+    await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({
+      state: 'schema-incompatible',
+    }));
+  });
+
   it('does not keep a short-lived consumer alive through app-server pipe handles', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-unref-'));
     tempPaths.push(directory);
@@ -381,6 +413,39 @@ input.on('line', (line) => {
     );
   });
 
+  it('maps active Codex wait flags to blocked agent state', async () => {
+    const thread = (id: string, activeFlag: string) => ({
+      id,
+      sessionId: `session-${id}`,
+      cliVersion: '0.145.0',
+      createdAt: 1_785_081_600,
+      updatedAt: 1_785_081_660,
+      cwd: '/workspace/project',
+      ephemeral: false,
+      modelProvider: 'openai',
+      status: { type: 'active', activeFlags: [activeFlag] },
+    });
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [
+          thread('approval', 'waitingOnApproval'),
+          thread('input', 'waitingOnUserInput'),
+        ],
+        nextCursor: null,
+      }),
+    });
+
+    const snapshot = await adapter.getSnapshot();
+
+    expect(snapshot.agents).toEqual({
+      status: 'available',
+      data: [
+        expect.objectContaining({ id: 'codex:thread:approval', state: 'blocked' }),
+        expect.objectContaining({ id: 'codex:thread:input', state: 'blocked' }),
+      ],
+    });
+  });
+
   it('provides stable bounded event polling and rejects malformed cursors', async () => {
     const threads = [
       {
@@ -474,6 +539,66 @@ input.on('line', (line) => {
     expect(second.events.map((event) => event.id)).toEqual([
       'codex:thread:thread-a:200:idle',
     ]);
+  });
+
+  it('preserves a status change on a thread older than the latest cursor timestamp', async () => {
+    let olderStatus = 'active';
+    const request = vi.fn(async () => ({
+      data: [
+        {
+          id: 'newer', sessionId: 'session-newer', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 300, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+        },
+        {
+          id: 'older', sessionId: 'session-older', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: olderStatus },
+        },
+      ],
+      nextCursor: null,
+    }));
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    const first = await adapter.getEvents({ limit: 2 });
+    olderStatus = 'idle';
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 2 });
+
+    expect(second.events.map((event) => event.id)).toEqual([
+      'codex:thread:older:200:idle',
+    ]);
+  });
+
+  it('keeps emitted cursors valid when a timestamp tie exceeds the status bound', async () => {
+    const boundaryStatuses = Object.fromEntries(Array.from({ length: 500 }, (_, index) => [
+      `thread-${String(index).padStart(3, '0')}`,
+      'idle',
+    ]));
+    const cursor = Buffer.from(JSON.stringify({
+      occurredAt: '1970-01-01T00:03:20.000Z',
+      threadId: 'thread-499',
+      status: 'idle',
+      boundaryStatuses,
+    })).toString('base64url');
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [{
+          id: 'thread-500', sessionId: 'session-500', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const page = await adapter.getEvents({ cursor, limit: 1 });
+
+    expect(page.events).toHaveLength(1);
+    expect(() => adapter.validateEventCursor?.(page.nextCursor!)).not.toThrow();
+    await expect(adapter.getEvents({ cursor: page.nextCursor!, limit: 1 })).resolves.toEqual({
+      events: [],
+      nextCursor: page.nextCursor,
+    });
   });
 
   it('returns the newest matching events on an initial poll', async () => {

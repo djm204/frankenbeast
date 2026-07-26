@@ -14,6 +14,9 @@
 - [x] Self-review the complete diff and verify no Hive Brain files or fixture/demo/synthetic production data were introduced.
 - [x] Re-check #3812 exact head; rebase only if it changed.
 - [x] Commit as David Mendez <me@davidmendez.dev>, push, and open one PR with `Closes #3816`.
-- [ ] Trigger real GitHub `@codex review`; resolve accepted findings and all Codex-authored threads.
+- [x] Trigger real GitHub `@codex review` and remediate current-head findings 3653371402, 3653371403, 3653371405, and 3653371408 test-first.
+- [x] Run focused runtime verification (27/27), root lint/typecheck/build, and full tests (full suite reached 4,637/4,640 orchestrator tests; three unrelated environment/order-sensitive CLI tests remain red).
+- [x] Publish the rebased remediation commits and reply to/resolve all four Codex threads.
+- [x] Rebase onto #3821's final exact clean head `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e`.
 - [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.
