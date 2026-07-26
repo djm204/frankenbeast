@@ -109,6 +109,9 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const runRequestRef = useRef(0);
   const runCacheRef = useRef(new Map<string, BeastRunSummary>());
   const nextRunCursorRef = useRef<string | undefined>(undefined);
+  const runDiscoveryInFlightRef = useRef(false);
+  const runDiscoveryRequestRef = useRef(0);
+  const lastRunDiscoveryAtRef = useRef(0);
   const latestSnapshotTimestampRef = useRef(0);
   const [runs, setRuns] = useState<BeastRunSummary[]>([]);
   const [brainIds, setBrainIds] = useState<string[]>([]);
@@ -143,23 +146,44 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     nextRunCursorRef.current = undefined;
 
     const refreshRuns = async (initial: boolean) => {
+      if (runDiscoveryInFlightRef.current) return;
+      runDiscoveryInFlightRef.current = true;
+      const discoveryRequest = runDiscoveryRequestRef.current + 1;
+      runDiscoveryRequestRef.current = discoveryRequest;
       try {
-        const cursor = nextRunCursorRef.current;
-        const { runs: nextRuns, nextCursor } = await client.listBrainVitalsRuns(100, cursor);
+        const newestPage = await client.listBrainVitalsRuns(100, undefined);
+        let nextRuns = newestPage.runs;
+        let backfillError: unknown;
+        if (initial) nextRunCursorRef.current = newestPage.nextCursor;
+        else if (nextRunCursorRef.current) {
+          try {
+            const backfillPage = await client.listBrainVitalsRuns(100, nextRunCursorRef.current);
+            nextRunCursorRef.current = backfillPage.nextCursor;
+            nextRuns = [...nextRuns, ...backfillPage.runs];
+          } catch (loadError) {
+            backfillError = loadError;
+          }
+        }
         if (!active || generationRef.current !== generation) return;
-        nextRunCursorRef.current = nextCursor;
         const discoveredRuns = mergeRunPage(runCacheRef.current, nextRuns);
         const nextBrainIds = [...new Set(discoveredRuns.map((run) => run.definitionId))].sort();
         setRuns(discoveredRuns);
         setBrainIds(nextBrainIds);
         setSelectedBrainId((current) => current && nextBrainIds.includes(current) ? current : nextBrainIds[0] ?? null);
         if (nextBrainIds.length === 0) setLoading(false);
-        setDiscoveryError(null);
+        setDiscoveryError(backfillError
+          ? `Unable to backfill older Brain Vitals runs. ${describeError(backfillError)}`
+          : null);
+        lastRunDiscoveryAtRef.current = Date.now();
       } catch (loadError) {
         if (!active || generationRef.current !== generation) return;
         const message = `Unable to discover Brain Vitals runs. ${describeError(loadError)}`;
         setDiscoveryError(message);
         if (initial) setLoading(false);
+      } finally {
+        if (runDiscoveryRequestRef.current === discoveryRequest) {
+          runDiscoveryInFlightRef.current = false;
+        }
       }
     };
 
@@ -235,16 +259,28 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         setStreamError(describeError(subscriptionError));
       },
       (activity) => {
-        if (activity.dimension !== 'churn') return;
+        if (
+          activity.dimension !== 'churn'
+          || runDiscoveryInFlightRef.current
+          || Date.now() - lastRunDiscoveryAtRef.current < 10_000
+        ) return;
+        runDiscoveryInFlightRef.current = true;
+        const discoveryRequest = runDiscoveryRequestRef.current + 1;
+        runDiscoveryRequestRef.current = discoveryRequest;
         void client.listBrainVitalsRuns(100, undefined).then(({ runs: nextRuns }) => {
           if (!active || generationRef.current !== generation) return;
           const discoveredRuns = mergeRunPage(runCacheRef.current, nextRuns);
           setRuns(discoveredRuns);
           setBrainIds([...new Set(discoveredRuns.map((run) => run.definitionId))].sort());
           setDiscoveryError(null);
+          lastRunDiscoveryAtRef.current = Date.now();
         }).catch((runListError: unknown) => {
           if (!active || generationRef.current !== generation) return;
           setDiscoveryError(`Live run refresh failed. ${describeError(runListError)}`);
+        }).finally(() => {
+          if (runDiscoveryRequestRef.current === discoveryRequest) {
+            runDiscoveryInFlightRef.current = false;
+          }
         });
       },
     ).then((stop) => {

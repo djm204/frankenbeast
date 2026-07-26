@@ -233,7 +233,8 @@ describe('BrainVitalsPanel', () => {
 
     expect(await screen.findByRole('option', { name: 'planner' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'reviewer' })).toBeTruthy();
-    expect(listBrainVitalsRuns).toHaveBeenCalledTimes(2);
+    expect(listBrainVitalsRuns).toHaveBeenCalledTimes(3);
+    expect(listBrainVitalsRuns).toHaveBeenNthCalledWith(2, 100, undefined);
     expect(listBrainVitalsRuns).toHaveBeenLastCalledWith(100, 'page-2');
   });
 
@@ -254,8 +255,10 @@ describe('BrainVitalsPanel', () => {
       }),
       ...(page < 5 ? { nextCursor: `page-${page + 2}` } : {}),
     }));
-    const listBrainVitalsRuns = vi.fn();
-    for (const page of pages) listBrainVitalsRuns.mockResolvedValueOnce(page);
+    const listBrainVitalsRuns = vi.fn(async (_limit: number, cursor?: string) => {
+      if (!cursor) return pages[0]!;
+      return pages[Number(cursor.replace('page-', '')) - 1]!;
+    });
     render(<BrainVitalsPanel client={client({ listBrainVitalsRuns })} />);
 
     expect(await screen.findByRole('button', { name: 'Open vitals for run run-0' })).toBeTruthy();
@@ -271,6 +274,8 @@ describe('BrainVitalsPanel', () => {
   });
 
   it('refreshes run discovery only for churn activity', async () => {
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
     let pushActivity!: (activity: BrainVitalsActivity) => void;
     const listBrainVitalsRuns = vi.fn().mockResolvedValue({ runs: [detail.run] });
     const api = client({
@@ -288,6 +293,7 @@ describe('BrainVitalsPanel', () => {
     await Promise.resolve();
     expect(listBrainVitalsRuns).toHaveBeenCalledTimes(1);
 
+    now += 10_001;
     act(() => pushActivity({ dimension: 'churn', kind: 'run.completed', runId: 'run-1', timestamp: 4 }));
     await waitFor(() => expect(listBrainVitalsRuns).toHaveBeenCalledTimes(2));
   });
