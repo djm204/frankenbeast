@@ -143,7 +143,10 @@ describe('provider-neutral runtime contract', () => {
   });
 
   it('registers Hermes and Codex by default without inventing provider availability', async () => {
-    const registry = createDefaultRuntimeAdapterRegistry({ env: { PATH: '' } });
+    const registry = createDefaultRuntimeAdapterRegistry({
+      env: { PATH: '' },
+      codex: { requestTimeoutMs: 25 },
+    });
 
     await expect(registry.list()).resolves.toEqual([
       expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),

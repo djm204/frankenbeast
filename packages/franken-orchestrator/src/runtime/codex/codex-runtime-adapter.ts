@@ -46,6 +46,7 @@ const UNSUPPORTED_RUNS = 'Codex thread metadata does not expose canonical task-l
 const DEFAULT_REQUEST_TIMEOUT_MS = 2_000;
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
+const MAX_THREAD_PAGES = 100;
 const THREAD_STATUS_TYPES = new Set(['active', 'idle', 'notLoaded', 'systemError']);
 
 interface CodexThread {
@@ -97,13 +98,27 @@ function parseThread(value: unknown): CodexThread | null {
   return thread as unknown as CodexThread;
 }
 
-function parseThreadList(value: unknown): { threads: CodexThread[]; rejected: number } {
+interface CodexThreadPage {
+  threads: CodexThread[];
+  rejected: number;
+  nextCursor: string | null;
+}
+
+function parseThreadList(value: unknown): CodexThreadPage {
   if (!value || typeof value !== 'object' || !Array.isArray((value as Record<string, unknown>)['data'])) {
     throw new CodexSchemaError('Codex app-server returned an incompatible thread/list response');
   }
-  const values = (value as { data: unknown[] }).data;
+  const record = value as { data: unknown[]; nextCursor?: unknown };
+  if (record.nextCursor !== undefined && record.nextCursor !== null && typeof record.nextCursor !== 'string') {
+    throw new CodexSchemaError('Codex app-server returned an incompatible thread/list cursor');
+  }
+  const values = record.data;
   const threads = values.map(parseThread).filter((thread): thread is CodexThread => thread !== null);
-  return { threads, rejected: values.length - threads.length };
+  return {
+    threads,
+    rejected: values.length - threads.length,
+    nextCursor: typeof record.nextCursor === 'string' ? record.nextCursor : null,
+  };
 }
 
 function workspaceKey(cwd: string): string {
@@ -186,6 +201,35 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   }
 
+  validateEventCursor(cursor: string): void {
+    parseCursor(cursor);
+  }
+
+  private async readThreadPages(options: {
+    pageSize: number;
+    signal?: AbortSignal | undefined;
+    stop: (threads: CodexThread[]) => boolean;
+  }): Promise<{ threads: CodexThread[]; rejected: number }> {
+    const threads: CodexThread[] = [];
+    let rejected = 0;
+    let cursor: string | null = null;
+    for (let pageNumber = 0; pageNumber < MAX_THREAD_PAGES; pageNumber += 1) {
+      const response = await this.request('thread/list', {
+        limit: options.pageSize,
+        sortKey: 'updated_at',
+        sortDirection: 'desc',
+        useStateDbOnly: true,
+        ...(cursor ? { cursor } : {}),
+      }, { signal: options.signal, timeoutMs: this.requestTimeoutMs });
+      const page = parseThreadList(response);
+      threads.push(...page.threads);
+      rejected += page.rejected;
+      if (options.stop(threads) || page.nextCursor === null) return { threads, rejected };
+      cursor = page.nextCursor;
+    }
+    throw new CodexSchemaError('Codex thread pagination exceeded the bounded page limit');
+  }
+
   async describe(): Promise<RuntimeProvider> {
     let health: RuntimeProvider['health'];
     try {
@@ -195,8 +239,14 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
         sortDirection: 'desc',
         useStateDbOnly: true,
       }, { timeoutMs: this.requestTimeoutMs });
-      parseThreadList(response);
-      health = { state: 'connected', checkedAt: this.now().toISOString() };
+      const parsed = parseThreadList(response);
+      health = parsed.rejected > 0
+        ? {
+            state: 'degraded',
+            checkedAt: this.now().toISOString(),
+            message: 'Some Codex thread metadata was incompatible',
+          }
+        : { state: 'connected', checkedAt: this.now().toISOString() };
     } catch (error) {
       health = error instanceof CodexSchemaError
         ? {
@@ -234,13 +284,13 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     const limit = normalizeLimit(request.activityLimit);
     let parsed: { threads: CodexThread[]; rejected: number };
     try {
-      const response = await this.request('thread/list', {
-        limit,
-        sortKey: 'updated_at',
-        sortDirection: 'desc',
-        useStateDbOnly: true,
-      }, { signal: request.signal, timeoutMs: this.requestTimeoutMs });
-      parsed = parseThreadList(response);
+      parsed = await this.readThreadPages({
+        pageSize: request.workspaceId === undefined ? limit : MAX_ACTIVITY_LIMIT,
+        signal: request.signal,
+        stop: (threads) => request.workspaceId === undefined || threads.filter(
+          (thread) => workspaceId(thread.cwd) === request.workspaceId,
+        ).length >= limit,
+      });
     } catch (error) {
       if (request.signal?.aborted) {
         const reason = request.signal.reason;
@@ -267,7 +317,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
 
     const selected = parsed.threads.filter((thread) => (
       request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId
-    ));
+    )).slice(0, limit);
     const workspacesById = new Map<string, RuntimeWorkspace>();
     const agents: RuntimeAgent[] = [];
     const events: RuntimeEvent[] = [];
@@ -318,13 +368,13 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
     const limit = normalizeLimit(request.limit);
     const after = parseCursor(request.cursor);
-    const response = await this.request('thread/list', {
-      limit: MAX_ACTIVITY_LIMIT,
-      sortKey: 'updated_at',
-      sortDirection: 'desc',
-      useStateDbOnly: true,
-    }, { signal: request.signal, timeoutMs: this.requestTimeoutMs });
-    const parsed = parseThreadList(response);
+    const parsed = await this.readThreadPages({
+      pageSize: MAX_ACTIVITY_LIMIT,
+      signal: request.signal,
+      stop: (threads) => after === null || threads.some(
+        (thread) => timestamp(thread.updatedAt)! < after.occurredAt,
+      ),
+    });
     const entries = parsed.threads
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId)
       .map((thread) => ({

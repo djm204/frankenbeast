@@ -1,9 +1,11 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCodexAppServerRequest } from '../../../src/runtime/codex/codex-app-server-client.js';
 import { CodexRuntimeAdapter } from '../../../src/runtime/codex/codex-runtime-adapter.js';
+import { createDefaultRuntimeAdapterRegistry } from '../../../src/runtime/runtime-defaults.js';
 
 const tempPaths: string[] = [];
 
@@ -16,8 +18,12 @@ describe('CodexRuntimeAdapter', () => {
     const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-'));
     tempPaths.push(directory);
     const command = join(directory, 'codex-protocol.cjs');
+    const startFile = join(directory, 'starts.txt');
     await writeFile(command, `#!/usr/bin/env node
+const fs = require('node:fs');
 const readline = require('node:readline');
+if (process.env.SHARED_ENV !== 'expected') process.exit(23);
+fs.appendFileSync(process.env.START_FILE, '1');
 const input = readline.createInterface({ input: process.stdin });
 let initialized = false;
 input.on('line', (line) => {
@@ -29,7 +35,15 @@ input.on('line', (line) => {
   } else if (message.method === 'initialized') {
     initialized = true;
   } else if (message.method === 'thread/list' && initialized) {
-    process.stdout.write(JSON.stringify({ id: message.id, result: { data: [], nextCursor: null } }) + '\\n');
+    const payload = Buffer.from(JSON.stringify({ id: message.id, result: {
+      data: [{ id: 'unicode', sessionId: 'session-unicode', cliVersion: 'test', createdAt: 1,
+        updatedAt: 2, cwd: '/tmp/project', ephemeral: false, modelProvider: '模型', status: { type: 'idle' } }],
+      nextCursor: null
+    } }) + '\\n');
+    const marker = Buffer.from('模型');
+    const split = payload.indexOf(marker) + 1;
+    process.stdout.write(payload.subarray(0, split));
+    setTimeout(() => process.stdout.write(payload.subarray(split)), 5);
   } else if (message.id !== undefined) {
     process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32000, message: 'not initialized' } }) + '\\n');
   }
@@ -37,12 +51,28 @@ input.on('line', (line) => {
 `);
     await chmod(command, 0o700);
 
-    const request = createCodexAppServerRequest({ command, env: { PATH: process.env['PATH'] ?? '' } });
+    const sharedEnv = {
+      PATH: process.env['PATH'] ?? '',
+      SHARED_ENV: 'expected',
+      START_FILE: startFile,
+    };
+    const request = createCodexAppServerRequest({ command, env: sharedEnv });
 
     await expect(request('thread/list', { limit: 1 }, { timeoutMs: 2_000 })).resolves.toEqual({
-      data: [],
+      data: [expect.objectContaining({ modelProvider: '模型' })],
       nextCursor: null,
     });
+    await expect(request('thread/list', { limit: 1 }, { timeoutMs: 2_000 })).resolves.toEqual({
+      data: [expect.objectContaining({ modelProvider: '模型' })],
+      nextCursor: null,
+    });
+    expect(await readFile(startFile, 'utf8')).toBe('1');
+    await expect(createDefaultRuntimeAdapterRegistry({
+      env: sharedEnv,
+      codex: { command, requestTimeoutMs: 2_000 },
+    }).list()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'codex', health: expect.objectContaining({ state: 'connected' }) }),
+    ]));
   });
 
   it('cancels an in-flight app-server read through AbortSignal', async () => {
@@ -145,6 +175,9 @@ input.on('line', (line) => {
       }),
     });
 
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'degraded' }),
+    }));
     const snapshot = await adapter.getSnapshot();
 
     expect(snapshot.state).toBe('degraded');
@@ -251,6 +284,9 @@ input.on('line', (line) => {
     const request = vi.fn(async () => ({ data: threads, nextCursor: null }));
     const adapter = new CodexRuntimeAdapter({ request });
 
+    expect(() => adapter.validateEventCursor?.('malformed')).toThrow(expect.objectContaining({
+      code: 'INVALID_CURSOR',
+    }));
     await expect(adapter.getEvents({ cursor: 'malformed' })).rejects.toMatchObject({
       code: 'INVALID_CURSOR',
     });
@@ -272,5 +308,61 @@ input.on('line', (line) => {
       expect.objectContaining({ limit: 500, useStateDbOnly: true }),
       expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
+  });
+
+  it('paginates thread metadata until event cursor continuity is preserved', async () => {
+    const thread = (id: string, updatedAt: number) => ({
+      id, sessionId: `session-${id}`, cliVersion: '0.145.0',
+      createdAt: updatedAt - 1, updatedAt,
+      cwd: '/workspace/project', ephemeral: false, modelProvider: 'openai',
+      status: { type: 'idle' },
+    });
+    const request = vi.fn(async (_method: string, params: Record<string, unknown>) => (
+      params['cursor'] === 'page-2'
+        ? { data: [thread('older-after-cursor', 200)], nextCursor: null }
+        : { data: [thread('newest', 300)], nextCursor: 'page-2' }
+    ));
+    const adapter = new CodexRuntimeAdapter({ request });
+    const cursor = Buffer.from(JSON.stringify({
+      occurredAt: '1970-01-01T00:01:40.000Z',
+      threadId: 'baseline',
+    })).toString('base64url');
+
+    const page = await adapter.getEvents({ cursor, limit: 10 });
+
+    expect(page.events.map((event) => event.id)).toEqual([
+      'codex:thread:older-after-cursor:200',
+      'codex:thread:newest:300',
+    ]);
+    expect(request).toHaveBeenNthCalledWith(2, 'thread/list', expect.objectContaining({
+      cursor: 'page-2',
+    }), expect.any(Object));
+  });
+
+  it('paginates before applying a bounded workspace snapshot filter', async () => {
+    const thread = (id: string, cwd: string) => ({
+      id, sessionId: `session-${id}`, cliVersion: '0.145.0',
+      createdAt: 100, updatedAt: 200,
+      cwd, ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+    });
+    const request = vi.fn(async (_method: string, params: Record<string, unknown>) => (
+      params['cursor'] === 'page-2'
+        ? {
+            data: [thread('target-1', '/workspace/target'), thread('target-2', '/workspace/target')],
+            nextCursor: null,
+          }
+        : { data: [thread('other', '/workspace/other')], nextCursor: 'page-2' }
+    ));
+    const adapter = new CodexRuntimeAdapter({ request });
+    const workspaceId = `codex:workspace:${createHash('sha256')
+      .update('/workspace/target').digest('hex').slice(0, 16)}`;
+
+    const snapshot = await adapter.getSnapshot({ workspaceId, activityLimit: 1 });
+
+    expect(snapshot.agents).toEqual({
+      status: 'available',
+      data: [expect.objectContaining({ id: 'codex:thread:target-1', workspaceId })],
+    });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

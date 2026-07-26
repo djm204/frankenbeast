@@ -9,8 +9,12 @@ export interface DefaultRuntimeAdapterOptions extends HermesRuntimeAdapterOption
 export function createDefaultRuntimeAdapterRegistry(
   options: DefaultRuntimeAdapterOptions = {},
 ): RuntimeAdapterRegistry {
+  const codexOptions: CodexRuntimeAdapterOptions = {
+    ...options.codex,
+    env: options.codex?.env ?? options.env,
+  };
   return new RuntimeAdapterRegistry([
     new HermesRuntimeAdapter(options),
-    new CodexRuntimeAdapter(options.codex ?? { env: options.env }),
+    new CodexRuntimeAdapter(codexOptions),
   ]);
 }
