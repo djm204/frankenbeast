@@ -122,6 +122,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [aggregatePoints, setAggregatePoints] = useState<AggregatePoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -135,6 +136,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     let active = true;
     setLoading(true);
     setError(null);
+    setHistoryError(null);
     setRuns([]);
     setBrainIds([]);
     setSelectedBrainId(null);
@@ -207,6 +209,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     let unsubscribe: (() => void) | undefined;
     setLoading(true);
     setError(null);
+    setHistoryError(null);
     setStreamError(null);
     setSnapshot(null);
     setHistory([]);
@@ -232,18 +235,22 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
       setAggregatePoints((points) => appendAggregatePoint(points, nextSnapshot));
     };
 
-    Promise.all([
+    void Promise.allSettled([
       client.fetchBrainVitalsSnapshot(selectedBrainId),
       client.fetchBrainVitalsHistory(selectedBrainId, '1h'),
-    ]).then(([nextSnapshot, nextHistory]) => {
+    ]).then(([snapshotResult, historyResult]) => {
       if (!active || generationRef.current !== generation) return;
-      setHistory((samples) => mergeHealthSamples(samples, nextHistory.data));
-      applySnapshot(nextSnapshot, false);
-      setLoading(false);
-    }).catch((loadError) => {
-      if (!active || generationRef.current !== generation) return;
-      if (latestSnapshotTimestampRef.current === 0) {
-        setError(`Unable to load Brain Vitals for ${selectedBrainId}. ${describeError(loadError)}`);
+      if (historyResult.status === 'fulfilled') {
+        setHistory((samples) => mergeHealthSamples(samples, historyResult.value.data));
+        setHistoryError(null);
+      } else {
+        setHistoryError(`Unable to load Brain Vitals history for ${selectedBrainId}. ${describeError(historyResult.reason)}`);
+      }
+      if (snapshotResult.status === 'fulfilled') {
+        applySnapshot(snapshotResult.value, false);
+        setError(null);
+      } else if (latestSnapshotTimestampRef.current === 0) {
+        setError(`Unable to load Brain Vitals for ${selectedBrainId}. ${describeError(snapshotResult.reason)}`);
       }
       setLoading(false);
     });
@@ -359,6 +366,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         <p className="rail-card__empty">No Beast runs exist yet, so there are no Brain Vitals to display.</p>
       )}
       {error && <p className="brain-vitals-panel__alert" role="alert">{error}</p>}
+      {historyError && <p className="brain-vitals-panel__alert" role="alert">{historyError}</p>}
       {discoveryError && <p className="brain-vitals-panel__alert" role="alert">{discoveryError}</p>}
       {streamError && <p className="brain-vitals-panel__alert" role="alert">Live updates interrupted. {streamError}</p>}
 

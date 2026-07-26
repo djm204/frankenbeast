@@ -388,6 +388,16 @@ describe('BrainVitalsPanel', () => {
     expect(screen.getByLabelText('Health score 99')).toBeTruthy();
   });
 
+  it('preserves a usable current snapshot when history loading fails', async () => {
+    render(<BrainVitalsPanel client={client({
+      fetchBrainVitalsHistory: vi.fn().mockRejectedValue(new Error('history offline')),
+    })} />);
+
+    expect(await screen.findByLabelText('Health score 88')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Unable to load Brain Vitals history for reviewer. history offline');
+    expect(screen.getByText('1 persisted/live samples')).toBeTruthy();
+  });
+
   it('recovers from a failed initial REST load when SSE succeeds and preserves missing resources', async () => {
     let pushSnapshot!: (next: BrainVitalsSnapshot) => void;
     const api = client({
@@ -410,7 +420,8 @@ describe('BrainVitalsPanel', () => {
     }));
 
     expect(await screen.findByLabelText('Health score 91')).toBeTruthy();
-    expect(screen.queryByText(/Unable to load Brain Vitals/)).toBeNull();
+    expect(screen.queryByText('Unable to load Brain Vitals for reviewer. REST unavailable')).toBeNull();
+    expect(screen.getByText('Unable to load Brain Vitals history for reviewer. REST unavailable')).toBeTruthy();
     expect(screen.getByText('Unavailable')).toBeTruthy();
     expect(screen.getByText('Resource telemetry unavailable')).toBeTruthy();
     expect(screen.getByLabelText('Resource usage trend').getAttribute('data-point-count')).toBe('0');
