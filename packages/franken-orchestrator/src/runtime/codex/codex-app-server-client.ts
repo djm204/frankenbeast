@@ -35,6 +35,13 @@ function safeError(message: string): Error {
   return new Error(message);
 }
 
+function protocolError(value: unknown, fallback: string): Error {
+  const code = value && typeof value === 'object'
+    ? (value as Record<string, unknown>)['code']
+    : undefined;
+  return typeof code === 'number' ? new CodexProtocolError(code) : safeError(fallback);
+}
+
 export function createCodexAppServerRequest(
   options: CodexAppServerClientOptions = {},
 ): CodexAppServerRequest {
@@ -114,7 +121,7 @@ export function createCodexAppServerRequest(
       initializationTimer = null;
       initializationId = null;
       if (record['error'] !== undefined) {
-        failServer(server, safeError('Codex app-server initialization failed'));
+        failServer(server, protocolError(record['error'], 'Codex app-server initialization failed'));
         return;
       }
       server.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`);
@@ -125,16 +132,7 @@ export function createCodexAppServerRequest(
       return;
     }
     if (record['error'] !== undefined) {
-      const protocolError = record['error'];
-      const code = protocolError && typeof protocolError === 'object'
-        ? (protocolError as Record<string, unknown>)['code']
-        : undefined;
-      settlePending(
-        id,
-        typeof code === 'number'
-          ? new CodexProtocolError(code)
-          : safeError('Codex app-server request failed'),
-      );
+      settlePending(id, protocolError(record['error'], 'Codex app-server request failed'));
     } else if (Object.hasOwn(record, 'result')) {
       settlePending(id, null, record['result']);
     }

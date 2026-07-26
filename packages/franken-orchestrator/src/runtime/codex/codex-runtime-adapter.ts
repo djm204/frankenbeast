@@ -62,7 +62,7 @@ interface CodexThread {
   cwd: string;
   ephemeral: boolean;
   modelProvider: string;
-  status: { type: string };
+  status: { type: string; activeFlags?: string[] | undefined };
 }
 
 class CodexSchemaError extends Error {}
@@ -104,6 +104,14 @@ function parseThread(value: unknown): CodexThread | null {
     || typeof thread['status'] !== 'object'
     || typeof (thread['status'] as Record<string, unknown>)['type'] !== 'string'
     || !THREAD_STATUS_TYPES.has((thread['status'] as Record<string, unknown>)['type'] as string)
+    || (
+      (thread['status'] as Record<string, unknown>)['activeFlags'] !== undefined
+      && (
+        !Array.isArray((thread['status'] as Record<string, unknown>)['activeFlags'])
+        || ((thread['status'] as Record<string, unknown>)['activeFlags'] as unknown[])
+          .some((flag) => typeof flag !== 'string')
+      )
+    )
   ) return null;
   return thread as unknown as CodexThread;
 }
@@ -139,9 +147,11 @@ function workspaceId(cwd: string): string {
   return `codex:workspace:${workspaceKey(cwd)}`;
 }
 
-function agentState(status: string): RuntimeAgent['state'] {
-  switch (status) {
-    case 'active': return 'running';
+function agentState(status: CodexThread['status']): RuntimeAgent['state'] {
+  switch (status.type) {
+    case 'active': return status.activeFlags?.some((flag) => (
+      flag === 'waitingOnApproval' || flag === 'waitingOnUserInput'
+    )) ? 'blocked' : 'running';
     case 'idle': return 'idle';
     case 'notLoaded': return 'offline';
     case 'systemError': return 'blocked';
@@ -200,6 +210,14 @@ function parseCursor(value: string | undefined): CodexCursor | null {
 
 function compareCursor(a: CodexCursor, b: CodexCursor): number {
   return a.occurredAt.localeCompare(b.occurredAt) || a.threadId.localeCompare(b.threadId);
+}
+
+function rememberStatus(statuses: Record<string, string>, threadId: string, status: string): void {
+  if (!Object.hasOwn(statuses, threadId) && Object.keys(statuses).length >= MAX_ACTIVITY_LIMIT) {
+    const oldestThreadId = Object.keys(statuses)[0];
+    if (oldestThreadId !== undefined) delete statuses[oldestThreadId];
+  }
+  statuses[threadId] = status;
 }
 
 function eventForThread(thread: CodexThread, boundaryStatuses?: Record<string, string>): RuntimeEvent {
@@ -369,7 +387,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
         id: `codex:thread:${thread.id}`,
         workspaceId: currentWorkspaceId,
         displayName: `Codex thread ${thread.id.slice(-4)}`,
-        state: agentState(thread.status.type),
+        state: agentState(thread.status),
         lastActiveAt: occurredAt,
         metadata: {
           cliVersion: thread.cliVersion,
@@ -430,10 +448,13 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       }))
       .filter((entry) => {
         if (!after) return true;
-        if (after.boundaryStatuses && entry.cursor.occurredAt === after.occurredAt) {
-          return after.boundaryStatuses[entry.cursor.threadId] !== entry.cursor.status;
-        }
         const order = compareCursor(entry.cursor, after);
+        if (order <= 0 && after.boundaryStatuses) {
+          if (Object.hasOwn(after.boundaryStatuses, entry.cursor.threadId)) {
+            return after.boundaryStatuses[entry.cursor.threadId] !== entry.cursor.status;
+          }
+          if (entry.cursor.occurredAt === after.occurredAt) return true;
+        }
         return order > 0 || (order === 0 && after.status !== undefined && entry.cursor.status !== after.status);
       });
     const entries = after
@@ -442,17 +463,10 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           .sort((a, b) => compareCursor(b.cursor, a.cursor))
           .slice(0, limit)
           .sort((a, b) => compareCursor(a.cursor, b.cursor));
-    const emittedStatusesByTimestamp = new Map<string, Record<string, string>>();
+    const emittedStatuses = after?.boundaryStatuses ? { ...after.boundaryStatuses } : {};
     const events = entries.map((entry) => {
-      let statuses = emittedStatusesByTimestamp.get(entry.cursor.occurredAt);
-      if (!statuses) {
-        statuses = entry.cursor.occurredAt === after?.occurredAt && after.boundaryStatuses
-          ? { ...after.boundaryStatuses }
-          : {};
-        emittedStatusesByTimestamp.set(entry.cursor.occurredAt, statuses);
-      }
-      statuses[entry.cursor.threadId] = entry.cursor.status;
-      return eventForThread(entry.thread, statuses);
+      rememberStatus(emittedStatuses, entry.cursor.threadId, entry.cursor.status);
+      return eventForThread(entry.thread, emittedStatuses);
     });
     return RuntimeEventPageSchema.parse({
       events,
