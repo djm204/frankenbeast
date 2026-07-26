@@ -34,6 +34,7 @@ export interface ProcessSupervisorOptions {
   readonly projectRoot?: string | undefined;
   readonly spawn?: typeof defaultSpawn;
   readonly orphanSweeper?: OrphanProcessSweeperOptions | undefined;
+  readonly onOrphanProcessSwept?: ((result: OrphanProcessSweepResult) => void) | undefined;
 }
 
 export interface OrphanProcessSweeperOptions {
@@ -146,12 +147,12 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
       // absent leader PID cannot be targeted directly, but its persisted,
       // owned process-group ID remains safe to sweep.
       if (options.processGroupOwned) {
-        this.sweepOrphanProcessGroup(pid, signal);
+        this.sweepProcessGroup(pid, signal, false);
       }
       return;
     }
 
-    if (options.processGroupOwned && this.sweepOrphanProcessGroup(pid, signal).swept) {
+    if (options.processGroupOwned && this.sweepProcessGroup(pid, signal, false).swept) {
       return;
     }
 
@@ -167,7 +168,18 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     return this.orphanSweeperEnabled() && this.orphanSweeperPlatform() !== 'win32';
   }
 
-  sweepOrphanProcessGroup(pid: number, signal: NodeJS.Signals = this.orphanSweeperSignal()): OrphanProcessSweepResult {
+  sweepOrphanProcessGroup(
+    pid: number,
+    signal: NodeJS.Signals = this.orphanSweeperSignal(),
+  ): OrphanProcessSweepResult {
+    return this.sweepProcessGroup(pid, signal, true);
+  }
+
+  private sweepProcessGroup(
+    pid: number,
+    signal: NodeJS.Signals,
+    observeOrphanSweep: boolean,
+  ): OrphanProcessSweepResult {
     if (!this.orphanSweeperEnabled()) {
       return { pid, signal, swept: false, skippedReason: 'disabled' };
     }
@@ -180,7 +192,15 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
 
     try {
       this.killProcess()(-pid, signal);
-      return { pid, signal, swept: true };
+      const result = { pid, signal, swept: true } as const;
+      if (observeOrphanSweep) {
+        try {
+          this.options.onOrphanProcessSwept?.(result);
+        } catch {
+          // Observation is best-effort and must not change process cleanup behavior.
+        }
+      }
+      return result;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ESRCH') {
@@ -387,8 +407,11 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
     }
 
     recordExit = (code: number | null, signal: string | null) => {
+      const firstTerminalEvent = exitInfo === undefined;
       exitInfo = { code, signal };
-      this.sweepOrphanProcessGroup(pid);
+      if (firstTerminalEvent) {
+        this.sweepOrphanProcessGroup(pid);
+      }
       setImmediate(() => {
         if (!stdoutClosed) {
           forceClose.stdout?.();
@@ -453,7 +476,7 @@ export class ProcessSupervisor implements ProcessSupervisorLike {
   }
 
   private signalTrackedProcess(child: ChildProcess, pid: number, signal: NodeJS.Signals): void {
-    const sweep = this.sweepOrphanProcessGroup(pid, signal);
+    const sweep = this.sweepProcessGroup(pid, signal, false);
     if (sweep.swept) {
       return;
     }

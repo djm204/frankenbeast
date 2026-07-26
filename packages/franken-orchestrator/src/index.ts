@@ -280,6 +280,14 @@ export { ProcessBeastExecutor } from './beasts/execution/process-beast-executor.
 export { ContainerBeastExecutor } from './beasts/execution/container-beast-executor.js';
 export type { BeastMetrics } from './beasts/telemetry/beast-metrics.js';
 export { PrometheusBeastMetrics } from './beasts/telemetry/prometheus-beast-metrics.js';
+export { BeastLifecycleMetrics } from './beasts/telemetry/beast-lifecycle-metrics.js';
+export type {
+  BeastDefinitionLifecycleAggregate,
+  BeastLifecycleMetricsOptions,
+  BeastLifecycleMetricsSnapshot,
+  BeastLifecycleMetricsWindow,
+  BeastRunDurationDistribution,
+} from './beasts/telemetry/beast-lifecycle-metrics.js';
 
 // Logging
 export {

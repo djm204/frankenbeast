@@ -1025,6 +1025,8 @@ When the daemon dispatches a Beast run, it spawns a subprocess managed by `Proce
 
 6. **Daemon drain mode**: when the daemon begins graceful shutdown it immediately enters drain mode before stopping live child runs. `/health` returns HTTP 503 with `status: "draining"`, `ok: false`, and drain metadata so supervisors/load balancers stop routing new work. Authenticated read endpoints remain available for inspection while mutating beast-control requests fail fast with `BEAST_DAEMON_DRAINING` until shutdown completes.
 
+7. **Lifecycle churn metrics**: `BeastLifecycleMetrics` queries a narrow indexed projection of persisted Beast attempts as start-time cohorts, grouped by `definitionId`, to report actual spawn counts/rates, completion/failure/stop rates, active counts, and min/p50/p95/max per-attempt runtime distributions for a caller-selected window. Queued runs are excluded and retries contribute their own outcome and duration. `ProcessSupervisor` records an orphan-process event only when post-exit cleanup successfully signals a surviving process group; ordinary tracked stop/kill signals and skipped or failed sweeps do not increment the process-local counter. Orphan sweep timestamps have a fixed 24-hour in-memory retention to bound daemon heap growth. `createBeastServices()` exposes this in-process query surface as `lifecycleMetrics`; HTTP exposure belongs to the Brain Vitals aggregation layer.
+
 Current beast-control routes:
 
 | Route | Purpose |
