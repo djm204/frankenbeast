@@ -12,7 +12,7 @@
 - [x] Implement provider-neutral authenticated HTTP routes and ticket-authenticated SSE replay/heartbeat/rate-limit behavior.
 - [x] Run focused tests, package tests, root tests, lint, typecheck, and build.
 - [x] Self-review the complete diff and verify no Hive Brain files or synthetic production data were introduced.
-- [ ] Commit as David Mendez <me@davidmendez.dev>, push, and open one PR with `Closes #3812`.
+- [x] Commit as David Mendez <me@davidmendez.dev>, push, and open PR #3821 with `Closes #3812`.
 - [ ] Trigger real GitHub `@codex review`; resolve accepted findings and all Codex-authored threads.
 - [ ] Verify exact-current-head clean Codex and green CI; do not merge.
 - [ ] Record structured handoff on the task/root blackboard and block for review.
