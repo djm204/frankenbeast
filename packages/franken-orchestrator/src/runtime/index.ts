@@ -1,4 +1,5 @@
 export type { RuntimeAdapter, RuntimeEventRequest, RuntimeSnapshotRequest } from './runtime-adapter.js';
+export { RuntimeCursorError } from './runtime-adapter.js';
 export { RuntimeAdapterRegistry } from './runtime-adapter-registry.js';
 export { createDefaultRuntimeAdapterRegistry } from './runtime-defaults.js';
 export { HermesRuntimeAdapter } from './hermes/hermes-runtime-adapter.js';

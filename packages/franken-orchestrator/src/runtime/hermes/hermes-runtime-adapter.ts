@@ -2,7 +2,12 @@ import { readdir, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { redactSensitiveText } from '../../logging/redaction.js';
-import type { RuntimeAdapter, RuntimeEventRequest, RuntimeSnapshotRequest } from '../runtime-adapter.js';
+import {
+  RuntimeCursorError,
+  type RuntimeAdapter,
+  type RuntimeEventRequest,
+  type RuntimeSnapshotRequest,
+} from '../runtime-adapter.js';
 import {
   RuntimeEventPageSchema,
   RuntimeProviderSchema,
@@ -33,7 +38,7 @@ interface DatabaseSource {
 }
 
 interface InspectedSource extends DatabaseSource {
-  compatible: boolean;
+  status: 'compatible' | 'schema-incompatible' | 'unavailable';
   message?: string | undefined;
 }
 
@@ -122,6 +127,7 @@ function mapRunState(status: unknown, outcome: unknown): 'queued' | 'running' | 
   const value = outcome ?? status;
   switch (value) {
     case 'scheduled':
+    case 'pending':
     case 'ready': return 'queued';
     case 'running': return 'running';
     case 'blocked': return 'blocked';
@@ -172,7 +178,7 @@ function parseCursor(value: string | undefined): CursorValue | undefined {
     ) throw new Error('invalid');
     return decoded as CursorValue;
   } catch {
-    throw new Error('Invalid runtime event cursor');
+    throw new RuntimeCursorError();
   }
 }
 
@@ -197,14 +203,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
 
   async describe(): Promise<RuntimeProvider> {
     const inspected = await this.inspectSources();
-    const compatible = inspected.filter((source) => source.compatible).length;
+    const compatible = inspected.filter((source) => source.status === 'compatible').length;
+    const unavailable = inspected.filter((source) => source.status === 'unavailable').length;
+    const incompatible = inspected.filter((source) => source.status === 'schema-incompatible').length;
     const unavailableMessage = this.home
       ? 'No canonical Hermes Kanban database was found'
       : 'Hermes home is not configured; set HERMES_HOME or pass hermesHome';
     const health = inspected.length === 0
       ? { state: 'unavailable' as const, checkedAt: nowIso(this.now), message: unavailableMessage }
-      : compatible === 0
-        ? { state: 'schema-incompatible' as const, checkedAt: nowIso(this.now), message: 'No discovered Hermes database has a supported schema' }
+      : compatible === 0 && unavailable === inspected.length
+        ? { state: 'unavailable' as const, checkedAt: nowIso(this.now), message: 'Discovered Hermes databases are unavailable' }
+        : compatible === 0 && incompatible === inspected.length
+          ? { state: 'schema-incompatible' as const, checkedAt: nowIso(this.now), message: 'No discovered Hermes database has a supported schema' }
         : compatible < inspected.length
           ? { state: 'degraded' as const, checkedAt: nowIso(this.now), message: 'One or more Hermes databases are unavailable or schema-incompatible' }
           : { state: 'connected' as const, checkedAt: nowIso(this.now) };
@@ -217,7 +227,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       capabilities: {
         snapshot: { status: 'supported' },
         streaming: { status: 'supported' },
-        logs: { status: 'supported' },
+        logs: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical log-record source' },
         blockers: { status: 'supported' },
         approvals: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical approval-request source' },
         pause: { status: 'unsupported', reason: 'The Hermes MVP adapter is read-only' },
@@ -238,7 +248,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       id: source.workspaceId,
       name: source.name,
       kind: source.kind,
-      state: source.compatible ? 'available' as const : 'schema-incompatible' as const,
+      state: source.status === 'compatible' ? 'available' as const : source.status,
       ...(source.message ? { metadata: { diagnostic: boundedText(source.message) } } : {}),
     }));
     const tasks: RuntimeTask[] = [];
@@ -248,7 +258,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const agentsById = new Map<string, RuntimeAgent>();
     let queryFailures = 0;
 
-    for (const source of inspected.filter((candidate) => candidate.compatible)) {
+    for (const source of inspected.filter((candidate) => candidate.status === 'compatible')) {
       try {
         const data = this.readSource(source, activityLimit);
         tasks.push(...data.tasks);
@@ -263,18 +273,22 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       }
     }
 
-    const compatibleCount = inspected.filter((source) => source.compatible).length;
+    const compatibleCount = inspected.filter((source) => source.status === 'compatible').length;
+    const unavailableCount = inspected.filter((source) => source.status === 'unavailable').length;
+    const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
     const state = inspected.length === 0
       ? (this.home ? 'empty' as const : 'unavailable' as const)
-      : compatibleCount === 0
-        ? 'schema-incompatible' as const
+      : compatibleCount === 0 && unavailableCount === inspected.length
+        ? 'unavailable' as const
+        : compatibleCount === 0 && incompatibleCount === inspected.length
+          ? 'schema-incompatible' as const
         : queryFailures > 0 || compatibleCount < inspected.length
           ? 'degraded' as const
           : tasks.length === 0 && runs.length === 0 && events.length === 0
             ? 'empty' as const
             : 'ready' as const;
     const message = state === 'unavailable'
-      ? 'Hermes home is not configured'
+      ? (this.home ? 'Discovered Hermes databases are unavailable' : 'Hermes home is not configured')
       : state === 'schema-incompatible'
         ? 'No selected Hermes database has a supported schema'
         : state === 'degraded'
@@ -306,7 +320,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const limit = normalizeLimit(request.limit);
     const after = parseCursor(request.cursor);
     const inspected = (await this.inspectSources()).filter((source) => (
-      source.compatible && (request.workspaceId === undefined || source.workspaceId === request.workspaceId)
+      source.status === 'compatible' && (request.workspaceId === undefined || source.workspaceId === request.workspaceId)
     ));
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
     for (const source of inspected) {
@@ -322,6 +336,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       events: page.map((entry) => entry.event),
       nextCursor: page.length > 0 ? page[page.length - 1]!.event.cursor : request.cursor ?? null,
     });
+  }
+
+  validateEventCursor(cursor: string): void {
+    parseCursor(cursor);
   }
 
   private async discoverSources(): Promise<DatabaseSource[]> {
@@ -367,12 +385,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         const db = this.open(source.path);
         try {
           const issue = this.schemaIssue(db);
-          return issue ? { ...source, compatible: false, message: issue } : { ...source, compatible: true };
+          return issue
+            ? { ...source, status: 'schema-incompatible' as const, message: issue }
+            : { ...source, status: 'compatible' as const };
         } finally {
           db.close();
         }
       } catch (error) {
-        return { ...source, compatible: false, message: error instanceof Error ? error.message : 'Database unavailable' };
+        return {
+          ...source,
+          status: 'unavailable' as const,
+          message: error instanceof Error ? error.message : 'Database unavailable',
+        };
       }
     });
   }

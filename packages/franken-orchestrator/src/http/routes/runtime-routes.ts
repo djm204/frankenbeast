@@ -9,6 +9,7 @@ import {
   type BeastRateLimitOptions,
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
+import type { RuntimeAdapter } from '../../runtime/runtime-adapter.js';
 import { RuntimeEventPageSchema, RuntimeSnapshotSchema } from '../../runtime/runtime-schemas.js';
 import { redactLogData } from '../../logging/redaction.js';
 import { redactAbsoluteHostPathValues } from '../beast-response-redaction.js';
@@ -84,6 +85,24 @@ function runtimeResponse(value: unknown): unknown {
   return redactAbsoluteHostPathValues(redactLogData(value));
 }
 
+function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID_CURSOR' } {
+  return error instanceof Error
+    && 'code' in error
+    && (error as Error & { code?: unknown }).code === 'INVALID_CURSOR';
+}
+
+function validateAdapterCursor(adapter: RuntimeAdapter, cursor: string | undefined): void {
+  if (!cursor) return;
+  try {
+    adapter.validateEventCursor?.(cursor);
+  } catch (error) {
+    if (isInvalidCursorError(error)) {
+      throw new HttpError(422, 'INVALID_CURSOR', error.message);
+    }
+    throw error;
+  }
+}
+
 export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   const app = new Hono();
   const auth = requireOperatorAuth({ operatorToken: deps.operatorToken, security: deps.security });
@@ -105,7 +124,11 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   });
   app.use('/v1/smart-swarm/*', requireBeastRateLimit(
     limiter,
-    (authHeader, path) => `${authHeader ?? 'ticket'}:${path}`,
+    (authHeader, path) => authHeader
+      ? `${authHeader}:${path}`
+      : isStreamPath(path)
+        ? 'ticket:runtime-stream'
+        : `ticket:${path}`,
   ));
 
   app.get(BASE_PATH, async (c) => c.json({ data: runtimeResponse(await deps.registry.list()) }));
@@ -125,13 +148,21 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const adapter = adapterOr404(deps.registry, c.req.param('providerId'));
     const limit = positiveInteger(c.req.query('limit'), 'limit', 500);
     const cursor = cursorValue(c.req.query('cursor'));
+    validateAdapterCursor(adapter, cursor);
     const workspaceId = c.req.query('workspaceId');
     const request = {
       ...(cursor ? { cursor } : {}),
       ...(workspaceId ? { workspaceId } : {}),
       ...(limit !== undefined ? { limit } : {}),
     };
-    return c.json({ data: runtimeResponse(RuntimeEventPageSchema.parse(await adapter.getEvents(request))) });
+    try {
+      return c.json({ data: runtimeResponse(RuntimeEventPageSchema.parse(await adapter.getEvents(request))) });
+    } catch (error) {
+      if (isInvalidCursorError(error)) {
+        throw new HttpError(422, 'INVALID_CURSOR', error.message);
+      }
+      throw error;
+    }
   });
 
   app.post(`${BASE_PATH}/:providerId/events/ticket`, (c) => {
@@ -157,12 +188,13 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     if (!ticket) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
+    const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
+    validateAdapterCursor(adapter, initialCursor);
     const ticketStatus = deps.ticketStore.consume(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
     if (ticketStatus === 'reused') return c.body(null, 204);
     if (ticketStatus === 'invalid') {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
-    const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
     const workspaceId = c.req.query('workspaceId');
 
     return streamSSE(c, async (stream) => {

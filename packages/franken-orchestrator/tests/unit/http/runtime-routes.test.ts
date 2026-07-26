@@ -51,6 +51,11 @@ function runtimeAdapter(): RuntimeAdapter {
     getEvents: vi.fn(async ({ cursor } = {}) => RuntimeEventPageSchema.parse(
       cursor ? { events: [], nextCursor: cursor } : { events: [event], nextCursor: event.cursor },
     )),
+    validateEventCursor: vi.fn((cursor) => {
+      if (cursor === 'malformed') {
+        throw Object.assign(new Error('Invalid runtime event cursor'), { code: 'INVALID_CURSOR' });
+      }
+    }),
   };
 }
 
@@ -69,6 +74,10 @@ function createRoutes() {
       heartbeatIntervalMs: 20,
     }),
   };
+}
+
+function authHeaders(): Record<string, string> {
+  return { authorization: 'Bearer operator-secret' };
 }
 
 describe('smart-swarm runtime routes', () => {
@@ -92,6 +101,81 @@ describe('smart-swarm runtime routes', () => {
     expect(JSON.parse(snapshotText)).toEqual({ data: expect.objectContaining({ providerId: 'hermes' }) });
     expect(snapshotText).not.toContain('secret-route-value');
     expect(adapter.getSnapshot).toHaveBeenCalledWith({ workspaceId: 'hermes:global', activityLimit: 25 });
+  });
+
+  it('redacts absolute host paths embedded in provider-neutral response strings', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({
+      providerId: 'hermes',
+      state: 'degraded',
+      capturedAt: '2026-07-26T12:00:00.000Z',
+      message: 'failed under /home/alice/private-repo during discovery',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'unsupported', reason: 'No source' },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/snapshot', { headers: authHeaders() });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).not.toContain('/home/alice/private-repo');
+    expect(text).toContain('[REDACTED_HOST_PATH]');
+  });
+
+  it('returns a client error when an adapter rejects a malformed cursor', async () => {
+    const { app, adapter } = createRoutes();
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/events?cursor=malformed', {
+      headers: authHeaders(),
+    });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.objectContaining({ code: 'INVALID_CURSOR' }),
+    });
+    expect(adapter.getEvents).not.toHaveBeenCalled();
+  });
+
+  it('rate limits unauthenticated stream attempts with a stable bucket', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const adapter = runtimeAdapter();
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 1, windowMs: 60_000 },
+    });
+
+    const first = await app.request('/v1/smart-swarm/providers/hermes/events/random-one');
+    const second = await app.request('/v1/smart-swarm/providers/hermes/events/random-two');
+
+    expect(first.status).toBe(401);
+    expect(second.status).toBe(429);
+  });
+
+  it('rejects a malformed SSE cursor before consuming its one-shot ticket', async () => {
+    const { app, adapter } = createRoutes();
+    const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
+    const { connectionId } = await ticketResponse.json() as { connectionId: string };
+    const path = `/v1/smart-swarm/providers/hermes/events/${connectionId}`;
+    const rejected = await app.request(`${path}?cursor=malformed`, { headers: { cookie } });
+    expect(rejected.status).toBe(422);
+
+    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: null }));
+    const retry = await app.request(path, { headers: { cookie } });
+    expect(retry.status).toBe(200);
+    await retry.body!.cancel();
   });
 
   it('uses one-shot scoped cookies for cursor-replay SSE and emits normalized events', async () => {
