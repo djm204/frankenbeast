@@ -97,8 +97,10 @@ export interface BrainVitalsRunDetail {
   eventsTruncated: boolean;
 }
 
+export type BrainVitalsDimension = 'cache' | 'compaction' | 'churn' | 'resource' | 'cost';
+
 export interface BrainVitalsActivity {
-  dimension: 'cache' | 'compaction' | 'churn' | 'resource' | 'cost';
+  dimension: BrainVitalsDimension;
   kind: string;
   runId: string;
   timestamp: number;

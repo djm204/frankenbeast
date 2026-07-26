@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BeastRunSummary } from '@franken/types';
 import type {
   BrainHealthSample,
+  BrainVitalsActivity,
   BrainVitalsRunDetail,
   BrainVitalsSnapshot,
   DashboardApiClient,
 } from '../../lib/dashboard-api';
 import { SlideInPanel } from '../beasts/slide-in-panel';
+import { BrainPulseMap } from './brain-pulse-map';
 
 interface BrainVitalsPanelProps {
   client: DashboardApiClient;
@@ -120,6 +122,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [history, setHistory] = useState<BrainHealthSample[]>([]);
   const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
   const [aggregatePoints, setAggregatePoints] = useState<AggregatePoint[]>([]);
+  const [activities, setActivities] = useState<BrainVitalsActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -144,6 +147,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setHistory([]);
     setResourcePoints([]);
     setAggregatePoints([]);
+    setActivities([]);
     runCacheRef.current.clear();
     nextRunCursorRef.current = undefined;
 
@@ -215,6 +219,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setHistory([]);
     setResourcePoints([]);
     setAggregatePoints([]);
+    setActivities([]);
     latestSnapshotTimestampRef.current = 0;
     setSelectedRunId(null);
     setRunDetail(null);
@@ -269,6 +274,15 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         setStreamError(describeError(subscriptionError));
       },
       (activity) => {
+        setActivities((current) => {
+          const duplicate = current.some((candidate) => (
+            candidate.dimension === activity.dimension
+            && candidate.kind === activity.kind
+            && candidate.runId === activity.runId
+            && candidate.timestamp === activity.timestamp
+          ));
+          return duplicate ? current : [...current, activity].slice(-200);
+        });
         if (
           activity.dimension !== 'churn'
           || runDiscoveryInFlightRef.current
@@ -372,6 +386,8 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
 
       {snapshot && (
         <>
+          <BrainPulseMap snapshot={snapshot} activities={activities} onOpenRun={(runId) => void openRun(runId)} />
+
           <div className="brain-vitals-panel__metrics">
             <article className="brain-vitals-panel__score" aria-label={`Health score ${snapshot.health.score}`}>
               <span>Health score</span>

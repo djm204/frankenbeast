@@ -155,6 +155,44 @@ describe('BrainVitalsPanel', () => {
     expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
   });
 
+  it('uses real activity events to pulse a vitals node and expose its run drill-down', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+
+    expect(await screen.findByRole('region', { name: 'Brain pulse map' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /activity:/ })).toHaveLength(5);
+    const compactionNode = screen.getByRole('button', { name: /Compaction activity:/ });
+    expect(compactionNode.getAttribute('data-activity-count')).toBe('0');
+    expect(compactionNode.getAttribute('data-pulse-state')).toBe('idle');
+
+    act(() => pushActivity({
+      dimension: 'compaction',
+      kind: 'compaction.completed',
+      runId: 'run-1',
+      timestamp: Date.now(),
+    }));
+
+    await waitFor(() => {
+      expect(compactionNode.getAttribute('data-activity-count')).toBe('1');
+      expect(compactionNode.getAttribute('data-pulse-state')).toBe('active');
+    });
+
+    fireEvent.click(compactionNode);
+    expect(screen.getByRole('region', { name: 'Compaction pulse detail' })).toBeTruthy();
+    expect(screen.getByText('compaction.completed')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open run run-1 from compaction activity' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Run run-1 vitals' })).toBeTruthy();
+    expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
+  });
+
   it('offers a selector when multiple brain definitions have runs', async () => {
     const api = client({
       listBrainVitalsRuns: vi.fn().mockResolvedValue({
