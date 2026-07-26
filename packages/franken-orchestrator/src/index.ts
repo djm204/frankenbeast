@@ -155,6 +155,7 @@ export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from
 
 // Provider-neutral smart-swarm runtime adapters
 export {
+  CodexRuntimeAdapter,
   HermesRuntimeAdapter,
   RuntimeAdapterRegistry,
   RuntimeCursorError,
@@ -175,6 +176,8 @@ export {
   createDefaultRuntimeAdapterRegistry,
 } from './runtime/index.js';
 export type {
+  CodexRuntimeAdapterOptions,
+  DefaultRuntimeAdapterOptions,
   HermesRuntimeAdapterOptions,
   RuntimeAdapter,
   RuntimeAgent,

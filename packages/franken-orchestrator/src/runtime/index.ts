@@ -2,8 +2,15 @@ export type { RuntimeAdapter, RuntimeEventRequest, RuntimeSnapshotRequest } from
 export { RuntimeCursorError } from './runtime-adapter.js';
 export { RuntimeAdapterRegistry } from './runtime-adapter-registry.js';
 export { createDefaultRuntimeAdapterRegistry } from './runtime-defaults.js';
+export type { DefaultRuntimeAdapterOptions } from './runtime-defaults.js';
 export { HermesRuntimeAdapter } from './hermes/hermes-runtime-adapter.js';
 export type { HermesRuntimeAdapterOptions } from './hermes/hermes-runtime-adapter.js';
+export { CodexRuntimeAdapter } from './codex/codex-runtime-adapter.js';
+export type {
+  CodexAppServerRequest,
+  CodexAppServerRequestOptions,
+  CodexRuntimeAdapterOptions,
+} from './codex/codex-runtime-adapter.js';
 export {
   RuntimeAgentSchema,
   RuntimeApprovalSchema,

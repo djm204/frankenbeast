@@ -142,11 +142,12 @@ describe('provider-neutral runtime contract', () => {
     await expect(registry.list()).rejects.toThrow(/does not match registered id/);
   });
 
-  it('registers Hermes as the first default runtime adapter without inventing availability', async () => {
-    const registry = createDefaultRuntimeAdapterRegistry({ env: {} });
+  it('registers Hermes and Codex by default without inventing provider availability', async () => {
+    const registry = createDefaultRuntimeAdapterRegistry({ env: { PATH: '' } });
 
     await expect(registry.list()).resolves.toEqual([
       expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
+      expect.objectContaining({ id: 'codex', health: expect.objectContaining({ state: 'unavailable' }) }),
     ]);
   });
 
@@ -156,6 +157,7 @@ describe('provider-neutral runtime contract', () => {
     expect(orchestrator.RuntimeAdapterRegistry).toBe(RuntimeAdapterRegistry);
     expect(orchestrator.RuntimeCursorError).toBe(RuntimeCursorError);
     expect(orchestrator.HermesRuntimeAdapter).toEqual(expect.any(Function));
+    expect(orchestrator.CodexRuntimeAdapter).toEqual(expect.any(Function));
     expect(RuntimeAgentSchema).toEqual(expect.any(Object));
     expect(RuntimeRunSchema).toEqual(expect.any(Object));
     expect(orchestrator.RuntimeAgentSchema).toBe(RuntimeAgentSchema);
