@@ -17,7 +17,7 @@ function isAbsoluteHostPath(value: string): boolean {
 const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_HOST_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
-const API_ROUTE_RE = /^\/(?:api|v\d+)(?:\/|$)/u;
+const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 
 function redactEmbeddedAbsoluteHostPaths(value: string): string {
   return value.replace(

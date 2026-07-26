@@ -34,6 +34,11 @@ describe('Beast response redaction', () => {
       .toBe('Call "/v1/users" after setup');
   });
 
+  it('preserves known non-versioned application routes', () => {
+    expect(redactAbsoluteHostPathValues('Check /comms/health and /webhooks/slack/events'))
+      .toBe('Check /comms/health and /webhooks/slack/events');
+  });
+
   it('redacts quoted host paths rooted outside the common host allowlist', () => {
     expect(redactAbsoluteHostPathValues("ENOTDIR: scandir '/data/hermes/kanban/boards'"))
       .toBe("ENOTDIR: scandir '[REDACTED_HOST_PATH]'");
