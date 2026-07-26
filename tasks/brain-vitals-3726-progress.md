@@ -11,7 +11,13 @@ Verified against live GitHub and exact `origin/main` `cb2e7c39199a007c4a4c244c16
 - [x] Verify current-main integration tests, typecheck, build, lint, real-data behavior, and scope boundaries.
 - [x] Verify durable local/public staging with synthetic data quarantined and placeholder writers disabled.
 - [x] Record residual risks and teardown ownership without stopping the user-acceptance endpoint.
-- [ ] Merge the exact-head closeout ledger PR, close epic #3726, and verify the ledger PR and epic are terminal on live GitHub.
+- [x] Merge exact-head closeout ledger PR #3822, close epic #3726, and verify the ledger PR and epic are terminal on live GitHub.
+
+## Final closeout evidence
+
+- [PR #3822](https://github.com/djm204/frankenbeast/pull/3822) merged reviewed head `f4755f40731156334e503cc9228122e0e1d0e1b0` as `93bc3a6f246af354b2e9a6be9055b3030c392d70` after [CI run 30212834273](https://github.com/djm204/frankenbeast/actions/runs/30212834273) passed 4/4 exact-head checks, [Codex returned clean on that head](https://github.com/djm204/frankenbeast/pull/3822#issuecomment-5084623584), and all 7 review threads were resolved.
+- Epic [#3726](https://github.com/djm204/frankenbeast/issues/3726) is `CLOSED/COMPLETED`; its [final closure comment](https://github.com/djm204/frankenbeast/issues/3726#issuecomment-5084665577) links the merged delivery chain and independent verifier evidence.
+- Live terminal verification after closure confirmed #3726, #3729, #3730, #3731, #3732, #3733, and #3738 are all `CLOSED/COMPLETED`.
 
 ## Dependency and foundation status
 
@@ -155,4 +161,4 @@ The canonical staging handoff (`t_0f1467ea`) and independent verifier both passe
 - A full local orchestrator sweep passed 4,573/4,576 tests. The three failures assert that managed services/remote chat are absent, but this acceptance host must keep the staging services live. Focused product suites, exact-head CI, full web, typecheck, build, lint, and public acceptance are green.
 - Faculty activity nodes are intentionally deferred until real Hive Brain activity data exists; adding placeholders would regress the verified scope/real-data boundary.
 
-No blocking correctness, security, regression, scope, placeholder, or staging discrepancy remains. Final merge/review gates and epic closure remain intentionally pending in the unchecked closeout item above.
+No blocking correctness, security, regression, scope, placeholder, review, merge, issue-state, or staging discrepancy remains for epic #3726 closeout.
