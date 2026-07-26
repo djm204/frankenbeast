@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.18.0...franken-types-v0.19.0) (2026-07-26)
+
+
+### Features
+
+* **brain:** add hive-aware status queries ([#3778](https://github.com/djm204/frankenbeast/issues/3778)) ([dff353f](https://github.com/djm204/frankenbeast/commit/dff353f96168374efd439c9abf486b360f4a327e))
+* **observer:** add cache-aware token accounting ([#3781](https://github.com/djm204/frankenbeast/issues/3781)) ([3d526f5](https://github.com/djm204/frankenbeast/commit/3d526f5573293f52e604c496dbffcefcc45fab28))
+
 ## [0.18.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.17.0...franken-types-v0.18.0) (2026-07-25)
 
 

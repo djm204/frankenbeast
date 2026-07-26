@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.66.0](https://github.com/djm204/frankenbeast/compare/v0.65.0...v0.66.0) (2026-07-26)
+
+
+### Features
+
+* **beasts:** expose lifecycle churn metrics ([#3794](https://github.com/djm204/frankenbeast/issues/3794)) ([15d2e52](https://github.com/djm204/frankenbeast/commit/15d2e52b48d345c928c03014ce39c302d9d24fd2))
+* **brain:** add hive-aware status queries ([#3778](https://github.com/djm204/frankenbeast/issues/3778)) ([dff353f](https://github.com/djm204/frankenbeast/commit/dff353f96168374efd439c9abf486b360f4a327e))
+* **observer:** add brain health scoring ([#3797](https://github.com/djm204/frankenbeast/issues/3797)) ([b320d89](https://github.com/djm204/frankenbeast/commit/b320d892c479c8dff98c40e01fcab9eb50615e69))
+* **observer:** add cache-aware token accounting ([#3781](https://github.com/djm204/frankenbeast/issues/3781)) ([3d526f5](https://github.com/djm204/frankenbeast/commit/3d526f5573293f52e604c496dbffcefcc45fab28))
+* **observer:** export session compaction metrics ([#3780](https://github.com/djm204/frankenbeast/issues/3780)) ([96b032e](https://github.com/djm204/frankenbeast/commit/96b032ea310a31ea51de20e9df2ad6db148c5a47))
+* **observer:** sample process resource usage ([#3795](https://github.com/djm204/frankenbeast/issues/3795)) ([f39e2ad](https://github.com/djm204/frankenbeast/commit/f39e2ad6673d4eade82ffb4b0ae6ba7897173110))
+* **orchestrator:** expose brain vitals telemetry APIs ([#3798](https://github.com/djm204/frankenbeast/issues/3798)) ([a26a390](https://github.com/djm204/frankenbeast/commit/a26a390a58f7f678dc1ad937ef55bd1015d56daf))
+* **web:** add live Brain Vitals dashboard ([#3806](https://github.com/djm204/frankenbeast/issues/3806)) ([2504485](https://github.com/djm204/frankenbeast/commit/2504485c1db25ec92939374bd09ffd0032592618))
+
+
+### Bug Fixes
+
+* **brain:** remediate hive privacy findings ([#3788](https://github.com/djm204/frankenbeast/issues/3788)) ([1275e4d](https://github.com/djm204/frankenbeast/commit/1275e4da6cd9199dcacae21ceda39323dbdbef88))
+
+
+### Documentation
+
+* **brain:** record epic closure audit ([#3783](https://github.com/djm204/frankenbeast/issues/3783)) ([1beb0ce](https://github.com/djm204/frankenbeast/commit/1beb0ce714d43dba428d0533b1b5b9f2638e7674))
+
 ## [0.65.0](https://github.com/djm204/frankenbeast/compare/v0.64.1...v0.65.0) (2026-07-25)
 
 

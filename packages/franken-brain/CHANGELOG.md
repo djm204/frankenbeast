@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.18.0...@franken/brain-v0.18.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **brain:** remediate hive privacy findings ([#3788](https://github.com/djm204/frankenbeast/issues/3788)) ([1275e4d](https://github.com/djm204/frankenbeast/commit/1275e4da6cd9199dcacae21ceda39323dbdbef88))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.18.0 to 0.19.0
+
 ## [0.18.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.17.0...@franken/brain-v0.18.0) (2026-07-25)
 
 

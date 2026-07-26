@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.11.0...franken-mcp-suite-v0.12.0) (2026-07-26)
+
+
+### Features
+
+* **observer:** add cache-aware token accounting ([#3781](https://github.com/djm204/frankenbeast/issues/3781)) ([3d526f5](https://github.com/djm204/frankenbeast/commit/3d526f5573293f52e604c496dbffcefcc45fab28))
+
+
+### Miscellaneous
+
+* add defensive checks for mcp.json validation in SkillsAdapter ([79a8025](https://github.com/djm204/frankenbeast/commit/79a8025f205e64ec74a39152cea17c17f2e16b2e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.18.0 to 0.19.0
+    * @franken/brain bumped from 0.18.0 to 0.18.1
+    * @franken/critique bumped from 0.11.1 to 0.11.2
+    * @franken/governor bumped from 0.9.1 to 0.9.2
+    * @franken/observer bumped from 0.12.1 to 0.13.0
+    * @franken/orchestrator bumped from 0.59.0 to 0.60.0
+    * @franken/planner bumped from 0.4.27 to 0.4.28
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.10.1...franken-mcp-suite-v0.11.0) (2026-07-25)
 
 
