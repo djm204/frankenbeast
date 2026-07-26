@@ -9,11 +9,11 @@
 - [x] RED→GREEN: read bounded health, version, installed-model, and loaded-model data from a controlled HTTP server and expose only honest normalized metadata.
 - [x] RED→GREEN: keep task/agent/run/event/blocker/approval sections unsupported when Ollama exposes no canonical upstream concepts; do not synthesize activity.
 - [x] RED→GREEN: enforce bounded timeout, cancellation propagation, response-size limits, request rate limiting, failure isolation, credential-reference resolution, and redacted diagnostics.
-- [x] Run focused adapter/contract/route tests (43/43 passing after the final upstream rebase).
+- [x] Run focused adapter/contract/route tests (47/47 passing after final upstream rebase and Codex remediation).
 - [x] Run package tests plus root lint, typecheck, build, `git diff --check`, and self-review; focused tests, lint, typecheck, build, and diff checks pass, while the package suite retains three unrelated environment/order-dependent baseline failures.
 - [x] Commit with Conventional Commits using David Mendez <me@davidmendez.dev>.
 - [x] Push `feat/ollama-runtime-adapter-3817` and open PR #3834 with `Closes #3817`.
-- [ ] Drive real GitHub `@codex review` to exact-current-head clean with zero unresolved Codex threads and green CI. Two rounds completed before the final upstream rebase; six Ollama findings were fixed and all prior threads were answered/resolved. A fresh exact-head round remains required after publication.
+- [ ] Drive real GitHub `@codex review` to exact-current-head clean with zero unresolved Codex threads and green CI. The default five-invocation cap is exhausted; all Ollama findings through round 5 are fixed and resolved, but a tier-12 trigger is required for the new exact head.
 - [x] Post durable evidence to root card `t_25558345` and complete/block this card accurately without merging.
 
 ## Requirement evidence
@@ -24,7 +24,7 @@ The canonical worktree was clean on `feat/ollama-runtime-adapter-3817` at `7b98d
 
 ## Verification evidence
 
-- `npx vitest run tests/unit/runtime/ollama-runtime-adapter.test.ts tests/unit/runtime/runtime-contract.test.ts tests/unit/http/runtime-routes.test.ts tests/unit/http/runtime-route-mounting.test.ts --testTimeout=20000`: 43/43 passed on the final upstream base.
+- `npx vitest run tests/unit/runtime/ollama-runtime-adapter.test.ts tests/unit/runtime/runtime-contract.test.ts tests/unit/http/runtime-routes.test.ts tests/unit/http/runtime-route-mounting.test.ts --testTimeout=20000`: 47/47 passed after final review remediation.
 - `npm run lint`: passed (pre-existing warnings only).
 - `npm run typecheck`: passed.
 - `npm run build`: passed.
@@ -35,6 +35,9 @@ The canonical worktree was clean on `feat/ollama-runtime-adapter-3817` at `7b98d
 
 - Round 1 fixed default egress-policy forwarding, empty endpoint-ID rejection, and fresh polling after all shared waiters cancel (`6a5002811`, rebased as `36595ea18`).
 - Round 2 fixed duplicate endpoint-ID rejection, cancellation of all parallel response bodies on HTTP failure, and validation of successful Ollama API payload schemas (`bbd7001c9`).
-- Ollama adapter suite: 21/21 passed after round 2; focused runtime/HTTP set and typecheck passed after the exact-head rebase.
-- Every round-1 and round-2 Codex thread on PR #3834 was replied to and resolved; unresolved Codex thread count was verified as zero before this dependency handoff.
+- Round 3 fixed live network-policy refresh and cancellation of fulfilled sibling bodies after transport rejection.
+- Round 4 produced only inherited #3812 findings, which were routed to the canonical upstream card instead of broadening #3817.
+- Round 5 fixed scheme-less `OLLAMA_HOST` normalization and cached health-check timestamps; three more inherited #3812 findings were routed upstream.
+- Ollama adapter suite: 24/24 passed after round 5; the focused runtime/HTTP set is 47/47 and root lint, typecheck, and build pass.
+- Every Codex thread through round 5 was replied to and resolved; the next exact-head review requires explicit approval to raise the invocation cap from 5 to 12.
 - Four inherited round-2 findings were posted to root card `t_25558345`, and the three additional inherited #3812 findings were posted directly to canonical upstream card `t_3828faf1`.

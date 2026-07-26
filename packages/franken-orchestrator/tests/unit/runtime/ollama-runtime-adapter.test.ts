@@ -245,6 +245,18 @@ describe('OllamaRuntimeAdapter', () => {
     ]);
   });
 
+  it('normalizes the common scheme-less OLLAMA_HOST form', async () => {
+    const endpoint = await ollamaServer();
+    const adapter = new OllamaRuntimeAdapter({
+      env: { OLLAMA_HOST: endpoint.baseUrl.replace(/^http:\/\//u, '') },
+    });
+
+    await expect(adapter.describe()).resolves.toMatchObject({
+      health: { state: 'connected' },
+    });
+    expect(endpoint.paths).toEqual(['/api/version', '/api/tags', '/api/ps']);
+  });
+
   it('rejects plaintext non-loopback endpoints without exposing the configured URL', async () => {
     const adapter = new OllamaRuntimeAdapter({
       endpoints: [{ id: 'remote', baseUrl: 'http://ollama.internal.example:11434/private' }],
@@ -341,6 +353,24 @@ describe('OllamaRuntimeAdapter', () => {
     await Promise.all([adapter.describe(), adapter.getSnapshot(), adapter.describe()]);
     await adapter.getSnapshot();
 
+    expect(endpoint.paths).toEqual(['/api/version', '/api/tags', '/api/ps']);
+  });
+
+  it('reports the cached poll timestamp until a new health check runs', async () => {
+    const endpoint = await ollamaServer();
+    let now = new Date('2026-07-26T12:00:00.000Z');
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: endpoint.baseUrl }],
+      minimumPollIntervalMs: 60_000,
+      now: () => now,
+    });
+
+    const first = await adapter.describe();
+    now = new Date('2026-07-26T12:00:30.000Z');
+    const cached = await adapter.describe();
+
+    expect(first.health.checkedAt).toBe('2026-07-26T12:00:00.000Z');
+    expect(cached.health.checkedAt).toBe(first.health.checkedAt);
     expect(endpoint.paths).toEqual(['/api/version', '/api/tags', '/api/ps']);
   });
 

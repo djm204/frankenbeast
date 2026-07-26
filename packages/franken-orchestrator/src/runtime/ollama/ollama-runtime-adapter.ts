@@ -112,6 +112,11 @@ function endpointUrl(baseUrl: string, path: string): URL {
   return new URL(path, `${base.toString().replace(/\/+$/u, '')}/`);
 }
 
+function normalizeConfiguredHost(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(value) ? value : `http://${value}`;
+}
+
 async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
   const contentLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
@@ -152,13 +157,14 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
   private readonly fetchImpl: typeof fetch;
   private cachedInspection: EndpointInspection[] | undefined;
   private lastPollAt = 0;
+  private lastInspectionAt: string | undefined;
   private pollInFlight: Promise<EndpointInspection[]> | undefined;
   private pollController: AbortController | undefined;
   private pollWaiterCount = 0;
 
   constructor(options: OllamaRuntimeAdapterOptions = {}) {
     this.env = options.env ?? process.env;
-    const configuredHost = this.env['OLLAMA_HOST']?.trim();
+    const configuredHost = normalizeConfiguredHost(this.env['OLLAMA_HOST']?.trim());
     const apiKeyEnv = this.env['OLLAMA_API_KEY_REF']?.trim();
     const endpoints = options.endpoints ?? (configuredHost
       ? [{ id: 'default', baseUrl: configuredHost, ...(apiKeyEnv ? { apiKeyEnv } : {}) }]
@@ -207,7 +213,7 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
       displayName: 'Ollama',
       health: {
         state,
-        checkedAt: this.now().toISOString(),
+        checkedAt: this.lastInspectionAt ?? this.now().toISOString(),
         ...(state === 'unavailable' ? { message: inspections.length === 0 ? UNCONFIGURED_REASON : 'Configured Ollama endpoints are unavailable' } : {}),
         ...(state === 'degraded' ? { message: 'One or more configured Ollama endpoints are unavailable' } : {}),
       },
@@ -358,6 +364,7 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
       if (!controller.signal.aborted) {
         this.cachedInspection = inspection;
         this.lastPollAt = Date.now();
+        this.lastInspectionAt = this.now().toISOString();
       }
       return inspection;
     } finally {
