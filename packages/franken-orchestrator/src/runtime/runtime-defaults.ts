@@ -1,8 +1,13 @@
+import { CodexRuntimeAdapter, type CodexRuntimeAdapterOptions } from './codex/codex-runtime-adapter.js';
 import { HermesRuntimeAdapter, type HermesRuntimeAdapterOptions } from './hermes/hermes-runtime-adapter.js';
 import { OllamaRuntimeAdapter, type OllamaRuntimeAdapterOptions } from './ollama/ollama-runtime-adapter.js';
 import { RuntimeAdapterRegistry } from './runtime-adapter-registry.js';
 
-export interface RuntimeAdapterDefaultsOptions extends HermesRuntimeAdapterOptions, OllamaRuntimeAdapterOptions {}
+export interface RuntimeAdapterDefaultsOptions extends HermesRuntimeAdapterOptions, OllamaRuntimeAdapterOptions {
+  codex?: CodexRuntimeAdapterOptions | undefined;
+}
+
+export type DefaultRuntimeAdapterOptions = RuntimeAdapterDefaultsOptions;
 
 export function createDefaultRuntimeAdapterRegistry(
   options: RuntimeAdapterDefaultsOptions = {},
@@ -10,5 +15,6 @@ export function createDefaultRuntimeAdapterRegistry(
   return new RuntimeAdapterRegistry([
     new HermesRuntimeAdapter(options),
     new OllamaRuntimeAdapter(options),
+    new CodexRuntimeAdapter(options.codex ?? { env: options.env }),
   ]);
 }
