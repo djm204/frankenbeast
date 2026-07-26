@@ -130,7 +130,7 @@ export interface RuntimeEventPage {
   nextCursor: string | null;
 }
 
-export type RuntimeConnectionState = 'connecting' | 'connected' | 'reconnecting';
+export type RuntimeConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 
 export interface RuntimeSubscriptionHandlers {
   event(event: RuntimeEvent): void;
@@ -230,7 +230,12 @@ export class SmartSwarmApiClient {
       });
     }
 
-    await connect();
+    try {
+      await connect();
+    } catch (error) {
+      handlers.error?.(error instanceof Error ? error : new Error('Unable to connect smart-swarm activity.'));
+      scheduleReconnect();
+    }
     return () => {
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
