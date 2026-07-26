@@ -153,6 +153,36 @@ export {
 } from './logging/redaction.js';
 export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from './logging/redaction.js';
 
+// Provider-neutral smart-swarm runtime adapters
+export {
+  HermesRuntimeAdapter,
+  RuntimeAdapterRegistry,
+  RuntimeAgentSchema,
+  RuntimeCapabilitiesSchema,
+  RuntimeCapabilitySchema,
+  RuntimeEventPageSchema,
+  RuntimeEventSchema,
+  RuntimeProviderSchema,
+  RuntimeRunSchema,
+  RuntimeSnapshotSchema,
+  createDefaultRuntimeAdapterRegistry,
+} from './runtime/index.js';
+export type {
+  HermesRuntimeAdapterOptions,
+  RuntimeAdapter,
+  RuntimeAgent,
+  RuntimeBlocker,
+  RuntimeEvent,
+  RuntimeEventPage,
+  RuntimeEventRequest,
+  RuntimeProvider,
+  RuntimeRun,
+  RuntimeSnapshot,
+  RuntimeSnapshotRequest,
+  RuntimeTask,
+  RuntimeWorkspace,
+} from './runtime/index.js';
+
 // LLM helpers
 export { AdapterLlmClient, AdapterLlmError } from './adapters/adapter-llm-client.js';
 export { PlanningFacultyAdapter } from './adapters/planning-faculty-adapter.js';
