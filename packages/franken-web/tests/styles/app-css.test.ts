@@ -17,3 +17,11 @@ describe('app.css transcript message formatting', () => {
     expect(appCss).toMatch(/\.message-card__content\s*\{[\s\S]*?white-space:\s*pre-wrap;[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?\}/m);
   });
 });
+
+describe('app.css smart-swarm dashboard', () => {
+  it('keeps topology responsive and disables decorative motion when requested', () => {
+    expect(appCss).toMatch(/\.smart-swarm-layout\s*\{[\s\S]*?grid-template-columns:/m);
+    expect(appCss).toMatch(/@media\s*\(max-width:\s*1100px\)\s*\{[\s\S]*?\.smart-swarm-layout\s*\{\s*grid-template-columns:\s*1fr;/m);
+    expect(appCss).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.smart-swarm-connection/m);
+  });
+});
