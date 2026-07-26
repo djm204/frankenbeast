@@ -6,7 +6,7 @@ export const RuntimeMetadataSchema = z.record(z.string(), SafeMetadataValueSchem
 
 const CorrelationIdSchema = z.string().uuid();
 const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
-const RuntimeWorkspaceIdSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
+const RuntimeWorkspaceIdSchema = z.string().min(1).max(200);
 const RuntimeTaskIdSchema = z.string().min(1).max(200);
 const BoundedReasonSchema = z.string().trim().min(1).max(1000);
 const RuntimeActionTypeSchema = z.enum([

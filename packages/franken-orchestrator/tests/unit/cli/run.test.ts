@@ -2144,6 +2144,7 @@ describe('main() execution', () => {
     } as any);
     mockCreateCliDeps.mockResolvedValueOnce({
       deps: { governor: runtimeGovernor },
+      governorActionEnabled: false,
       cliLlmAdapter: { name: 'chat-adapter' },
       observerBridge: {},
       logger: {},
@@ -2200,9 +2201,9 @@ describe('main() execution', () => {
       beastControl: expect.objectContaining({
         operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
-      runtimeActionGovernor: runtimeGovernor,
     }));
     const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
+    expect(startOptions).not.toHaveProperty('runtimeActionGovernor');
     expect(startOptions.dashboardDeps?.getSecurityConfig()).toEqual(expect.objectContaining({
       profile: 'permissive',
       webhookSignaturePolicy: 'local-dev-unsigned',

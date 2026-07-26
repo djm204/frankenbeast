@@ -151,6 +151,24 @@ function requiresGovernor(action: RuntimeAction): boolean {
   return action.type === 'task.cancel' || action.type === 'policy.apply';
 }
 
+function parseAdapterActionResult(
+  adapter: RuntimeAdapter,
+  request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+  value: unknown,
+) {
+  const result = RuntimeActionResultSchema.parse(value);
+  if (
+    result.providerId !== adapter.id
+    || result.correlationId !== request.correlationId
+    || result.audit.actionType !== request.action.type
+    || result.audit.targetId !== actionTarget(request.action)
+    || result.audit.outcome !== result.status
+  ) {
+    throw new Error('Runtime adapter returned a result for a different action');
+  }
+  return result;
+}
+
 function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID_CURSOR' } {
   return error instanceof Error
     && 'code' in error
@@ -222,7 +240,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             })
           : { decision: 'rejected' as const, reason: 'Runtime action governor is unavailable' };
         result = outcome.decision === 'approved'
-          ? RuntimeActionResultSchema.parse(await adapter.executeAction(request))
+          ? parseAdapterActionResult(adapter, request, await adapter.executeAction(request))
           : RuntimeActionResultSchema.parse({
             status: 'rejected',
             providerId: adapter.id,
@@ -231,7 +249,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             audit: actionAudit(request.action, 'rejected'),
           });
       } else {
-        result = RuntimeActionResultSchema.parse(await adapter.executeAction(request));
+        result = parseAdapterActionResult(adapter, request, await adapter.executeAction(request));
       }
     } catch {
       result = RuntimeActionResultSchema.parse({
@@ -312,7 +330,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       throw new HttpError(422, 'INVALID_RUNTIME_ACTION', 'Runtime action payload is invalid');
     }
     const request = parsed.data;
-    const key = `${adapter.id}:${request.idempotencyKey}`;
+    const key = createHash('sha256')
+      .update(JSON.stringify([adapter.id, request.idempotencyKey]))
+      .digest('base64url');
     const fingerprint = createHash('sha256').update(JSON.stringify(request.action)).digest('base64url');
     const now = Date.now();
     const reservation = actionStore.reserve(key, fingerprint, now + IDEMPOTENCY_TTL_MS, now);
@@ -333,10 +353,19 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
+    const lease = setInterval(
+      () => actionStore.renew(key, fingerprint, Date.now() + IDEMPOTENCY_TTL_MS),
+      IDEMPOTENCY_TTL_MS / 2,
+    );
+    lease.unref();
     const result = actionStore.track((async () => {
-      const completed = await executeAction(adapter, request);
-      actionStore.complete(key, fingerprint, completed);
-      return completed;
+      try {
+        const completed = await executeAction(adapter, request);
+        actionStore.complete(key, fingerprint, completed, Date.now() + IDEMPOTENCY_TTL_MS);
+        return completed;
+      } finally {
+        clearInterval(lease);
+      }
     })());
     inFlightActions.set(key, result);
     try {

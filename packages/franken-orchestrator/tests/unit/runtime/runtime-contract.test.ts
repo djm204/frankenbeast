@@ -97,6 +97,11 @@ describe('provider-neutral runtime contract', () => {
       action: { ...request.action, taskId: 'provider/task @ shard 1' },
     }).action).toEqual(expect.objectContaining({ taskId: 'provider/task @ shard 1' }));
 
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, workspaceId: 'provider/workspace @ shard 1' },
+    }).action).toEqual(expect.objectContaining({ workspaceId: 'provider/workspace @ shard 1' }));
+
     expect(() => RuntimeActionRequestSchema.parse({
       ...request,
       action: { ...request.action, taskId: 'x'.repeat(201) },
