@@ -18,6 +18,13 @@ const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|sr
 const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_HOST_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
+const SLASH_COMMANDS = new Set([
+  '/plan', '/run', '/status', '/diff', '/approve', '/reject', '/session', '/quit',
+]);
+
+function isApplicationPath(value: string): boolean {
+  return API_ROUTE_RE.test(value) || SLASH_COMMANDS.has(value);
+}
 
 function redactEmbeddedAbsoluteHostPaths(value: string): string {
   return value.replace(
@@ -38,7 +45,9 @@ function redactEmbeddedAbsoluteHostPaths(value: string): string {
 
 export function redactAbsoluteHostPathValues(value: unknown): unknown {
   if (typeof value === 'string') {
-    return isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : redactEmbeddedAbsoluteHostPaths(value);
+    return isApplicationPath(value)
+      ? value
+      : isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : redactEmbeddedAbsoluteHostPaths(value);
   }
   if (Array.isArray(value)) {
     return value.map(redactAbsoluteHostPathValues);

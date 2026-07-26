@@ -74,6 +74,33 @@ function createCurrentKanban(path: string): void {
 }
 
 describe('HermesRuntimeAdapter', () => {
+  it('uses the established HERMES_KANBAN_DB configuration', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+
+    const snapshot = await new HermesRuntimeAdapter({
+      env: { HERMES_KANBAN_DB: dbPath },
+    }).getSnapshot();
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'ready',
+      tasks: expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:t_parent' })]),
+      }),
+    }));
+  });
+
+  it('uses the standard Hermes home beneath HOME by default', async () => {
+    const home = await createHome();
+    await mkdir(join(home, '.hermes'), { recursive: true });
+    createCurrentKanban(join(home, '.hermes', 'kanban.db'));
+
+    const snapshot = await new HermesRuntimeAdapter({ env: { HOME: home } }).getSnapshot();
+
+    expect(snapshot.state).toBe('ready');
+  });
+
   it('reports missing configuration and incompatible schemas honestly instead of throwing', async () => {
     const unconfigured = new HermesRuntimeAdapter({ env: {} });
     await expect(unconfigured.describe()).resolves.toEqual(
@@ -94,6 +121,17 @@ describe('HermesRuntimeAdapter', () => {
       workspaces: expect.objectContaining({
         data: [expect.objectContaining({ id: 'hermes:global', state: 'schema-incompatible' })],
       }),
+      tasks: expect.objectContaining({ status: 'unsupported' }),
+    }));
+  });
+
+  it('reports a configured home without a database as unavailable', async () => {
+    const home = await createHome();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'unavailable',
       tasks: expect.objectContaining({ status: 'unsupported' }),
     }));
   });
@@ -243,6 +281,19 @@ describe('HermesRuntimeAdapter', () => {
 
     expect(page.nextCursor).not.toBeNull();
     expect(page.nextCursor!.length).toBeLessThan(16 * 1024);
+  });
+
+  it('rejects workspace sets that cannot fit in a bounded replay cursor', async () => {
+    const home = await createHome();
+    for (let index = 0; index < 100; index += 1) {
+      const boardName = `workspace-${String(index).padStart(3, '0')}-${'x'.repeat(120)}`;
+      const boardDir = join(home, 'kanban', 'boards', boardName);
+      await mkdir(boardDir, { recursive: true });
+      createCurrentKanban(join(boardDir, 'kanban.db'));
+    }
+
+    await expect(new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 }))
+      .rejects.toThrow('exceeds the supported runtime cursor size');
   });
 
   it('preserves slash commands and API routes in normalized runtime text', async () => {

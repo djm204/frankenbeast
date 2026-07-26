@@ -24,6 +24,11 @@ describe('Beast response redaction', () => {
     );
   });
 
+  it('preserves standalone slash commands and API routes', () => {
+    expect(redactAbsoluteHostPathValues('/plan')).toBe('/plan');
+    expect(redactAbsoluteHostPathValues('/v1/users')).toBe('/v1/users');
+  });
+
   it('redacts embedded host paths after key-value delimiters', () => {
     expect(redactAbsoluteHostPathValues('workspace=/home/alice/private-repo'))
       .toBe('workspace=[REDACTED_HOST_PATH]');
