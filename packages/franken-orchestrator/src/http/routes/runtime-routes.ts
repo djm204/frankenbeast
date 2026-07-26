@@ -32,7 +32,6 @@ const TICKET_COOKIE = 'frankenbeast_runtime_sse_ticket';
 const DEFAULT_RATE_LIMIT: BeastRateLimitOptions = { max: 120, windowMs: 60_000 };
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
-const MAX_CURSOR_CHARS = 4096;
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -59,8 +58,8 @@ function positiveInteger(value: string | undefined, name: string, max: number): 
 
 function cursorValue(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
-  if (value.length < 1 || value.length > MAX_CURSOR_CHARS) {
-    throw new HttpError(422, 'INVALID_CURSOR', `cursor must be between 1 and ${MAX_CURSOR_CHARS} characters`);
+  if (value.length < 1) {
+    throw new HttpError(422, 'INVALID_CURSOR', 'cursor must not be empty');
   }
   return value;
 }
@@ -204,6 +203,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
+    if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
+      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    }
     const workspaceId = c.req.query('workspaceId');
 
     return streamSSE(c, async (stream) => {
@@ -221,7 +223,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           }));
           for (const event of page.events) {
             await stream.writeSSE({
-              id: page.nextCursor ?? event.cursor,
+              id: event.cursor,
               event: 'activity',
               data: JSON.stringify(runtimeResponse(event)),
             });

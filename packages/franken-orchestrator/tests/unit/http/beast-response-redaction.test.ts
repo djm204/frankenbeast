@@ -24,6 +24,13 @@ describe('Beast response redaction', () => {
     );
   });
 
+  it('redacts quoted host paths rooted outside the common host allowlist', () => {
+    expect(redactAbsoluteHostPathValues("ENOTDIR: scandir '/data/hermes/kanban/boards'"))
+      .toBe("ENOTDIR: scandir '[REDACTED_HOST_PATH]'");
+    expect(redactAbsoluteHostPathValues('failed under /data/hermes/kanban/boards'))
+      .toBe('failed under [REDACTED_HOST_PATH]');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',

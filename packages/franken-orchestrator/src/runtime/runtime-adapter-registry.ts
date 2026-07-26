@@ -23,7 +23,13 @@ export class RuntimeAdapterRegistry {
 
   async list(): Promise<RuntimeProvider[]> {
     return await Promise.all(
-      [...this.adapters.values()].map(async (adapter) => RuntimeProviderSchema.parse(await adapter.describe())),
+      [...this.adapters.values()].map(async (adapter) => {
+        const provider = RuntimeProviderSchema.parse(await adapter.describe());
+        if (provider.id !== adapter.id) {
+          throw new Error(`Runtime adapter described id '${provider.id}' does not match registered id '${adapter.id}'`);
+        }
+        return provider;
+      }),
     );
   }
 }

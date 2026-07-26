@@ -102,6 +102,16 @@ describe('provider-neutral runtime contract', () => {
     expect(() => registry.register(adapter('alpha'))).toThrow("Runtime adapter 'alpha' is already registered");
   });
 
+  it('rejects adapters whose described provider id differs from their registry id', async () => {
+    const mismatched = adapter('foo');
+    vi.mocked(mismatched.describe).mockResolvedValue({
+      ...await adapter('bar').describe(),
+      id: 'bar',
+    });
+    const registry = new RuntimeAdapterRegistry([mismatched]);
+    await expect(registry.list()).rejects.toThrow(/does not match registered id/);
+  });
+
   it('registers Hermes as the first default runtime adapter without inventing availability', async () => {
     const registry = createDefaultRuntimeAdapterRegistry({ env: {} });
 
