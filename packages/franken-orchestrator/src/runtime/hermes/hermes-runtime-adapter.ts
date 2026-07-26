@@ -500,6 +500,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         : inspection.discoveryMessage || compatible < inspected.length
           ? { state: 'degraded' as const, checkedAt: nowIso(this.now), message: 'One or more Hermes databases are unavailable or schema-incompatible' }
           : { state: 'connected' as const, checkedAt: nowIso(this.now) };
+    const mutationCapability = this.home
+      ? { status: 'supported' as const }
+      : { status: 'unsupported' as const, reason: 'Hermes home is required for supported mutation commands' };
 
     return RuntimeProviderSchema.parse({
       id: this.id,
@@ -510,15 +513,15 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         snapshot: { status: 'supported' },
         streaming: { status: 'supported' },
         logs: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical log-record source' },
-        blockers: { status: 'supported' },
+        blockers: mutationCapability,
         approvals: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical approval-request source' },
-        pause: { status: 'supported' },
-        resume: { status: 'supported' },
+        pause: mutationCapability,
+        resume: mutationCapability,
         cancellation: {
           status: 'unsupported',
           reason: 'Hermes Kanban has no supported operation that cancels an active task run',
         },
-        policyActions: { status: 'supported' },
+        policyActions: mutationCapability,
       },
       metadata: { discoveredWorkspaceCount: inspected.length },
     });
@@ -740,9 +743,12 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
 
     const previousState = await this.readTaskStatus(request.action);
-    await this.runHermes(this.mutationArgs(request.action));
+    const mutation = await this.runHermes(this.mutationArgs(request.action));
     const currentState = await this.readTaskStatus(request.action);
-    if (!this.postconditionSatisfied(request.action, currentState)) {
+    if (
+      !this.postconditionSatisfied(request.action, currentState)
+      || (request.action.type === 'policy.apply' && !this.promotionSucceeded(mutation))
+    ) {
       throw new Error(`Hermes action ${request.action.type} did not reach its expected postcondition`);
     }
     return RuntimeActionResultSchema.parse({
@@ -843,6 +849,14 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       case 'task.resume': return status === 'ready' || status === 'todo';
       case 'task.cancel': return false;
       case 'policy.apply': return status === 'ready' || status === 'running';
+    }
+  }
+
+  private promotionSucceeded(result: HermesCommandResult): boolean {
+    try {
+      return (JSON.parse(result.stdout) as { promoted?: unknown }).promoted === true;
+    } catch {
+      return false;
     }
   }
 

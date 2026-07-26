@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import {
@@ -49,7 +49,9 @@ export class RuntimeActionStore {
 
   constructor(options: RuntimeActionStoreOptions = {}) {
     if (!options.databasePath) return;
-    mkdirSync(dirname(options.databasePath), { recursive: true, mode: 0o700 });
+    const databaseDir = dirname(options.databasePath);
+    mkdirSync(databaseDir, { recursive: true, mode: 0o700 });
+    chmodSync(databaseDir, 0o700);
     this.db = new Database(options.databasePath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');

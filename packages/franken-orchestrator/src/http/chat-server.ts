@@ -464,10 +464,10 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     wsUrl,
     close: async () => {
       const closedServer = closeHttpServer(server);
-      runtimeActionStore?.beginShutdown();
+      ownedRuntimeActionStore?.beginShutdown();
       server.closeAllConnections();
       webSocketServer.close();
-      await runtimeActionStore?.drain();
+      await ownedRuntimeActionStore?.drain();
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       chatStreamTicketStore?.destroy();

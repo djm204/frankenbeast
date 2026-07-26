@@ -108,6 +108,24 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('does not advertise mutations for a read-only database-only configuration', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+
+    const provider = await new HermesRuntimeAdapter({
+      env: { HERMES_KANBAN_DB: dbPath },
+    }).describe();
+
+    expect(provider.capabilities).toEqual(expect.objectContaining({
+      snapshot: { status: 'supported' },
+      blockers: { status: 'unsupported', reason: expect.any(String) },
+      pause: { status: 'unsupported', reason: expect.any(String) },
+      resume: { status: 'unsupported', reason: expect.any(String) },
+      policyActions: { status: 'unsupported', reason: expect.any(String) },
+    }));
+  });
+
   it('uses the standard Hermes home beneath HOME by default', async () => {
     const home = await createHome();
     await mkdir(join(home, '.hermes'), { recursive: true });
@@ -366,9 +384,14 @@ if (args.includes('show')) {
         calls.push([...args]);
         if (args.includes('unblock')) status = 'ready';
         if (args.includes('promote')) status = 'ready';
-        return args.includes('show')
-          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
-          : { stdout: '', stderr: '', exitCode: 0 };
+        if (args.includes('show')) {
+          return { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 };
+        }
+        return {
+          stdout: args.includes('promote') ? JSON.stringify({ promoted: true }) : '',
+          stderr: '',
+          exitCode: 0,
+        };
       },
     });
     const base = {
@@ -390,6 +413,26 @@ if (args.includes('show')) {
 
     expect(calls).toContainEqual(['kanban', 'unblock', 't_deadbeef']);
     expect(calls).toContainEqual(['kanban', 'promote', '--json', 't_deadbeef', 'Dependencies satisfied']);
+  });
+
+  it('rejects a promotion that Hermes reports as ineffective', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => args.includes('show')
+        ? { stdout: JSON.stringify({ task: { status: 'ready' } }), stderr: '', exitCode: 0 }
+        : { stdout: JSON.stringify({ promoted: false, error: 'task is already ready' }), stderr: '', exitCode: 0 },
+    });
+
+    await expect(adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'promote:t_deadbeef:ineffective',
+      action: {
+        type: 'policy.apply', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        policy: 'promote-task', reason: 'Dependencies satisfied',
+      },
+    }))).rejects.toThrow('did not reach its expected postcondition');
   });
 
   it('advertises cancellation as unsupported when Hermes has no cancellation operation', async () => {

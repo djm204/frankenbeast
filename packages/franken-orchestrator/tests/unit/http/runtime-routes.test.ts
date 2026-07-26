@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
@@ -346,6 +346,20 @@ describe('smart-swarm runtime routes', () => {
     expect(secondStore.listAuditEvents()).toEqual([
       expect.objectContaining({ correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566', outcome: 'applied' }),
     ]);
+  });
+
+  it('repairs private permissions on an existing runtime action directory', async () => {
+    if (process.platform === 'win32') return;
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-permissions-'));
+    tempDirs.push(dir);
+    const actionDir = join(dir, 'runtime-actions');
+    await mkdir(actionDir);
+    await chmod(actionDir, 0o755);
+
+    const store = new RuntimeActionStore({ databasePath: join(actionDir, 'actions.sqlite') });
+    actionStores.push(store);
+
+    expect((await stat(actionDir)).mode & 0o777).toBe(0o700);
   });
 
   it('completes idempotency before an optional external audit hook settles', async () => {

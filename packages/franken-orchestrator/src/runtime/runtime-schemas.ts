@@ -135,7 +135,7 @@ export const RuntimeProviderSchema = z.object({
 }).strict();
 
 export const RuntimeWorkspaceSchema = z.object({
-  id: z.string().min(1),
+  id: RuntimeWorkspaceIdSchema,
   name: z.string().min(1),
   kind: z.enum(['workspace', 'board', 'project']),
   state: z.enum(['available', 'degraded', 'unavailable', 'schema-incompatible']),
@@ -152,8 +152,8 @@ export const RuntimeAgentSchema = z.object({
 }).strict();
 
 export const RuntimeTaskSchema = z.object({
-  id: z.string().min(1),
-  workspaceId: z.string().min(1),
+  id: RuntimeTaskIdSchema,
+  workspaceId: RuntimeWorkspaceIdSchema,
   title: z.string(),
   state: z.enum(['queued', 'ready', 'running', 'blocked', 'succeeded', 'failed', 'cancelled', 'archived', 'unknown']),
   parentIds: z.array(z.string().min(1)),
