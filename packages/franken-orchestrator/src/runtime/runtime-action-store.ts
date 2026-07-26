@@ -90,19 +90,35 @@ export class RuntimeActionStore {
     return reserve.immediate();
   }
 
-  complete(key: string, fingerprint: string, result: RuntimeActionResult): void {
+  renew(key: string, fingerprint: string, expiresAt: number): boolean {
+    if (!this.db) {
+      const entry = this.entries.get(key);
+      if (!entry || entry.fingerprint !== fingerprint || entry.result) return false;
+      entry.expiresAt = expiresAt;
+      return true;
+    }
+    const update = this.db.prepare(`
+      UPDATE runtime_action_idempotency
+      SET expires_at = ?
+      WHERE action_key = ? AND fingerprint = ? AND result_json IS NULL
+    `).run(expiresAt, key, fingerprint);
+    return update.changes === 1;
+  }
+
+  complete(key: string, fingerprint: string, result: RuntimeActionResult, expiresAt: number): void {
     const parsed = RuntimeActionResultSchema.parse(result);
     if (!this.db) {
       const entry = this.entries.get(key);
       if (!entry || entry.fingerprint !== fingerprint) throw new Error('Runtime action reservation was lost');
       entry.result = parsed;
+      entry.expiresAt = expiresAt;
       return;
     }
     const update = this.db.prepare(`
       UPDATE runtime_action_idempotency
-      SET result_json = ?
+      SET result_json = ?, expires_at = ?
       WHERE action_key = ? AND fingerprint = ?
-    `).run(JSON.stringify(parsed), key, fingerprint);
+    `).run(JSON.stringify(parsed), expiresAt, key, fingerprint);
     if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
   }
 
