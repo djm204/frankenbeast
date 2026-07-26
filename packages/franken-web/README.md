@@ -74,14 +74,22 @@ operator credential.
 
 The sibling **Brain Vitals** panel is the operational view. It discovers brains
 from real Beast runs, reads aggregate health/history from `/v1/brain-vitals/*`,
-and uses the ticket-authenticated SSE stream to update health, CPU, memory,
-power, token, cost, cache, compaction, and churn charts without a refresh. Its
-run list opens a read-only slide-in drill-down backed by
+and uses the ticket-authenticated SSE stream to drive its primary **Live Brain
+Pulse Map** plus secondary health, CPU, memory, power, token, cost, cache,
+compaction, and churn charts without a refresh. The fixed, responsive map has
+one node for each live vitals dimension (`cache`, `compaction`, `churn`,
+`resource`, and `cost`). Node pulse rate comes only from typed activity events
+observed in the last minute; no event means an honest idle node. Node color is
+derived from that dimension's health signal, while the center ring reflects the
+aggregate health score. Selecting a node reveals its recent real events and run
+ids, and those run links open the read-only slide-in drill-down backed by
 `/v1/brain-vitals/:brainId/runs/:runId`, including per-run token/cache splits,
 cost, compactions, resource samples, churn classification, and activity events.
 The faculty **Brain** panel answers “what the brain knows”; **Brain Vitals**
-answers “how hard the brain is working.” The Pulse Map tracked by #3738 remains
-a follow-up entry visualization and is not fabricated before that route/UI ships.
+answers “how hard the brain is working.” Memory, planning, reasoning, action,
+and learning remain explicitly marked as coming soon in the map because the
+Brain routes do not yet expose a compatible live faculty activity-event feed;
+the UI never substitutes vitals or fabricated rates for those faculties.
 
 If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. Beast routes (`/v1/beasts/*`) reuse that same target by default. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls run on a different backend, for example a separate local orchestrator or daemon port:
 

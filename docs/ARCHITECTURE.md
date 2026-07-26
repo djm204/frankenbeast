@@ -1077,6 +1077,19 @@ The stream sends a fresh snapshot every second and separate typed `activity`
 events for cache hits/misses, compaction completion, lifecycle churn,
 resource-threshold crossings, and budget-threshold crossings.
 
+`franken-web` uses those discrete events as the sole pulse-rate input for the
+Brain Vitals panel's primary Live Brain Pulse Map. Its five current nodes map
+directly to the `cache`, `compaction`, `churn`, `resource`, and `cost` event
+dimensions; a rolling one-minute client window controls pulse speed, each
+dimension's normalized health signal controls node state, and the aggregate
+health score controls the center ring. Selecting a node exposes the contributing
+events and their real run ids before the existing per-run telemetry drill-down.
+Hive Brain's memory/planning/reasoning/action/learning faculties stay visibly
+unavailable rather than borrowing vitals data: the read-only `/v1/brain/*`
+surface has faculty state, but no compatible live faculty activity-event stream
+yet. Adding those nodes is therefore an additive cross-epic follow-up, not a
+synthetic mapping in the Brain Vitals UI.
+
 | Route | Purpose and bounds |
 |-------|--------------------|
 | `GET /v1/brain-vitals/:brainId` | Current one-hour health and telemetry snapshot; health score is persisted for history |

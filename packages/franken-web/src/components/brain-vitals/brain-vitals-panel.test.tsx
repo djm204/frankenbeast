@@ -6,7 +6,7 @@ import type {
   DashboardApiClient,
 } from '../../lib/dashboard-api';
 import type { BrainVitalsActivity } from '../../lib/brain-vitals-api';
-import { BrainVitalsPanel } from './brain-vitals-panel';
+import { BrainVitalsPanel, pruneActivityReceipts } from './brain-vitals-panel';
 
 const snapshot: BrainVitalsSnapshot = {
   brainId: 'reviewer',
@@ -153,6 +153,183 @@ describe('BrainVitalsPanel', () => {
     expect(screen.getByText('1 compaction')).toBeTruthy();
     expect(screen.getByText(/128 MB peak RSS/)).toBeTruthy();
     expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
+  });
+
+  it('uses real activity events to pulse a vitals node and expose its run drill-down', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+
+    expect(await screen.findByRole('region', { name: 'Brain pulse map' })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /activity:/ })).toHaveLength(5);
+    const compactionNode = screen.getByRole('button', { name: /Compaction activity:/ });
+    expect(compactionNode.getAttribute('data-activity-count')).toBe('0');
+    expect(compactionNode.getAttribute('data-pulse-state')).toBe('idle');
+
+    act(() => pushActivity({
+      dimension: 'compaction',
+      kind: 'compaction.completed',
+      runId: 'run-1',
+      timestamp: Date.now(),
+    }));
+
+    await waitFor(() => {
+      expect(compactionNode.getAttribute('data-activity-count')).toBe('1');
+      expect(compactionNode.getAttribute('data-pulse-state')).toBe('active');
+    });
+
+    fireEvent.click(compactionNode);
+    expect(screen.getByRole('region', { name: 'Compaction pulse detail' })).toBeTruthy();
+    expect(screen.getByText('compaction.completed')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open run run-1 from compaction activity' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Run run-1 vitals' })).toBeTruthy();
+    expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
+  });
+
+  it('marks cost health unavailable when the brain has no budget', async () => {
+    const api = client({
+      fetchBrainVitalsSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        cost: { ...snapshot.cost, budgetUsd: null },
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+
+    const costNode = await screen.findByRole('button', { name: /Cost activity: unavailable/ });
+    expect(costNode.textContent).toContain('Telemetry unavailable');
+  });
+
+  it('does not truncate a real one-minute activity rate at an arbitrary buffer size', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const cacheNode = await screen.findByRole('button', { name: /Cache activity:/ });
+    const now = Date.now();
+    act(() => {
+      for (let index = 0; index < 201; index += 1) {
+        pushActivity({
+          dimension: 'cache',
+          kind: 'cache.hit',
+          runId: 'run-1',
+          timestamp: now - index,
+        });
+      }
+    });
+
+    await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('201'));
+    fireEvent.click(cacheNode);
+    expect(screen.getAllByRole('button', { name: /Open run run-1 from cache activity/ })).toHaveLength(200);
+  });
+
+  it('retains bounded drill-down detail independently for each pulse dimension', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const cacheNode = await screen.findByRole('button', { name: /Cache activity:/ });
+    act(() => {
+      pushActivity({ dimension: 'cache', kind: 'cache.hit', runId: 'run-1', timestamp: Date.now() });
+      for (let index = 0; index < 200; index += 1) {
+        pushActivity({ dimension: 'cost', kind: 'cost.updated', runId: 'run-1', timestamp: Date.now() });
+      }
+    });
+
+    fireEvent.click(cacheNode);
+    expect(screen.getByRole('button', { name: 'Open run run-1 from cache activity' })).toBeTruthy();
+  });
+
+  it('prunes expired receipt history for inactive dimensions', () => {
+    const receipts = {
+      cache: [1, 70_000],
+      compaction: [2],
+      churn: [],
+      resource: [],
+      cost: [],
+    };
+
+    expect(pruneActivityReceipts(receipts, 60_000)).toEqual({
+      cache: [70_000],
+      compaction: [],
+      churn: [],
+      resource: [],
+      cost: [],
+    });
+  });
+
+  it('counts every delivered event on the local receipt clock', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const cacheNode = await screen.findByRole('button', { name: /Cache activity:/ });
+    const samePayload: BrainVitalsActivity = {
+      dimension: 'cache',
+      kind: 'cache.hit',
+      runId: 'run-1',
+      timestamp: Date.now() + 3_600_000,
+    };
+    act(() => {
+      pushActivity(samePayload);
+      pushActivity(samePayload);
+    });
+
+    await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('2'));
+  });
+
+  it('ignores activity callbacks from a superseded brain subscription', async () => {
+    const activityCallbacks = new Map<string, (activity: BrainVitalsActivity) => void>();
+    const reviewerRun = detail.run;
+    const workerRun = { ...detail.run, id: 'run-2', definitionId: 'worker' };
+    const api = client({
+      listBrainVitalsRuns: vi.fn().mockResolvedValue({
+        runs: [reviewerRun, workerRun],
+        nextCursor: undefined,
+      }),
+      subscribeToBrainVitals: vi.fn((brainId, _onSnapshot, _onError, onActivity) => {
+        activityCallbacks.set(brainId, onActivity!);
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const selector = await screen.findByRole('combobox', { name: 'Brain' });
+    await waitFor(() => expect(activityCallbacks.has('reviewer')).toBe(true));
+    fireEvent.change(selector, { target: { value: 'worker' } });
+    await waitFor(() => expect(activityCallbacks.has('worker')).toBe(true));
+
+    act(() => activityCallbacks.get('reviewer')!({
+      dimension: 'compaction',
+      kind: 'compaction.completed',
+      runId: 'run-1',
+      timestamp: Date.now(),
+    }));
+
+    const compactionNode = await screen.findByRole('button', { name: /Compaction activity:/ });
+    expect(compactionNode.getAttribute('data-activity-count')).toBe('0');
   });
 
   it('offers a selector when multiple brain definitions have runs', async () => {

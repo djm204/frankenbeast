@@ -10,6 +10,8 @@ import {
 
 export type {
   BrainHealthSample,
+  BrainVitalsActivity,
+  BrainVitalsDimension,
   BrainVitalsRunDetail,
   BrainVitalsSnapshot,
   BrainVitalsWindow,
