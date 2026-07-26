@@ -67,6 +67,10 @@ input.on('line', (line) => {
       data: [expect.objectContaining({ modelProvider: '模型' })],
       nextCursor: null,
     });
+    await expect(request('unsupported/method', {}, { timeoutMs: 2_000 })).rejects.toMatchObject({
+      name: 'CodexProtocolError',
+      code: -32000,
+    });
     expect(await readFile(startFile, 'utf8')).toBe('1');
     await expect(createDefaultRuntimeAdapterRegistry({
       env: sharedEnv,
@@ -122,7 +126,7 @@ main().catch((error) => {
       const timer = setTimeout(() => {
         consumer.kill('SIGKILL');
         reject(new Error(`short-lived Codex consumer stayed alive: ${stderr}`));
-      }, 1_000);
+      }, 3_000);
       consumer.once('exit', (code) => {
         clearTimeout(timer);
         if (code === 0) resolve();
@@ -255,6 +259,19 @@ input.on('line', (line) => {
       state: 'schema-incompatible',
       message: 'Codex app-server returned incompatible thread metadata',
     }));
+
+    const methodMismatch = new CodexRuntimeAdapter({
+      now: () => new Date('2026-07-26T12:00:00.000Z'),
+      request: async () => {
+        throw Object.assign(new Error('server details must not escape'), {
+          name: 'CodexProtocolError',
+          code: -32601,
+        });
+      },
+    });
+    await expect(methodMismatch.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'schema-incompatible' }),
+    }));
   });
 
   it('degrades safely when individual thread metadata is outside the documented schema', async () => {
@@ -354,6 +371,10 @@ input.on('line', (line) => {
         limit: 25,
         sortKey: 'updated_at',
         sortDirection: 'desc',
+        sourceKinds: [
+          'cli', 'vscode', 'exec', 'appServer', 'subAgent',
+          'subAgentReview', 'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown',
+        ],
         useStateDbOnly: true,
       }),
       expect.objectContaining({ signal: controller.signal, timeoutMs: expect.any(Number) }),
@@ -388,13 +409,13 @@ input.on('line', (line) => {
 
     const first = await adapter.getEvents({ limit: 1 });
     expect(first.events.map((event) => event.id)).toEqual([
-      'codex:thread:thread-a:1785081660:active',
+      'codex:thread:thread-b:1785081660:idle',
     ]);
     expect(first.nextCursor).toBe(first.events[0]!.cursor);
 
     const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 1 });
     expect(second.events.map((event) => event.id)).toEqual([
-      'codex:thread:thread-b:1785081660:idle',
+      'codex:thread:thread-a:1785081660:active',
     ]);
     expect(second.nextCursor).toBe(second.events[0]!.cursor);
     expect(request).toHaveBeenLastCalledWith(
@@ -425,6 +446,53 @@ input.on('line', (line) => {
     ]);
     expect(second.events[0]!.id).not.toBe(first.events[0]!.id);
     expect(second.nextCursor).not.toBe(first.nextCursor);
+  });
+
+  it('preserves a lower-id thread status change behind a same-second cursor', async () => {
+    let lowerStatus = 'active';
+    const request = vi.fn(async () => ({
+      data: [
+        {
+          id: 'thread-b', sessionId: 'session-b', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+        },
+        {
+          id: 'thread-a', sessionId: 'session-a', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: lowerStatus },
+        },
+      ],
+      nextCursor: null,
+    }));
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    const first = await adapter.getEvents({ limit: 2 });
+    lowerStatus = 'idle';
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 2 });
+
+    expect(second.events.map((event) => event.id)).toEqual([
+      'codex:thread:thread-a:200:idle',
+    ]);
+  });
+
+  it('returns the newest matching events on an initial poll', async () => {
+    const thread = (id: string, updatedAt: number) => ({
+      id, sessionId: `session-${id}`, cliVersion: '0.145.0',
+      createdAt: 100, updatedAt, cwd: '/workspace/project',
+      ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+    });
+    const request = vi.fn(async () => ({
+      data: [thread('newest', 300), thread('older', 200)],
+      nextCursor: null,
+    }));
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    const page = await adapter.getEvents({ limit: 1 });
+
+    expect(page.events.map((event) => event.id)).toEqual([
+      'codex:thread:newest:300:idle',
+    ]);
   });
 
   it('paginates thread metadata until event cursor continuity is preserved', async () => {
