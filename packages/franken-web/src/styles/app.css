@@ -2270,8 +2270,256 @@ button {
   font-size: 0.78rem;
 }
 
+.smart-swarm-page,
+.smart-swarm-evidence,
+.smart-swarm-capabilities,
+.smart-swarm-topology,
+.smart-swarm-detail,
+.smart-swarm-actions {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.smart-swarm-header {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) minmax(20rem, 1.2fr) auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.smart-swarm-header h2,
+.smart-swarm-header p,
+.smart-swarm-state h2,
+.smart-swarm-state p,
+.smart-swarm-capabilities h3,
+.smart-swarm-capabilities p,
+.smart-swarm-evidence h3,
+.smart-swarm-evidence p,
+.smart-swarm-detail h3,
+.smart-swarm-detail h4,
+.smart-swarm-detail p {
+  margin: 0;
+}
+
+.smart-swarm-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.smart-swarm-selectors .field-stack {
+  min-width: 0;
+}
+
+.smart-swarm-connection {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.smart-swarm-refresh,
+.smart-swarm-state,
+.smart-swarm-unsupported {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+}
+
+.smart-swarm-state--warning {
+  border-color: rgba(255, 205, 86, 0.42);
+  background: rgba(255, 205, 86, 0.1);
+}
+
+.smart-swarm-state--error {
+  border-color: rgba(255, 122, 107, 0.42);
+  background: rgba(255, 122, 107, 0.1);
+}
+
+.smart-swarm-capabilities {
+  grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.smart-swarm-capabilities dl,
+.smart-swarm-detail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.smart-swarm-capabilities dl div,
+.smart-swarm-detail dl div {
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.smart-swarm-capabilities dt,
+.smart-swarm-detail dt {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+}
+
+.smart-swarm-capabilities dd,
+.smart-swarm-detail dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.smart-swarm-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(20rem, 0.75fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.smart-swarm-agents {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.65rem;
+}
+
+.smart-swarm-agent,
+.smart-swarm-evidence article,
+.smart-swarm-detail article {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.smart-swarm-agent span,
+.smart-swarm-task small,
+.smart-swarm-detail span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.smart-swarm-agent--blocked {
+  border-color: rgba(255, 205, 86, 0.42);
+}
+
+.smart-swarm-tasks,
+.smart-swarm-timeline {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.smart-swarm-task {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.35rem 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  text-align: left;
+}
+
+.smart-swarm-task:hover,
+.smart-swarm-task:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+}
+
+.smart-swarm-task > span:first-child,
+.smart-swarm-timeline li {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.smart-swarm-task > small {
+  grid-column: 1 / -1;
+}
+
+.smart-swarm-timeline {
+  max-height: 28rem;
+  overflow: auto;
+}
+
+.smart-swarm-timeline li {
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0.6rem;
+  padding: 0.65rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.smart-swarm-timeline time {
+  color: var(--text-subtle);
+  font-size: 0.72rem;
+}
+
+.smart-swarm-detail {
+  position: fixed;
+  z-index: 40;
+  inset: 1rem 1rem 1rem auto;
+  width: min(34rem, calc(100vw - 2rem));
+  align-content: start;
+  padding: 1rem;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 1.15rem;
+  background: var(--bg-panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.smart-swarm-detail > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.smart-swarm-actions button {
+  min-height: 2.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: 0.75rem;
+  background: var(--control-bg);
+  color: var(--text);
+}
+
+.smart-swarm-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smart-swarm-connection,
+  .smart-swarm-task {
+    transition: none;
+  }
+}
+
 @media (max-width: 1100px) {
   .chat-page {
+    grid-template-columns: 1fr;
+  }
+
+  .smart-swarm-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .smart-swarm-header,
+  .smart-swarm-capabilities {
     grid-template-columns: 1fr;
   }
 

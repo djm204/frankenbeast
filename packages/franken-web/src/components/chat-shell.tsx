@@ -33,12 +33,10 @@ import { appendUniqueLogLine, formatStreamedLogLine, getAgentEventRunId } from '
 import { networkErrorMessage } from './chat-shell/network-error';
 // Route pages are lazy so each becomes its own chunk; they carry route-specific
 // UI the initial chat view never needs, keeping the entry bundle small.
-const DashboardPage = lazy(() =>
-  import('../pages/dashboard-page').then((module) => ({ default: module.DashboardPage })));
-const BeastsPage = lazy(() =>
-  import('../pages/beasts-page').then((module) => ({ default: module.BeastsPage })));
-const NetworkPage = lazy(() =>
-  import('../pages/network-page').then((module) => ({ default: module.NetworkPage })));
+const DashboardPage = lazy(() => import('../pages/dashboard-page').then((module) => ({ default: module.DashboardPage })));
+const BeastsPage = lazy(() => import('../pages/beasts-page').then((module) => ({ default: module.BeastsPage })));
+const NetworkPage = lazy(() => import('../pages/network-page').then((module) => ({ default: module.NetworkPage })));
+const SmartSwarmRoute = lazy(() => import('./chat-shell/smart-swarm-route').then((module) => ({ default: module.SmartSwarmRoute })));
 const AnalyticsPage = lazy(() =>
   import('../pages/analytics-page').then((module) => ({ default: module.AnalyticsPage })));
 
@@ -213,7 +211,6 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
     () => new BeastApiClient(baseUrl),
     [baseUrl],
   );
-
   useEffect(() => {
     const client = new NetworkApiClient(baseUrl);
     setNetworkConfig(null);
@@ -1153,6 +1150,8 @@ export function ChatShell({ baseUrl, projectId, sessionId, version }: ChatShellP
               });
             }}
           />
+        ) : route === 'smart-swarm' ? (
+          <SmartSwarmRoute baseUrl={baseUrl} />
         ) : route === 'network' ? (
           <NetworkPage
             config={networkConfig}
