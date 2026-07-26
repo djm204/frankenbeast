@@ -28,7 +28,6 @@ import {
   SELECT_TRACE_SUMMARIES,
   DELETE_SPANS_BY_TRACE,
   DELETE_COMPACTIONS_BY_RUN,
-  DELETE_RESOURCE_SAMPLES_BY_RUN,
   DELETE_COMPACTIONS_BEFORE,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
@@ -85,6 +84,14 @@ interface FlushedSpanState {
 
 const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_compaction_events_session_timestamp'
 const COMPACTION_PRIMARY_KEY = ['runId', 'sessionId', 'generation']
+
+function normalizeResourceSample(sample: ProcessResourceSample): ProcessResourceSample {
+  const agentId = sample.agentId.trim()
+  const runId = sample.runId.trim()
+  if (agentId.length === 0) throw new TypeError('resource sample agentId must not be empty')
+  if (runId.length === 0) throw new TypeError('resource sample runId must not be empty')
+  return { ...sample, agentId, runId }
+}
 
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
@@ -218,12 +225,10 @@ function execute(operation, payload) {
     case 'deleteTrace': {
       const deleteSpans = db.prepare(sql.deleteSpansByTrace)
       const deleteCompactions = db.prepare(sql.deleteCompactionsByRun)
-      const deleteResourceSamples = db.prepare(sql.deleteResourceSamplesByRun)
       const deleteTrace = db.prepare(sql.deleteTrace)
       db.transaction((traceId) => {
         deleteSpans.run(traceId)
         deleteCompactions.run(traceId)
-        deleteResourceSamples.run(traceId)
         deleteTrace.run(traceId)
       })(payload.traceId)
       return undefined
@@ -328,7 +333,6 @@ class SQLiteWorkerClient {
             selectTraceSummaries: SELECT_TRACE_SUMMARIES,
             deleteSpansByTrace: DELETE_SPANS_BY_TRACE,
             deleteCompactionsByRun: DELETE_COMPACTIONS_BY_RUN,
-            deleteResourceSamplesByRun: DELETE_RESOURCE_SAMPLES_BY_RUN,
             deleteCompactionsBefore: DELETE_COMPACTIONS_BEFORE,
             deleteTrace: DELETE_TRACE,
             upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
@@ -967,12 +971,10 @@ export class SQLiteAdapter implements ExportAdapter {
       await this.withSqliteLockRetry('delete trace transaction', () => {
         const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
         const deleteCompactions = this.db.prepare(DELETE_COMPACTIONS_BY_RUN)
-        const deleteResourceSamples = this.db.prepare(DELETE_RESOURCE_SAMPLES_BY_RUN)
         const deleteTrace = this.db.prepare(DELETE_TRACE)
         const transaction = this.db.transaction((id: string) => {
           deleteSpans.run(id)
           deleteCompactions.run(id)
-          deleteResourceSamples.run(id)
           deleteTrace.run(id)
         })
 
@@ -1056,15 +1058,16 @@ export class SQLiteAdapter implements ExportAdapter {
   }
 
   async recordResourceSample(sample: ProcessResourceSample): Promise<void> {
+    const normalizedSample = normalizeResourceSample(sample)
     return this.enqueueSqliteOperation(async () => {
       if (this.workerClient !== undefined) {
         await this.withSqliteLockRetry('record process resource sample', () => (
-          this.workerClient!.request<void>('recordResourceSample', { sample })
+          this.workerClient!.request<void>('recordResourceSample', { sample: normalizedSample })
         ))
         return
       }
       await this.withSqliteLockRetry('record process resource sample', () => {
-        this.db.prepare(INSERT_RESOURCE_SAMPLE).run(sample)
+        this.db.prepare(INSERT_RESOURCE_SAMPLE).run(normalizedSample)
       })
     })
   }

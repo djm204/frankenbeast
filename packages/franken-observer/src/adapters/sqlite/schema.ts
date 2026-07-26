@@ -130,7 +130,6 @@ export const SELECT_TRACE_SUMMARIES = `
 
 export const DELETE_SPANS_BY_TRACE = `DELETE FROM spans WHERE traceId = ?`
 export const DELETE_COMPACTIONS_BY_RUN = `DELETE FROM compaction_events WHERE runId = ?`
-export const DELETE_RESOURCE_SAMPLES_BY_RUN = `DELETE FROM process_resource_samples WHERE runId = ?`
 export const DELETE_COMPACTIONS_BEFORE = `DELETE FROM compaction_events WHERE timestamp < ?`
 export const DELETE_TRACE = `DELETE FROM traces WHERE id = ?`
 

@@ -45,7 +45,7 @@ export interface ProcessResourceSamplerOptions extends ProcessPowerModel {
   readonly intervalMs?: number;
   readonly adapter?: ProcessResourceSampleAdapter;
   readonly onSample?: (sample: ProcessResourceSample) => void;
-  readonly onError?: (error: Error) => void;
+  readonly onError?: (error: Error) => void | Promise<void>;
 }
 
 interface RawProcessUsage {
@@ -97,9 +97,10 @@ export class ProcessResourceSampler {
   private readonly tdpWatts: number;
   private readonly adapter: ProcessResourceSampleAdapter | undefined;
   private readonly onSample: ((sample: ProcessResourceSample) => void) | undefined;
-  private readonly onError: ((error: Error) => void) | undefined;
+  private readonly onError: ((error: Error) => void | Promise<void>) | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private inFlight: Promise<void> | undefined;
+  private sampleQueue: Promise<void> = Promise.resolve();
   private previousTimestamp: number | undefined;
   private previousCpuUsage = process.cpuUsage();
   private previousCpuAt = process.hrtime.bigint();
@@ -127,7 +128,13 @@ export class ProcessResourceSampler {
     return this.timer !== undefined;
   }
 
-  async sample(): Promise<ProcessResourceSample> {
+  sample(): Promise<ProcessResourceSample> {
+    const operation = this.sampleQueue.then(() => this.collectSample());
+    this.sampleQueue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private async collectSample(): Promise<ProcessResourceSample> {
     const usage = this.pid === process.pid
       ? this.sampleCurrentProcess()
       : await this.sampleChildProcess();
@@ -167,21 +174,28 @@ export class ProcessResourceSampler {
       clearInterval(this.timer);
       this.timer = undefined;
     }
-    await this.inFlight;
+    await Promise.all([this.inFlight, this.sampleQueue]);
   }
 
   private async tick(): Promise<void> {
     if (this.inFlight !== undefined) return this.inFlight;
     const operation = this.sample()
       .then(() => undefined)
-      .catch(error => {
-        this.onError?.(error instanceof Error ? error : new Error(String(error)));
-      });
+      .catch(error => this.reportError(error instanceof Error ? error : new Error(String(error))));
     this.inFlight = operation;
     try {
       await operation;
     } finally {
       if (this.inFlight === operation) this.inFlight = undefined;
+    }
+  }
+
+  private async reportError(error: Error): Promise<void> {
+    try {
+      await this.onError?.(error);
+    } catch {
+      // Error reporting must not turn a recoverable background failure into an
+      // unhandled rejection. Callers can instrument the callback independently.
     }
   }
 

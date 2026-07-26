@@ -142,6 +142,44 @@ describe('ProcessResourceSampler', () => {
     });
   });
 
+  it('drains a manual sample before stopping', async () => {
+    let releaseWrite: (() => void) | undefined;
+    let writeCompleted = false;
+    const sampler = new ProcessResourceSampler({
+      pid: process.pid,
+      agentId: 'agent-manual',
+      runId: 'run-manual',
+      adapter: {
+        async recordResourceSample() {
+          await new Promise<void>(resolve => { releaseWrite = resolve; });
+          writeCompleted = true;
+        },
+      },
+    });
+
+    const sampling = sampler.sample();
+    setTimeout(() => releaseWrite?.(), 10);
+    const writeCompletedWhenStopped = await sampler.stop().then(() => writeCompleted);
+    await sampling;
+
+    expect(writeCompletedWhenStopped).toBe(true);
+  });
+
+  it('contains rejections from the background error callback', async () => {
+    const sampler = new ProcessResourceSampler({
+      pid: process.pid,
+      agentId: 'agent-error',
+      runId: 'run-error',
+      adapter: {
+        async recordResourceSample() { throw new Error('write failed'); },
+      },
+      async onError() { throw new Error('reporting failed'); },
+    });
+
+    sampler.start();
+    await expect(sampler.stop()).resolves.toBeUndefined();
+  });
+
   it('persists sampled runtime data through SQLite', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'resource-sampler-'));
     tempDirs.push(dir);
@@ -198,6 +236,29 @@ describe('SQLiteAdapter resource samples', () => {
       persistedSample({ timestamp: 1_500, runId: 'run-2' }),
     ]);
 
+    await adapter.close();
+  });
+
+  it('normalizes direct-write identifiers and rejects empty identifiers', async () => {
+    const adapter = new SQLiteAdapter(':memory:', { useWorkerThread: false });
+    const sample = persistedSample({ agentId: '  agent-direct  ', runId: '  run-direct  ' });
+
+    await adapter.recordResourceSample(sample);
+    await expect(adapter.queryResourceSamples({ agentId: 'agent-direct' })).resolves.toEqual([
+      { ...sample, agentId: 'agent-direct', runId: 'run-direct' },
+    ]);
+    await expect(adapter.recordResourceSample({ ...sample, agentId: '   ' })).rejects.toThrow(TypeError);
+
+    await adapter.close();
+  });
+
+  it('does not treat an independent resource run ID as a trace ID during deletion', async () => {
+    const adapter = new SQLiteAdapter(':memory:', { useWorkerThread: false });
+    await adapter.recordResourceSample(persistedSample({ runId: 'shared-id' }));
+
+    await adapter.deleteTrace('shared-id');
+
+    await expect(adapter.queryResourceSamples({ runId: 'shared-id' })).resolves.toHaveLength(1);
     await adapter.close();
   });
 });
