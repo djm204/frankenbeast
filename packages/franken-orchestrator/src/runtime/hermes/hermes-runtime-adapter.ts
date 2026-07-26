@@ -111,7 +111,8 @@ function optionalHome(options: HermesRuntimeAdapterOptions): string | undefined 
 
 function optionalKanbanDbPath(options: HermesRuntimeAdapterOptions): string | undefined {
   const env = options.env ?? process.env;
-  const value = options.kanbanDbPath ?? env['HERMES_KANBAN_DB'];
+  const value = options.kanbanDbPath
+    ?? (options.hermesHome === undefined ? env['HERMES_KANBAN_DB'] : undefined);
   return value?.trim() || undefined;
 }
 
