@@ -11,7 +11,7 @@ import {
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
 import type { RuntimeAdapter } from '../../runtime/runtime-adapter.js';
 import { RuntimeEventPageSchema, RuntimeSnapshotSchema } from '../../runtime/runtime-schemas.js';
-import { redactLogData } from '../../logging/redaction.js';
+import { isSensitiveLogKey, redactSensitiveText } from '../../logging/redaction.js';
 import { redactAbsoluteHostPathValues } from '../beast-response-redaction.js';
 import { errorHandler, HttpError } from '../middleware.js';
 import { requireOperatorAuth } from '../operator-auth.js';
@@ -81,19 +81,27 @@ function validateInterval(name: string, value: number | undefined, fallback: num
 }
 
 function redactRuntimePaths(value: unknown, inMetadata = false): unknown {
-  if (typeof value === 'string') return redactAbsoluteHostPathValues(value);
+  if (typeof value === 'string') return redactAbsoluteHostPathValues(redactSensitiveText(value));
   if (Array.isArray(value)) return value.map((entry) => redactRuntimePaths(entry, inMetadata));
   if (!value || typeof value !== 'object') return value;
 
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
     const opaqueContractField = !inMetadata
-      && (key === 'id' || key === 'cursor' || key === 'nextCursor' || key.endsWith('Id'));
-    return [key, opaqueContractField ? entry : redactRuntimePaths(entry, inMetadata || key === 'metadata')];
+      && (
+        key === 'id'
+        || key === 'cursor'
+        || key === 'nextCursor'
+        || key.endsWith('Id')
+        || key.endsWith('Ids')
+      );
+    if (opaqueContractField) return [key, entry];
+    if (isSensitiveLogKey(key)) return [key, '<redacted>'];
+    return [key, redactRuntimePaths(entry, inMetadata || key === 'metadata')];
   }));
 }
 
 function runtimeResponse(value: unknown): unknown {
-  return redactRuntimePaths(redactLogData(value));
+  return redactRuntimePaths(value);
 }
 
 function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID_CURSOR' } {

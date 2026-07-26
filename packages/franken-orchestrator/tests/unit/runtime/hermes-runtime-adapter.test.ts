@@ -136,6 +136,22 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('returns an empty snapshot when a workspace filter matches no discovered source', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({
+      workspaceId: 'hermes:missing',
+    });
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'empty',
+      workspaces: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+    }));
+  });
+
   it('supports the canonical schema when optional newer columns and tables are absent', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -228,6 +244,25 @@ describe('HermesRuntimeAdapter', () => {
     expect(new Set(ids).size).toBe(2);
   });
 
+  it('does not rediscover an explicitly configured database as a board', async () => {
+    const home = await createHome();
+    const boardDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(boardDir, { recursive: true });
+    const dbPath = join(boardDir, 'kanban.db');
+    createCurrentKanban(dbPath);
+
+    const snapshot = await new HermesRuntimeAdapter({
+      hermesHome: home,
+      kanbanDbPath: dbPath,
+    }).getSnapshot();
+    if (snapshot.workspaces.status !== 'available' || snapshot.tasks.status !== 'available') {
+      throw new Error('Expected available runtime data');
+    }
+
+    expect(snapshot.workspaces.data).toHaveLength(1);
+    expect(snapshot.tasks.data.filter((task) => task.id.endsWith(':t_parent'))).toHaveLength(1);
+  });
+
   it('continues returning healthy workspace events when another workspace read fails', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
@@ -255,6 +290,39 @@ describe('HermesRuntimeAdapter', () => {
     expect(replay.events.some((event) => event.workspaceId === 'hermes:alpha')).toBe(true);
   });
 
+  it('retains cursor positions for discovered workspaces that are temporarily unavailable', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(alphaDir, { recursive: true });
+    const globalPath = join(home, 'kanban.db');
+    const alphaPath = join(alphaDir, 'kanban.db');
+    createCurrentKanban(globalPath);
+    createCurrentKanban(alphaPath);
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+    const first = await adapter.getEvents({ limit: 10 });
+
+    await writeFile(alphaPath, 'temporarily unavailable');
+    const globalDb = new Database(globalPath);
+    globalDb.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
+      11, 't_parent', 1, 'progress', '{}', 1_785_081_700,
+    );
+    globalDb.close();
+    const degraded = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    const degradedCursor = JSON.parse(Buffer.from(degraded.nextCursor!, 'base64url').toString('utf8')) as {
+      p: Array<[string, string, number, number]>;
+    };
+
+    expect(degradedCursor.p.map(([workspaceId]) => workspaceId)).toEqual([
+      'hermes:alpha',
+      'hermes:global',
+    ]);
+
+    await rm(alphaPath);
+    createCurrentKanban(alphaPath);
+    const recovered = await adapter.getEvents({ cursor: degraded.nextCursor!, limit: 10 });
+    expect(recovered.events).toEqual([]);
+  });
+
   it('seeds initial cursors for healthy workspaces whose older events fall outside the page', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
@@ -267,6 +335,73 @@ describe('HermesRuntimeAdapter', () => {
 
     expect(first.events).toHaveLength(1);
     expect(replay.events).toEqual([]);
+  });
+
+  it('seeds represented workspaces before their first event in an intermediate cursor', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(alphaDir, { recursive: true });
+    const globalPath = join(home, 'kanban.db');
+    const alphaPath = join(alphaDir, 'kanban.db');
+    createCurrentKanban(globalPath);
+    createCurrentKanban(alphaPath);
+    const globalDb = new Database(globalPath);
+    globalDb.exec('DELETE FROM task_comments; DELETE FROM task_events;');
+    globalDb.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
+      30, 't_parent', 1, 'global-current', '{}', 1_785_081_700,
+    );
+    globalDb.close();
+    const alphaDb = new Database(alphaPath);
+    alphaDb.exec('DELETE FROM task_comments; DELETE FROM task_events;');
+    const insertAlpha = alphaDb.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    insertAlpha.run(20, 't_parent', 1, 'alpha-old', '{}', 1_785_081_600);
+    insertAlpha.run(40, 't_parent', 1, 'alpha-current', '{}', 1_785_081_800);
+    alphaDb.close();
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+
+    const first = await adapter.getEvents({ limit: 2 });
+    const replay = await adapter.getEvents({ cursor: first.events[0]!.cursor, limit: 10 });
+
+    expect(first.events.map((event) => event.id)).toEqual([
+      'hermes:global:event:30',
+      'hermes:alpha:event:40',
+    ]);
+    expect(replay.events.map((event) => event.id)).toEqual(['hermes:alpha:event:40']);
+  });
+
+  it('drops cursor positions for workspaces that are no longer discovered', async () => {
+    const home = await createHome();
+    const boardDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(boardDir, { recursive: true });
+    const globalPath = join(home, 'kanban.db');
+    createCurrentKanban(globalPath);
+    createCurrentKanban(join(boardDir, 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+    const first = await adapter.getEvents({ limit: 10 });
+
+    await rm(boardDir, { recursive: true });
+    const compacted = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    const compactedCursor = JSON.parse(Buffer.from(compacted.nextCursor!, 'base64url').toString('utf8')) as {
+      p: Array<[string, string, number, number]>;
+    };
+
+    expect(compacted.events).toEqual([]);
+    expect(compactedCursor.p.map(([workspaceId]) => workspaceId)).toEqual(['hermes:global']);
+
+    const db = new Database(globalPath);
+    db.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
+      11, 't_parent', 1, 'progress', '{}', 1_785_081_700,
+    );
+    db.close();
+    const replay = await adapter.getEvents({ cursor: compacted.nextCursor!, limit: 10 });
+    const decoded = JSON.parse(Buffer.from(replay.nextCursor!, 'base64url').toString('utf8')) as {
+      p: Array<[string, string, number, number]>;
+    };
+
+    expect(replay.events).toHaveLength(1);
+    expect(decoded.p.map(([workspaceId]) => workspaceId)).toEqual(['hermes:global']);
   });
 
   it('keeps multi-workspace replay cursors below the default HTTP header limit', async () => {

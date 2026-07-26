@@ -402,7 +402,12 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const compatibleCount = inspected.filter((source) => source.status === 'compatible').length;
     const unavailableCount = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
-    const state = inspected.length === 0
+    const workspaceFilterMiss = request.workspaceId !== undefined
+      && inspected.length === 0
+      && inspection.sources.some((source) => source.status === 'compatible');
+    const state = workspaceFilterMiss
+      ? 'empty' as const
+      : inspected.length === 0
       ? 'unavailable' as const
       : compatibleCount === 0 && unavailableCount > 0
         ? 'unavailable' as const
@@ -449,9 +454,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
     const limit = normalizeLimit(request.limit);
     const cursorState = parseRequestCursor(request.cursor);
-    const inspected = (await this.inspectSources()).sources.filter((source) => (
-      source.status === 'compatible' && (request.workspaceId === undefined || source.workspaceId === request.workspaceId)
+    const selectedSources = (await this.inspectSources()).sources.filter((source) => (
+      request.workspaceId === undefined || source.workspaceId === request.workspaceId
     ));
+    const inspected = selectedSources.filter((source) => source.status === 'compatible');
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
     const sourceLatest = new Map<string, CursorValue>();
     for (const source of inspected) {
@@ -475,7 +481,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       return !after || eventOrder(entry.cursor, after) > 0;
     });
     const page = request.cursor ? filtered.slice(0, limit) : filtered.slice(-limit);
-    const positions = new Map(cursorState.positions);
+    const selectedWorkspaceIds = new Set(selectedSources.map((source) => source.workspaceId));
+    const positions = new Map(
+      [...cursorState.positions].filter(([workspaceId]) => selectedWorkspaceIds.has(workspaceId)),
+    );
     if (cursorState.legacy) {
       for (const source of inspected) positions.set(source.workspaceId, cursorState.legacy);
     }
@@ -484,6 +493,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       for (const [workspaceId, latest] of sourceLatest) {
         if (!pageWorkspaces.has(workspaceId)) positions.set(workspaceId, latest);
       }
+      for (const workspaceId of pageWorkspaces) {
+        const firstPageEntry = page.find((entry) => entry.cursor.workspaceId === workspaceId);
+        const predecessor = firstPageEntry
+          ? filtered.filter((entry) => (
+              entry.cursor.workspaceId === workspaceId
+              && eventOrder(entry.cursor, firstPageEntry.cursor) < 0
+            )).at(-1)
+          : undefined;
+        if (predecessor) positions.set(workspaceId, predecessor.cursor);
+      }
     }
     const events = page.map((entry) => {
       positions.set(entry.cursor.workspaceId, entry.cursor);
@@ -491,7 +510,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     });
     return RuntimeEventPageSchema.parse({
       events,
-      nextCursor: events.at(-1)?.cursor ?? request.cursor ?? null,
+      nextCursor: events.at(-1)?.cursor ?? (request.cursor ? cursorForPositions(positions) : null),
     });
   }
 
@@ -503,6 +522,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     if (!this.home && !this.kanbanDbPath) return { sources: [] };
     const home = this.home ? resolve(this.home) : undefined;
     const sources: DatabaseSource[] = [];
+    const discoveredPaths = new Set<string>();
     let discoveryMessage: string | undefined;
     const globalPath = this.kanbanDbPath ? resolve(this.kanbanDbPath) : resolve(home!, 'kanban.db');
     try {
@@ -510,7 +530,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         ? await this.isDatabase(globalPath)
         : await this.isSafeDatabase(home!, globalPath);
       if (safe) {
-        sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: globalPath });
+        const resolvedPath = await realpath(globalPath);
+        discoveredPaths.add(resolvedPath);
+        sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: resolvedPath });
       }
     } catch (error) {
       discoveryMessage = error instanceof Error ? error.message : 'Hermes database discovery failed';
@@ -531,8 +553,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       const path = resolve(boardsRoot, entry.name, 'kanban.db');
       try {
         if (await this.isSafeDatabase(home, path)) {
+          const resolvedPath = await realpath(path);
+          if (discoveredPaths.has(resolvedPath)) continue;
+          discoveredPaths.add(resolvedPath);
           const workspaceId = entry.name === 'global' ? 'hermes:board:global' : `hermes:${entry.name}`;
-          sources.push({ workspaceId, name: entry.name, kind: 'board', path });
+          sources.push({ workspaceId, name: entry.name, kind: 'board', path: resolvedPath });
         }
       } catch (error) {
         discoveryMessage ??= error instanceof Error ? error.message : 'Hermes board discovery failed';

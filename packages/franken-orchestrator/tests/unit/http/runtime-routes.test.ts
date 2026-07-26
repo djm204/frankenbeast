@@ -196,6 +196,82 @@ describe('smart-swarm runtime routes', () => {
     });
   });
 
+  it('preserves secret-like text in opaque runtime contract fields', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getEvents).mockResolvedValueOnce(RuntimeEventPageSchema.parse({
+      events: [{
+        id: 'event-token=opaque-id',
+        cursor: 'token=opaque-cursor',
+        workspaceId: 'workspace-token=opaque-workspace',
+        taskId: 'task-token=opaque-task',
+        runId: 'run-token=opaque-run',
+        type: 'lifecycle',
+        occurredAt: '2026-07-26T12:00:00.000Z',
+        summary: 'opaque cursor event',
+        metadata: {},
+      }],
+      nextCursor: 'token=opaque-cursor',
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/events', { headers: authHeaders() });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({
+        events: [expect.objectContaining({
+          id: 'event-token=opaque-id',
+          cursor: 'token=opaque-cursor',
+          workspaceId: 'workspace-token=opaque-workspace',
+          taskId: 'task-token=opaque-task',
+          runId: 'run-token=opaque-run',
+        })],
+        nextCursor: 'token=opaque-cursor',
+      }),
+    });
+  });
+
+  it('preserves opaque identifier arrays outside metadata', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T12:00:00.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [{
+        id: 'task-1',
+        workspaceId: 'workspace-1',
+        title: 'opaque relationships',
+        state: 'ready',
+        parentIds: ['parent-token=opaque-parent'],
+        dependencyIds: ['/dependencies/opaque-dependency'],
+        ownerIds: ['/home/opaque-owner'],
+        priority: null,
+        createdAt: '2026-07-26T12:00:00.000Z',
+        updatedAt: null,
+      }] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'unsupported', reason: 'No source' },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/snapshot', { headers: authHeaders() });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({
+        tasks: expect.objectContaining({
+          data: [expect.objectContaining({
+            parentIds: ['parent-token=opaque-parent'],
+            dependencyIds: ['/dependencies/opaque-dependency'],
+            ownerIds: ['/home/opaque-owner'],
+          })],
+        }),
+      }),
+    });
+  });
+
   it('rate limits unauthenticated stream attempts with a stable bucket', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
