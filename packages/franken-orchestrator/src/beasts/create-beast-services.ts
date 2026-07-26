@@ -23,6 +23,7 @@ import { BeastRunService } from './services/beast-run-service.js';
 import { MaintenanceModeService } from './services/maintenance-mode-service.js';
 import { HiveStatusQuery, workspaceHiveId } from './services/hive-status-query.js';
 import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js';
+import { BeastLifecycleMetrics } from './telemetry/beast-lifecycle-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { BrainRegistry, HiveMindStore } from '@franken/brain';
 import type { BrainRouteContext } from '../http/routes/brain-routes.js';
@@ -47,6 +48,7 @@ export interface BeastServiceBundle {
   runs: BeastRunService;
   interviews: BeastInterviewService;
   metrics: PrometheusBeastMetrics;
+  lifecycleMetrics: BeastLifecycleMetrics;
   maintenance: MaintenanceModeService;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
@@ -119,6 +121,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const runConfigDir = join(projectRoot, '.fbeast', '.build', 'run-configs');
   const catalog = new BeastCatalogService();
   const metrics = new PrometheusBeastMetrics();
+  const lifecycleMetrics = new BeastLifecycleMetrics(() => repository.listRuns({ recoverCorruptJson: true }));
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
@@ -130,7 +133,10 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   // eslint-disable-next-line prefer-const
   let runService: BeastRunService;
   const executors = {
-    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor({ projectRoot }), {
+    process: new ProcessBeastExecutor(repository, logStore, new ProcessSupervisor({
+      projectRoot,
+      onOrphanProcessSwept: () => lifecycleMetrics.recordOrphanProcessSwept(),
+    }), {
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
       eventBus,
       runConfigDir,
@@ -145,6 +151,10 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       logStore,
       eventBus,
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
+      supervisorFactory: () => new ProcessSupervisor({
+        projectRoot,
+        onOrphanProcessSwept: () => lifecycleMetrics.recordOrphanProcessSwept(),
+      }),
       policy: {
         ...DEFAULT_SANDBOX_POLICY,
         workspaceHostPath: projectRoot,
@@ -211,6 +221,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     runs: runService,
     interviews: new BeastInterviewService(repository, catalog),
     metrics,
+    lifecycleMetrics,
     maintenance,
     eventBus,
     ticketStore,

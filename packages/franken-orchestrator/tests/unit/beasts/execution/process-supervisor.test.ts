@@ -403,6 +403,67 @@ process.stdout.write('parent done\\n');`,
       expect(killProcess).not.toHaveBeenCalled();
     });
 
+    it('reports only successful orphan process-group sweeps to the lifecycle observer', () => {
+      const noProcessGroup = Object.assign(new Error('no process group'), { code: 'ESRCH' });
+      const killProcess = vi.fn((pid: number) => {
+        if (pid === -23456) throw noProcessGroup;
+        return true as const;
+      });
+      const onOrphanProcessSwept = vi.fn();
+      const observedSupervisor = new ProcessSupervisor({
+        orphanSweeper: { killProcess },
+        onOrphanProcessSwept,
+      });
+
+      const swept = observedSupervisor.sweepOrphanProcessGroup(12345);
+      const skipped = observedSupervisor.sweepOrphanProcessGroup(23456);
+
+      expect(onOrphanProcessSwept).toHaveBeenCalledOnce();
+      expect(onOrphanProcessSwept).toHaveBeenCalledWith(swept);
+      expect(skipped).toMatchObject({ swept: false, skippedReason: 'no_process_group' });
+    });
+
+    it('does not report an ordinary tracked stop as an orphan sweep', async () => {
+      const onOrphanProcessSwept = vi.fn();
+      const callbacks = makeCallbacks();
+      const observedSupervisor = new ProcessSupervisor({ onOrphanProcessSwept });
+      const handle = await observedSupervisor.spawn(makeSpec({
+        command: process.execPath,
+        args: ['-e', 'setTimeout(() => {}, 60_000)'],
+      }), callbacks);
+
+      await observedSupervisor.stop(handle.pid);
+      await vi.waitFor(() => {
+        expect(callbacks.onExit).toHaveBeenCalled();
+      }, { timeout: 5_000 });
+
+      expect(onOrphanProcessSwept).not.toHaveBeenCalled();
+    });
+
+    it('reports post-exit orphan cleanup once when both exit and close fire', async () => {
+      const onOrphanProcessSwept = vi.fn();
+      const callbacks = makeCallbacks();
+      const fakeChild = Object.assign(new EventEmitter(), {
+        pid: 34567,
+        stdout: null,
+        stderr: null,
+        kill: vi.fn(),
+      });
+      const observedSupervisor = new ProcessSupervisor({
+        spawn: vi.fn(() => fakeChild as never),
+        orphanSweeper: { killProcess: vi.fn(() => true as const) },
+        onOrphanProcessSwept,
+      });
+
+      const spawnPromise = observedSupervisor.spawn(makeSpec(), callbacks);
+      fakeChild.emit('spawn');
+      await spawnPromise;
+      fakeChild.emit('exit', 0, null);
+      fakeChild.emit('close', 0, null);
+
+      expect(onOrphanProcessSwept).toHaveBeenCalledTimes(1);
+    });
+
     it('treats process-group permission errors as skipped so exit handling remains safe', () => {
       const permissionError = Object.assign(new Error('permission denied'), { code: 'EPERM' });
       const killProcess = vi.fn(() => {
@@ -533,12 +594,14 @@ process.stdout.write('parent done\\n');`,
 
     it('tries a process-group sweep before direct PID signaling for marked recovered attempts', async () => {
       const killProcess = vi.fn();
+      const onOrphanProcessSwept = vi.fn();
       const readProcessIdentity = vi.fn(() => ({
         status: 'found' as const,
         startTimeTicks: 'known-start-time',
       }));
       supervisor = new ProcessSupervisor({
         orphanSweeper: { killProcess, readProcessIdentity },
+        onOrphanProcessSwept,
       });
 
       await supervisor.stop(12345, {
@@ -552,6 +615,7 @@ process.stdout.write('parent done\\n');`,
 
       expect(killProcess).toHaveBeenNthCalledWith(1, -12345, 'SIGTERM');
       expect(killProcess).toHaveBeenNthCalledWith(2, -23456, 'SIGKILL');
+      expect(onOrphanProcessSwept).not.toHaveBeenCalled();
     });
 
     it('revalidates identity before direct fallback when the process group is gone', async () => {
