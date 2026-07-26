@@ -29,6 +29,11 @@ describe('Beast response redaction', () => {
     expect(redactAbsoluteHostPathValues('/v1/users')).toBe('/v1/users');
   });
 
+  it('redacts host paths embedded after a leading application route', () => {
+    expect(redactAbsoluteHostPathValues('/api/tasks?root=/home/alice/project'))
+      .toBe('/api/tasks?root=[REDACTED_HOST_PATH]');
+  });
+
   it('redacts embedded host paths after key-value delimiters', () => {
     expect(redactAbsoluteHostPathValues('workspace=/home/alice/private-repo'))
       .toBe('workspace=[REDACTED_HOST_PATH]');
