@@ -820,6 +820,174 @@ button {
   min-width: 12rem;
 }
 
+.brain-pulse-map {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 1rem;
+  background: radial-gradient(circle at center, rgba(134, 228, 95, 0.08), transparent 52%), var(--bg-panel-strong);
+}
+
+.brain-pulse-map > header,
+.brain-pulse-map__detail > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.brain-pulse-map h4,
+.brain-pulse-map h5,
+.brain-pulse-map p {
+  margin: 0;
+}
+
+.brain-pulse-map header p,
+.brain-pulse-map header small,
+.brain-pulse-map__node small,
+.brain-pulse-map__faculties small,
+.brain-pulse-map__detail small {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.brain-pulse-map__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-areas:
+    "cache core compaction"
+    "churn core resource"
+    ". cost .";
+  gap: 0.75rem;
+  align-items: stretch;
+}
+
+.brain-pulse-map__core {
+  grid-area: core;
+  display: grid;
+  place-content: center;
+  min-height: 9rem;
+  text-align: center;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 22px color-mix(in srgb, currentColor 45%, transparent);
+}
+
+.brain-pulse-map__core strong {
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 2rem;
+}
+
+.brain-pulse-map__node {
+  display: grid;
+  gap: 0.25rem;
+  min-height: 5.5rem;
+  padding: 0.75rem;
+  color: currentColor;
+  text-align: left;
+  border: 1px solid currentColor;
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, currentColor 7%, var(--bg-panel-strong));
+  box-shadow: 0 0 8px color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.brain-pulse-map__node--cache { grid-area: cache; }
+.brain-pulse-map__node--compaction { grid-area: compaction; }
+.brain-pulse-map__node--churn { grid-area: churn; }
+.brain-pulse-map__node--resource { grid-area: resource; }
+.brain-pulse-map__node--cost { grid-area: cost; }
+
+.brain-pulse-map__node strong {
+  font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 1.15rem;
+}
+
+.brain-pulse-map--healthy { color: var(--accent-strong); }
+.brain-pulse-map--warning,
+.brain-pulse-map--unavailable { color: var(--text-muted); }
+.brain-pulse-map--danger { color: var(--danger); }
+
+.brain-pulse-map__node--low { animation: brain-vitals-pulse 2.4s ease-in-out infinite; }
+.brain-pulse-map__node--medium { animation: brain-vitals-pulse 1.4s ease-in-out infinite; }
+.brain-pulse-map__node--high { animation: brain-vitals-pulse 0.8s ease-in-out infinite; }
+
+@keyframes brain-vitals-pulse {
+  50% {
+    filter: brightness(1.5);
+    box-shadow: 0 0 16px color-mix(in srgb, currentColor 65%, transparent);
+    transform: scale(1.025);
+  }
+}
+
+.brain-pulse-map__faculties {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+}
+
+.brain-pulse-map__faculties > span {
+  display: grid;
+  padding: 0.55rem;
+  color: var(--text-subtle);
+  border: 1px dashed var(--border);
+  border-radius: 0.65rem;
+}
+
+.brain-pulse-map__detail {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.brain-pulse-map__detail button {
+  padding: 0.4rem 0.6rem;
+  color: var(--accent-strong);
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--surface-soft);
+}
+
+.brain-pulse-map__detail ol {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.brain-pulse-map__detail li,
+.brain-pulse-map__detail li span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+@media (max-width: 700px) {
+  .brain-pulse-map__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "core core"
+      "cache compaction"
+      "churn resource"
+      "cost cost";
+  }
+
+  .brain-pulse-map__core {
+    width: 8rem;
+    min-height: 8rem;
+    margin: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brain-pulse-map__node {
+    animation: none;
+  }
+}
+
 .brain-vitals-panel__metrics,
 .brain-vitals-panel__trends {
   display: grid;

@@ -2,11 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BeastRunSummary } from '@franken/types';
 import type {
   BrainHealthSample,
+  BrainVitalsDimension,
   BrainVitalsRunDetail,
   BrainVitalsSnapshot,
   DashboardApiClient,
 } from '../../lib/dashboard-api';
 import { SlideInPanel } from '../beasts/slide-in-panel';
+import {
+  BrainPulseMap,
+  type BrainPulseActivity,
+  type BrainPulseActivityReceipts,
+} from './brain-pulse-map';
 
 interface BrainVitalsPanelProps {
   client: DashboardApiClient;
@@ -23,6 +29,45 @@ interface AggregatePoint {
   timestamp: number;
   totalTokens: number;
   estimatedUsd: number;
+}
+
+const PULSE_DIMENSIONS: readonly BrainVitalsDimension[] = ['cache', 'compaction', 'churn', 'resource', 'cost'];
+const MAX_ACTIVITY_DETAILS_PER_DIMENSION = 200;
+
+function emptyActivityReceipts(): BrainPulseActivityReceipts {
+  return { cache: [], compaction: [], churn: [], resource: [], cost: [] };
+}
+
+export function pruneActivityReceipts(
+  current: BrainPulseActivityReceipts,
+  cutoff: number,
+): BrainPulseActivityReceipts {
+  const next: BrainPulseActivityReceipts = {
+    cache: current.cache.filter((receivedAt: number) => receivedAt >= cutoff),
+    compaction: current.compaction.filter((receivedAt: number) => receivedAt >= cutoff),
+    churn: current.churn.filter((receivedAt: number) => receivedAt >= cutoff),
+    resource: current.resource.filter((receivedAt: number) => receivedAt >= cutoff),
+    cost: current.cost.filter((receivedAt: number) => receivedAt >= cutoff),
+  };
+  const changed = PULSE_DIMENSIONS.some((dimension) => (
+    next[dimension].length !== current[dimension].length
+  ));
+  return changed ? next : current;
+}
+
+function appendActivityDetail(
+  current: BrainPulseActivity[],
+  activity: BrainPulseActivity,
+): BrainPulseActivity[] {
+  const recent = current.filter((candidate) => candidate.receivedAt >= activity.receivedAt - 60_000);
+  const dimensionCount = recent.filter((candidate) => candidate.dimension === activity.dimension).length;
+  let toDrop = Math.max(0, dimensionCount + 1 - MAX_ACTIVITY_DETAILS_PER_DIMENSION);
+  const retained = recent.filter((candidate) => {
+    if (candidate.dimension !== activity.dimension || toDrop === 0) return true;
+    toDrop -= 1;
+    return false;
+  });
+  return [...retained, activity];
 }
 
 function describeError(error: unknown): string {
@@ -107,6 +152,7 @@ function TrendChart({
 export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const generationRef = useRef(0);
   const runRequestRef = useRef(0);
+  const activitySequenceRef = useRef(0);
   const runCacheRef = useRef(new Map<string, BeastRunSummary>());
   const nextRunCursorRef = useRef<string | undefined>(undefined);
   const runDiscoveryInFlightRef = useRef(false);
@@ -120,6 +166,8 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [history, setHistory] = useState<BrainHealthSample[]>([]);
   const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
   const [aggregatePoints, setAggregatePoints] = useState<AggregatePoint[]>([]);
+  const [activities, setActivities] = useState<BrainPulseActivity[]>([]);
+  const [activityReceipts, setActivityReceipts] = useState(emptyActivityReceipts);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -129,6 +177,18 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [runDetail, setRunDetail] = useState<BrainVitalsRunDetail | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [runLoading, setRunLoading] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const cutoff = Date.now() - 60_000;
+      setActivityReceipts((current: BrainPulseActivityReceipts) => pruneActivityReceipts(current, cutoff));
+      setActivities((current) => {
+        const recent = current.filter((activity) => activity.receivedAt >= cutoff);
+        return recent.length === current.length ? current : recent;
+      });
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const generation = generationRef.current + 1;
@@ -144,6 +204,8 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setHistory([]);
     setResourcePoints([]);
     setAggregatePoints([]);
+    setActivities([]);
+    setActivityReceipts(emptyActivityReceipts());
     runCacheRef.current.clear();
     nextRunCursorRef.current = undefined;
 
@@ -215,6 +277,8 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setHistory([]);
     setResourcePoints([]);
     setAggregatePoints([]);
+    setActivities([]);
+    setActivityReceipts(emptyActivityReceipts());
     latestSnapshotTimestampRef.current = 0;
     setSelectedRunId(null);
     setRunDetail(null);
@@ -269,6 +333,23 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         setStreamError(describeError(subscriptionError));
       },
       (activity) => {
+        if (!active || generationRef.current !== generation) return;
+        const receivedAt = Date.now();
+        setActivityReceipts((current: BrainPulseActivityReceipts) => {
+          const recent = pruneActivityReceipts(current, receivedAt - 60_000);
+          return {
+            ...recent,
+            [activity.dimension]: [...recent[activity.dimension], receivedAt],
+          };
+        });
+        setActivities((current) => {
+          activitySequenceRef.current += 1;
+          return appendActivityDetail(current, {
+            ...activity,
+            receivedAt,
+            sequence: activitySequenceRef.current,
+          });
+        });
         if (
           activity.dimension !== 'churn'
           || runDiscoveryInFlightRef.current
@@ -372,6 +453,13 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
 
       {snapshot && (
         <>
+          <BrainPulseMap
+            snapshot={snapshot}
+            activities={activities}
+            activityReceipts={activityReceipts}
+            onOpenRun={(runId) => void openRun(runId)}
+          />
+
           <div className="brain-vitals-panel__metrics">
             <article className="brain-vitals-panel__score" aria-label={`Health score ${snapshot.health.score}`}>
               <span>Health score</span>
