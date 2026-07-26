@@ -219,6 +219,31 @@ describe('BrainVitalsPanel', () => {
     await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('201'));
   });
 
+  it('counts every delivered event on the local receipt clock', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const cacheNode = await screen.findByRole('button', { name: /Cache activity:/ });
+    const samePayload: BrainVitalsActivity = {
+      dimension: 'cache',
+      kind: 'cache.hit',
+      runId: 'run-1',
+      timestamp: Date.now() + 3_600_000,
+    };
+    act(() => {
+      pushActivity(samePayload);
+      pushActivity(samePayload);
+    });
+
+    await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('2'));
+  });
+
   it('ignores activity callbacks from a superseded brain subscription', async () => {
     const activityCallbacks = new Map<string, (activity: BrainVitalsActivity) => void>();
     const reviewerRun = detail.run;

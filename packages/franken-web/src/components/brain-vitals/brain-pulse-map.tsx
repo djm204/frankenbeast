@@ -20,9 +20,14 @@ const LABELS: Record<BrainVitalsDimension, string> = {
 type HealthState = 'healthy' | 'warning' | 'danger' | 'unavailable';
 type PulseState = 'idle' | 'low' | 'medium' | 'high';
 
+export interface BrainPulseActivity extends BrainVitalsActivity {
+  readonly receivedAt: number;
+  readonly sequence: number;
+}
+
 interface BrainPulseMapProps {
   snapshot: BrainVitalsSnapshot;
-  activities: readonly BrainVitalsActivity[];
+  activities: readonly BrainPulseActivity[];
   onOpenRun: (runId: string) => void;
 }
 
@@ -72,8 +77,8 @@ export function BrainPulseMap({ snapshot, activities, onOpenRun }: BrainPulseMap
   }, [activities]);
 
   const recentActivities = useMemo(() => activities.filter((activity) => (
-    activity.timestamp >= now - ACTIVITY_WINDOW_MS
-    && activity.timestamp <= now + 5_000
+    activity.receivedAt >= now - ACTIVITY_WINDOW_MS
+    && activity.receivedAt <= now + 5_000
   )), [activities, now]);
 
   const selectedActivities = selectedDimension
@@ -143,8 +148,8 @@ export function BrainPulseMap({ snapshot, activities, onOpenRun }: BrainPulseMap
             <p>No real {LABELS[selectedDimension]!.toLowerCase()} activity events were observed in the last minute.</p>
           ) : (
             <ol>
-              {[...selectedActivities].sort((left, right) => right.timestamp - left.timestamp).map((activity) => (
-                <li key={`${activity.dimension}:${activity.kind}:${activity.runId}:${activity.timestamp}`}>
+              {[...selectedActivities].sort((left, right) => right.receivedAt - left.receivedAt).map((activity) => (
+                <li key={activity.sequence}>
                   <span><strong>{activity.kind}</strong><small>{new Date(activity.timestamp).toLocaleTimeString()}</small></span>
                   <button
                     type="button"

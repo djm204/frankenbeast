@@ -2,13 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BeastRunSummary } from '@franken/types';
 import type {
   BrainHealthSample,
-  BrainVitalsActivity,
   BrainVitalsRunDetail,
   BrainVitalsSnapshot,
   DashboardApiClient,
 } from '../../lib/dashboard-api';
 import { SlideInPanel } from '../beasts/slide-in-panel';
-import { BrainPulseMap } from './brain-pulse-map';
+import { BrainPulseMap, type BrainPulseActivity } from './brain-pulse-map';
 
 interface BrainVitalsPanelProps {
   client: DashboardApiClient;
@@ -109,6 +108,7 @@ function TrendChart({
 export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const generationRef = useRef(0);
   const runRequestRef = useRef(0);
+  const activitySequenceRef = useRef(0);
   const runCacheRef = useRef(new Map<string, BeastRunSummary>());
   const nextRunCursorRef = useRef<string | undefined>(undefined);
   const runDiscoveryInFlightRef = useRef(false);
@@ -122,7 +122,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [history, setHistory] = useState<BrainHealthSample[]>([]);
   const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
   const [aggregatePoints, setAggregatePoints] = useState<AggregatePoint[]>([]);
-  const [activities, setActivities] = useState<BrainVitalsActivity[]>([]);
+  const [activities, setActivities] = useState<BrainPulseActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -278,20 +278,14 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         const receivedAt = Date.now();
         setActivities((current) => {
           const recent = current.filter((candidate) => (
-            candidate.timestamp >= receivedAt - 60_000
-            && candidate.timestamp <= receivedAt + 5_000
+            candidate.receivedAt >= receivedAt - 60_000
           ));
-          if (
-            activity.timestamp < receivedAt - 60_000
-            || activity.timestamp > receivedAt + 5_000
-          ) return recent;
-          const duplicate = recent.some((candidate) => (
-            candidate.dimension === activity.dimension
-            && candidate.kind === activity.kind
-            && candidate.runId === activity.runId
-            && candidate.timestamp === activity.timestamp
-          ));
-          return duplicate ? recent : [...recent, activity];
+          activitySequenceRef.current += 1;
+          return [...recent, {
+            ...activity,
+            receivedAt,
+            sequence: activitySequenceRef.current,
+          }];
         });
         if (
           activity.dimension !== 'churn'
