@@ -12,9 +12,13 @@ export type DefaultRuntimeAdapterOptions = RuntimeAdapterDefaultsOptions;
 export function createDefaultRuntimeAdapterRegistry(
   options: RuntimeAdapterDefaultsOptions = {},
 ): RuntimeAdapterRegistry {
+  const codexOptions: CodexRuntimeAdapterOptions = {
+    ...options.codex,
+    env: options.codex?.env ?? options.env,
+  };
   return new RuntimeAdapterRegistry([
     new HermesRuntimeAdapter(options),
     new OllamaRuntimeAdapter(options),
-    new CodexRuntimeAdapter(options.codex ?? { env: options.env }),
+    new CodexRuntimeAdapter(codexOptions),
   ]);
 }

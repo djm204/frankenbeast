@@ -152,7 +152,10 @@ describe('provider-neutral runtime contract', () => {
   });
 
   it('registers read-only runtime adapters without inventing availability', async () => {
-    const registry = createDefaultRuntimeAdapterRegistry({ env: { PATH: '' } });
+    const registry = createDefaultRuntimeAdapterRegistry({
+      env: { PATH: '' },
+      codex: { requestTimeoutMs: 25 },
+    });
 
     await expect(registry.list()).resolves.toEqual([
       expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
