@@ -60,12 +60,15 @@ function mergeHealthSamples(current: BrainHealthSample[], incoming: BrainHealthS
 
 function mergeRunPage(cache: Map<string, BeastRunSummary>, incoming: BeastRunSummary[]): BeastRunSummary[] {
   for (const run of incoming) cache.set(run.id, run);
-  while (cache.size > 500) {
-    const oldestRunId = cache.keys().next().value as string | undefined;
-    if (!oldestRunId) break;
-    cache.delete(oldestRunId);
-  }
-  return [...cache.values()];
+  const newestRuns = [...cache.values()]
+    .sort((left, right) => (
+      Date.parse(right.createdAt) - Date.parse(left.createdAt)
+      || right.id.localeCompare(left.id)
+    ))
+    .slice(0, 500);
+  cache.clear();
+  for (const run of newestRuns) cache.set(run.id, run);
+  return newestRuns;
 }
 
 function chartPoints(values: readonly number[]): string {
@@ -231,7 +234,8 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         if (!active || generationRef.current !== generation) return;
         setStreamError(describeError(subscriptionError));
       },
-      () => {
+      (activity) => {
+        if (activity.dimension !== 'churn') return;
         void client.listBrainVitalsRuns(100, undefined).then(({ runs: nextRuns }) => {
           if (!active || generationRef.current !== generation) return;
           const discoveredRuns = mergeRunPage(runCacheRef.current, nextRuns);
@@ -412,8 +416,9 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
 }
 
 function RunDetail({ detail }: { detail: BrainVitalsRunDetail }) {
-  const peakRss = detail.resources.reduce((peak, sample) => Math.max(peak, sample.rssBytes), 0);
-  const peakCpu = detail.resources.reduce((peak, sample) => Math.max(peak, sample.cpuPercent), 0);
+  const resources = [...detail.resources].sort((left, right) => left.timestamp - right.timestamp);
+  const peakRss = resources.reduce((peak, sample) => Math.max(peak, sample.rssBytes), 0);
+  const peakCpu = resources.reduce((peak, sample) => Math.max(peak, sample.cpuPercent), 0);
   return (
     <div className="brain-vitals-detail__content">
       <dl>
@@ -423,11 +428,11 @@ function RunDetail({ detail }: { detail: BrainVitalsRunDetail }) {
         <div><dt>Cache split</dt><dd>{detail.tokens.cacheReadTokens.toLocaleString()} read / {detail.tokens.cacheCreationTokens.toLocaleString()} created</dd></div>
         <div><dt>Cost</dt><dd>${detail.cost.estimatedUsd.toFixed(4)}{detail.cost.budgetUsd === null ? '' : ` / $${detail.cost.budgetUsd.toFixed(2)} budget`}</dd></div>
         <div><dt>Compaction</dt><dd>{detail.compactions.length} {detail.compactions.length === 1 ? 'compaction' : 'compactions'}</dd></div>
-        <div><dt>Resources</dt><dd>{detail.resources.length === 0 ? 'Resource telemetry unavailable' : `${Math.round(peakCpu)}% peak CPU · ${Math.round(peakRss / 1024 / 1024)} MB peak RSS`}</dd></div>
+        <div><dt>Resources</dt><dd>{resources.length === 0 ? 'Resource telemetry unavailable' : `${Math.round(peakCpu)}% peak CPU · ${Math.round(peakRss / 1024 / 1024)} MB peak RSS`}</dd></div>
       </dl>
       <section>
         <h4>Resource samples</h4>
-        <TrendChart label="Run resource samples" values={detail.resources.map((sample) => sample.cpuPercent)} pointCount={detail.resources.length} />
+        <TrendChart label="Run resource samples" values={resources.map((sample) => sample.cpuPercent)} pointCount={resources.length} />
       </section>
       <section>
         <h4>Activity events</h4>

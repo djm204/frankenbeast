@@ -5,6 +5,7 @@ import type {
   BrainVitalsSnapshot,
   DashboardApiClient,
 } from '../../lib/dashboard-api';
+import type { BrainVitalsActivity } from '../../lib/brain-vitals-api';
 import { BrainVitalsPanel } from './brain-vitals-panel';
 
 const snapshot: BrainVitalsSnapshot = {
@@ -236,6 +237,61 @@ describe('BrainVitalsPanel', () => {
     expect(listBrainVitalsRuns).toHaveBeenLastCalledWith(100, 'page-2');
   });
 
+  it('retains the newest 500 runs when incrementally paging older history', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, timeout) => {
+      if (timeout === 10_000) poll = callback as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const pages = Array.from({ length: 6 }, (_, page) => ({
+      runs: Array.from({ length: 100 }, (_, index) => {
+        const ordinal = page * 100 + index;
+        return {
+          ...detail.run,
+          id: `run-${ordinal}`,
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, 600 - ordinal)).toISOString(),
+        };
+      }),
+      ...(page < 5 ? { nextCursor: `page-${page + 2}` } : {}),
+    }));
+    const listBrainVitalsRuns = vi.fn();
+    for (const page of pages) listBrainVitalsRuns.mockResolvedValueOnce(page);
+    render(<BrainVitalsPanel client={client({ listBrainVitalsRuns })} />);
+
+    expect(await screen.findByRole('button', { name: 'Open vitals for run run-0' })).toBeTruthy();
+    for (let page = 1; page < pages.length; page += 1) {
+      await act(async () => {
+        poll?.();
+        await Promise.resolve();
+      });
+    }
+
+    expect(screen.getByRole('button', { name: 'Open vitals for run run-0' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open vitals for run run-599' })).toBeNull();
+  });
+
+  it('refreshes run discovery only for churn activity', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const listBrainVitalsRuns = vi.fn().mockResolvedValue({ runs: [detail.run] });
+    const api = client({
+      listBrainVitalsRuns,
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+    await waitFor(() => expect(pushActivity).toBeTypeOf('function'));
+    expect(listBrainVitalsRuns).toHaveBeenCalledTimes(1);
+
+    act(() => pushActivity({ dimension: 'resource', kind: 'sampled', runId: 'run-1', timestamp: 3 }));
+    await Promise.resolve();
+    expect(listBrainVitalsRuns).toHaveBeenCalledTimes(1);
+
+    act(() => pushActivity({ dimension: 'churn', kind: 'run.completed', runId: 'run-1', timestamp: 4 }));
+    await waitFor(() => expect(listBrainVitalsRuns).toHaveBeenCalledTimes(2));
+  });
+
   it('clears a recovered run-discovery error', async () => {
     let poll: (() => void) | undefined;
     vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, timeout) => {
@@ -356,5 +412,22 @@ describe('BrainVitalsPanel', () => {
       expect(screen.getByLabelText('Health score trend').getAttribute('data-point-count')).toBe('2');
       expect(screen.getByLabelText('Cost trend').getAttribute('data-point-count')).toBe('2');
     });
+  });
+
+  it('plots per-run resource samples from oldest to newest', async () => {
+    const api = client({
+      fetchBrainVitalsRun: vi.fn().mockResolvedValue({
+        ...detail,
+        resources: [
+          { ...snapshot.resource.latest!, cpuPercent: 80, timestamp: 2 },
+          { ...snapshot.resource.latest!, cpuPercent: 20, timestamp: 1 },
+        ],
+      }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Open vitals for run run-1/ }));
+    const chart = await screen.findByLabelText('Run resource samples');
+    expect(chart.querySelector('polyline')?.getAttribute('points')).toBe('0,29.5 100,4');
   });
 });
