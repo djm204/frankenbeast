@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   RuntimeAdapterRegistry,
   RuntimeAgentSchema,
+  RuntimeCursorError,
   RuntimeProviderSchema,
   RuntimeRunSchema,
   RuntimeSnapshotSchema,
@@ -113,6 +114,7 @@ describe('provider-neutral runtime contract', () => {
     const orchestrator = await import('../../../src/index.js');
 
     expect(orchestrator.RuntimeAdapterRegistry).toBe(RuntimeAdapterRegistry);
+    expect(orchestrator.RuntimeCursorError).toBe(RuntimeCursorError);
     expect(orchestrator.HermesRuntimeAdapter).toEqual(expect.any(Function));
     expect(RuntimeAgentSchema).toEqual(expect.any(Object));
     expect(RuntimeRunSchema).toEqual(expect.any(Object));
