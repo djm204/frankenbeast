@@ -2345,7 +2345,10 @@ describe('main() execution', () => {
 
     await main();
 
-    expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({ skillsDir }));
+    expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({
+      skillsDir,
+      tracesDb: join(root, '.fbeast', '.build', 'build-traces.db'),
+    }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       operatorToken: TEST_ROOT_ENV_TOKEN,
       beastControl: expect.objectContaining({
@@ -2842,6 +2845,7 @@ describe('main() execution', () => {
       root: '/mock/project',
       beastsDb: '/mock/project/.fbeast/beast.db',
       beastLogsDir: '/mock/project/.fbeast/.build/beasts/logs',
+      tracesDb: '/mock/project/.fbeast/.build/build-traces.db',
       host: '127.0.0.1',
       port: 4050,
       operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,

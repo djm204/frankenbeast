@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
 import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
@@ -26,16 +26,17 @@ import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js'
 import { BeastLifecycleMetrics } from './telemetry/beast-lifecycle-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { BrainRegistry, HiveMindStore } from '@franken/brain';
+import { CostCalculator, DEFAULT_PRICING, ProcessResourceSampler, SQLiteAdapter } from '@franken/observer';
 import type { BrainRouteContext } from '../http/routes/brain-routes.js';
+import { BrainVitalsService } from '../http/routes/brain-vitals-routes.js';
 import type { ModuleConfig } from './types.js';
-
-
 export interface BeastServicePaths {
   beastsDb: string;
   beastLogsDir: string;
   root?: string | undefined;
   skillsDir?: string | undefined;
   brainDbPath?: string | undefined;
+  tracesDb?: string | undefined;
 }
 
 export interface BeastServiceBundle {
@@ -52,7 +53,8 @@ export interface BeastServiceBundle {
   maintenance: MaintenanceModeService;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
-  dispose(): void;
+  brainVitals: BrainVitalsService;
+  dispose(): Promise<void>;
 }
 
 type BrainContextRepository = Pick<
@@ -124,6 +126,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const lifecycleMetrics = new BeastLifecycleMetrics(window => repository.listLifecycleAttempts(window));
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
+  const tracesDb = paths.tracesDb ?? join(projectRoot, '.fbeast', '.build', 'build-traces.db');
+  mkdirSync(dirname(tracesDb), { recursive: true });
+  const observerAdapter = new SQLiteAdapter(
+    tracesDb,
+    { useWorkerThread: false },
+  );
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
   const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, '.fbeast', 'skills');
@@ -141,6 +149,13 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       eventBus,
       runConfigDir,
       runConfigRoot: projectRoot,
+      telemetryDatabasePath: tracesDb,
+      resourceSamplerFactory: ({ pid, agentId, runId }) => new ProcessResourceSampler({
+        pid,
+        agentId,
+        runId,
+        adapter: observerAdapter,
+      }),
       worktreeIsolation: {
         enabled: true,
         projectRoot,
@@ -151,6 +166,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       logStore,
       eventBus,
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
+      telemetryDatabasePath: tracesDb,
       supervisorFactory: () => new ProcessSupervisor({
         projectRoot,
         onOrphanProcessSwept: () => lifecycleMetrics.recordOrphanProcessSwept(),
@@ -187,6 +203,13 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     capacityPolicy,
     maintenance,
     trustedSkillToolManifests,
+  });
+  const brainVitals = new BrainVitalsService({
+    observer: observerAdapter,
+    runs: runService,
+    eventBus,
+    costCalculator: new CostCalculator(DEFAULT_PRICING),
+    lifecycleMetrics,
   });
   const agents = new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests });
   let hiveAvailable = true;
@@ -225,10 +248,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     maintenance,
     eventBus,
     ticketStore,
-    dispose: () => {
+    brainVitals,
+    dispose: async () => {
       hiveStatus.close();
       brains.close();
       ticketStore.destroy();
+      await observerAdapter.close();
       repository.close();
     },
   };

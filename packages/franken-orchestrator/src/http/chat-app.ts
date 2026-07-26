@@ -14,6 +14,7 @@ import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
 import { brainRoutes, type BrainRouteContext } from './routes/brain-routes.js';
+import { createBrainVitalsRoutes, type BrainVitalsService } from './routes/brain-vitals-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
@@ -70,6 +71,7 @@ export interface ChatAppOptions {
   beastControl?: BeastRoutesDeps & {
     brains?: BrainRegistry;
     resolveBrainContext?: (agentTypeId: string) => BrainRouteContext | undefined;
+    brainVitals?: BrainVitalsService;
   };
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
@@ -224,6 +226,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     });
     app.use('/v1/brain', requireAuth());
     app.use('/v1/brain/*', requireAuth());
+    app.use('/v1/brain-vitals', requireAuth());
+    app.use('/v1/brain-vitals/*', async (c, next) => {
+      const pathname = new URL(c.req.url).pathname;
+      if (c.req.method === 'GET' && /^\/v1\/brain-vitals\/[^/]+\/events\/[^/]+$/.test(pathname)) {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     app.use('/api/dashboard', requireAuth());
     app.use('/api/dashboard/*', async (c, next) => {
       if (new URL(c.req.url).pathname === '/api/dashboard/events') {
@@ -304,6 +315,16 @@ export function createChatApp(opts: ChatAppOptions): Hono {
         rateLimit: opts.beastControl.rateLimit,
       }));
     }
+    if (opts.beastControl.brainVitals) {
+      app.route('/', createBrainVitalsRoutes({
+        service: opts.beastControl.brainVitals,
+        eventBus: opts.beastControl.eventBus,
+        ticketStore: opts.beastControl.ticketStore,
+        operatorToken: opts.beastControl.operatorToken,
+        security: opts.beastControl.security ?? transportSecurity,
+        rateLimit: opts.beastControl.rateLimit,
+      }));
+    }
     const bc = opts.beastControl;
     app.route('/', createBeastSseRoutes({
       bus: bc.eventBus,
@@ -327,6 +348,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;
     app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
     app.all('/v1/brain/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
+    app.all('/v1/brain-vitals/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));

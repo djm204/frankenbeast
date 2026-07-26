@@ -365,6 +365,12 @@ export interface ProcessBeastExecutorOptions {
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
   /** Optional protected debug sink. Values are scrubbed before this callback is invoked. */
   onSpawnFailureDebug?: (details: SpawnFailureDebugDetails) => void;
+  resourceSamplerFactory?: (options: {
+    pid: number;
+    agentId: string;
+    runId: string;
+  }) => { start(): void; stop(): Promise<void> };
+  telemetryDatabasePath?: string | undefined;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -490,6 +496,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   private readonly attemptConfigFilePaths = new Map<string, string>();
   private readonly attemptConfigManifestPaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
+  private readonly resourceSamplers = new Map<string, { stop(): Promise<void> }>();
 
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -758,6 +765,15 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (flushedEarlyExit) {
       return this.repository.getAttempt(attempt.id) ?? attempt;
     }
+    const resourceSampler = this.options.resourceSamplerFactory?.({
+      pid: handle.pid,
+      agentId: run.trackedAgentId ?? run.definitionId,
+      runId: run.id,
+    });
+    if (resourceSampler) {
+      resourceSampler.start();
+      this.resourceSamplers.set(attempt.id, resourceSampler);
+    }
     this.options.eventBus?.publish({
       type: 'run.status',
       data: { runId: run.id, status: 'running' as const, updatedAt: startedAt },
@@ -812,6 +828,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
         ...isolatedSpec.env,
         ...moduleEnv,
         FRANKENBEAST_RUN_CONFIG: configFilePath,
+        FRANKENBEAST_BEAST_RUN_ID: run.id,
+        ...(this.options.telemetryDatabasePath
+          ? { FRANKENBEAST_TRACES_DB: this.options.telemetryDatabasePath }
+          : {}),
         [RUN_CONFIG_INTEGRITY_ENV]: configManifestPath,
         [RUN_CONFIG_INTEGRITY_SECRET_ENV]: runConfigIntegritySecret,
       },
@@ -977,6 +997,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     stderrTail: string[],
     configuredSecrets: readonly string[],
   ): void {
+    void this.stopResourceSampler(attemptId);
     // Skip if attempt is already in a terminal state (e.g., finishAttempt already ran from stop/kill)
     const currentAttempt = this.repository.getAttempt(attemptId);
     if (currentAttempt && (currentAttempt.status === 'stopped' || currentAttempt.status === 'completed' || currentAttempt.status === 'failed')) {
@@ -1113,12 +1134,24 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
   }
 
+  private async stopResourceSampler(attemptId: string): Promise<void> {
+    const sampler = this.resourceSamplers.get(attemptId);
+    if (!sampler) return;
+    this.resourceSamplers.delete(attemptId);
+    try {
+      await sampler.stop();
+    } catch {
+      // Resource telemetry is best effort and must not hide process completion.
+    }
+  }
+
   private finishAttempt(
     runId: string,
     attempt: BeastRunAttempt,
     status: BeastRunAttempt['status'],
     stopReason: string,
   ): BeastRunAttempt {
+    void this.stopResourceSampler(attempt.id);
     const finishedAt = new Date(wallClockNow()).toISOString();
     const updatedAttempt = this.repository.updateAttempt(attempt.id, {
       status,

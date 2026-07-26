@@ -173,14 +173,14 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
       });
     });
   } catch (error) {
-    services.dispose();
+    await services.dispose();
     await releasePidFile(pidFile);
     throw error;
   }
 
   const address = server.address();
   if (!address || typeof address === 'string') {
-    services.dispose();
+    await services.dispose();
     await releasePidFile(pidFile);
     throw new Error('Beast daemon did not bind to a TCP address');
   }
@@ -212,7 +212,7 @@ export async function startBeastDaemon(options: StartBeastDaemonOptions): Promis
         await drainState.waitForMutationCompletion();
       }
       const shutdownFailures = await stopLiveRuns(services);
-      services.dispose();
+      await services.dispose();
       if (listening && !httpServerClosed) {
         const closedServer = closeHttpServer(server);
         server.closeAllConnections();

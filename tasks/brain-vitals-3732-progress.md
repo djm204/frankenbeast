@@ -1,0 +1,25 @@
+# Brain Vitals #3732 Progress
+
+- [x] Confirm parent #3731/PR #3797 is terminal and merged.
+- [x] Refresh the isolated branch to current `origin/main` and verify Git identity/auth.
+- [x] Fetch and validate live issue #3732 and shipped #3704 route naming.
+- [x] Trace existing dashboard SSE ticket auth, Beast event bus, route registration, health history, run telemetry, and package conventions.
+- [x] RED→GREEN: add operator-auth-gated brain-vitals snapshot and history routes backed by real observer data.
+- [x] RED→GREEN: add per-run drill-down backed by real run/token/cache/cost/compaction/resource/churn data.
+- [x] RED→GREEN: add ticket-authenticated snapshot SSE plus immediate typed activity events from real signals.
+- [x] Document the `/v1/brain-vitals/*` HTTP surface.
+- [x] Run focused route tests and relevant orchestrator/observer quality gates.
+- [x] Self-review the final diff and close all discovered defects.
+- [x] Commit as David Mendez, push the unique branch, and open exactly one PR resolving #3732 (PR #3798).
+- [x] Address all 14 findings from the first exact-head Codex round with regression coverage: stable run correlation, production resource samples, preserved budgets, proxy/route auth, exact SSE exemptions, rate limiting, sanitized bounded drill-down responses, brain-scoped churn, normalized IDs, bounded history, retry-window accounting, and cheap event filtering.
+- [x] Verify 151 focused tests, package typecheck/lint/build, and the full root test suite (10 packages; 4,571 orchestrator tests).
+- [ ] Complete the final exact-head Codex review round, resolve all threads, and verify exact-head CI.
+- [x] RED→GREEN: represent missing container resource telemetry as unavailable and exclude it from health scoring.
+- [x] RED→GREEN: persist production traces under the Beast run ID in the daemon telemetry database.
+- [x] RED→GREEN: filter telemetry windows, serialize health persistence, and prune resource retention.
+- [x] Deduplicate/resiliently stream SSE status events and attribute vitals activity to the producing run.
+- [x] Propagate run/agent identity through CLI phases, telemetry, and resource sampling.
+- [x] RED→GREEN: bound/index per-second snapshot run reads by brain and activity window.
+- [x] RED→GREEN: address invocation-4 findings for awaited chat disposal, lazy legacy trace lookup, normalized SSE activity filtering, failure-safe adapter close, and container telemetry-path validation.
+- [x] Address invocation-5 findings for coalesced SSE snapshots, telemetry override propagation, per-run pressure aggregation, span-based cache activity, bounded fingerprints, and budget-matched burn ratios.
+- [ ] Merge the PR, verify issue #3732 closes, and record final evidence.

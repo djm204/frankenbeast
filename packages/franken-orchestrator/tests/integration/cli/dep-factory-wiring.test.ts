@@ -129,6 +129,39 @@ describe('dep-factory wiring integration', () => {
     await finalize();
   });
 
+  it('persists the production trace under the Beast run ID during finalization', async () => {
+    const paths = createTempPaths();
+    cleanups.push(paths.root);
+    const previousRunId = process.env.FRANKENBEAST_BEAST_RUN_ID;
+    process.env.FRANKENBEAST_BEAST_RUN_ID = 'beast-run-wiring';
+    try {
+      const { observerBridge, finalize } = await createCliDeps({
+        paths,
+        baseBranch: 'main',
+        budget: 1.0,
+        provider: 'claude',
+        noPr: true,
+        verbose: false,
+        reset: false,
+      });
+      expect(observerBridge.getActiveSessionId()).toBe('beast-run-wiring');
+      observerBridge.startSpan('production-work').end({ promptTokens: 10, completionTokens: 2 });
+
+      await finalize();
+
+      const reader = new SQLiteAdapter(paths.tracesDb, { useWorkerThread: false });
+      await expect(reader.queryByTraceId('beast-run-wiring')).resolves.toMatchObject({
+        id: 'beast-run-wiring',
+        status: 'completed',
+        spans: [expect.objectContaining({ name: 'production-work' })],
+      });
+      await reader.close();
+    } finally {
+      if (previousRunId === undefined) delete process.env.FRANKENBEAST_BEAST_RUN_ID;
+      else process.env.FRANKENBEAST_BEAST_RUN_ID = previousRunId;
+    }
+  });
+
   it('creates real SqliteBrainMemoryAdapter when modules are enabled', async () => {
     const paths = createTempPaths();
     cleanups.push(paths.root);

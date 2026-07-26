@@ -67,6 +67,17 @@ describe('project-root', () => {
   });
 
   describe('getProjectPaths', () => {
+    it('uses the daemon telemetry database override in isolated run processes', () => {
+      const previous = process.env.FRANKENBEAST_TRACES_DB;
+      process.env.FRANKENBEAST_TRACES_DB = '/tmp/shared-frankenbeast-traces.db';
+      try {
+        expect(getProjectPaths(testDir).tracesDb).toBe('/tmp/shared-frankenbeast-traces.db');
+      } finally {
+        if (previous === undefined) delete process.env.FRANKENBEAST_TRACES_DB;
+        else process.env.FRANKENBEAST_TRACES_DB = previous;
+      }
+    });
+
     it('returns flat plans dir when no plan name provided', () => {
       const paths = getProjectPaths(testDir);
       expect(paths.root).toBe(testDir);

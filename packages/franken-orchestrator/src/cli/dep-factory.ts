@@ -543,14 +543,19 @@ async function createObserverDeps(
   });
   const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
-  const runSessionId = options.runSessionId ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
+  const processRunSessionId = process.env.FRANKENBEAST_BEAST_RUN_ID?.trim() || undefined;
+  const runSessionId = options.runSessionId
+    ?? processRunSessionId
+    ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
+  const telemetryAdapter = createBestEffortCompactionAdapter(options.paths.tracesDb, logger);
   const observerBridge = new CliObserverBridge({
     budgetLimitUsd: config.budget,
     sessionId: runSessionId,
     replayStore,
-    compactionAdapter: createBestEffortCompactionAdapter(options.paths.tracesDb, logger),
+    compactionAdapter: telemetryAdapter,
+    traceAdapter: telemetryAdapter,
   });
-  if (config.enableTracing) {
+  if (config.enableTracing || processRunSessionId !== undefined) {
     observerBridge.startTrace(runSessionId);
   }
   const traceViewerHandle = options.verbose

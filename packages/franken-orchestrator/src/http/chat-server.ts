@@ -63,7 +63,7 @@ export interface StartChatServerOptions {
     setConfig(config: OrchestratorConfig): void;
   };
   beastControl?: BeastRoutesDeps & { brains?: BrainRegistry };
-  disposeBeastControl?: (() => void) | undefined;
+  disposeBeastControl?: (() => void | Promise<void>) | undefined;
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
   skillManager?: SkillManager;
@@ -451,7 +451,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       chatStreamTicketStore?.destroy();
-      options.disposeBeastControl?.();
+      await options.disposeBeastControl?.();
       const closedServer = closeHttpServer(server);
       server.closeAllConnections();
       await closedServer;
