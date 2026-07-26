@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.11.0...franken-web-v0.12.0) (2026-07-26)
+
+
+### Features
+
+* **web:** add live Brain Vitals dashboard ([#3806](https://github.com/djm204/frankenbeast/issues/3806)) ([2504485](https://github.com/djm204/frankenbeast/commit/2504485c1db25ec92939374bd09ffd0032592618))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.18.0 to 0.19.0
+
 ## [0.11.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.10.0...franken-web-v0.11.0) (2026-07-25)
 
 

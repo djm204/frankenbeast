@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.60.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.59.0...@franken/orchestrator-v0.60.0) (2026-07-26)
+
+
+### Features
+
+* **beasts:** expose lifecycle churn metrics ([#3794](https://github.com/djm204/frankenbeast/issues/3794)) ([15d2e52](https://github.com/djm204/frankenbeast/commit/15d2e52b48d345c928c03014ce39c302d9d24fd2))
+* **brain:** add hive-aware status queries ([#3778](https://github.com/djm204/frankenbeast/issues/3778)) ([dff353f](https://github.com/djm204/frankenbeast/commit/dff353f96168374efd439c9abf486b360f4a327e))
+* **observer:** add cache-aware token accounting ([#3781](https://github.com/djm204/frankenbeast/issues/3781)) ([3d526f5](https://github.com/djm204/frankenbeast/commit/3d526f5573293f52e604c496dbffcefcc45fab28))
+* **observer:** export session compaction metrics ([#3780](https://github.com/djm204/frankenbeast/issues/3780)) ([96b032e](https://github.com/djm204/frankenbeast/commit/96b032ea310a31ea51de20e9df2ad6db148c5a47))
+* **orchestrator:** expose brain vitals telemetry APIs ([#3798](https://github.com/djm204/frankenbeast/issues/3798)) ([a26a390](https://github.com/djm204/frankenbeast/commit/a26a390a58f7f678dc1ad937ef55bd1015d56daf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.11.1 to 0.11.2
+    * @franken/governor bumped from 0.9.1 to 0.9.2
+    * @franken/types bumped from 0.18.0 to 0.19.0
+    * @franken/observer bumped from 0.12.1 to 0.13.0
+    * @franken/planner bumped from 0.4.27 to 0.4.28
+    * @franken/brain bumped from 0.18.0 to 0.18.1
+
 ## [0.59.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.58.0...@franken/orchestrator-v0.59.0) (2026-07-25)
 
 
