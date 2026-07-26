@@ -459,9 +459,15 @@ describe('HermesRuntimeAdapter', () => {
 
   it('timestamps blockers from their latest blocking transition', async () => {
     const home = await createHome();
-    createCurrentKanban(join(home, 'kanban.db'));
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
+      11, 't_parent', 1, 'heartbeat', '{}', 1_785_081_700,
+    );
+    db.close();
 
-    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({ activityLimit: 1 });
 
     expect(snapshot.blockers).toEqual(expect.objectContaining({
       data: [expect.objectContaining({
@@ -469,6 +475,58 @@ describe('HermesRuntimeAdapter', () => {
         createdAt: '2026-07-26T16:00:50.000Z',
       })],
     }));
+  });
+
+  it('includes established comments table activity in snapshots', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec(`
+      DROP TABLE task_comments;
+      CREATE TABLE comments (
+        id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL
+      );
+      INSERT INTO comments (id, task_id, body, created_at)
+      VALUES (21, 't_child', 'Established comment activity', 1785081670);
+    `);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.events.status !== 'available') throw new Error('Expected events');
+
+    expect(snapshot.events.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'hermes:global:comment:21',
+        taskId: 'hermes:global:t_child',
+        summary: 'Established comment activity',
+      }),
+    ]));
+  });
+
+  it('replays established comments table activity', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec(`
+      DROP TABLE task_comments;
+      CREATE TABLE comments (
+        id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL
+      );
+      INSERT INTO comments (id, task_id, body, created_at)
+      VALUES (21, 't_child', 'Established replay activity', 1785081670);
+    `);
+    db.close();
+
+    const page = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 10 });
+
+    expect(page.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'hermes:global:comment:21',
+        summary: 'Established replay activity',
+      }),
+    ]));
   });
 
   it('degrades a workspace with corrupt required timestamps instead of fabricating epoch activity', async () => {
