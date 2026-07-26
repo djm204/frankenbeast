@@ -36,6 +36,7 @@ import {
   DELETE_COMPACTIONS_BY_RUN,
   DELETE_COMPACTIONS_BEFORE,
   DELETE_RESOURCE_SAMPLES_BEFORE,
+  DELETE_BRAIN_HEALTH_SCORES_BEFORE,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
@@ -189,6 +190,7 @@ type SQLiteWorkerOperation =
   | 'deleteResourceSamplesBefore'
   | 'recordHealthScore'
   | 'queryHealthScores'
+  | 'deleteHealthScoresBefore'
 
 interface SQLiteWorkerResponse {
   id: number
@@ -300,6 +302,8 @@ function execute(operation, payload) {
       return undefined
     case 'queryHealthScores':
       return db.prepare(sql.selectBrainHealthScores).all(payload.query)
+    case 'deleteHealthScoresBefore':
+      return db.prepare(sql.deleteBrainHealthScoresBefore).run(payload.before).changes
     default:
       throw new Error('Unknown SQLite worker operation: ' + operation)
   }
@@ -384,6 +388,7 @@ class SQLiteWorkerClient {
             selectResourceSamplesByRun: SELECT_RESOURCE_SAMPLES_BY_RUN,
             insertBrainHealthScore: INSERT_BRAIN_HEALTH_SCORE,
             selectBrainHealthScores: SELECT_BRAIN_HEALTH_SCORES,
+            deleteBrainHealthScoresBefore: DELETE_BRAIN_HEALTH_SCORES_BEFORE,
           },
         },
       },
@@ -1229,6 +1234,22 @@ export class SQLiteAdapter implements ExportAdapter {
             this.db.prepare(SELECT_BRAIN_HEALTH_SCORES).all(params) as BrainHealthScoreRow[]
           ))
       return rows.map(rowToBrainHealthSample)
+    })
+  }
+
+  async deleteHealthScoresBefore(before: number): Promise<number> {
+    if (!Number.isSafeInteger(before) || before < 0) {
+      return Promise.reject(new RangeError('health score retention cutoff must be a non-negative safe integer'))
+    }
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('delete old brain health scores', () => (
+          this.workerClient!.request<number>('deleteHealthScoresBefore', { before })
+        ))
+      }
+      return this.withSqliteLockRetry('delete old brain health scores', () => (
+        this.db.prepare(DELETE_BRAIN_HEALTH_SCORES_BEFORE).run(before).changes
+      ))
     })
   }
 

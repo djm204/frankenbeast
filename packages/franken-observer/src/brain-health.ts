@@ -118,8 +118,8 @@ export class BrainHealthScorer {
     window: BrainHealthHistoryWindow = {},
   ): Promise<BrainHealthSample[]> {
     return this.adapter.queryHealthScores({
-      brainId: requireBrainId(brainId),
       ...window,
+      brainId: requireBrainId(brainId),
     });
   }
 }

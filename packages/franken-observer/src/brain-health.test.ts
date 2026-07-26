@@ -87,6 +87,24 @@ describe('BrainHealthScorer', () => {
     await expect(scorer.getHealthHistory('brain-a', { since: 1_001, before: 1_999 }))
       .resolves.toEqual([]);
 
+    const widerWindow = { brainId: 'brain-b', since: 0 };
+    await expect(scorer.getHealthHistory('brain-a', widerWindow))
+      .resolves.toEqual([degraded, healthy]);
+
+    await adapter.close();
+  });
+
+  it('supports explicit retention pruning without deleting recent health scores', async () => {
+    const adapter = new SQLiteAdapter(':memory:', { useWorkerThread: false });
+    const scorer = new BrainHealthScorer(adapter);
+    await scorer.computeAndPersist('brain-a', HEALTHY_SIGNALS, 1_000);
+    await scorer.computeAndPersist('brain-a', HEALTHY_SIGNALS, 2_000);
+
+    await expect(adapter.deleteHealthScoresBefore(1_500)).resolves.toBe(1);
+    await expect(scorer.getHealthHistory('brain-a')).resolves.toEqual([
+      expect.objectContaining({ timestamp: 2_000 }),
+    ]);
+
     await adapter.close();
   });
 

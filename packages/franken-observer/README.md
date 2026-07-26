@@ -335,9 +335,12 @@ const history = await health.getHealthHistory('definition-42', {
   since: Date.now() - 24 * 60 * 60 * 1_000,
   before: Date.now(),
 })
+
+// Apply an operator-chosen retention window (for example, keep 30 days).
+await db.deleteHealthScoresBefore(Date.now() - 30 * 24 * 60 * 60 * 1_000)
 ```
 
-The SQLite history is indexed by brain id and timestamp. Query results are newest-first and include the exact normalized signals and weights used for each score.
+The SQLite history is indexed by brain id and timestamp. Query results are newest-first and include the exact normalized signals and weights used for each score. Snapshots are not pruned implicitly because retention needs vary by deployment; operators should schedule `deleteHealthScoresBefore()` with their chosen cutoff.
 
 ---
 
