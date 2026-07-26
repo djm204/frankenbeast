@@ -11,6 +11,7 @@ Verified against live GitHub and exact `origin/main` `cb2e7c39199a007c4a4c244c16
 - [x] Verify current-main integration tests, typecheck, build, lint, real-data behavior, and scope boundaries.
 - [x] Verify durable local/public staging with synthetic data quarantined and placeholder writers disabled.
 - [x] Record residual risks and teardown ownership without stopping the user-acceptance endpoint.
+- [ ] Merge the exact-head closeout ledger PR, close epic #3726, and verify the ledger PR and epic are terminal on live GitHub.
 
 ## Dependency and foundation status
 
@@ -129,28 +130,29 @@ Independent verifier card `t_8aa0af15` returned `PASS` on exact `origin/main` `c
 
 The canonical staging handoff (`t_0f1467ea`) and independent verifier both passed on deployed SHA `cb2e7c39199a007c4a4c244c16aa383fb0f633d0`.
 
-- Public dashboard: https://267b-142-161-28-139.ngrok-free.app/#/dashboard (HTTPS 200 at closeout verification).
+- Public dashboard: https://2d23-142-161-28-139.ngrok-free.app/#/dashboard, protected independently by ngrok Traffic Policy HTTP Basic authentication. The policy and credential files are local mode-`0600` state and no credential is stored in this repository.
 - Durable services: `frankenbeast-brain-vitals-stage-backend.service`, `frankenbeast-brain-vitals-stage-dashboard.service`, and `frankenbeast-brain-vitals-stage-ngrok.service` are enabled and active.
 - Exposure: backend `127.0.0.1:3747` and dashboard/BFF `127.0.0.1:5190` remain loopback-only; ngrok forwards only the intended dashboard entrypoint.
-- Authenticated acceptance: snapshot, one-hour history, per-run drill-down, SSE ticket/stream, dashboard rendering, Pulse Map interaction, and run-detail interaction passed locally and publicly.
+- Public access control: an unauthenticated `/health` request returns HTTP 401; an authenticated `/health` request returns HTTP 200. Authenticated headless Firefox renders Brain Vitals, Pulse Map, and the genuine run drill-down through the public endpoint.
+- Authenticated acceptance: snapshot, one-hour history, per-run drill-down, SSE ticket/stream, dashboard rendering, Pulse Map interaction, and run-detail interaction passed locally and through the independently authenticated public endpoint.
 - Genuine run: `run_682cd478-2fc1-475c-8c3c-2b7a6e60b8a1`, with real `run.created`, `attempt.started`, and `attempt.finished` events and one real process sample.
 - Synthetic-data correction: contaminated staging state and the rejected seed helper were quarantined; `frankenbeast-brain-vitals-stage-pulse.timer` is disabled/inactive and its pulse service is inactive. No synthetic epoch is used as acceptance evidence.
-- Keep-live decision: services and tunnel remain running for user testing; teardown is intentionally deferred.
+- Keep-live decision: services and tunnel remain running for user testing. Repository owner/operator `djm204` owns teardown, triggered by explicit user confirmation that testing is complete (or an explicit request to withdraw the endpoint); teardown means disabling/stopping the three `frankenbeast-brain-vitals-stage-*` services and removing the protected local ngrok policy/credential state.
 
 ## Scope and documentation conclusions
 
-- Implemented scope is limited to observer telemetry/persistence, orchestrator lifecycle/API/proxy/docs, and the web Brain Vitals API/dashboard/Pulse Map/tests.
+- Whole-epic scope is limited to shared types and MCP-suite foundations (`packages/franken-types`, `packages/franken-mcp-suite`), observer telemetry/persistence, orchestrator lifecycle/API/proxy/docs, and the web Brain Vitals API/dashboard/Pulse Map/tests.
 - No `IBrain`, `BrainRegistry`, lesson consolidation, hive-mind, central-command chat, or other unrelated Hive Brain implementation was introduced.
 - The current Pulse Map intentionally exposes only the five operational dimensions. Faculty nodes remain an additive cross-epic follow-up once a compatible real faculty activity stream exists.
 - Existing SSE/ticket auth and UI detail-panel conventions were reused; no charting dependency or duplicate project identity was introduced.
 - The final architecture and route contract are documented in `docs/ARCHITECTURE.md`, `packages/franken-observer/README.md`, and `packages/franken-web/README.md`. A standalone Brain Vitals ADR was not added; the epic's implemented architecture is durably captured in those docs and this ledger.
-- The stale unchecked terminal boxes in the older #3729/#3730 per-issue progress files are bookkeeping drift only; live GitHub, CI, Codex, thread, merge, and verifier evidence above supersedes them.
+- The matching #3729/#3730 progress files have been reconciled with the live terminal evidence recorded above.
 
 ## Residual risks
 
-- The ngrok free-tier URL may rotate or expire despite the durable enabled service; it was HTTPS 200 at closeout and must remain live until explicit teardown.
+- The ngrok free-tier URL may rotate or expire despite the durable enabled service; its independently authenticated endpoint returned 401 without credentials and 200 with credentials at closeout, and it must remain live until the owner receives the explicit teardown trigger above.
 - Best-effort power is an estimate derived from real process resource samples, not metered electricity; unsupported telemetry remains unavailable rather than invented.
 - A full local orchestrator sweep passed 4,573/4,576 tests. The three failures assert that managed services/remote chat are absent, but this acceptance host must keep the staging services live. Focused product suites, exact-head CI, full web, typecheck, build, lint, and public acceptance are green.
 - Faculty activity nodes are intentionally deferred until real Hive Brain activity data exists; adding placeholders would regress the verified scope/real-data boundary.
 
-No blocking correctness, security, regression, scope, placeholder, review, merge, issue-state, or staging discrepancy remains for epic #3726 closeout.
+No blocking correctness, security, regression, scope, placeholder, or staging discrepancy remains. Final merge/review gates and epic closure remain intentionally pending in the unchecked closeout item above.
