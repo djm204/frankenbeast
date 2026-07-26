@@ -1421,6 +1421,7 @@ async function runChatCommandIfRequested(
       ? createBeastServices({
         beastsDb: join(paths.frankenbeastDir, 'beast.db'),
         beastLogsDir: paths.beastLogsDir,
+        tracesDb: paths.tracesDb,
         root,
         brainDbPath: config.brain?.dbPath,
         skillsDir: typeof skillManager?.getSkillsDir === 'function'
@@ -1844,6 +1845,7 @@ async function runBeastDaemonCommand(
     root,
     beastsDb: paths.beastsDb,
     beastLogsDir: paths.beastLogsDir,
+    tracesDb: paths.tracesDb,
     operatorToken,
     ...(args.host ? { host: args.host } : {}),
     ...(args.port !== undefined ? { port: args.port } : {}),

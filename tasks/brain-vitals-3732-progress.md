@@ -21,4 +21,5 @@
 - [x] Propagate run/agent identity through CLI phases, telemetry, and resource sampling.
 - [x] RED→GREEN: bound/index per-second snapshot run reads by brain and activity window.
 - [x] RED→GREEN: address invocation-4 findings for awaited chat disposal, lazy legacy trace lookup, normalized SSE activity filtering, failure-safe adapter close, and container telemetry-path validation.
+- [x] Address invocation-5 findings for coalesced SSE snapshots, telemetry override propagation, per-run pressure aggregation, span-based cache activity, bounded fingerprints, and budget-matched burn ratios.
 - [ ] Merge the PR, verify issue #3732 closes, and record final evidence.

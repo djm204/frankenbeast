@@ -35,7 +35,10 @@ describe('brain vitals routes', () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
 
-  function createFixture(rateLimit?: { windowMs: number; max: number }) {
+  function createFixture(
+    rateLimit?: { windowMs: number; max: number },
+    now: () => number = () => NOW,
+  ) {
     const root = mkdtempSync(join(tmpdir(), 'brain-vitals-routes-'));
     const repository = new SQLiteBeastRepository(join(root, 'beasts.db'));
     const observer = new SQLiteAdapter(join(root, 'observer.db'), { useWorkerThread: false });
@@ -43,7 +46,7 @@ describe('brain vitals routes', () => {
     const ticketStore = new SseConnectionTicketStore();
     const lifecycleMetrics = new BeastLifecycleMetrics(
       window => repository.listLifecycleAttempts(window),
-      { now: () => new Date(NOW).toISOString() },
+      { now: () => new Date(now()).toISOString() },
     );
     const service = new BrainVitalsService({
       observer,
@@ -51,7 +54,7 @@ describe('brain vitals routes', () => {
       eventBus,
       costCalculator: new CostCalculator(DEFAULT_PRICING),
       lifecycleMetrics,
-      now: () => NOW,
+      now,
     });
     const app = new Hono();
     app.onError(errorHandler);
@@ -255,6 +258,92 @@ describe('brain vitals routes', () => {
     await service.snapshot('reviewer');
 
     expect(listRuns).not.toHaveBeenCalled();
+  });
+
+  it('coalesces stream snapshots and aggregates only comparable health signals', async () => {
+    const { observer, repository, service } = createFixture();
+    const budgeted = repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: { budget: 1 },
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    const unbudgeted = repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:01:00.000Z',
+    });
+    await observer.recordResourceSample({
+      agentId: 'pressured', runId: budgeted.id, pid: 1, cpuPercent: 90, rssBytes: 1,
+      estimatedWatts: 1, estimatedEnergyWh: 1, timestamp: NOW - 2,
+    });
+    await observer.recordResourceSample({
+      agentId: 'idle', runId: unbudgeted.id, pid: 2, cpuPercent: 1, rssBytes: 1,
+      estimatedWatts: 1, estimatedEnergyWh: 1, timestamp: NOW - 1,
+    });
+    const trace = TraceContext.createTrace(unbudgeted.id);
+    trace.id = unbudgeted.id;
+    const span = TraceContext.startSpan(trace, { name: 'unbudgeted-usage' });
+    SpanLifecycle.recordTokenUsage(span, { model: 'gpt-4o', promptTokens: 1_000_000, completionTokens: 0 });
+    TraceContext.endSpan(span);
+    Object.assign(span, { startedAt: NOW - 1_000, endedAt: NOW - 1_000 });
+    TraceContext.endTrace(trace);
+    await observer.flush(trace);
+    const snapshot = vi.spyOn(service, 'snapshot');
+
+    const [first, second] = await Promise.all([
+      service.streamSnapshot('reviewer'),
+      service.streamSnapshot('reviewer'),
+    ]);
+
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    expect(first).toBe(second);
+    expect(first.health.signals.resourcePressure).toBe(0.9);
+    expect(first.cost.estimatedUsd).toBeGreaterThan(0);
+    expect(first.cost.burnRatio).toBe(0);
+  });
+
+  it('detects new token spans when window totals decrease and evicts stale run fingerprints', async () => {
+    let now = NOW;
+    const { eventBus, observer, repository, service } = createFixture(undefined, () => now);
+    const run = repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: new Date(NOW - 30 * 60_000).toISOString(),
+    });
+    const trace = TraceContext.createTrace(run.id);
+    trace.id = run.id;
+    const oldSpan = TraceContext.startSpan(trace, { name: 'old-usage' });
+    SpanLifecycle.recordTokenUsage(oldSpan, { model: 'gpt-4o', promptTokens: 100, completionTokens: 0 });
+    TraceContext.endSpan(oldSpan);
+    Object.assign(oldSpan, { startedAt: NOW - 31 * 60_000, endedAt: NOW - 31 * 60_000 });
+    await observer.flush(trace);
+    await service.snapshot('reviewer');
+    const events: Array<Record<string, unknown>> = [];
+    const unsubscribe = eventBus.subscribe((event) => {
+      if (event.type === 'brain-vitals.activity') events.push(event.data);
+    });
+    now += 31 * 60_000;
+    const newSpan = TraceContext.startSpan(trace, { name: 'new-usage' });
+    SpanLifecycle.recordTokenUsage(newSpan, { model: 'gpt-4o', promptTokens: 50, completionTokens: 0 });
+    TraceContext.endSpan(newSpan);
+    Object.assign(newSpan, { startedAt: now - 1_000, endedAt: now - 1_000 });
+    TraceContext.endTrace(trace);
+    await observer.flush(trace);
+
+    await service.snapshot('reviewer');
+    unsubscribe();
+
+    expect(events).toContainEqual(expect.objectContaining({
+      dimension: 'cache', kind: 'cache.miss', runId: run.id,
+    }));
+    repository.updateRun(run.id, {
+      status: 'completed',
+      startedAt: new Date(NOW - 40 * 60_000).toISOString(),
+      finishedAt: new Date(NOW - 30 * 60_000).toISOString(),
+    });
+    now += 2 * 60 * 60_000;
+    await service.snapshot('reviewer');
+    const fingerprints = (service as unknown as {
+      activityFingerprints: Map<string, unknown>;
+    }).activityFingerprints;
+    expect(fingerprints.has(run.id)).toBe(false);
   });
 
   it('serializes concurrent health persistence and prunes expired resource samples', async () => {

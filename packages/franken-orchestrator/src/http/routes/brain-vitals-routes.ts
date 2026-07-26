@@ -98,8 +98,7 @@ interface TokenAndCostTotals {
 }
 
 interface ActivityFingerprint {
-  readonly promptTokens: number;
-  readonly cacheReadTokens: number;
+  readonly tokenActivityIds: ReadonlySet<string>;
   readonly budgetBurnRatio: number;
   readonly resourcePressure: number;
   readonly resourceTimestamp: number | null;
@@ -111,6 +110,10 @@ export class BrainVitalsService {
   private readonly seenCompactions = new Map<string, Set<string>>();
   private readonly directlyPublishedCompactions = new Set<string>();
   private readonly activityFingerprints = new Map<string, ActivityFingerprint>();
+  private readonly streamSnapshots = new Map<string, {
+    readonly expiresAt: number;
+    readonly promise: ReturnType<BrainVitalsService['snapshot']>;
+  }>();
   private readonly directResourcePressure = new Map<string, number>();
   private readonly directBudgetBurn = new Map<string, number>();
   private readonly lastPersistedHealthAt = new Map<string, number>();
@@ -171,12 +174,23 @@ export class BrainVitalsService {
     // Orphan sweeps are process-global and cannot be attributed to one definition.
     const orphaned = 0;
     const budgetUsd = sumBudgets(runs);
-    const burnRatio = budgetUsd === null ? 0 : clamp(tokenTotals.estimatedUsd / budgetUsd);
+    const budgetedEstimatedUsd = details.reduce((total, detail, index) => (
+      runs[index] && readBudget(runs[index]) !== null ? total + detail.tokens.estimatedUsd : total
+    ), 0);
+    const burnRatio = budgetUsd === null ? 0 : clamp(budgetedEstimatedUsd / budgetUsd);
     const churnRatio = spawnCount + orphaned === 0
       ? 0
       : clamp((failed + stopped + orphaned) / (spawnCount + orphaned));
-    const resourceAvailable = latestResource !== null;
-    const currentResourcePressure = resourceAvailable ? resourcePressure(latestResource) : 0;
+    const latestResourcesByRun = details
+      .map((detail) => detail.resources.reduce<ProcessResourceSample | null>(
+        (latest, sample) => latest === null || sample.timestamp > latest.timestamp ? sample : latest,
+        null,
+      ))
+      .filter((sample): sample is ProcessResourceSample => sample !== null);
+    const resourceAvailable = latestResourcesByRun.length > 0;
+    const currentResourcePressure = resourceAvailable
+      ? Math.max(...latestResourcesByRun.map(resourcePressure))
+      : 0;
     const signals = {
       taskSuccessRate: lifecycleAggregate?.completionRate
         ?? (terminal === 0 ? 0 : completed / terminal),
@@ -236,6 +250,23 @@ export class BrainVitalsService {
         burnRatio,
       },
     };
+  }
+
+  streamSnapshot(brainId: string, windowMs = DEFAULT_WINDOW_MS): ReturnType<BrainVitalsService['snapshot']> {
+    brainId = normalizeBrainId(brainId);
+    const now = Date.now();
+    for (const [cachedKey, cached] of this.streamSnapshots) {
+      if (cached.expiresAt <= now) this.streamSnapshots.delete(cachedKey);
+    }
+    const key = `${brainId}:${windowMs}`;
+    const existing = this.streamSnapshots.get(key);
+    if (existing && existing.expiresAt > now) return existing.promise;
+    const promise = this.snapshot(brainId, windowMs);
+    this.streamSnapshots.set(key, { expiresAt: now + SNAPSHOT_POLL_MS, promise });
+    void promise.catch(() => {
+      if (this.streamSnapshots.get(key)?.promise === promise) this.streamSnapshots.delete(key);
+    });
+    return promise;
   }
 
   getHistory(brainId: string, options: { since?: number; before?: number; limit?: number } = {}): Promise<BrainHealthSample[]> {
@@ -341,6 +372,7 @@ export class BrainVitalsService {
     ]);
     return {
       tokens: traceTokenTotals(trace, this.options.costCalculator, since, before),
+      tokenActivities: traceTokenActivities(trace, since, before),
       // sessionId is the stable Beast run id. Compaction runId is the observer
       // trace id for older writers, so filtering by it would hide real records.
       compactions: compactions.filter((event) => event.timestamp <= before),
@@ -400,7 +432,11 @@ export class BrainVitalsService {
 
   private publishSignalChanges(
     runs: readonly BeastRun[],
-    details: readonly { tokens: TokenAndCostTotals; resources: readonly ProcessResourceSample[] }[],
+    details: readonly {
+      tokens: TokenAndCostTotals;
+      tokenActivities: readonly { id: string; cacheReadTokens: number }[];
+      resources: readonly ProcessResourceSample[];
+    }[],
     timestamp: number,
   ): void {
     for (const [index, run] of runs.entries()) {
@@ -409,8 +445,7 @@ export class BrainVitalsService {
       const latestResource = telemetry.resources.at(0) ?? null;
       const budget = readBudget(run);
       const current: ActivityFingerprint = {
-        promptTokens: telemetry.tokens.promptTokens,
-        cacheReadTokens: telemetry.tokens.cacheReadTokens,
+        tokenActivityIds: new Set(telemetry.tokenActivities.map((activity) => activity.id)),
         budgetBurnRatio: budget === null ? 0 : clamp(telemetry.tokens.estimatedUsd / budget),
         resourcePressure: latestResource ? resourcePressure(latestResource) : 0,
         resourceTimestamp: latestResource?.timestamp ?? null,
@@ -418,8 +453,13 @@ export class BrainVitalsService {
       const previous = this.activityFingerprints.get(run.id);
       this.activityFingerprints.set(run.id, current);
       if (!previous) continue;
-      if (current.promptTokens > previous.promptTokens) {
-        const cacheKind = current.cacheReadTokens > previous.cacheReadTokens ? 'cache.hit' : 'cache.miss';
+      const newTokenActivities = telemetry.tokenActivities.filter(
+        (activity) => !previous.tokenActivityIds.has(activity.id),
+      );
+      if (newTokenActivities.length > 0) {
+        const cacheKind = newTokenActivities.some((activity) => activity.cacheReadTokens > 0)
+          ? 'cache.hit'
+          : 'cache.miss';
         this.publishActivityForRun(run.id, 'cache', cacheKind, timestamp);
       }
       const costKind = crossedBudgetThreshold(previous.budgetBurnRatio, current.budgetBurnRatio);
@@ -436,6 +476,13 @@ export class BrainVitalsService {
           current.resourceTimestamp ?? timestamp,
         );
       }
+    }
+    const currentRunIds = new Set(runs.map((run) => run.id));
+    for (const runId of this.activityFingerprints.keys()) {
+      if (currentRunIds.has(runId)) continue;
+      this.activityFingerprints.delete(runId);
+      this.directResourcePressure.delete(runId);
+      this.directBudgetBurn.delete(runId);
     }
   }
 
@@ -558,7 +605,7 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
     }
 
     return streamSSE(c, async (stream) => {
-      let snapshot = JSON.stringify(await deps.service.snapshot(brainId));
+      let snapshot = JSON.stringify(await deps.service.streamSnapshot(brainId));
       await stream.writeSSE({ event: 'snapshot', data: snapshot });
       const unsubscribe = deps.eventBus.subscribe(async (event) => {
         try {
@@ -600,7 +647,7 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
         if (snapshotPending) return;
         snapshotPending = true;
         try {
-          const next = JSON.stringify(await deps.service.snapshot(brainId));
+          const next = JSON.stringify(await deps.service.streamSnapshot(brainId));
           if (next !== snapshot) {
             snapshot = next;
             await stream.writeSSE({ event: 'snapshot', data: next });
@@ -693,6 +740,19 @@ function traceTokenTotals(
 
 function tokenCount(value: unknown): number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function traceTokenActivities(
+  trace: Trace | null,
+  since: number,
+  before: number,
+): Array<{ id: string; cacheReadTokens: number }> {
+  return trace?.spans.flatMap((span) => {
+    const activityAt = span.endedAt ?? span.startedAt;
+    const promptTokens = tokenCount(span.metadata.promptTokens);
+    if (activityAt < since || activityAt > before || promptTokens === 0) return [];
+    return [{ id: span.id, cacheReadTokens: tokenCount(span.metadata.cacheReadTokens) }];
+  }) ?? [];
 }
 
 function sumTokenTotals(totals: readonly TokenAndCostTotals[]): TokenAndCostTotals {
