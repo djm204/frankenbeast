@@ -16,6 +16,7 @@ interface SmartSwarmPageProps {
 }
 
 const MAX_VISIBLE_TASKS = 200;
+const MAX_VISIBLE_EVIDENCE = 100;
 
 function available<T>(section: RuntimeSection<T>): T | null {
   return section.status === 'available' ? section.data : null;
@@ -27,6 +28,10 @@ function errorMessage(error: unknown): string {
 
 function capabilityReason(capability: RuntimeCapability): string | null {
   return capability.status === 'unsupported' ? capability.reason : null;
+}
+
+function taskActivityRank(state: string): number {
+  return ['succeeded', 'failed', 'cancelled', 'archived'].includes(state) ? 1 : 0;
 }
 
 function StateNotice({ provider, snapshot, error, onRetry }: {
@@ -98,12 +103,17 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<unknown>(null);
+  const [snapshotError, setSnapshotError] = useState<unknown>(null);
+  const [streamError, setStreamError] = useState<unknown>(null);
   const [connection, setConnection] = useState<RuntimeConnectionState>('connecting');
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [providerRefreshNonce, setProviderRefreshNonce] = useState(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snapshotRequestsInFlight = useRef(0);
+  const refreshPending = useRef(false);
 
   const provider = providers.find((candidate) => candidate.id === providerId);
+  const error = snapshotError ?? streamError;
   const workspaces = available(workspaceCatalog ?? snapshot?.workspaces ?? { status: 'available', data: [] }) ?? [];
   const agents = snapshot ? available(snapshot.agents) ?? [] : [];
   const tasks = snapshot ? available(snapshot.tasks) ?? [] : [];
@@ -127,22 +137,23 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             ? current
             : nextProviders[0]?.id ?? ''
         ));
-        setError(null);
+        setSnapshotError(null);
         if (nextProviders.length === 0) setLoading(false);
       })
       .catch((nextError: unknown) => {
         if (!cancelled) {
-          setError(nextError);
+          setSnapshotError(nextError);
           setLoading(false);
         }
       });
     return () => { cancelled = true; };
-  }, [client]);
+  }, [client, providerRefreshNonce]);
 
   useEffect(() => {
     if (!providerId) return;
     let cancelled = false;
     setLoading(true);
+    snapshotRequestsInFlight.current += 1;
     void client.fetchSnapshot(providerId, {
       ...(workspaceId ? { workspaceId } : {}),
       activityLimit: 100,
@@ -162,35 +173,42 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             ? current
             : null
         ));
-        setError(null);
+        setSnapshotError(null);
         setLoading(false);
       })
       .catch((nextError: unknown) => {
         if (!cancelled) {
-          setError(nextError);
+          setSnapshotError(nextError);
           setLoading(false);
+        }
+      })
+      .finally(() => {
+        snapshotRequestsInFlight.current -= 1;
+        if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
+          refreshPending.current = false;
+          setRefreshNonce((current) => current + 1);
         }
       });
     return () => { cancelled = true; };
   }, [client, providerId, workspaceId, refreshNonce]);
 
   useEffect(() => {
-    if (!provider || !workspaceId || provider.capabilities.streaming.status !== 'supported') {
+    if (!provider || provider.capabilities.streaming.status !== 'supported') {
       setConnection('unavailable');
       return;
     }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setConnection('connecting');
-    void client.subscribe(provider.id, workspaceId, {
+    void client.subscribe(provider.id, workspaceId || undefined, {
       connection: (state) => {
         if (!cancelled) {
           setConnection(state);
-          if (state === 'connected') setError(null);
+          if (state === 'connected') setStreamError(null);
         }
       },
       error: (streamError) => {
-        if (!cancelled) setError(streamError);
+        if (!cancelled) setStreamError(streamError);
       },
       event: (event: RuntimeEvent) => {
         if (cancelled) return;
@@ -205,7 +223,11 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         if (!refreshTimer.current) {
           refreshTimer.current = setTimeout(() => {
             refreshTimer.current = null;
-            setRefreshNonce((current) => current + 1);
+            if (snapshotRequestsInFlight.current > 0) {
+              refreshPending.current = true;
+            } else {
+              setRefreshNonce((current) => current + 1);
+            }
           }, 250);
         }
       },
@@ -213,7 +235,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       if (cancelled) stop();
       else unsubscribe = stop;
     }).catch((streamError: unknown) => {
-      if (!cancelled) setError(streamError);
+      if (!cancelled) setStreamError(streamError);
     });
     return () => {
       cancelled = true;
@@ -226,11 +248,39 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   }, [client, provider, workspaceId]);
 
   const filteredAgents = agents.filter((agent) => !workspaceId || agent.workspaceId === workspaceId);
+  const visibleAgents = filteredAgents.slice(0, MAX_VISIBLE_EVIDENCE);
   const filteredTasks = tasks.filter((task) => !workspaceId || task.workspaceId === workspaceId);
-  const visibleTasks = filteredTasks.slice(0, MAX_VISIBLE_TASKS);
-  const filteredEvents = events.filter((event) => !workspaceId || event.workspaceId === workspaceId).slice(0, 100);
+  const visibleTasks = [...filteredTasks]
+    .sort((left, right) => taskActivityRank(left.state) - taskActivityRank(right.state))
+    .slice(0, MAX_VISIBLE_TASKS);
+  const filteredEvents = events
+    .filter((event) => !workspaceId || event.workspaceId === workspaceId)
+    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+    .slice(0, 100);
   const filteredBlockers = blockers.filter((blocker) => !workspaceId || blocker.workspaceId === workspaceId);
   const filteredApprovals = approvals.filter((approval) => !workspaceId || approval.workspaceId === workspaceId);
+  const visibleBlockers = filteredBlockers.slice(0, MAX_VISIBLE_EVIDENCE);
+  const visibleApprovals = filteredApprovals.slice(0, MAX_VISIBLE_EVIDENCE);
+
+  async function refreshWorkspaceCatalog(): Promise<void> {
+    if (!providerId || loading) return;
+    setLoading(true);
+    snapshotRequestsInFlight.current += 1;
+    try {
+      const catalogSnapshot = await client.fetchSnapshot(providerId, { activityLimit: 1 });
+      setWorkspaceCatalog(catalogSnapshot.workspaces);
+      setSnapshotError(null);
+    } catch (nextError) {
+      setSnapshotError(nextError);
+    } finally {
+      snapshotRequestsInFlight.current -= 1;
+      setLoading(false);
+      if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
+        refreshPending.current = false;
+        setRefreshNonce((current) => current + 1);
+      }
+    }
+  }
 
   if (loading && !snapshot) {
     return <main className="smart-swarm-page" aria-busy="true"><p role="status">Loading smart-swarm live state…</p></main>;
@@ -284,6 +334,14 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
             </select>
           </label>
+          <button
+            className="button button--secondary button--compact"
+            disabled={loading || !providerId}
+            onClick={() => { void refreshWorkspaceCatalog(); }}
+            type="button"
+          >
+            Refresh workspaces
+          </button>
           {snapshot ? <UnsupportedSection label="Workspaces" section={workspaceCatalog ?? snapshot.workspaces} /> : null}
         </div>
         <div className="smart-swarm-connection" role="status">
@@ -299,7 +357,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
       <StateNotice
         error={error}
-        onRetry={() => setRefreshNonce((current) => current + 1)}
+        onRetry={() => {
+          setProviderRefreshNonce((current) => current + 1);
+          setRefreshNonce((current) => current + 1);
+        }}
         provider={provider}
         snapshot={snapshot}
       />
@@ -334,8 +395,11 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               <UnsupportedSection label="Agents" section={snapshot.agents} />
               <UnsupportedSection label="Tasks" section={snapshot.tasks} />
               <UnsupportedSection label="Runs" section={snapshot.runs} />
+              {filteredAgents.length > MAX_VISIBLE_EVIDENCE
+                ? <p>Showing {MAX_VISIBLE_EVIDENCE} of {filteredAgents.length} agents</p>
+                : null}
               <div className="smart-swarm-agents">
-                {filteredAgents.map((agent) => (
+                {visibleAgents.map((agent) => (
                   <article className={`smart-swarm-agent smart-swarm-agent--${agent.state}`} key={agent.id}>
                     <strong>{agent.displayName}</strong>
                     <span>{String(agent.metadata?.role ?? 'agent')} · {agent.state}</span>
@@ -378,12 +442,18 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               <section className="rail-card">
                 <p className="eyebrow">Blockers</p>
                 <UnsupportedSection label="Blockers" section={snapshot.blockers} />
-                {filteredBlockers.map((blocker) => <article key={blocker.id}><strong>{blocker.category}</strong><p>{blocker.summary}</p></article>)}
+                {filteredBlockers.length > MAX_VISIBLE_EVIDENCE
+                  ? <p>Showing {MAX_VISIBLE_EVIDENCE} of {filteredBlockers.length} blockers</p>
+                  : null}
+                {visibleBlockers.map((blocker) => <article key={blocker.id}><strong>{blocker.category}</strong><p>{blocker.summary}</p></article>)}
               </section>
               <section className="rail-card">
                 <p className="eyebrow">Approvals</p>
                 <UnsupportedSection label="Approvals" section={snapshot.approvals} />
-                {filteredApprovals.map((approval) => <article key={approval.id}><strong>{approval.state}</strong><p>{approval.summary}</p></article>)}
+                {filteredApprovals.length > MAX_VISIBLE_EVIDENCE
+                  ? <p>Showing {MAX_VISIBLE_EVIDENCE} of {filteredApprovals.length} approvals</p>
+                  : null}
+                {visibleApprovals.map((approval) => <article key={approval.id}><strong>{approval.state}</strong><p>{approval.summary}</p></article>)}
               </section>
             </aside>
           </div>
