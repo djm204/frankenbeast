@@ -126,6 +126,7 @@ export function createCodexAppServerRequest(
   };
 
   const consumeOutput = (server: ChildProcessWithoutNullStreams, chunk: Buffer): void => {
+    if (child !== server) return;
     buffered += decoder.write(chunk);
     let newline = buffered.indexOf('\n');
     while (newline >= 0) {
@@ -176,6 +177,10 @@ export function createCodexAppServerRequest(
     });
     child = server;
     server.unref();
+    for (const stream of [server.stdin, server.stdout, server.stderr]) {
+      const unref = (stream as { unref?: () => void }).unref;
+      unref?.call(stream);
+    }
     decoder = new StringDecoder('utf8');
     buffered = '';
     initialization = new Promise<void>((resolve, reject) => {
