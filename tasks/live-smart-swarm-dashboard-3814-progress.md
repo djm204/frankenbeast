@@ -9,10 +9,12 @@
 - [x] Verify production paths have no fixture/demo/synthetic fallback and do not touch Hive Brain files.
 - [x] Run focused runtime/web tests, the complete web suite, lint, typecheck, and build gates.
 - [x] Perform browser/live verification against real Hermes-backed endpoints where available.
-- [x] Rebase onto #3821 exact head `7b98df2486da583dedb1971b9348a7c0290742a6` and re-run relevant gates.
-- [ ] Commit with David Mendez identity, push, and open one linked PR without merging.
-- [ ] Run the real GitHub @codex review loop to exact-head clean with zero unresolved threads.
+- [ ] Rebase onto the final exact clean #3821 head and re-run relevant gates (latest verified intermediate base: `9b6c62305360bd5f3aa990a6787b9a258a6db082`).
+- [x] Commit with David Mendez identity, push, and open one linked PR without merging.
+- [ ] Run the real GitHub @codex review loop to exact-head clean with zero unresolved threads; round-three's six findings are fixed locally and focused coverage is 27/27.
 - [ ] Verify exact-head CI is green and record evidence on the PM/root cards.
 - [ ] Request human review through the Kanban lifecycle with a structured handoff.
 
 Verification note: `npm test` was also run at the repository root after the rebase. All non-orchestrator workspaces passed; the existing orchestrator suite reported 10 unrelated failures (timeouts plus network/run test pollution), while the 35 normalized-runtime tests and all 779 web tests passed in isolation.
+
+Recovery note: after the round-three remediation and intermediate `9b6c62305` rebase, the complete web suite passes 799/799, root lint reports zero errors, and root typecheck/build pass. Publication is paused until #3821 resolves its remaining current-head findings and establishes the final exact clean base.
