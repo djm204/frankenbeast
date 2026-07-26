@@ -10,7 +10,7 @@
 - [x] Update franken-web README and architecture documentation.
 - [x] Run focused tests, @franken/web typecheck, lint, full tests, and production build.
 - [x] Run the real persisted-data browser golden path and trigger a real activity pulse.
-- [ ] Commit/push the unique exact-origin/main branch and open one PR closing #3738.
+- [x] Commit/push the unique exact-origin/main branch and open one PR closing #3738 (#3807).
 - [ ] Run bounded exact-head GitHub Codex review tiers; reply to and resolve every finding.
 - [ ] Verify exact-head CI and zero unresolved threads; merge.
 - [ ] Verify issue closure and record the final Kanban handoff.
