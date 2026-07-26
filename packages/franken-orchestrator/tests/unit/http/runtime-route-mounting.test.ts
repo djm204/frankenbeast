@@ -10,7 +10,7 @@ const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 describe('smart-swarm route composition', () => {
-  it('mounts the default Hermes runtime registry behind operator authentication', async () => {
+  it('mounts the default runtime registry behind operator authentication', async () => {
     const sessionStoreDir = mkdtempSync(join(tmpdir(), 'runtime-route-mount-'));
     dirs.push(sessionStoreDir);
     const app = createChatApp({
@@ -27,7 +27,10 @@ describe('smart-swarm route composition', () => {
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      data: [expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) })],
+      data: [
+        expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
+        expect.objectContaining({ id: 'ollama', health: expect.objectContaining({ state: 'unavailable' }) }),
+      ],
     });
   });
 });

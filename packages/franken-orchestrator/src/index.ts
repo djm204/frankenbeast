@@ -156,6 +156,7 @@ export type { RedactionDecision, RedactionDecisionSource, RedactionResult } from
 // Provider-neutral smart-swarm runtime adapters
 export {
   HermesRuntimeAdapter,
+  OllamaRuntimeAdapter,
   RuntimeAdapterRegistry,
   RuntimeCursorError,
   RuntimeAgentSchema,
@@ -176,6 +177,8 @@ export {
 } from './runtime/index.js';
 export type {
   HermesRuntimeAdapterOptions,
+  OllamaRuntimeAdapterOptions,
+  RuntimeAdapterDefaultsOptions,
   RuntimeAdapter,
   RuntimeAgent,
   RuntimeApproval,

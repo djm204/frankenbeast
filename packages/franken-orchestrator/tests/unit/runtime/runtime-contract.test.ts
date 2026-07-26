@@ -7,6 +7,7 @@ import {
   RuntimeCursorError,
   RuntimeHealthSchema,
   RuntimeMetadataSchema,
+  OllamaRuntimeAdapter,
   RuntimeProviderSchema,
   RuntimeRunSchema,
   RuntimeSnapshotSchema,
@@ -149,11 +150,12 @@ describe('provider-neutral runtime contract', () => {
     await expect(registry.list()).rejects.toThrow(/does not match registered id/);
   });
 
-  it('registers Hermes as the first default runtime adapter without inventing availability', async () => {
+  it('registers read-only runtime adapters without inventing availability', async () => {
     const registry = createDefaultRuntimeAdapterRegistry({ env: {} });
 
     await expect(registry.list()).resolves.toEqual([
       expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
+      expect.objectContaining({ id: 'ollama', health: expect.objectContaining({ state: 'unavailable' }) }),
     ]);
   });
 
@@ -163,6 +165,7 @@ describe('provider-neutral runtime contract', () => {
     expect(orchestrator.RuntimeAdapterRegistry).toBe(RuntimeAdapterRegistry);
     expect(orchestrator.RuntimeCursorError).toBe(RuntimeCursorError);
     expect(orchestrator.HermesRuntimeAdapter).toEqual(expect.any(Function));
+    expect(orchestrator.OllamaRuntimeAdapter).toBe(OllamaRuntimeAdapter);
     expect(RuntimeAgentSchema).toEqual(expect.any(Object));
     expect(RuntimeRunSchema).toEqual(expect.any(Object));
     expect(orchestrator.RuntimeAgentSchema).toBe(RuntimeAgentSchema);

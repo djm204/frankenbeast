@@ -108,6 +108,16 @@ describe('smart-swarm runtime routes', () => {
     }));
   });
 
+  it('propagates the HTTP request cancellation signal to adapter reads', async () => {
+    const { app, adapter } = createRoutes();
+
+    await app.request('/v1/smart-swarm/providers/hermes/snapshot', { headers: authHeaders() });
+    await app.request('/v1/smart-swarm/providers/hermes/events', { headers: authHeaders() });
+
+    expect(adapter.getSnapshot).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+    expect(adapter.getEvents).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+  });
+
   it('redacts absolute host paths embedded in provider-neutral response strings', async () => {
     const { app, adapter } = createRoutes();
     vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({
