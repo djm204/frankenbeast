@@ -9,7 +9,8 @@
 - [x] Update franken-web README and architecture documentation where applicable.
 - [x] Run focused tests and relevant package typecheck/build.
 - [x] Start the app with real persisted vitals data and exercise the browser golden path.
-- [ ] Commit and push a unique feature branch; open one PR closing #3733.
+- [x] Commit and push a unique feature branch; open one PR closing #3733.
+- [x] RED→GREEN: address Codex findings for paginated discovery, recoverable errors, REST/SSE races, missing resources, trend continuity, and SSE lifecycle cleanup.
 - [ ] Run exact-head Codex review tiers 5, 12, 24, and 50; address and resolve all findings.
 - [ ] Verify exact-head CI and zero unresolved review threads; merge.
 - [ ] Verify issue closure and record final evidence in the Kanban handoff.

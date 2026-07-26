@@ -12,11 +12,15 @@ interface BrainVitalsPanelProps {
   client: DashboardApiClient;
 }
 
-interface LivePoint {
+interface ResourcePoint {
   timestamp: number;
   cpuPercent: number;
   rssMb: number;
   estimatedWatts: number;
+}
+
+interface AggregatePoint {
+  timestamp: number;
   totalTokens: number;
   estimatedUsd: number;
 }
@@ -25,19 +29,43 @@ function describeError(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
 }
 
-function appendLivePoint(points: LivePoint[], snapshot: BrainVitalsSnapshot): LivePoint[] {
+function appendResourcePoint(points: ResourcePoint[], snapshot: BrainVitalsSnapshot): ResourcePoint[] {
   const resource = snapshot.resource.latest;
-  const timestamp = resource?.timestamp ?? snapshot.window.before;
+  if (snapshot.resource.availability !== 'available' || !resource) return points;
   const point = {
-    timestamp,
-    cpuPercent: resource?.cpuPercent ?? 0,
-    rssMb: resource ? resource.rssBytes / 1024 / 1024 : 0,
-    estimatedWatts: resource?.estimatedWatts ?? 0,
+    timestamp: resource.timestamp,
+    cpuPercent: resource.cpuPercent,
+    rssMb: resource.rssBytes / 1024 / 1024,
+    estimatedWatts: resource.estimatedWatts,
+  };
+  const withoutDuplicate = points.filter((candidate) => candidate.timestamp !== resource.timestamp);
+  return [...withoutDuplicate, point].sort((left, right) => left.timestamp - right.timestamp).slice(-60);
+}
+
+function appendAggregatePoint(points: AggregatePoint[], snapshot: BrainVitalsSnapshot): AggregatePoint[] {
+  const point = {
+    timestamp: snapshot.window.before,
     totalTokens: snapshot.cache.promptTokens + snapshot.cache.cacheReadTokens + snapshot.cache.cacheCreationTokens,
     estimatedUsd: snapshot.cost.estimatedUsd,
   };
-  const withoutDuplicate = points.filter((candidate) => candidate.timestamp !== timestamp);
+  const withoutDuplicate = points.filter((candidate) => candidate.timestamp !== point.timestamp);
   return [...withoutDuplicate, point].sort((left, right) => left.timestamp - right.timestamp).slice(-60);
+}
+
+function mergeHealthSamples(current: BrainHealthSample[], incoming: BrainHealthSample[]): BrainHealthSample[] {
+  const samples = new Map(current.map((sample) => [sample.timestamp, sample]));
+  for (const sample of incoming) samples.set(sample.timestamp, sample);
+  return [...samples.values()].sort((left, right) => left.timestamp - right.timestamp).slice(-120);
+}
+
+function mergeRunPage(cache: Map<string, BeastRunSummary>, incoming: BeastRunSummary[]): BeastRunSummary[] {
+  for (const run of incoming) cache.set(run.id, run);
+  while (cache.size > 500) {
+    const oldestRunId = cache.keys().next().value as string | undefined;
+    if (!oldestRunId) break;
+    cache.delete(oldestRunId);
+  }
+  return [...cache.values()];
 }
 
 function chartPoints(values: readonly number[]): string {
@@ -76,14 +104,19 @@ function TrendChart({
 export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const generationRef = useRef(0);
   const runRequestRef = useRef(0);
+  const runCacheRef = useRef(new Map<string, BeastRunSummary>());
+  const nextRunCursorRef = useRef<string | undefined>(undefined);
+  const latestSnapshotTimestampRef = useRef(0);
   const [runs, setRuns] = useState<BeastRunSummary[]>([]);
   const [brainIds, setBrainIds] = useState<string[]>([]);
   const [selectedBrainId, setSelectedBrainId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<BrainVitalsSnapshot | null>(null);
   const [history, setHistory] = useState<BrainHealthSample[]>([]);
-  const [livePoints, setLivePoints] = useState<LivePoint[]>([]);
+  const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
+  const [aggregatePoints, setAggregatePoints] = useState<AggregatePoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runDetail, setRunDetail] = useState<BrainVitalsRunDetail | null>(null);
@@ -101,27 +134,29 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setSelectedBrainId(null);
     setSnapshot(null);
     setHistory([]);
-    setLivePoints([]);
+    setResourcePoints([]);
+    setAggregatePoints([]);
+    runCacheRef.current.clear();
+    nextRunCursorRef.current = undefined;
 
     const refreshRuns = async (initial: boolean) => {
       try {
-        const { runs: nextRuns } = await client.listBrainVitalsRuns(100);
+        const cursor = nextRunCursorRef.current;
+        const { runs: nextRuns, nextCursor } = await client.listBrainVitalsRuns(100, cursor);
         if (!active || generationRef.current !== generation) return;
-        const nextBrainIds = [...new Set(nextRuns.map((run) => run.definitionId))].sort();
-        setRuns(nextRuns);
+        nextRunCursorRef.current = nextCursor;
+        const discoveredRuns = mergeRunPage(runCacheRef.current, nextRuns);
+        const nextBrainIds = [...new Set(discoveredRuns.map((run) => run.definitionId))].sort();
+        setRuns(discoveredRuns);
         setBrainIds(nextBrainIds);
         setSelectedBrainId((current) => current && nextBrainIds.includes(current) ? current : nextBrainIds[0] ?? null);
         if (nextBrainIds.length === 0) setLoading(false);
-        if (!initial) setError(null);
+        setDiscoveryError(null);
       } catch (loadError) {
         if (!active || generationRef.current !== generation) return;
         const message = `Unable to discover Brain Vitals runs. ${describeError(loadError)}`;
-        if (initial) {
-          setError(message);
-          setLoading(false);
-        } else {
-          setStreamError(message);
-        }
+        setDiscoveryError(message);
+        if (initial) setLoading(false);
       }
     };
 
@@ -145,22 +180,41 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setStreamError(null);
     setSnapshot(null);
     setHistory([]);
-    setLivePoints([]);
+    setResourcePoints([]);
+    setAggregatePoints([]);
+    latestSnapshotTimestampRef.current = 0;
     setSelectedRunId(null);
     setRunDetail(null);
+
+    const applySnapshot = (nextSnapshot: BrainVitalsSnapshot, replaceAtSameTimestamp = true) => {
+      if (
+        nextSnapshot.window.before < latestSnapshotTimestampRef.current
+        || (
+          !replaceAtSameTimestamp
+          && latestSnapshotTimestampRef.current !== 0
+          && nextSnapshot.window.before === latestSnapshotTimestampRef.current
+        )
+      ) return;
+      latestSnapshotTimestampRef.current = nextSnapshot.window.before;
+      setSnapshot(nextSnapshot);
+      setHistory((samples) => mergeHealthSamples(samples, [nextSnapshot.health]));
+      setResourcePoints((points) => appendResourcePoint(points, nextSnapshot));
+      setAggregatePoints((points) => appendAggregatePoint(points, nextSnapshot));
+    };
 
     Promise.all([
       client.fetchBrainVitalsSnapshot(selectedBrainId),
       client.fetchBrainVitalsHistory(selectedBrainId, '1h'),
     ]).then(([nextSnapshot, nextHistory]) => {
       if (!active || generationRef.current !== generation) return;
-      setSnapshot(nextSnapshot);
-      setHistory(nextHistory.data);
-      setLivePoints((points) => appendLivePoint(points, nextSnapshot));
+      setHistory((samples) => mergeHealthSamples(samples, nextHistory.data));
+      applySnapshot(nextSnapshot, false);
       setLoading(false);
     }).catch((loadError) => {
       if (!active || generationRef.current !== generation) return;
-      setError(`Unable to load Brain Vitals for ${selectedBrainId}. ${describeError(loadError)}`);
+      if (latestSnapshotTimestampRef.current === 0) {
+        setError(`Unable to load Brain Vitals for ${selectedBrainId}. ${describeError(loadError)}`);
+      }
       setLoading(false);
     });
 
@@ -168,8 +222,9 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
       selectedBrainId,
       (nextSnapshot) => {
         if (!active || generationRef.current !== generation) return;
-        setSnapshot(nextSnapshot);
-        setLivePoints((points) => appendLivePoint(points, nextSnapshot));
+        applySnapshot(nextSnapshot);
+        setError(null);
+        setLoading(false);
         setStreamError(null);
       },
       (subscriptionError) => {
@@ -177,13 +232,15 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
         setStreamError(describeError(subscriptionError));
       },
       () => {
-        void client.listBrainVitalsRuns(100).then(({ runs: nextRuns }) => {
+        void client.listBrainVitalsRuns(100, undefined).then(({ runs: nextRuns }) => {
           if (!active || generationRef.current !== generation) return;
-          setRuns(nextRuns);
-          setBrainIds([...new Set(nextRuns.map((run) => run.definitionId))].sort());
+          const discoveredRuns = mergeRunPage(runCacheRef.current, nextRuns);
+          setRuns(discoveredRuns);
+          setBrainIds([...new Set(discoveredRuns.map((run) => run.definitionId))].sort());
+          setDiscoveryError(null);
         }).catch((runListError: unknown) => {
           if (!active || generationRef.current !== generation) return;
-          setStreamError(`Live run refresh failed. ${describeError(runListError)}`);
+          setDiscoveryError(`Live run refresh failed. ${describeError(runListError)}`);
         });
       },
     ).then((stop) => {
@@ -229,7 +286,8 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     }
   }
 
-  const latestPoint = livePoints.at(-1);
+  const latestResourcePoint = resourcePoints.at(-1);
+  const latestAggregatePoint = aggregatePoints.at(-1);
   const regionLabel = selectedBrainId ? `Brain Vitals for ${selectedBrainId}` : 'Brain Vitals';
 
   return (
@@ -254,10 +312,11 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
       </div>
 
       {loading && <p role="status">Loading Brain Vitals...</p>}
-      {!loading && brainIds.length === 0 && !error && (
+      {!loading && brainIds.length === 0 && !error && !discoveryError && (
         <p className="rail-card__empty">No Beast runs exist yet, so there are no Brain Vitals to display.</p>
       )}
       {error && <p className="brain-vitals-panel__alert" role="alert">{error}</p>}
+      {discoveryError && <p className="brain-vitals-panel__alert" role="alert">{discoveryError}</p>}
       {streamError && <p className="brain-vitals-panel__alert" role="alert">Live updates interrupted. {streamError}</p>}
 
       {snapshot && (
@@ -271,28 +330,28 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
             <article><span>Cache hit</span><strong>{Math.round(snapshot.cache.hitRatio * 100)}%</strong></article>
             <article><span>Compactions</span><strong>{snapshot.compaction.count}</strong></article>
             <article><span>Cost</span><strong>${snapshot.cost.estimatedUsd.toFixed(4)}</strong></article>
-            <article><span>Energy</span><strong>{snapshot.resource.estimatedEnergyWh.toFixed(3)} Wh</strong></article>
+            <article><span>Energy</span><strong>{snapshot.resource.availability === 'available' ? `${snapshot.resource.estimatedEnergyWh.toFixed(3)} Wh` : 'Unavailable'}</strong></article>
             <article><span>Churn</span><strong>{snapshot.churn.failed + snapshot.churn.stopped}/{snapshot.churn.spawnCount}</strong></article>
           </div>
 
           <div className="brain-vitals-panel__trends">
             <article>
               <h4>Health trend</h4>
-              <TrendChart label="Health score trend" values={[...history.map((sample) => sample.score), snapshot.health.score]} pointCount={history.length + 1} />
-              <small>{history.length + 1} persisted/live samples</small>
+              <TrendChart label="Health score trend" values={history.map((sample) => sample.score)} pointCount={history.length} />
+              <small>{history.length} persisted/live samples</small>
             </article>
             <article>
               <h4>Resource usage</h4>
-              <TrendChart label="Resource usage trend" values={livePoints.map((point) => point.cpuPercent)} pointCount={livePoints.length} />
-              <TrendChart label="Memory usage trend" values={livePoints.map((point) => point.rssMb)} pointCount={livePoints.length} />
-              <TrendChart label="Power usage trend" values={livePoints.map((point) => point.estimatedWatts)} pointCount={livePoints.length} />
-              <small>{snapshot.resource.availability === 'available' && latestPoint ? `${Math.round(latestPoint.cpuPercent)}% CPU · ${Math.round(latestPoint.rssMb)} MB RSS` : 'Resource telemetry unavailable'}</small>
+              <TrendChart label="Resource usage trend" values={resourcePoints.map((point) => point.cpuPercent)} pointCount={resourcePoints.length} />
+              <TrendChart label="Memory usage trend" values={resourcePoints.map((point) => point.rssMb)} pointCount={resourcePoints.length} />
+              <TrendChart label="Power usage trend" values={resourcePoints.map((point) => point.estimatedWatts)} pointCount={resourcePoints.length} />
+              <small>{snapshot.resource.availability === 'available' && latestResourcePoint ? `${Math.round(latestResourcePoint.cpuPercent)}% CPU · ${Math.round(latestResourcePoint.rssMb)} MB RSS` : 'Resource telemetry unavailable'}</small>
             </article>
             <article>
               <h4>Input/cache token and cost trends</h4>
-              <TrendChart label="Input and cache token trend" values={livePoints.map((point) => point.totalTokens)} pointCount={livePoints.length} />
-              <TrendChart label="Cost trend" values={livePoints.map((point) => point.estimatedUsd)} pointCount={livePoints.length} />
-              <small>{latestPoint?.totalTokens.toLocaleString() ?? '0'} observed input/cache tokens · ${(latestPoint?.estimatedUsd ?? 0).toFixed(4)}</small>
+              <TrendChart label="Input and cache token trend" values={aggregatePoints.map((point) => point.totalTokens)} pointCount={aggregatePoints.length} />
+              <TrendChart label="Cost trend" values={aggregatePoints.map((point) => point.estimatedUsd)} pointCount={aggregatePoints.length} />
+              <small>{latestAggregatePoint?.totalTokens.toLocaleString() ?? '0'} observed input/cache tokens · ${(latestAggregatePoint?.estimatedUsd ?? 0).toFixed(4)}</small>
             </article>
             <article>
               <h4>Agent churn</h4>

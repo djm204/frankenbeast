@@ -208,4 +208,153 @@ describe('BrainVitalsPanel', () => {
 
     expect(await screen.findByRole('region', { name: 'Brain Vitals for reviewer' })).toBeTruthy();
   });
+
+  it('discovers paginated runs one bounded page per refresh and preserves earlier pages', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, timeout) => {
+      if (timeout === 10_000) poll = callback as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const plannerRun = { ...detail.run, id: 'run-2', definitionId: 'planner' };
+    const listBrainVitalsRuns = vi.fn()
+      .mockResolvedValueOnce({ runs: [detail.run], nextCursor: 'page-2' })
+      .mockResolvedValueOnce({ runs: [plannerRun] });
+    render(<BrainVitalsPanel client={client({ listBrainVitalsRuns })} />);
+
+    expect(await screen.findByRole('region', { name: 'Brain Vitals for reviewer' })).toBeTruthy();
+    expect(listBrainVitalsRuns).toHaveBeenCalledTimes(1);
+    expect(listBrainVitalsRuns).toHaveBeenLastCalledWith(100, undefined);
+
+    await act(async () => {
+      poll?.();
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole('option', { name: 'planner' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: 'reviewer' })).toBeTruthy();
+    expect(listBrainVitalsRuns).toHaveBeenCalledTimes(2);
+    expect(listBrainVitalsRuns).toHaveBeenLastCalledWith(100, 'page-2');
+  });
+
+  it('clears a recovered run-discovery error', async () => {
+    let poll: (() => void) | undefined;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, timeout) => {
+      if (timeout === 10_000) poll = callback as () => void;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const api = client({
+      listBrainVitalsRuns: vi.fn()
+        .mockRejectedValueOnce(new Error('offline'))
+        .mockResolvedValueOnce({ runs: [detail.run] }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Unable to discover Brain Vitals runs');
+    await act(async () => {
+      poll?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.queryByText(/Unable to discover Brain Vitals runs/)).toBeNull());
+    expect(screen.getByRole('region', { name: 'Brain Vitals for reviewer' })).toBeTruthy();
+  });
+
+  it('keeps newer SSE state when the initial REST load settles later', async () => {
+    let pushSnapshot!: (next: BrainVitalsSnapshot) => void;
+    let resolveSnapshot!: (value: BrainVitalsSnapshot) => void;
+    let resolveHistory!: (value: { data: []; window: BrainVitalsSnapshot['window'] }) => void;
+    const initialSnapshot = new Promise<BrainVitalsSnapshot>((resolve) => { resolveSnapshot = resolve; });
+    const initialHistory = new Promise<{ data: []; window: BrainVitalsSnapshot['window'] }>((resolve) => { resolveHistory = resolve; });
+    const api = client({
+      fetchBrainVitalsSnapshot: vi.fn().mockReturnValue(initialSnapshot),
+      fetchBrainVitalsHistory: vi.fn().mockReturnValue(initialHistory),
+      subscribeToBrainVitals: vi.fn((_brainId, onSnapshot) => {
+        pushSnapshot = onSnapshot;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+    await waitFor(() => expect(pushSnapshot).toBeTypeOf('function'));
+
+    act(() => pushSnapshot({
+      ...snapshot,
+      window: { ...snapshot.window, before: 3 },
+      health: { ...snapshot.health, score: 99, timestamp: 3 },
+    }));
+    expect(await screen.findByLabelText('Health score 99')).toBeTruthy();
+
+    await act(async () => {
+      resolveSnapshot(snapshot);
+      resolveHistory({ data: [], window: snapshot.window });
+      await Promise.all([initialSnapshot, initialHistory]);
+    });
+
+    expect(screen.getByLabelText('Health score 99')).toBeTruthy();
+  });
+
+  it('recovers from a failed initial REST load when SSE succeeds and preserves missing resources', async () => {
+    let pushSnapshot!: (next: BrainVitalsSnapshot) => void;
+    const api = client({
+      fetchBrainVitalsSnapshot: vi.fn().mockRejectedValue(new Error('REST unavailable')),
+      fetchBrainVitalsHistory: vi.fn().mockRejectedValue(new Error('REST unavailable')),
+      subscribeToBrainVitals: vi.fn((_brainId, onSnapshot) => {
+        pushSnapshot = onSnapshot;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+    await waitFor(() => expect(pushSnapshot).toBeTypeOf('function'));
+
+    act(() => pushSnapshot({
+      ...snapshot,
+      window: { ...snapshot.window, before: 3 },
+      health: { ...snapshot.health, score: 91, timestamp: 3 },
+      resource: { ...snapshot.resource, availability: 'unavailable', latest: null },
+      cost: { ...snapshot.cost, estimatedUsd: 0.03 },
+    }));
+
+    expect(await screen.findByLabelText('Health score 91')).toBeTruthy();
+    expect(screen.queryByText(/Unable to load Brain Vitals/)).toBeNull();
+    expect(screen.getByText('Unavailable')).toBeTruthy();
+    expect(screen.getByText('Resource telemetry unavailable')).toBeTruthy();
+    expect(screen.getByLabelText('Resource usage trend').getAttribute('data-point-count')).toBe('0');
+    expect(screen.getByLabelText('Cost trend').getAttribute('data-point-count')).toBe('1');
+  });
+
+  it('appends and deduplicates live health and aggregate samples independently of resources', async () => {
+    let pushSnapshot!: (next: BrainVitalsSnapshot) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, onSnapshot) => {
+        pushSnapshot = onSnapshot;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+    render(<BrainVitalsPanel client={api} />);
+    expect((await screen.findByLabelText('Health score trend')).getAttribute('data-point-count')).toBe('1');
+
+    act(() => pushSnapshot({
+      ...snapshot,
+      window: { ...snapshot.window, before: 3 },
+      health: { ...snapshot.health, score: 90, timestamp: 3 },
+      resource: { ...snapshot.resource, availability: 'unavailable', latest: null },
+      cost: { ...snapshot.cost, estimatedUsd: 0.03 },
+    }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Health score trend').getAttribute('data-point-count')).toBe('2');
+      expect(screen.getByLabelText('Resource usage trend').getAttribute('data-point-count')).toBe('1');
+      expect(screen.getByLabelText('Cost trend').getAttribute('data-point-count')).toBe('2');
+    });
+
+    act(() => pushSnapshot({
+      ...snapshot,
+      window: { ...snapshot.window, before: 3 },
+      health: { ...snapshot.health, score: 92, timestamp: 3 },
+      resource: { ...snapshot.resource, availability: 'unavailable', latest: null },
+      cost: { ...snapshot.cost, estimatedUsd: 0.04 },
+    }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Health score trend').getAttribute('data-point-count')).toBe('2');
+      expect(screen.getByLabelText('Cost trend').getAttribute('data-point-count')).toBe('2');
+    });
+  });
 });

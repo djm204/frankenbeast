@@ -159,8 +159,8 @@ export class DashboardApiClient {
     this.brainVitals = new BrainVitalsApiClient(baseUrl);
   }
 
-  listBrainVitalsRuns(limit = 100) {
-    return this.brainVitals.listRuns(limit);
+  listBrainVitalsRuns(limit = 100, cursor?: string) {
+    return this.brainVitals.listRuns(limit, cursor);
   }
 
   fetchBrainVitalsSnapshot(brainId: string): Promise<BrainVitalsSnapshot> {

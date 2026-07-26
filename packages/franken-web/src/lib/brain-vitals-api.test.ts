@@ -31,7 +31,8 @@ describe('BrainVitalsApiClient', () => {
       .mockResolvedValueOnce(Response.json({ data: detail }));
     const client = new BrainVitalsApiClient(BASE_URL);
 
-    await expect(client.listRuns()).resolves.toEqual({ runs: [run, olderRun] });
+    await expect(client.listRuns()).resolves.toEqual({ runs: [run], nextCursor: 'cursor/1' });
+    await expect(client.listRuns(100, 'cursor/1')).resolves.toEqual({ runs: [olderRun] });
     await expect(client.fetchSnapshot('code/reviewer')).resolves.toEqual(snapshot);
     await expect(client.fetchHistory('code/reviewer')).resolves.toEqual(history);
     await expect(client.fetchRun('code/reviewer', 'run/1')).resolves.toEqual(detail);
