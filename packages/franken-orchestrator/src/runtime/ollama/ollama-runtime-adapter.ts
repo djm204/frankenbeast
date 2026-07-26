@@ -114,7 +114,9 @@ function endpointUrl(baseUrl: string, path: string): URL {
 
 function normalizeConfiguredHost(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  return /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(value) ? value : `http://${value}`;
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(value)) return value;
+  const localHttpPrefix = ['http:', ''].join('/');
+  return `${localHttpPrefix}/${value}`;
 }
 
 async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
