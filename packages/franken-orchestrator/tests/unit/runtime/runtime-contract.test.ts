@@ -2,10 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   RuntimeAdapterRegistry,
   RuntimeAgentSchema,
+  RuntimeApprovalSchema,
+  RuntimeBlockerSchema,
   RuntimeCursorError,
+  RuntimeHealthSchema,
+  RuntimeMetadataSchema,
   RuntimeProviderSchema,
   RuntimeRunSchema,
   RuntimeSnapshotSchema,
+  RuntimeTaskSchema,
+  RuntimeWorkspaceSchema,
   createDefaultRuntimeAdapterRegistry,
   type RuntimeAdapter,
 } from '../../../src/runtime/index.js';
@@ -136,7 +142,13 @@ describe('provider-neutral runtime contract', () => {
     expect(RuntimeAgentSchema).toEqual(expect.any(Object));
     expect(RuntimeRunSchema).toEqual(expect.any(Object));
     expect(orchestrator.RuntimeAgentSchema).toBe(RuntimeAgentSchema);
+    expect(orchestrator.RuntimeApprovalSchema).toBe(RuntimeApprovalSchema);
+    expect(orchestrator.RuntimeBlockerSchema).toBe(RuntimeBlockerSchema);
+    expect(orchestrator.RuntimeHealthSchema).toBe(RuntimeHealthSchema);
+    expect(orchestrator.RuntimeMetadataSchema).toBe(RuntimeMetadataSchema);
     expect(orchestrator.RuntimeRunSchema).toBe(RuntimeRunSchema);
     expect(orchestrator.RuntimeSnapshotSchema).toBe(RuntimeSnapshotSchema);
+    expect(orchestrator.RuntimeTaskSchema).toBe(RuntimeTaskSchema);
+    expect(orchestrator.RuntimeWorkspaceSchema).toBe(RuntimeWorkspaceSchema);
   }, 20_000);
 });
