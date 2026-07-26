@@ -11,6 +11,6 @@
 - [x] Start the app with real persisted vitals data and exercise the browser golden path.
 - [x] Commit and push a unique feature branch; open one PR closing #3733.
 - [x] RED→GREEN: address Codex findings for bounded newest-page polling plus cyclical historical refresh, throttled churn refreshes, recoverable errors, REST/SSE races, missing resources, chronological trend continuity, and SSE lifecycle cleanup.
-- [ ] Run exact-head Codex review tiers 5, 12, 24, and 50; address and resolve all findings.
-- [ ] Verify exact-head CI and zero unresolved review threads; merge.
-- [ ] Verify issue closure and record final evidence in the Kanban handoff.
+- [x] Complete the bounded exact-head review with an independent at-cap audit recorded at https://github.com/djm204/frankenbeast/pull/3806#issuecomment-5083624819 for reviewed head `ee1800f899be04f10cb20b0320f359825e88fe14`; address and resolve all findings.
+- [x] Verify 0/19 unresolved review threads and all four checks passed in https://github.com/djm204/frankenbeast/actions/runs/30203568723; squash-merge as `2504485c1db25ec92939374bd09ffd0032592618`.
+- [x] Verify https://github.com/djm204/frankenbeast/issues/3733 is closed by https://github.com/djm204/frankenbeast/pull/3806 and record final evidence in the Kanban handoff.

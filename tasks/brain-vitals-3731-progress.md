@@ -8,8 +8,8 @@
 - [x] Export the public API and document the v1 formula, weights, normalization, and on-demand rationale.
 - [x] Run focused tests plus `@franken/observer` test, lint, typecheck, and build gates.
 - [x] Commit and push the unique issue branch; open exactly one PR closing #3731: https://github.com/djm204/frankenbeast/pull/3797.
-- [ ] Complete exact-head GitHub Codex review loops, resolve all threads, and verify exact-head CI.
-- [ ] Squash-merge, verify #3731 closed, and record merge/test/review evidence.
+- [x] Complete exact-head GitHub Codex review loops, resolve all threads, and verify exact-head CI: reviewed head `c288b884877775cc1fbd86d4cba36110fe4d81ea`; Codex clean at https://github.com/djm204/frankenbeast/pull/3797#issuecomment-5082291633; 0/2 unresolved threads; all four checks passed in https://github.com/djm204/frankenbeast/actions/runs/30190290868.
+- [x] Squash-merge as `b320d892c479c8dff98c40e01fcab9eb50615e69` and verify https://github.com/djm204/frankenbeast/issues/3731 is closed by https://github.com/djm204/frankenbeast/pull/3797.
 
 ## V1 decisions
 

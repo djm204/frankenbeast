@@ -155,7 +155,7 @@ describe('BrainVitalsPanel', () => {
     expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
   });
 
-  it('uses real activity events to pulse a vitals node and expose its run drill-down', async () => {
+  it('renders only the five real vitals dimensions and uses their activity for drill-down', async () => {
     let pushActivity!: (activity: BrainVitalsActivity) => void;
     const api = client({
       subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
@@ -168,6 +168,8 @@ describe('BrainVitalsPanel', () => {
 
     expect(await screen.findByRole('region', { name: 'Brain pulse map' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: /activity:/ })).toHaveLength(5);
+    expect(screen.queryByLabelText('Faculty pulse map availability')).toBeNull();
+    expect(screen.queryByText(/Coming soon/)).toBeNull();
     const compactionNode = screen.getByRole('button', { name: /Compaction activity:/ });
     expect(compactionNode.getAttribute('data-activity-count')).toBe('0');
     expect(compactionNode.getAttribute('data-pulse-state')).toBe('idle');

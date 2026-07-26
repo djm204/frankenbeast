@@ -87,9 +87,9 @@ ids, and those run links open the read-only slide-in drill-down backed by
 cost, compactions, resource samples, churn classification, and activity events.
 The faculty **Brain** panel answers “what the brain knows”; **Brain Vitals**
 answers “how hard the brain is working.” Memory, planning, reasoning, action,
-and learning remain explicitly marked as coming soon in the map because the
-Brain routes do not yet expose a compatible live faculty activity-event feed;
-the UI never substitutes vitals or fabricated rates for those faculties.
+and learning nodes are omitted from the map until the Brain routes expose a
+compatible live faculty activity-event feed. The UI renders only the five real
+vitals dimensions and never substitutes vitals or fabricated faculty rates.
 
 If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. Beast routes (`/v1/beasts/*`) reuse that same target by default. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls run on a different backend, for example a separate local orchestrator or daemon port:
 

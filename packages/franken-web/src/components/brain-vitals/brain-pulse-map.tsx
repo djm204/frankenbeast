@@ -7,7 +7,6 @@ import type {
 
 const ACTIVITY_WINDOW_MS = 60_000;
 const DIMENSIONS: readonly BrainVitalsDimension[] = ['cache', 'compaction', 'churn', 'resource', 'cost'];
-const FACULTIES = ['memory', 'planning', 'reasoning', 'action', 'learning'] as const;
 
 const LABELS: Record<BrainVitalsDimension, string> = {
   cache: 'Cache',
@@ -140,12 +139,6 @@ export function BrainPulseMap({ snapshot, activities, activityReceipts, onOpenRu
             </button>
           );
         })}
-      </div>
-
-      <div className="brain-pulse-map__faculties" aria-label="Faculty pulse map availability">
-        {FACULTIES.map((faculty) => (
-          <span key={faculty}><strong>{faculty}</strong><small>Coming soon — no live faculty event feed</small></span>
-        ))}
       </div>
 
       {selectedDimension && (

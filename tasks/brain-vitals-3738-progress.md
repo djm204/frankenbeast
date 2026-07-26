@@ -11,6 +11,6 @@
 - [x] Run focused tests, @franken/web typecheck, lint, full tests, and production build.
 - [x] Run the real persisted-data browser golden path and trigger a real activity pulse.
 - [x] Commit/push the unique exact-origin/main branch and open one PR closing #3738 (#3807).
-- [ ] Run bounded exact-head GitHub Codex review tiers; reply to and resolve every finding.
-- [ ] Verify exact-head CI and zero unresolved threads; merge.
-- [ ] Verify issue closure and record the final Kanban handoff.
+- [x] Run bounded exact-head GitHub Codex review for head `4c05c1c034931183bbd7e32e07dea3b133cf1bf4`; reply to and resolve every finding; final clean response: https://github.com/djm204/frankenbeast/pull/3807#issuecomment-5084008343.
+- [x] Verify 0/9 unresolved threads and all four checks passed in https://github.com/djm204/frankenbeast/actions/runs/30206918102; squash-merge as `e532946c57162299126022967395286bb8fb6793`.
+- [x] Verify https://github.com/djm204/frankenbeast/issues/3738 is closed by https://github.com/djm204/frankenbeast/pull/3807 and record the final Kanban handoff.

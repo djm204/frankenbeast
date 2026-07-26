@@ -1084,11 +1084,11 @@ dimensions; a rolling one-minute client window controls pulse speed, each
 dimension's normalized health signal controls node state, and the aggregate
 health score controls the center ring. Selecting a node exposes the contributing
 events and their real run ids before the existing per-run telemetry drill-down.
-Hive Brain's memory/planning/reasoning/action/learning faculties stay visibly
-unavailable rather than borrowing vitals data: the read-only `/v1/brain/*`
-surface has faculty state, but no compatible live faculty activity-event stream
-yet. Adding those nodes is therefore an additive cross-epic follow-up, not a
-synthetic mapping in the Brain Vitals UI.
+Hive Brain's memory/planning/reasoning/action/learning faculty nodes are omitted
+rather than borrowing vitals data: the read-only `/v1/brain/*` surface has
+faculty state, but no compatible live faculty activity-event stream yet. Adding
+those nodes is therefore an additive cross-epic follow-up, not a synthetic
+mapping in the Brain Vitals UI.
 
 | Route | Purpose and bounds |
 |-------|--------------------|

@@ -59,6 +59,23 @@ of creating state. Because this follows the CLI's direct-local inspection
 pattern, no daemon token is required; the equivalent `/v1/brain/*` HTTP routes
 remain operator-token authenticated.
 
+## Brain Vitals HTTP and SSE surface
+
+The Beast daemon owns the read-only `/v1/brain-vitals/*` route family;
+`chat-server` mounts the same routes when it has local Beast services or proxies
+them to an attached daemon. Snapshot, history, run-detail, and ticket requests
+require the Beast operator token. The SSE event request instead consumes the
+single-use ticket from a 30-second `HttpOnly`, `SameSite=Strict` cookie scoped to
+that connection path; the bare `/events` path always rejects access.
+
+| Route | Purpose and bounds |
+| --- | --- |
+| `GET /v1/brain-vitals/:brainId` | Current one-hour snapshot across at most 200 recent or active runs, including health, cache, compaction, churn, resource, and cost/budget telemetry. |
+| `GET /v1/brain-vitals/:brainId/history?window=1h` | Persisted health history. `window` accepts a positive integer plus `ms`, `s`, `m`, `h`, or `d`, defaults to one hour, and is capped at 24 hours and 1,000 rows. |
+| `GET /v1/brain-vitals/:brainId/runs/:runId` | Brain-scoped run drill-down. Cross-brain or unknown run ids return 404; compaction and resource reads are capped at 1,000 rows each, and events at 100 with `eventsTruncated` reporting overflow. |
+| `POST /v1/brain-vitals/:brainId/events/ticket` | Operator-authenticated creation of a non-secret connection id and single-use, 30-second scoped ticket cookie. |
+| `GET /v1/brain-vitals/:brainId/events/:connectionId` | Ticket-cookie-authenticated SSE stream. It emits an initial snapshot, changed snapshots on the one-second poll cadence, typed real `activity` events, and 30-second heartbeats. Reused tickets return 204; missing or invalid tickets return 401. |
+
 For local development from the monorepo, build and link the CLI from the root:
 
 ```bash
