@@ -129,6 +129,11 @@ describe('BeastLifecycleMetrics', () => {
         },
       },
     ]);
+
+    expect(metrics.query({
+      from: '2026-07-25T00:05:01Z',
+      to: '2026-07-25T00:05:02Z',
+    }).definitions[0]?.spawnCount).toBe(1);
     expect(result.orphanedProcessCount).toBe(0);
   });
 
@@ -188,8 +193,8 @@ describe('BeastLifecycleMetrics', () => {
       now: () => '2026-07-26T00:00:00.000Z',
       orphanRetentionMs: 60 * 60 * 1_000,
     });
-    metrics.recordOrphanProcessSwept('2026-07-25T22:00:00.000Z');
     metrics.recordOrphanProcessSwept('2026-07-25T23:30:00.000Z');
+    metrics.recordOrphanProcessSwept('2026-07-25T22:00:00.000Z');
 
     expect(metrics.query({
       from: '2026-07-25T00:00:00.000Z',

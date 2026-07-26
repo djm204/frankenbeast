@@ -74,15 +74,19 @@ export class BeastLifecycleMetrics {
     if (timestamp === undefined) {
       throw new RangeError('Orphan sweep timestamp must be a valid ISO timestamp');
     }
-    this.orphanSweepTimes.push(timestamp);
+    insertSorted(this.orphanSweepTimes, timestamp);
     this.pruneOrphanSweeps();
   }
 
   query(window: BeastLifecycleMetricsWindow): BeastLifecycleMetricsSnapshot {
     const parsedWindow = parseWindow(window);
+    const storageWindow = {
+      from: new Date(parsedWindow.from).toISOString(),
+      to: new Date(parsedWindow.to).toISOString(),
+    };
     const cohorts = new Map<string, BeastLifecycleAttempt[]>();
 
-    for (const attempt of this.listAttempts(window)) {
+    for (const attempt of this.listAttempts(storageWindow)) {
       const startedAt = parseIsoTimestamp(attempt.startedAt);
       if (startedAt === undefined || startedAt < parsedWindow.from || startedAt >= parsedWindow.to) {
         continue;
@@ -178,6 +182,20 @@ function parseIsoTimestamp(value: string): number | undefined {
   if (!Number.isFinite(timestamp)) return undefined;
   const normalized = value.includes('.') ? value : value.replace('Z', '.000Z');
   return new Date(timestamp).toISOString() === normalized ? timestamp : undefined;
+}
+
+function insertSorted(values: number[], value: number): void {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (values[middle]! <= value) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  values.splice(low, 0, value);
 }
 
 function durationDistribution(values: readonly number[]): BeastRunDurationDistribution {
