@@ -4,6 +4,7 @@ import { requireBeastOperatorAuth } from '../beasts/http/beast-auth.js';
 import { agentRoutes } from './routes/agent-routes.js';
 import { beastRoutes } from './routes/beast-routes.js';
 import { brainRoutes } from './routes/brain-routes.js';
+import { createBrainVitalsRoutes } from './routes/brain-vitals-routes.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import {
   BEAST_CONTROL_MAX_BODY_SIZE,
@@ -239,6 +240,13 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     operatorToken: options.operatorToken,
     security,
     rateLimit,
+  }));
+  app.route('/', createBrainVitalsRoutes({
+    service: services.brainVitals,
+    eventBus: services.eventBus,
+    ticketStore: services.ticketStore,
+    operatorToken: options.operatorToken,
+    security,
   }));
   app.route('/', agentRoutes({
     agents: services.agents,

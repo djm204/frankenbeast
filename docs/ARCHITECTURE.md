@@ -1058,6 +1058,29 @@ the stable `BRAIN_READ_FAILED` response.
 See [ADR-041](adr/041-hive-brain-command-center.md) for the command-center and
 registry ownership decision.
 
+#### Brain Vitals telemetry reads
+
+The Beast daemon owns `/v1/brain-vitals/*`; `chat-server` mounts the same routes
+with local Beast services or proxies them to an attached daemon. Every REST
+request requires the Beast operator token. EventSource connections use the
+existing one-time ticket pattern: the authenticated ticket request returns a
+non-secret connection id and stores the ticket in a 30-second, `HttpOnly`,
+`SameSite=Strict` cookie scoped to that connection's stream path.
+
+Snapshots aggregate persisted run lifecycle, token/cache, compaction, process
+resource, cost/budget, and brain-health score data by Beast `definitionId`.
+The stream sends a fresh snapshot every second and separate typed `activity`
+events for cache hits/misses, compaction completion, lifecycle churn,
+resource-threshold crossings, and budget-threshold crossings.
+
+| Route | Purpose and bounds |
+|-------|--------------------|
+| `GET /v1/brain-vitals/:brainId` | Current one-hour health and telemetry snapshot; health score is persisted for history |
+| `GET /v1/brain-vitals/:brainId/history?window=1h` | Persisted health-score history; duration accepts `ms`, `s`, `m`, `h`, or `d` and is capped at 24 hours/1,000 rows |
+| `GET /v1/brain-vitals/:brainId/runs/:runId` | Per-run lifecycle, event, token/cache, compaction, resource, and cost/budget drill-down; cross-brain run ids return 404 |
+| `POST /v1/brain-vitals/:brainId/events/ticket` | Issue a single-use stream connection id and scoped ticket cookie (operator auth required) |
+| `GET /v1/brain-vitals/:brainId/events/:connectionId` | Ticket-cookie-authenticated SSE stream with 1-second snapshots and typed activity events |
+
 ## Communications Gateway (orchestrator comms surface)
 
 Multi-channel external communications with deterministic session mapping (SHA256-based). See [ADR-016](adr/016-external-comms-gateway.md).

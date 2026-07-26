@@ -1,5 +1,5 @@
-import { existsSync, readdirSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { BeastEventBus } from './events/beast-event-bus.js';
 import { BeastLogStore } from './events/beast-log-store.js';
 import { SseConnectionTicketStore } from './events/sse-connection-ticket.js';
@@ -26,16 +26,17 @@ import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js'
 import { BeastLifecycleMetrics } from './telemetry/beast-lifecycle-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { BrainRegistry, HiveMindStore } from '@franken/brain';
+import { CostCalculator, DEFAULT_PRICING, SQLiteAdapter } from '@franken/observer';
 import type { BrainRouteContext } from '../http/routes/brain-routes.js';
+import { BrainVitalsService } from '../http/routes/brain-vitals-routes.js';
 import type { ModuleConfig } from './types.js';
-
-
 export interface BeastServicePaths {
   beastsDb: string;
   beastLogsDir: string;
   root?: string | undefined;
   skillsDir?: string | undefined;
   brainDbPath?: string | undefined;
+  tracesDb?: string | undefined;
 }
 
 export interface BeastServiceBundle {
@@ -52,6 +53,7 @@ export interface BeastServiceBundle {
   maintenance: MaintenanceModeService;
   eventBus: BeastEventBus;
   ticketStore: SseConnectionTicketStore;
+  brainVitals: BrainVitalsService;
   dispose(): void;
 }
 
@@ -124,6 +126,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
   const lifecycleMetrics = new BeastLifecycleMetrics(window => repository.listLifecycleAttempts(window));
   const eventBus = new BeastEventBus();
   const ticketStore = new SseConnectionTicketStore({ databasePath: paths.beastsDb });
+  const tracesDb = paths.tracesDb ?? join(projectRoot, '.fbeast', '.build', 'build-traces.db');
+  mkdirSync(dirname(tracesDb), { recursive: true });
+  const observerAdapter = new SQLiteAdapter(
+    tracesDb,
+    { useWorkerThread: false },
+  );
   const capacityPolicy = createCapacityReservationPolicyFromEnv();
   const maintenance = MaintenanceModeService.forProjectRoot(projectRoot);
   const trustedSkillsDir = paths.skillsDir ?? join(projectRoot, '.fbeast', 'skills');
@@ -188,6 +196,13 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     maintenance,
     trustedSkillToolManifests,
   });
+  const brainVitals = new BrainVitalsService({
+    observer: observerAdapter,
+    runs: runService,
+    eventBus,
+    costCalculator: new CostCalculator(DEFAULT_PRICING),
+    lifecycleMetrics,
+  });
   const agents = new AgentService(repository, undefined, { capacityPolicy, trustedSkillToolManifests });
   let hiveAvailable = true;
   let hiveMind: HiveMindStore;
@@ -225,10 +240,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
     maintenance,
     eventBus,
     ticketStore,
+    brainVitals,
     dispose: () => {
       hiveStatus.close();
       brains.close();
       ticketStore.destroy();
+      void observerAdapter.close();
       repository.close();
     },
   };
