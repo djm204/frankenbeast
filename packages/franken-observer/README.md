@@ -18,6 +18,7 @@ npm install @franken/observer
 - [Quick start](#quick-start)
 - [Core tracing](#core-tracing)
 - [Token & cost tracking](#token--cost-tracking)
+- [Process resource telemetry](#process-resource-telemetry)
 - [Decision outcome attribution](#decision-outcome-attribution)
 - [Export backends](#export-backends)
 - [OTEL serialisation](#otel-serialisation)
@@ -293,6 +294,41 @@ attribution.report()
 //     { model: 'claude-opus-4-6',   totalCalls: 1, successfulCalls: 0, failedCalls: 1, successRate: 0.0, totalCostUsd: 0.0105 },
 //   ]
 ```
+
+---
+
+## Process resource telemetry
+
+`ProcessResourceSampler` records real CPU utilization and RSS memory for a PID and attaches every sample to the caller's existing agent and run identifiers. Passing a `SQLiteAdapter` persists the time series in the same database used for traces; `queryResourceSamples` filters by agent or run and an inclusive timestamp range.
+
+```ts
+import { ProcessResourceSampler, SQLiteAdapter } from '@franken/observer'
+
+const db = new SQLiteAdapter('./traces.db')
+const sampler = new ProcessResourceSampler({
+  pid: spawnedProcess.pid,
+  agentId: beastAgentId,
+  runId: beastRunId,
+  adapter: db,
+  intervalMs: 5_000, // optional; 5 seconds is the default
+  idleWatts: 10,
+  tdpWatts: 65,
+})
+
+sampler.start()
+// Later, after the process exits:
+await sampler.stop() // drains an in-flight sample before returning
+
+const history = await db.queryResourceSamples({
+  runId: beastRunId,
+  since: Date.now() - 60_000,
+  before: Date.now(),
+})
+```
+
+Current-process sampling uses Node's built-in CPU and memory APIs. Child-PID sampling uses `ps`, avoiding a native addon for v1 and working on Linux/macOS; Windows child-PID sampling is explicitly unsupported. `ps` reports a lifetime-average CPU percentage rather than a hardware-counter interval, so precision varies by platform.
+
+`estimatedWatts` and `estimatedEnergyWh` are **best-effort estimates, not measurements**. The configurable linear model is `idleWatts + min(cpuPercent, 100) / 100 × tdpWatts`; it does not read RAPL, IPMI, battery, or other hardware sensors. Configure the values per host and do not use them for billing-grade energy accounting.
 
 ---
 

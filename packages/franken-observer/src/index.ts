@@ -53,6 +53,13 @@ export {
 export { TraceServer } from './ui/TraceServer.js'
 export { generateGrafanaDashboard } from './grafana/GrafanaDashboard.js'
 export { CompactionMetrics } from './compaction-metrics.js'
+export {
+  DEFAULT_IDLE_WATTS,
+  DEFAULT_RESOURCE_SAMPLE_INTERVAL_MS,
+  DEFAULT_TDP_WATTS,
+  ProcessResourceSampler,
+  estimateProcessPower,
+} from './resource/ProcessResourceSampler.js'
 
 export type { ExportAdapter, TraceSummary } from './export/ExportAdapter.js'
 export type { MultiAdapterOptions } from './adapters/multi/MultiAdapter.js'
@@ -72,6 +79,13 @@ export type {
   CompactionRate,
   CompactionTriggerReason,
 } from './compaction-metrics.js'
+export type {
+  ProcessPowerModel,
+  ProcessResourceSample,
+  ProcessResourceSampleAdapter,
+  ProcessResourceSampleQuery,
+  ProcessResourceSamplerOptions,
+} from './resource/ProcessResourceSampler.js'
 export type { PrometheusAdapterOptions } from './adapters/prometheus/PrometheusAdapter.js'
 export type { TempoAdapterOptions, TempoBasicAuth } from './adapters/tempo/TempoAdapter.js'
 export type {
