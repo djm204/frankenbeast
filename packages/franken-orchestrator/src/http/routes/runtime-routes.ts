@@ -12,6 +12,11 @@ import {
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
 import type { RuntimeAdapter } from '../../runtime/runtime-adapter.js';
 import {
+  RuntimeActionStore,
+  type RuntimeActionAuditEvent,
+} from '../../runtime/runtime-action-store.js';
+export type { RuntimeActionAuditEvent } from '../../runtime/runtime-action-store.js';
+import {
   RuntimeActionRequestSchema,
   RuntimeActionResultSchema,
   RuntimeEventPageSchema,
@@ -35,12 +40,7 @@ export interface RuntimeRouteDeps {
   heartbeatIntervalMs?: number | undefined;
   actionAudit?: ((event: RuntimeActionAuditEvent) => void | Promise<void>) | undefined;
   actionGovernor?: IGovernorModule | undefined;
-}
-
-export interface RuntimeActionAuditEvent extends RuntimeActionAudit {
-  providerId: string;
-  correlationId: string;
-  causationId?: string | undefined;
+  actionStore?: RuntimeActionStore | undefined;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -48,7 +48,6 @@ const TICKET_COOKIE = 'frankenbeast_runtime_sse_ticket';
 const DEFAULT_RATE_LIMIT: BeastRateLimitOptions = { max: 120, windowMs: 60_000 };
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
-const MAX_IDEMPOTENCY_ENTRIES = 1000;
 const IDEMPOTENCY_TTL_MS = 10 * 60_000;
 const MAX_ACTION_BODY_BYTES = 16 * 1024;
 
@@ -180,23 +179,22 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     deps.heartbeatIntervalMs,
     DEFAULT_HEARTBEAT_INTERVAL_MS,
   );
-  const actionResults = new Map<string, {
-    fingerprint: string;
-    expiresAt: number;
-    result: Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>;
-  }>();
+  const actionStore = deps.actionStore ?? new RuntimeActionStore();
+  const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
 
   const recordActionAudit = async (
     providerId: string,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
     audit: RuntimeActionAudit,
   ): Promise<void> => {
-    await deps.actionAudit?.({
+    const event = {
       ...audit,
       providerId,
       correlationId: request.correlationId,
       ...(request.causationId ? { causationId: request.causationId } : {}),
-    });
+    };
+    actionStore.recordAudit(event);
+    await Promise.resolve(deps.actionAudit?.(event)).catch(() => {});
   };
 
   const executeAction = async (
@@ -317,25 +315,33 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const key = `${adapter.id}:${request.idempotencyKey}`;
     const fingerprint = createHash('sha256').update(JSON.stringify(request.action)).digest('base64url');
     const now = Date.now();
-    for (const [storedKey, entry] of actionResults) {
-      if (entry.expiresAt <= now) actionResults.delete(storedKey);
+    const reservation = actionStore.reserve(key, fingerprint, now + IDEMPOTENCY_TTL_MS, now);
+    if (reservation.status === 'conflict') {
+      throw new HttpError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'Idempotency key was already used for a different action');
     }
-    const existing = actionResults.get(key);
-    if (existing) {
-      if (existing.fingerprint !== fingerprint) {
-        throw new HttpError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'Idempotency key was already used for a different action');
-      }
-      const result = await existing.result;
+    if (reservation.status === 'completed') {
+      const result = reservation.result;
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
-    if (actionResults.size >= MAX_IDEMPOTENCY_ENTRIES) {
-      const oldest = actionResults.keys().next().value as string | undefined;
-      if (oldest) actionResults.delete(oldest);
+    if (reservation.status === 'pending') {
+      const pending = inFlightActions.get(key);
+      if (!pending) {
+        throw new HttpError(409, 'IDEMPOTENCY_KEY_IN_PROGRESS', 'Idempotent runtime action is still in progress');
+      }
+      const result = await pending;
+      const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
+      return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
     const result = executeAction(adapter, request);
-    actionResults.set(key, { fingerprint, expiresAt: now + IDEMPOTENCY_TTL_MS, result });
-    return c.json({ data: runtimeResponse(await result) });
+    inFlightActions.set(key, result);
+    try {
+      const completed = await result;
+      actionStore.complete(key, fingerprint, completed);
+      return c.json({ data: runtimeResponse(completed) });
+    } finally {
+      inFlightActions.delete(key);
+    }
   });
 
   app.post(`${BASE_PATH}/:providerId/events/ticket`, (c) => {

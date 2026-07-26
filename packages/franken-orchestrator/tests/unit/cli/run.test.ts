@@ -2106,6 +2106,7 @@ describe('main() execution', () => {
 
   it('dispatches chat-server without creating a Session or REPL', async () => {
     const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const runtimeGovernor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
     vi.mocked(loadConfig).mockResolvedValueOnce({
       maxCritiqueIterations: 3,
       maxDurationMs: 600_000,
@@ -2142,7 +2143,7 @@ describe('main() execution', () => {
       },
     } as any);
     mockCreateCliDeps.mockResolvedValueOnce({
-      deps: {},
+      deps: { governor: runtimeGovernor },
       cliLlmAdapter: { name: 'chat-adapter' },
       observerBridge: {},
       logger: {},
@@ -2199,6 +2200,7 @@ describe('main() execution', () => {
       beastControl: expect.objectContaining({
         operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,
       }),
+      runtimeActionGovernor: runtimeGovernor,
     }));
     const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
     expect(startOptions.dashboardDeps?.getSecurityConfig()).toEqual(expect.objectContaining({

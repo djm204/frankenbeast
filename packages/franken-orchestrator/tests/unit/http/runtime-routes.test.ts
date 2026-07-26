@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { createRuntimeRoutes } from '../../../src/http/routes/runtime-routes.js';
@@ -10,11 +13,16 @@ import {
   RuntimeSnapshotSchema,
   type RuntimeAdapter,
 } from '../../../src/runtime/index.js';
+import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
 
 const stores: SseConnectionTicketStore[] = [];
+const actionStores: RuntimeActionStore[] = [];
+const tempDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   stores.splice(0).forEach((store) => store.destroy());
+  actionStores.splice(0).forEach((store) => store.destroy());
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 function runtimeAdapter(): RuntimeAdapter {
@@ -72,9 +80,10 @@ function runtimeAdapter(): RuntimeAdapter {
   };
 }
 
-function createRoutes() {
+function createRoutes(actionStore = new RuntimeActionStore()) {
   const ticketStore = new SseConnectionTicketStore();
   stores.push(ticketStore);
+  actionStores.push(actionStore);
   const adapter = runtimeAdapter();
   const actionAudit = vi.fn();
   const actionGovernor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
@@ -91,6 +100,7 @@ function createRoutes() {
       heartbeatIntervalMs: 20,
       actionAudit,
       actionGovernor,
+      actionStore,
     }),
   };
 }
@@ -170,6 +180,48 @@ describe('smart-swarm runtime routes', () => {
       actionType: 'blocker.add',
     }));
     expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-log');
+  });
+
+  it('replays completed actions and preserves audit evidence after a server restart', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const firstStore = new RuntimeActionStore({ databasePath });
+    const first = createRoutes(firstStore);
+    vi.mocked(first.adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied', previousState: 'ready', currentState: 'blocked',
+      },
+    }));
+    const body = JSON.stringify({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:durable',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    });
+    const request = (app: ReturnType<typeof createRuntimeRoutes>) => app.request(
+      '/v1/smart-swarm/providers/hermes/actions',
+      { method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body },
+    );
+
+    expect((await request(first.app)).status).toBe(200);
+    firstStore.destroy();
+    actionStores.splice(actionStores.indexOf(firstStore), 1);
+
+    const secondStore = new RuntimeActionStore({ databasePath });
+    const second = createRoutes(secondStore);
+    const replay = await request(second.app);
+
+    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({ status: 'applied', replayed: true }) });
+    expect(second.adapter.executeAction).not.toHaveBeenCalled();
+    expect(secondStore.listAuditEvents()).toEqual([
+      expect.objectContaining({ correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566', outcome: 'applied' }),
+    ]);
   });
 
   it('checks adapter action support and returns a typed unsupported response without side effects', async () => {

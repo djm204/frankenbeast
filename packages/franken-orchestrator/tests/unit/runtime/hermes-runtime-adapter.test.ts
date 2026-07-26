@@ -143,6 +143,139 @@ describe('HermesRuntimeAdapter', () => {
     expect(JSON.stringify(calls)).not.toContain('shell');
   });
 
+  it('passes opaque Hermes task ids as a single argv value without inventing character restrictions', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const calls: string[][] = [];
+    let status = 'ready';
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        calls.push([...args]);
+        if (args.includes('block')) status = 'blocked';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:opaque-id:one',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global',
+        taskId: 'hermes:global:task @ shard/1', category: 'transient', reason: 'Retry later',
+      },
+    }));
+
+    expect(calls).toContainEqual([
+      'kanban', 'block', '--kind', 'transient', 'task @ shard/1', 'Retry later',
+    ]);
+  });
+
+  it('uses only the configured command environment for Hermes mutations', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const environments: NodeJS.ProcessEnv[] = [];
+    let status = 'ready';
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      env: { PATH: '/isolated/bin', SAFE_MARKER: 'present' },
+      runCommand: async (_command, args, options) => {
+        environments.push(options.env);
+        if (args.includes('block')) status = 'blocked';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:isolated-env',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    }));
+
+    expect(environments).not.toHaveLength(0);
+    expect(environments.every((env) => (
+      env['PATH'] === '/isolated/bin'
+      && env['SAFE_MARKER'] === 'present'
+      && env['HERMES_HOME'] === home
+    ))).toBe(true);
+    expect(environments.some((env) => env === process.env)).toBe(false);
+  });
+
+  it('does not inherit ambient process variables when no command environment is configured', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const environments: NodeJS.ProcessEnv[] = [];
+    const previous = process.env['RUNTIME_AMBIENT_SECRET'];
+    process.env['RUNTIME_AMBIENT_SECRET'] = 'must-not-leak';
+    try {
+      let status = 'ready';
+      const adapter = new HermesRuntimeAdapter({
+        hermesHome: home,
+        runCommand: async (_command, args, options) => {
+          environments.push(options.env);
+          if (args.includes('block')) status = 'blocked';
+          return args.includes('show')
+            ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+            : { stdout: '', stderr: '', exitCode: 0 };
+        },
+      });
+
+      await adapter.executeAction(RuntimeActionRequestSchema.parse({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:no-ambient-env',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }));
+
+      expect(environments.every((env) => env['RUNTIME_AMBIENT_SECRET'] === undefined)).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env['RUNTIME_AMBIENT_SECRET'];
+      else process.env['RUNTIME_AMBIENT_SECRET'] = previous;
+    }
+  });
+
+  it('resolves the configured command before spawning with an isolated environment', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const binDir = join(home, 'bin');
+    const statePath = join(home, 'command-state');
+    await mkdir(binDir);
+    await writeFile(join(binDir, 'fake-hermes'), `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args.includes('block')) fs.writeFileSync(${JSON.stringify(statePath)}, 'blocked');
+if (args.includes('show')) {
+  const status = fs.existsSync(${JSON.stringify(statePath)}) ? fs.readFileSync(${JSON.stringify(statePath)}, 'utf8') : 'ready';
+  process.stdout.write(JSON.stringify({ task: { status } }));
+}
+`, { mode: 0o755 });
+    const previousPath = process.env['PATH'];
+    process.env['PATH'] = binDir;
+    try {
+      const adapter = new HermesRuntimeAdapter({ hermesHome: home, command: 'fake-hermes' });
+      await expect(adapter.executeAction(RuntimeActionRequestSchema.parse({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:resolved-command',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }))).resolves.toEqual(expect.objectContaining({ status: 'applied' }));
+    } finally {
+      if (previousPath === undefined) delete process.env['PATH'];
+      else process.env['PATH'] = previousPath;
+    }
+  });
+
   it('resolves blockers through Hermes unblock and verifies the task is no longer blocked', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
@@ -203,7 +336,7 @@ describe('HermesRuntimeAdapter', () => {
     expect(calls).toContainEqual(['kanban', '--board', 'alpha', 'schedule', 't_deadbeef', 'Maintenance window']);
   });
 
-  it('maps resume, cancellation, and the allowlisted promotion policy to fixed Hermes operations', async () => {
+  it('maps resume and the allowlisted promotion policy to fixed Hermes operations', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
     let status = 'scheduled';
@@ -213,7 +346,6 @@ describe('HermesRuntimeAdapter', () => {
       runCommand: async (_command, args) => {
         calls.push([...args]);
         if (args.includes('unblock')) status = 'ready';
-        if (args.includes('archive')) status = 'archived';
         if (args.includes('promote')) status = 'ready';
         return args.includes('show')
           ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
@@ -231,10 +363,6 @@ describe('HermesRuntimeAdapter', () => {
     }));
     await adapter.executeAction(RuntimeActionRequestSchema.parse({
       ...base,
-      action: { type: 'task.cancel', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef' },
-    }));
-    await adapter.executeAction(RuntimeActionRequestSchema.parse({
-      ...base,
       action: {
         type: 'policy.apply', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
         policy: 'promote-task', reason: 'Dependencies satisfied',
@@ -242,8 +370,32 @@ describe('HermesRuntimeAdapter', () => {
     }));
 
     expect(calls).toContainEqual(['kanban', 'unblock', 't_deadbeef']);
-    expect(calls).toContainEqual(['kanban', 'archive', 't_deadbeef']);
     expect(calls).toContainEqual(['kanban', 'promote', '--json', 't_deadbeef', 'Dependencies satisfied']);
+  });
+
+  it('advertises cancellation as unsupported when Hermes has no cancellation operation', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const calls: string[][] = [];
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        calls.push([...args]);
+        return { stdout: JSON.stringify({ task: { status: 'running' } }), stderr: '', exitCode: 0 };
+      },
+    });
+
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      capabilities: expect.objectContaining({
+        cancellation: { status: 'unsupported', reason: expect.any(String) },
+      }),
+    }));
+    await expect(adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'cancel:t_deadbeef:unsupported',
+      action: { type: 'task.cancel', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef' },
+    }))).resolves.toEqual(expect.objectContaining({ status: 'unsupported' }));
+    expect(calls).toEqual([]);
   });
 
   it('reports missing configuration and incompatible schemas honestly instead of throwing', async () => {

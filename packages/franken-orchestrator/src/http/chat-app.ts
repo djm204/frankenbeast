@@ -47,6 +47,7 @@ import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { DEFAULT_TRACKED_AGENT_PAGE_LIMIT } from '../beasts/repository/sqlite-beast-repository.js';
 import { createDefaultRuntimeAdapterRegistry } from '../runtime/runtime-defaults.js';
 import type { RuntimeAdapterRegistry } from '../runtime/runtime-adapter-registry.js';
+import type { RuntimeActionStore } from '../runtime/runtime-action-store.js';
 import { createRuntimeRoutes, type RuntimeActionAuditEvent } from './routes/runtime-routes.js';
 import type { IGovernorModule } from '../deps.js';
 
@@ -99,6 +100,8 @@ export interface ChatAppOptions {
   runtimeActionGovernor?: IGovernorModule;
   /** Durable audit integration for every runtime mutation attempt. */
   runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
+  /** Shared durable idempotency and audit store for runtime mutations. */
+  runtimeActionStore?: RuntimeActionStore;
   /** Rate/concurrency guard shared by chat REST, websocket, and comms mutations. */
   chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
@@ -409,6 +412,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       ...(opts.beastControl?.rateLimit ? { rateLimit: opts.beastControl.rateLimit } : {}),
       ...(opts.runtimeActionGovernor ? { actionGovernor: opts.runtimeActionGovernor } : {}),
       ...(opts.runtimeActionAudit ? { actionAudit: opts.runtimeActionAudit } : {}),
+      ...(opts.runtimeActionStore ? { actionStore: opts.runtimeActionStore } : {}),
     }));
   }
 

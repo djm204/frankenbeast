@@ -461,6 +461,7 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  runtimeActionGovernor: import('../deps.js').IGovernorModule;
   /** Resolved provider's declared context window, for the status line's usage bar. */
   contextMaxTokens: number;
   /** Resolve a fallback provider's declared context window. */
@@ -1190,7 +1191,7 @@ export async function createChatSurfaceDeps(
     governorCancel,
     orchestratorConfig: config,
   };
-  const { cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
+  const { deps, cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
   const chatLlm = new AdapterLlmClient(cliLlmAdapter);
 
   const override = config.providers.overrides?.[provider];
@@ -1208,6 +1209,7 @@ export async function createChatSurfaceDeps(
     sessionStoreDir,
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
+    runtimeActionGovernor: deps.governor,
     contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
     contextMaxTokensForProvider: (providerName) => registry.has(providerName)
       ? registry.get(providerName).defaultContextWindowTokens()
@@ -1379,6 +1381,7 @@ async function runChatCommandIfRequested(
     sessionStoreDir,
     skillManager,
     providerRegistry,
+    runtimeActionGovernor,
     contextMaxTokens,
     contextMaxTokensForProvider,
     modelLabel,
@@ -1475,6 +1478,7 @@ async function runChatCommandIfRequested(
       // Consolidated deps — skill/dashboard routes activate when providers are configured
       ...(skillManager ? { skillManager } : {}),
       ...(providerRegistry ? { providerRegistry } : {}),
+      runtimeActionGovernor,
       ...(skillManager && providerRegistry
         ? {
             dashboardDeps: {
