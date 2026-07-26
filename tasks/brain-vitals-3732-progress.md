@@ -10,6 +10,8 @@
 - [x] Document the `/v1/brain-vitals/*` HTTP surface.
 - [x] Run focused route tests and relevant orchestrator/observer quality gates.
 - [x] Self-review the final diff and close all discovered defects.
-- [ ] Commit as David Mendez, push the unique branch, and open exactly one PR resolving #3732.
-- [ ] Complete exact-head Codex review tiers 5→12→24→50, resolve all threads, and verify exact-head CI.
+- [x] Commit as David Mendez, push the unique branch, and open exactly one PR resolving #3732 (PR #3798).
+- [x] Address all 14 findings from the first exact-head Codex round with regression coverage: stable run correlation, production resource samples, preserved budgets, proxy/route auth, exact SSE exemptions, rate limiting, sanitized bounded drill-down responses, brain-scoped churn, normalized IDs, bounded history, retry-window accounting, and cheap event filtering.
+- [x] Verify 151 focused tests, package typecheck/lint/build, and the full root test suite (10 packages; 4,571 orchestrator tests).
+- [ ] Complete the final exact-head Codex review round, resolve all threads, and verify exact-head CI.
 - [ ] Merge the PR, verify issue #3732 closes, and record final evidence.

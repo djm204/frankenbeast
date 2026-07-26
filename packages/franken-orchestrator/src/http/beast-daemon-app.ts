@@ -247,6 +247,7 @@ export function createBeastDaemonApp(options: BeastDaemonAppOptions): Hono {
     ticketStore: services.ticketStore,
     operatorToken: options.operatorToken,
     security,
+    rateLimit,
   }));
   app.route('/', agentRoutes({
     agents: services.agents,

@@ -624,7 +624,7 @@ export class Session {
   private async runExecute(): Promise<BeastResult> {
     const { paths, planDirOverride, budget } = this.config;
     const chunkDir = planDirOverride ?? paths.plansDir;
-    const runSessionId = randomUUID();
+    const runSessionId = process.env.FRANKENBEAST_BEAST_RUN_ID?.trim() || randomUUID();
 
     const { deps, logger, finalize } = await createCliDeps({
       ...this.buildDepOptions(),

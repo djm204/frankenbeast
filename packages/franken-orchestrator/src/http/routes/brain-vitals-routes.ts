@@ -1,5 +1,6 @@
 import {
   BrainHealthScorer,
+  calculateBrainHealthScore,
   cacheHitRatio,
   type BrainHealthSample,
   type BrainHealthSampleAdapter,
@@ -16,24 +17,37 @@ import { streamSSE } from 'hono/streaming';
 
 import type { BeastEventBus } from '../../beasts/events/beast-event-bus.js';
 import { requireBeastOperatorAuth } from '../../beasts/http/beast-auth.js';
+import {
+  InMemoryRateLimiter,
+  requireBeastRateLimit,
+  type BeastRateLimitOptions,
+} from '../../beasts/http/beast-rate-limit.js';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import type { BeastLifecycleMetrics } from '../../beasts/telemetry/beast-lifecycle-metrics.js';
 import type { BeastRun, BeastRunEvent } from '../../beasts/types.js';
+import { redactAbsoluteHostPathValues } from '../beast-response-redaction.js';
 import { TransportSecurityService } from '../security/transport-security.js';
 
 const DEFAULT_WINDOW_MS = 60 * 60 * 1_000;
 const MAX_OBSERVER_ROWS = 1_000;
 const SNAPSHOT_POLL_MS = 1_000;
 const HEARTBEAT_MS = 30_000;
+const HEALTH_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const HEALTH_HISTORY_SAMPLE_MS = 60_000;
+const RUN_EVENT_LIMIT = 100;
 const BRAIN_VITALS_SSE_TICKET_COOKIE = 'frankenbeast_brain_vitals_sse_ticket';
 
 interface BrainVitalsObserver extends BrainHealthSampleAdapter {
+  deleteHealthScoresBefore(before: number): Promise<number>;
   flush(trace: Trace): Promise<void>;
   recordCompaction(event: CompactionEvent): Promise<void>;
   recordResourceSample(sample: ProcessResourceSample): Promise<void>;
   queryByTraceId(traceId: string): Promise<Trace | null>;
   listTraceSummaries?(): Promise<TraceSummary[]>;
-  queryCompactions(query: { sessionId: string; since?: number; limit: number }): Promise<CompactionEvent[]>;
+  queryCompactions(query: (
+    | { sessionId: string; runId?: never }
+    | { runId: string; sessionId?: never }
+  ) & { since?: number; limit: number }): Promise<CompactionEvent[]>;
   queryResourceSamples(query: {
     runId?: string;
     agentId?: string;
@@ -46,7 +60,12 @@ interface BrainVitalsObserver extends BrainHealthSampleAdapter {
 interface BrainVitalsRunStore {
   listRuns(): BeastRun[];
   getRun(runId: string): BeastRun | undefined;
-  listEvents?(runId: string): BeastRunEvent[];
+  listEvents?(runId: string, options?: { limit?: number }): BeastRunEvent[];
+  listEventPageForResponse?(runId: string, afterSequence: number, limit: number): {
+    events: BeastRunEvent[];
+    page: { hasMore: boolean };
+  };
+  sanitizeRunForResponse?(run: BeastRun | undefined): BeastRun | undefined;
 }
 
 export interface BrainVitalsServiceOptions {
@@ -84,6 +103,8 @@ export class BrainVitalsService {
   private readonly activityFingerprints = new Map<string, ActivityFingerprint>();
   private readonly directResourcePressure = new Map<string, number>();
   private readonly directBudgetBurn = new Map<string, number>();
+  private readonly lastPersistedHealthAt = new Map<string, number>();
+  private lastHealthPruneAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly options: BrainVitalsServiceOptions) {
     this.health = new BrainHealthScorer(options.observer);
@@ -91,13 +112,14 @@ export class BrainVitalsService {
   }
 
   async snapshot(brainId: string, windowMs = DEFAULT_WINDOW_MS) {
+    brainId = normalizeBrainId(brainId);
     const now = this.now();
     const since = now - windowMs;
     const allBrainRuns = this.options.runs.listRuns().filter((run) => run.definitionId === brainId);
     const runs = allBrainRuns.filter((run) => (
       run.status === 'queued'
       || run.status === 'running'
-      || Date.parse(run.createdAt) >= since
+      || latestRunActivityAt(run) >= since
     ));
     const lifecycle = this.options.lifecycleMetrics.query({
       from: new Date(since).toISOString(),
@@ -122,7 +144,8 @@ export class BrainVitalsService {
     const terminal = completed + failed + stopped;
     const spawnCount = lifecycleAggregate?.spawnCount ?? runs.length;
     const active = lifecycleAggregate?.activeCount ?? runs.length - terminal;
-    const orphaned = lifecycle.orphanedProcessCount;
+    // Orphan sweeps are process-global and cannot be attributed to one definition.
+    const orphaned = 0;
     const budgetUsd = sumBudgets(runs);
     const burnRatio = budgetUsd === null ? 0 : clamp(tokenTotals.estimatedUsd / budgetUsd);
     const churnRatio = spawnCount + orphaned === 0
@@ -138,7 +161,7 @@ export class BrainVitalsService {
       resourcePressure: currentResourcePressure,
       budgetBurnRatio: burnRatio,
     };
-    const health = await this.health.computeAndPersist(brainId, signals, now);
+    const health = await this.healthSample(brainId, signals, now);
     this.publishNewCompactions(brainId, compactions);
     this.publishSignalChanges(brainId, runs, tokenTotals, latestResource, burnRatio, now);
 
@@ -247,12 +270,19 @@ export class BrainVitalsService {
   }
 
   async runDetails(brainId: string, runId: string) {
+    brainId = normalizeBrainId(brainId);
     const run = this.options.runs.getRun(runId);
     if (!run || run.definitionId !== brainId) return null;
     const telemetry = await this.readRunTelemetry(run, 0, Number.MAX_SAFE_INTEGER);
     const budgetUsd = readBudget(run);
+    const eventPage = this.options.runs.listEventPageForResponse?.(run.id, 0, RUN_EVENT_LIMIT);
+    const fallbackEvents = eventPage === undefined
+      ? this.options.runs.listEvents?.(run.id, { limit: RUN_EVENT_LIMIT + 1 }) ?? []
+      : [];
+    const events = eventPage?.events ?? fallbackEvents.slice(0, RUN_EVENT_LIMIT);
+    const responseRun = this.options.runs.sanitizeRunForResponse?.(run) ?? run;
     return {
-      run,
+      run: redactAbsoluteHostPathValues(responseRun) as BeastRun,
       churn: { classification: classifyRun(run) },
       tokens: telemetry.tokens,
       cost: {
@@ -262,7 +292,8 @@ export class BrainVitalsService {
       },
       compactions: telemetry.compactions,
       resources: telemetry.resources,
-      events: this.options.runs.listEvents?.(run.id) ?? [],
+      events: events.map((event) => redactAbsoluteHostPathValues(event) as BeastRunEvent),
+      eventsTruncated: eventPage?.page.hasMore ?? fallbackEvents.length > RUN_EVENT_LIMIT,
     };
   }
 
@@ -274,7 +305,7 @@ export class BrainVitalsService {
   ) {
     const [trace, compactions, resources] = await Promise.all([
       this.findRunTrace(run.id, traceSummaries),
-      this.options.observer.queryCompactions({ sessionId: run.id, since, limit: MAX_OBSERVER_ROWS }),
+      this.options.observer.queryCompactions({ runId: run.id, since, limit: MAX_OBSERVER_ROWS }),
       this.options.observer.queryResourceSamples({ runId: run.id, since, before, limit: MAX_OBSERVER_ROWS }),
     ]);
     return {
@@ -372,6 +403,38 @@ export class BrainVitalsService {
       );
     }
   }
+
+  private async healthSample(
+    brainId: string,
+    signals: BrainHealthSample['signals'],
+    timestamp: number,
+  ): Promise<BrainHealthSample> {
+    if (timestamp - this.lastHealthPruneAt >= HEALTH_HISTORY_SAMPLE_MS) {
+      await this.options.observer.deleteHealthScoresBefore(timestamp - HEALTH_HISTORY_RETENTION_MS);
+      this.lastHealthPruneAt = timestamp;
+    }
+    const lastPersistedAt = this.lastPersistedHealthAt.get(brainId);
+    if (lastPersistedAt === undefined || timestamp - lastPersistedAt >= HEALTH_HISTORY_SAMPLE_MS) {
+      const sample = await this.health.computeAndPersist(brainId, signals, timestamp);
+      this.lastPersistedHealthAt.set(brainId, timestamp);
+      return sample;
+    }
+    const latest = await this.health.getHealthScore(brainId);
+    return {
+      brainId,
+      score: calculateBrainHealthScore(signals),
+      signals: { ...signals },
+      weights: latest?.weights ?? {
+        taskSuccessRate: 0.3,
+        cacheHitRatio: 0.15,
+        compactionPressure: 0.15,
+        churnRatio: 0.15,
+        resourcePressure: 0.1,
+        budgetBurnRatio: 0.15,
+      },
+      timestamp,
+    };
+  }
 }
 
 export interface BrainVitalsRouteDeps {
@@ -380,6 +443,7 @@ export interface BrainVitalsRouteDeps {
   ticketStore: SseConnectionTicketStore;
   operatorToken: string;
   security: TransportSecurityService;
+  rateLimit?: BeastRateLimitOptions;
 }
 
 export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
@@ -391,12 +455,19 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
 
   app.use('/v1/brain-vitals/*', async (c, next) => {
     const pathname = new URL(c.req.url).pathname;
-    if (/\/events\/[^/]+$/.test(pathname)) {
+    if (c.req.method === 'GET' && /^\/v1\/brain-vitals\/[^/]+\/events\/[^/]+$/.test(pathname)) {
       await next();
       return;
     }
     return auth(c, next);
   });
+  if (deps.rateLimit) {
+    const limiter = new InMemoryRateLimiter(deps.rateLimit);
+    app.use('/v1/brain-vitals/*', requireBeastRateLimit(
+      limiter,
+      (authHeader, path) => `${authHeader ?? 'anonymous'}:${path}`,
+    ));
+  }
   app.get('/v1/brain-vitals/:brainId', async (c) => (
     c.json({ data: await deps.service.snapshot(c.req.param('brainId')) })
   ));
@@ -460,9 +531,10 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
             });
             return;
           }
+          if (event.type !== 'run.status' && event.type !== 'run.event') return;
           const runId = typeof data.runId === 'string' ? data.runId : undefined;
           const run = runId ? await deps.service.runDetails(brainId, runId) : null;
-          if (run && (event.type === 'run.status' || event.type === 'run.event')) {
+          if (run) {
             await stream.writeSSE({
               ...(event.id === undefined ? {} : { id: String(event.id) }),
               event: 'activity',
@@ -589,6 +661,16 @@ function sumTokenTotals(totals: readonly TokenAndCostTotals[]): TokenAndCostTota
 function readBudget(run: BeastRun): number | null {
   const value = run.configSnapshot.budget;
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function normalizeBrainId(brainId: string): string {
+  const normalized = brainId.trim();
+  if (normalized.length === 0) throw new TypeError('brainId must not be empty');
+  return normalized;
+}
+
+function latestRunActivityAt(run: BeastRun): number {
+  return Date.parse(run.finishedAt ?? run.startedAt ?? run.createdAt);
 }
 
 function sumBudgets(runs: readonly BeastRun[]): number | null {

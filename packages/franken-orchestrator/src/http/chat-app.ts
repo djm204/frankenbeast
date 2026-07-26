@@ -226,6 +226,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     });
     app.use('/v1/brain', requireAuth());
     app.use('/v1/brain/*', requireAuth());
+    app.use('/v1/brain-vitals', requireAuth());
+    app.use('/v1/brain-vitals/*', async (c, next) => {
+      const pathname = new URL(c.req.url).pathname;
+      if (c.req.method === 'GET' && /^\/v1\/brain-vitals\/[^/]+\/events\/[^/]+$/.test(pathname)) {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     app.use('/api/dashboard', requireAuth());
     app.use('/api/dashboard/*', async (c, next) => {
       if (new URL(c.req.url).pathname === '/api/dashboard/events') {
@@ -313,6 +322,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
         ticketStore: opts.beastControl.ticketStore,
         operatorToken: opts.beastControl.operatorToken,
         security: opts.beastControl.security ?? transportSecurity,
+        rateLimit: opts.beastControl.rateLimit,
       }));
     }
     const bc = opts.beastControl;

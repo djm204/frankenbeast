@@ -167,6 +167,14 @@ export const SELECT_COMPACTION_EVENTS = `
   LIMIT @limit
 `
 
+export const SELECT_COMPACTION_EVENTS_BY_RUN = `
+  SELECT sessionId, runId, generation, triggerReason, tokensBefore, tokensAfter, timestamp
+  FROM compaction_events
+  WHERE runId = @runId AND timestamp >= @since
+  ORDER BY timestamp DESC, generation DESC
+  LIMIT @limit
+`
+
 export const SELECT_COMPACTION_AGGREGATE = `
   SELECT COUNT(*) AS count, MAX(timestamp) AS latestAt
   FROM compaction_events

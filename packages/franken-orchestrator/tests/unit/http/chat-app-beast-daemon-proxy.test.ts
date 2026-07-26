@@ -82,6 +82,17 @@ describe('chat app beast daemon proxy', () => {
     expect((init.headers as Headers).get('authorization')).toBe(`Bearer ${TEST_DAEMON_TOKEN}`);
   });
 
+  it('requires outer operator auth before proxying brain-vitals reads', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ data: { brainId: 'reviewer' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createProxyApp();
+
+    const response = await app.request('/v1/brain-vitals/reviewer');
+
+    expect(response.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('forwards cookie-authenticated SSE streams without putting tickets in the URL', async () => {
     const fetchMock = vi.fn(async () => new Response('event: snapshot\ndata: {}\n\n', {
       headers: { 'content-type': 'text/event-stream' },

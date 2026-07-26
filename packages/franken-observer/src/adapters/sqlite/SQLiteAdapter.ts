@@ -40,6 +40,7 @@ import {
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
+  SELECT_COMPACTION_EVENTS_BY_RUN,
   SELECT_COMPACTION_AGGREGATE,
   INSERT_RESOURCE_SAMPLE,
   SELECT_RESOURCE_SAMPLES_BY_AGENT,
@@ -276,7 +277,7 @@ function execute(operation, payload) {
     case 'queryCompactions':
       return db.transaction((query, retentionCutoff) => {
         db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
-        return db.prepare(sql.selectCompactionEvents).all(query)
+        return db.prepare(query.runId ? sql.selectCompactionEventsByRun : sql.selectCompactionEvents).all(query)
       })(payload.query, payload.retentionCutoff)
     case 'aggregateCompactions':
       return db.transaction((query, retentionCutoff) => {
@@ -381,6 +382,7 @@ class SQLiteWorkerClient {
             deleteTrace: DELETE_TRACE,
             upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
             selectCompactionEvents: SELECT_COMPACTION_EVENTS,
+            selectCompactionEventsByRun: SELECT_COMPACTION_EVENTS_BY_RUN,
             selectCompactionAggregate: SELECT_COMPACTION_AGGREGATE,
             insertResourceSample: INSERT_RESOURCE_SAMPLE,
             selectResourceSamplesByAgent: SELECT_RESOURCE_SAMPLES_BY_AGENT,
@@ -1072,7 +1074,7 @@ export class SQLiteAdapter implements ExportAdapter {
   async queryCompactions(query: CompactionEventQuery): Promise<CompactionEvent[]> {
     return this.enqueueSqliteOperation(async () => {
       const params = {
-        sessionId: query.sessionId,
+        ...('runId' in query ? { runId: query.runId } : { sessionId: query.sessionId }),
         since: query.since ?? 0,
         limit: query.limit,
       }
@@ -1086,7 +1088,8 @@ export class SQLiteAdapter implements ExportAdapter {
       }
       return this.withSqliteLockRetry('query compaction events', () => this.db.transaction(() => {
         this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
-        return this.db.prepare(SELECT_COMPACTION_EVENTS).all(params) as CompactionEvent[]
+        return this.db.prepare('runId' in query ? SELECT_COMPACTION_EVENTS_BY_RUN : SELECT_COMPACTION_EVENTS)
+          .all(params) as CompactionEvent[]
       })())
     })
   }

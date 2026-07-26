@@ -35,21 +35,22 @@ describe('brain vitals routes', () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
 
-  function createFixture() {
+  function createFixture(rateLimit?: { windowMs: number; max: number }) {
     const root = mkdtempSync(join(tmpdir(), 'brain-vitals-routes-'));
     const repository = new SQLiteBeastRepository(join(root, 'beasts.db'));
     const observer = new SQLiteAdapter(join(root, 'observer.db'), { useWorkerThread: false });
     const eventBus = new BeastEventBus();
     const ticketStore = new SseConnectionTicketStore();
+    const lifecycleMetrics = new BeastLifecycleMetrics(
+      window => repository.listLifecycleAttempts(window),
+      { now: () => new Date(NOW).toISOString() },
+    );
     const service = new BrainVitalsService({
       observer,
       runs: repository,
       eventBus,
       costCalculator: new CostCalculator(DEFAULT_PRICING),
-      lifecycleMetrics: new BeastLifecycleMetrics(
-        window => repository.listLifecycleAttempts(window),
-        { now: () => new Date(NOW).toISOString() },
-      ),
+      lifecycleMetrics,
       now: () => NOW,
     });
     const app = new Hono();
@@ -60,6 +61,7 @@ describe('brain vitals routes', () => {
       ticketStore,
       operatorToken: OPERATOR_TOKEN,
       security: new TransportSecurityService(),
+      ...(rateLimit ? { rateLimit } : {}),
     }));
     cleanups.push(async () => {
       ticketStore.destroy();
@@ -67,7 +69,7 @@ describe('brain vitals routes', () => {
       repository.close();
       rmSync(root, { recursive: true, force: true });
     });
-    return { app, eventBus, observer, repository, service };
+    return { app, eventBus, lifecycleMetrics, observer, repository, service };
   }
 
   function authHeaders(): Record<string, string> {
@@ -113,8 +115,8 @@ describe('brain vitals routes', () => {
     TraceContext.endTrace(trace);
     await observer.flush(trace);
     await observer.recordCompaction({
-      sessionId: run.id,
-      runId: 'observer-trace-id',
+      sessionId: 'production-chunk-session-id',
+      runId: run.id,
       generation: 1,
       triggerReason: 'threshold',
       tokensBefore: 4_000,
@@ -164,7 +166,7 @@ describe('brain vitals routes', () => {
           totalTokens: 1_200,
           cacheHitRatio: 0.2,
         },
-        compactions: [{ generation: 1, runId: 'observer-trace-id' }],
+        compactions: [{ generation: 1, runId: run.id }],
         resources: [{ cpuPercent: 25, runId: run.id }],
         cost: { estimatedUsd: expect.any(Number), budgetUsd: 2 },
       },
@@ -205,6 +207,113 @@ describe('brain vitals routes', () => {
       data: [{ brainId: 'reviewer', score: 95 }],
       window: { windowMs: 3_600_000, since: NOW - 3_600_000, before: NOW },
     });
+  });
+
+  it('authenticates ticket issuance and rate limits expensive reads', async () => {
+    const { app } = createFixture({ windowMs: 60_000, max: 1 });
+
+    const ticket = await app.request('/v1/brain-vitals/reviewer/events/ticket', { method: 'POST' });
+    const first = await app.request('/v1/brain-vitals/reviewer', { headers: authHeaders() });
+    const second = await app.request('/v1/brain-vitals/reviewer', { headers: authHeaders() });
+
+    expect(ticket.status).toBe(401);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
+
+  it('normalizes brain IDs once and prunes expired health history', async () => {
+    const { observer, repository, service } = createFixture();
+    repository.createRun({
+      definitionId: 'reviewer',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    await observer.recordHealthScore({
+      brainId: 'reviewer',
+      score: 1,
+      signals: {
+        taskSuccessRate: 0,
+        cacheHitRatio: 0,
+        compactionPressure: 1,
+        churnRatio: 1,
+        resourcePressure: 1,
+        budgetBurnRatio: 1,
+      },
+      weights: {
+        taskSuccessRate: 0.3,
+        cacheHitRatio: 0.15,
+        compactionPressure: 0.15,
+        churnRatio: 0.15,
+        resourcePressure: 0.1,
+        budgetBurnRatio: 0.15,
+      },
+      timestamp: NOW - 25 * 60 * 60 * 1_000,
+    });
+
+    const snapshot = await service.snapshot('  reviewer  ');
+    const history = await observer.queryHealthScores({ brainId: 'reviewer', limit: 100 });
+
+    expect(snapshot.brainId).toBe('reviewer');
+    expect(snapshot.churn.spawnCount).toBe(1);
+    expect(history.some((sample) => sample.timestamp < NOW - 24 * 60 * 60 * 1_000)).toBe(false);
+  });
+
+  it('includes recently retried runs without assigning global orphan sweeps to the brain', async () => {
+    const { lifecycleMetrics, repository, service } = createFixture();
+    const run = repository.createRun({
+      definitionId: 'reviewer',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-20T06:00:00.000Z',
+    });
+    repository.updateRun(run.id, {
+      status: 'completed',
+      startedAt: '2026-07-26T06:10:00.000Z',
+      finishedAt: '2026-07-26T06:20:00.000Z',
+    });
+    repository.createAttempt(run.id, {
+      status: 'completed',
+      startedAt: '2026-07-26T06:10:00.000Z',
+    });
+    lifecycleMetrics.recordOrphanProcessSwept();
+
+    const snapshot = await service.snapshot('reviewer');
+
+    expect(snapshot.churn.completed).toBe(1);
+    expect(snapshot.churn.orphaned).toBe(0);
+  });
+
+  it('bounds and redacts drill-down run data', async () => {
+    const { repository, service } = createFixture();
+    const run = repository.createRun({
+      definitionId: 'reviewer',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: { projectRoot: '/home/operator/private/repo' },
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    for (let index = 0; index < 105; index += 1) {
+      repository.appendEvent(run.id, {
+        type: 'run.created',
+        payload: { path: `/home/operator/private/repo/${index}` },
+        createdAt: new Date(NOW + index).toISOString(),
+      });
+    }
+
+    const details = await service.runDetails('reviewer', run.id);
+
+    expect(JSON.stringify(details?.run)).not.toContain('/home/operator/private/repo');
+    expect(details?.events).toHaveLength(100);
+    expect(details?.eventsTruncated).toBe(true);
   });
 
   it('uses persisted attempt-level lifecycle metrics for churn', async () => {
@@ -325,8 +434,8 @@ describe('brain vitals routes', () => {
       if (event.type === 'brain-vitals.activity') events.push(event.data);
     });
     await observer.recordCompaction({
-      sessionId: run.id,
-      runId: 'external-trace-id',
+      sessionId: 'external-chunk-session-id',
+      runId: run.id,
       generation: 1,
       triggerReason: 'threshold',
       tokensBefore: 2_000,

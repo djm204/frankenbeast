@@ -26,7 +26,7 @@ import { PrometheusBeastMetrics } from './telemetry/prometheus-beast-metrics.js'
 import { BeastLifecycleMetrics } from './telemetry/beast-lifecycle-metrics.js';
 import { SkillManager } from '../skills/skill-manager.js';
 import { BrainRegistry, HiveMindStore } from '@franken/brain';
-import { CostCalculator, DEFAULT_PRICING, SQLiteAdapter } from '@franken/observer';
+import { CostCalculator, DEFAULT_PRICING, ProcessResourceSampler, SQLiteAdapter } from '@franken/observer';
 import type { BrainRouteContext } from '../http/routes/brain-routes.js';
 import { BrainVitalsService } from '../http/routes/brain-vitals-routes.js';
 import type { ModuleConfig } from './types.js';
@@ -149,6 +149,12 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       eventBus,
       runConfigDir,
       runConfigRoot: projectRoot,
+      resourceSamplerFactory: ({ pid, agentId, runId }) => new ProcessResourceSampler({
+        pid,
+        agentId,
+        runId,
+        adapter: observerAdapter,
+      }),
       worktreeIsolation: {
         enabled: true,
         projectRoot,

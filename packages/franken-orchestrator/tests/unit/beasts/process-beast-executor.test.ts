@@ -150,6 +150,40 @@ describe('ProcessBeastExecutor', () => {
     ]);
   });
 
+  it('propagates the stable Beast run ID and samples resources for the process lifetime', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let callbacks: ProcessCallbacks | undefined;
+    let spawnedEnv: Record<string, string> | undefined;
+    const supervisor = {
+      spawn: vi.fn(async (spec: { env?: Record<string, string> }, handlers: ProcessCallbacks) => {
+        spawnedEnv = spec.env;
+        callbacks = handlers;
+        return { pid: 4242 };
+      }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const sampler = { start: vi.fn(), stop: vi.fn(async () => {}) };
+    const resourceSamplerFactory = vi.fn(() => sampler);
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, { resourceSamplerFactory });
+    const run = createTestRun(repo);
+
+    const attempt = await executor.start(run, martinLoopDefinition);
+    expect(spawnedEnv?.FRANKENBEAST_BEAST_RUN_ID).toBe(run.id);
+    expect(resourceSamplerFactory).toHaveBeenCalledWith(expect.objectContaining({
+      pid: 4242,
+      agentId: 'martin-loop',
+      runId: run.id,
+    }));
+    expect(sampler.start).toHaveBeenCalledOnce();
+
+    callbacks?.onExit(0, null);
+    await vi.waitFor(() => expect(sampler.stop).toHaveBeenCalledOnce());
+    expect(repo.getAttempt(attempt.id)?.status).toBe('completed');
+  });
+
   it('merges process-group ownership metadata into custom attempt metadata', async () => {
     workDir = await createTempWorkDir();
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

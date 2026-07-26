@@ -320,16 +320,19 @@ describe('CliObserverBridge', () => {
   });
 
   describe('recordCompaction()', () => {
-    it('correlates compaction telemetry with the persisted trace id', async () => {
+    it('correlates compaction telemetry with the stable Beast run id', async () => {
       const recordCompaction = vi.fn(async () => undefined);
       const compactionAdapter: CompactionEventAdapter = {
         recordCompaction,
         queryCompactions: vi.fn(async () => []),
         aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
       };
-      const bridge = new CliObserverBridge({ ...defaultConfig, compactionAdapter });
-      bridge.startTrace('chunk-session-1');
-      const traceId = bridge.observerDeps.trace.id;
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        sessionId: 'run_123',
+        compactionAdapter,
+      });
+      bridge.startTrace('run_123');
 
       await bridge.recordCompaction({
         sessionId: 'chunk-session-1',
@@ -342,7 +345,7 @@ describe('CliObserverBridge', () => {
 
       expect(recordCompaction).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: 'chunk-session-1',
-        runId: traceId,
+        runId: 'run_123',
       }));
     });
   });
