@@ -142,4 +142,33 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
     vi.useRealTimers();
   });
+
+  it('retries when the initial stream ticket request fails', async () => {
+    vi.useFakeTimers();
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      this.close = vi.fn();
+      this.addEventListener = vi.fn() as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Temporary outage' } }), { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-1' })));
+    const error = vi.fn();
+    const connection = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    const unsubscribe = await client.subscribe('hermes', 'board-main', {
+      event: vi.fn(),
+      error,
+      connection,
+    });
+
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ status: 503 }));
+    expect(connection).toHaveBeenCalledWith('reconnecting');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(EventSourceMock).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    vi.useRealTimers();
+  });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   SmartSwarmApiError,
   type RuntimeCapability,
@@ -29,10 +29,11 @@ function capabilityReason(capability: RuntimeCapability): string | null {
   return capability.status === 'unsupported' ? capability.reason : null;
 }
 
-function StateNotice({ provider, snapshot, error }: {
+function StateNotice({ provider, snapshot, error, onRetry }: {
   provider: RuntimeProvider | undefined;
   snapshot: RuntimeSnapshot | null;
   error: unknown;
+  onRetry(): void;
 }) {
   if (error) {
     const authentication = error instanceof SmartSwarmApiError && (error.status === 401 || error.status === 403);
@@ -40,6 +41,7 @@ function StateNotice({ provider, snapshot, error }: {
       <section className="smart-swarm-state smart-swarm-state--error" role="alert">
         <h2>{authentication ? 'Operator authentication required' : 'Smart-swarm unavailable'}</h2>
         <p>{authentication ? 'Authenticate this dashboard with an operator token, then retry.' : errorMessage(error)}</p>
+        <button className="button button--secondary button--compact" onClick={onRetry} type="button">Retry smart-swarm</button>
       </section>
     );
   }
@@ -92,15 +94,17 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [providers, setProviders] = useState<RuntimeProvider[]>([]);
   const [providerId, setProviderId] = useState('');
   const [workspaceId, setWorkspaceId] = useState('');
+  const [workspaceCatalog, setWorkspaceCatalog] = useState<RuntimeSnapshot['workspaces'] | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [connection, setConnection] = useState<RuntimeConnectionState>('connecting');
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const provider = providers.find((candidate) => candidate.id === providerId);
-  const workspaces = snapshot ? available(snapshot.workspaces) ?? [] : [];
+  const workspaces = available(workspaceCatalog ?? snapshot?.workspaces ?? { status: 'available', data: [] }) ?? [];
   const agents = snapshot ? available(snapshot.agents) ?? [] : [];
   const tasks = snapshot ? available(snapshot.tasks) ?? [] : [];
   const runs = snapshot ? available(snapshot.runs) ?? [] : [];
@@ -146,6 +150,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       .then((nextSnapshot) => {
         if (cancelled) return;
         setSnapshot(nextSnapshot);
+        if (!workspaceId) setWorkspaceCatalog(nextSnapshot.workspaces);
         const nextWorkspaces = available(nextSnapshot.workspaces) ?? [];
         setWorkspaceId((current) => (
           nextWorkspaces.some((workspace) => workspace.id === current)
@@ -170,13 +175,19 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   }, [client, providerId, workspaceId, refreshNonce]);
 
   useEffect(() => {
-    if (!provider || !workspaceId || provider.capabilities.streaming.status !== 'supported') return;
+    if (!provider || !workspaceId || provider.capabilities.streaming.status !== 'supported') {
+      setConnection('unavailable');
+      return;
+    }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
     setConnection('connecting');
     void client.subscribe(provider.id, workspaceId, {
       connection: (state) => {
-        if (!cancelled) setConnection(state);
+        if (!cancelled) {
+          setConnection(state);
+          if (state === 'connected') setError(null);
+        }
       },
       error: (streamError) => {
         if (!cancelled) setError(streamError);
@@ -191,7 +202,12 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             events: { status: 'available', data: [event, ...withoutDuplicate].slice(0, 100) },
           };
         });
-        setRefreshNonce((current) => current + 1);
+        if (!refreshTimer.current) {
+          refreshTimer.current = setTimeout(() => {
+            refreshTimer.current = null;
+            setRefreshNonce((current) => current + 1);
+          }, 250);
+        }
       },
     }).then((stop) => {
       if (cancelled) stop();
@@ -201,6 +217,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     });
     return () => {
       cancelled = true;
+      if (refreshTimer.current) {
+        clearTimeout(refreshTimer.current);
+        refreshTimer.current = null;
+      }
       unsubscribe?.();
     };
   }, [client, provider, workspaceId]);
@@ -243,6 +263,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               className="field-control"
               onChange={(event) => {
                 setSnapshot(null);
+                setWorkspaceCatalog(null);
                 setWorkspaceId('');
                 setProviderId(event.target.value);
               }}
@@ -263,13 +284,25 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
             </select>
           </label>
+          {snapshot ? <UnsupportedSection label="Workspaces" section={workspaceCatalog ?? snapshot.workspaces} /> : null}
         </div>
         <div className="smart-swarm-connection" role="status">
-          <strong>{connection === 'connected' ? 'Live · connected' : connection === 'reconnecting' ? 'Connection lost · reconnecting' : 'Connecting · connecting'}</strong>
+          <strong>{connection === 'connected'
+            ? 'Live · connected'
+            : connection === 'reconnecting'
+              ? 'Connection lost · reconnecting'
+              : connection === 'unavailable'
+                ? 'Live updates unavailable'
+                : 'Connecting · connecting'}</strong>
         </div>
       </header>
 
-      <StateNotice error={error} provider={provider} snapshot={snapshot} />
+      <StateNotice
+        error={error}
+        onRetry={() => setRefreshNonce((current) => current + 1)}
+        provider={provider}
+        snapshot={snapshot}
+      />
       {loading ? <p className="smart-swarm-refresh" role="status">Refreshing normalized state…</p> : null}
 
       {snapshot ? (
@@ -300,6 +333,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               </div>
               <UnsupportedSection label="Agents" section={snapshot.agents} />
               <UnsupportedSection label="Tasks" section={snapshot.tasks} />
+              <UnsupportedSection label="Runs" section={snapshot.runs} />
               <div className="smart-swarm-agents">
                 {filteredAgents.map((agent) => (
                   <article className={`smart-swarm-agent smart-swarm-agent--${agent.state}`} key={agent.id}>
@@ -374,9 +408,10 @@ function TaskDetail({ task, provider, runs, onClose }: {
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
   onClose(): void;
 }) {
-  const pauseReason = capabilityReason(provider.capabilities.pause);
-  const resumeReason = capabilityReason(provider.capabilities.resume);
-  const cancelReason = capabilityReason(provider.capabilities.cancellation);
+  const unwiredReason = 'This control is not wired to a runtime mutation yet.';
+  const pauseReason = capabilityReason(provider.capabilities.pause) ?? unwiredReason;
+  const resumeReason = capabilityReason(provider.capabilities.resume) ?? unwiredReason;
+  const cancelReason = capabilityReason(provider.capabilities.cancellation) ?? unwiredReason;
   return (
     <section aria-label={`${task.title} details`} aria-modal="false" className="smart-swarm-detail" role="dialog">
       <header>
@@ -394,11 +429,11 @@ function TaskDetail({ task, provider, runs, onClose }: {
       </section>
       <section className="smart-swarm-actions" aria-label="Task lifecycle controls">
         <h4>Capability-driven controls</h4>
-        <button disabled={Boolean(pauseReason)} title={pauseReason ?? undefined} type="button">Pause task</button>
+        <button disabled title={pauseReason} type="button">Pause task</button>
         {pauseReason ? <p>{pauseReason}</p> : null}
-        <button disabled={Boolean(resumeReason)} title={resumeReason ?? undefined} type="button">Resume task</button>
+        <button disabled title={resumeReason} type="button">Resume task</button>
         {resumeReason ? <p>{resumeReason}</p> : null}
-        <button disabled={Boolean(cancelReason)} title={cancelReason ?? undefined} type="button">Cancel task</button>
+        <button disabled title={cancelReason} type="button">Cancel task</button>
         {cancelReason ? <p>{cancelReason}</p> : null}
       </section>
     </section>
