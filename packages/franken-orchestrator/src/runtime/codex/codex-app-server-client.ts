@@ -9,6 +9,13 @@ export interface CodexAppServerClientOptions {
   idleTimeoutMs?: number | undefined;
 }
 
+export class CodexProtocolError extends Error {
+  constructor(readonly code: number) {
+    super('Codex app-server protocol request failed');
+    this.name = 'CodexProtocolError';
+  }
+}
+
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -118,7 +125,16 @@ export function createCodexAppServerRequest(
       return;
     }
     if (record['error'] !== undefined) {
-      settlePending(id, safeError('Codex app-server request failed'));
+      const protocolError = record['error'];
+      const code = protocolError && typeof protocolError === 'object'
+        ? (protocolError as Record<string, unknown>)['code']
+        : undefined;
+      settlePending(
+        id,
+        typeof code === 'number'
+          ? new CodexProtocolError(code)
+          : safeError('Codex app-server request failed'),
+      );
     } else if (Object.hasOwn(record, 'result')) {
       settlePending(id, null, record['result']);
     }
