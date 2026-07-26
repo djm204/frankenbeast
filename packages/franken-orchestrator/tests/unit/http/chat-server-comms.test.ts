@@ -29,6 +29,7 @@ vi.mock('../../../src/http/ws-chat-server.js', () => ({
 import { startChatServer } from '../../../src/http/chat-server.js';
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { hashChatRateLimitPrincipal } from '../../../src/http/chat-rate-limit.js';
+import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 import type { ChatServerHandle } from '../../../src/http/chat-server.js';
@@ -138,6 +139,30 @@ describe('startChatServer comms pass-through', () => {
     expect(destroy).toHaveBeenCalledOnce();
     expect(beginShutdown.mock.invocationCallOrder[0]).toBeLessThan(drain.mock.invocationCallOrder[0]!);
     expect(drain.mock.invocationCallOrder[0]).toBeLessThan(destroy.mock.invocationCallOrder[0]!);
+  });
+
+  it('leaves caller-owned runtime action store lifecycle with the caller', async () => {
+    const runtimeActionStore = new RuntimeActionStore();
+    const beginShutdown = vi.spyOn(runtimeActionStore, 'beginShutdown');
+    const drain = vi.spyOn(runtimeActionStore, 'drain');
+    const destroy = vi.spyOn(runtimeActionStore, 'destroy');
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-external-runtime-action-store',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      runtimeActionStore,
+    });
+    await handle.close();
+    handle = undefined;
+
+    expect(beginShutdown).not.toHaveBeenCalled();
+    expect(drain).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(runtimeActionStore.reserve('key', 'fingerprint', Date.now() + 1000)).toEqual({ status: 'claimed' });
+    runtimeActionStore.destroy();
   });
 
   it('closes analytics dependencies when the chat server shuts down', async () => {

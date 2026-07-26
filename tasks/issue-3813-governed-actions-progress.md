@@ -16,5 +16,6 @@
 - [x] Commit and push the Codex remediation with David Mendez <me@davidmendez.dev>.
 - [x] Reproduce and remediate the next five exact-head Codex findings under RED→GREEN tests: non-expiring pending idempotency claims, fail-closed disabled-governor wiring, unambiguous provider/idempotency storage keys, authoritative adapter-result binding, and opaque bounded workspace IDs.
 - [x] Rebase the complete seven-commit remediation stack onto #3821's final exact-current-head clean commit `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e`, preserving a clean worktree and David Mendez commit identity throughout.
+- [x] Address the post-rebase Codex round with red-green regressions for honest database-only mutation capabilities, authoritative promotion results, caller-owned store lifecycle, private durable-store directory permissions, and bounded snapshot IDs. Verified that simultaneous `HERMES_HOME`/`HERMES_KANBAN_DB` already remain aligned because the adapter preserves the configured database variable in the fixed command environment; no production change was needed for that report.
 - [ ] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
 - [ ] Post the exact final handoff to PM `t_9f813264` and root `t_25558345`, then block the task for review.
