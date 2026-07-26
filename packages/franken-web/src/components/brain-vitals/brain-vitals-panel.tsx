@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { BeastRunSummary } from '@franken/types';
 import type {
   BrainHealthSample,
+  BrainVitalsDimension,
   BrainVitalsRunDetail,
   BrainVitalsSnapshot,
   DashboardApiClient,
@@ -30,8 +31,43 @@ interface AggregatePoint {
   estimatedUsd: number;
 }
 
+const PULSE_DIMENSIONS: readonly BrainVitalsDimension[] = ['cache', 'compaction', 'churn', 'resource', 'cost'];
+const MAX_ACTIVITY_DETAILS_PER_DIMENSION = 200;
+
 function emptyActivityReceipts(): BrainPulseActivityReceipts {
   return { cache: [], compaction: [], churn: [], resource: [], cost: [] };
+}
+
+export function pruneActivityReceipts(
+  current: BrainPulseActivityReceipts,
+  cutoff: number,
+): BrainPulseActivityReceipts {
+  const next: BrainPulseActivityReceipts = {
+    cache: current.cache.filter((receivedAt: number) => receivedAt >= cutoff),
+    compaction: current.compaction.filter((receivedAt: number) => receivedAt >= cutoff),
+    churn: current.churn.filter((receivedAt: number) => receivedAt >= cutoff),
+    resource: current.resource.filter((receivedAt: number) => receivedAt >= cutoff),
+    cost: current.cost.filter((receivedAt: number) => receivedAt >= cutoff),
+  };
+  const changed = PULSE_DIMENSIONS.some((dimension) => (
+    next[dimension].length !== current[dimension].length
+  ));
+  return changed ? next : current;
+}
+
+function appendActivityDetail(
+  current: BrainPulseActivity[],
+  activity: BrainPulseActivity,
+): BrainPulseActivity[] {
+  const recent = current.filter((candidate) => candidate.receivedAt >= activity.receivedAt - 60_000);
+  const dimensionCount = recent.filter((candidate) => candidate.dimension === activity.dimension).length;
+  let toDrop = Math.max(0, dimensionCount + 1 - MAX_ACTIVITY_DETAILS_PER_DIMENSION);
+  const retained = recent.filter((candidate) => {
+    if (candidate.dimension !== activity.dimension || toDrop === 0) return true;
+    toDrop -= 1;
+    return false;
+  });
+  return [...retained, activity];
 }
 
 function describeError(error: unknown): string {
@@ -141,6 +177,18 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [runDetail, setRunDetail] = useState<BrainVitalsRunDetail | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [runLoading, setRunLoading] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const cutoff = Date.now() - 60_000;
+      setActivityReceipts((current: BrainPulseActivityReceipts) => pruneActivityReceipts(current, cutoff));
+      setActivities((current) => {
+        const recent = current.filter((activity) => activity.receivedAt >= cutoff);
+        return recent.length === current.length ? current : recent;
+      });
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const generation = generationRef.current + 1;
@@ -287,23 +335,20 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
       (activity) => {
         if (!active || generationRef.current !== generation) return;
         const receivedAt = Date.now();
-        setActivityReceipts((current) => ({
-          ...current,
-          [activity.dimension]: [
-            ...current[activity.dimension].filter((timestamp) => timestamp >= receivedAt - 60_000),
-            receivedAt,
-          ],
-        }));
+        setActivityReceipts((current: BrainPulseActivityReceipts) => {
+          const recent = pruneActivityReceipts(current, receivedAt - 60_000);
+          return {
+            ...recent,
+            [activity.dimension]: [...recent[activity.dimension], receivedAt],
+          };
+        });
         setActivities((current) => {
-          const recent = current.filter((candidate) => (
-            candidate.receivedAt >= receivedAt - 60_000
-          ));
           activitySequenceRef.current += 1;
-          return [...recent, {
+          return appendActivityDetail(current, {
             ...activity,
             receivedAt,
             sequence: activitySequenceRef.current,
-          }].slice(-200);
+          });
         });
         if (
           activity.dimension !== 'churn'

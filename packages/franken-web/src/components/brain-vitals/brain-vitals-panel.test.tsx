@@ -6,7 +6,7 @@ import type {
   DashboardApiClient,
 } from '../../lib/dashboard-api';
 import type { BrainVitalsActivity } from '../../lib/brain-vitals-api';
-import { BrainVitalsPanel } from './brain-vitals-panel';
+import { BrainVitalsPanel, pruneActivityReceipts } from './brain-vitals-panel';
 
 const snapshot: BrainVitalsSnapshot = {
   brainId: 'reviewer',
@@ -233,6 +233,46 @@ describe('BrainVitalsPanel', () => {
     await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('201'));
     fireEvent.click(cacheNode);
     expect(screen.getAllByRole('button', { name: /Open run run-1 from cache activity/ })).toHaveLength(200);
+  });
+
+  it('retains bounded drill-down detail independently for each pulse dimension', async () => {
+    let pushActivity!: (activity: BrainVitalsActivity) => void;
+    const api = client({
+      subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
+        pushActivity = onActivity!;
+        return Promise.resolve(() => undefined);
+      }),
+    });
+
+    render(<BrainVitalsPanel client={api} />);
+    const cacheNode = await screen.findByRole('button', { name: /Cache activity:/ });
+    act(() => {
+      pushActivity({ dimension: 'cache', kind: 'cache.hit', runId: 'run-1', timestamp: Date.now() });
+      for (let index = 0; index < 200; index += 1) {
+        pushActivity({ dimension: 'cost', kind: 'cost.updated', runId: 'run-1', timestamp: Date.now() });
+      }
+    });
+
+    fireEvent.click(cacheNode);
+    expect(screen.getByRole('button', { name: 'Open run run-1 from cache activity' })).toBeTruthy();
+  });
+
+  it('prunes expired receipt history for inactive dimensions', () => {
+    const receipts = {
+      cache: [1, 70_000],
+      compaction: [2],
+      churn: [],
+      resource: [],
+      cost: [],
+    };
+
+    expect(pruneActivityReceipts(receipts, 60_000)).toEqual({
+      cache: [70_000],
+      compaction: [],
+      churn: [],
+      resource: [],
+      cost: [],
+    });
   });
 
   it('counts every delivered event on the local receipt clock', async () => {
