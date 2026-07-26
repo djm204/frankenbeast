@@ -51,6 +51,14 @@ function StateNotice({ provider, snapshot, error, onRetry }: {
     );
   }
   if (!snapshot) return null;
+  if (snapshot.state === 'loading') {
+    return (
+      <section className="smart-swarm-state" role="status">
+        <h2>Runtime state is loading</h2>
+        <p>{snapshot.message ?? `${provider?.displayName ?? snapshot.providerId} is still preparing normalized runtime evidence.`}</p>
+      </section>
+    );
+  }
   if (snapshot.state === 'empty') {
     return (
       <section className="smart-swarm-state">
@@ -111,6 +119,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
   const refreshPending = useRef(false);
+  const currentProviderId = useRef(providerId);
+  currentProviderId.current = providerId;
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const error = snapshotError ?? streamError;
@@ -255,7 +265,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     .slice(0, MAX_VISIBLE_TASKS);
   const filteredEvents = events
     .filter((event) => !workspaceId || event.workspaceId === workspaceId)
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+    .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
     .slice(0, 100);
   const filteredBlockers = blockers.filter((blocker) => !workspaceId || blocker.workspaceId === workspaceId);
   const filteredApprovals = approvals.filter((approval) => !workspaceId || approval.workspaceId === workspaceId);
@@ -264,17 +274,19 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
   async function refreshWorkspaceCatalog(): Promise<void> {
     if (!providerId || loading) return;
+    const requestedProviderId = providerId;
     setLoading(true);
     snapshotRequestsInFlight.current += 1;
     try {
-      const catalogSnapshot = await client.fetchSnapshot(providerId, { activityLimit: 1 });
+      const catalogSnapshot = await client.fetchSnapshot(requestedProviderId, { activityLimit: 1 });
+      if (currentProviderId.current !== requestedProviderId) return;
       setWorkspaceCatalog(catalogSnapshot.workspaces);
       setSnapshotError(null);
     } catch (nextError) {
-      setSnapshotError(nextError);
+      if (currentProviderId.current === requestedProviderId) setSnapshotError(nextError);
     } finally {
       snapshotRequestsInFlight.current -= 1;
-      setLoading(false);
+      if (currentProviderId.current === requestedProviderId) setLoading(false);
       if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
         refreshPending.current = false;
         setRefreshNonce((current) => current + 1);
@@ -315,6 +327,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                 setSnapshot(null);
                 setWorkspaceCatalog(null);
                 setWorkspaceId('');
+                setSelectedTaskId(null);
+                setStreamError(null);
                 setProviderId(event.target.value);
               }}
               value={providerId}
@@ -328,7 +342,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               aria-label="Workspace"
               className="field-control"
               disabled={workspaces.length === 0}
-              onChange={(event) => setWorkspaceId(event.target.value)}
+              onChange={(event) => {
+                setSelectedTaskId(null);
+                setWorkspaceId(event.target.value);
+              }}
               value={workspaceId}
             >
               {workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
@@ -464,7 +481,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         <TaskDetail
           onClose={() => setSelectedTaskId(null)}
           provider={provider}
-          runs={runs.filter((run) => run.taskId === selectedTask.id).slice(0, 20)}
+          runs={runs
+            .filter((run) => run.taskId === selectedTask.id)
+            .sort((left, right) => Date.parse(right.lastActiveAt ?? right.startedAt) - Date.parse(left.lastActiveAt ?? left.startedAt))
+            .slice(0, 20)}
           task={selectedTask}
         />
       ) : null}
