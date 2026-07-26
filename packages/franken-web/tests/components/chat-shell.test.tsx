@@ -191,6 +191,7 @@ const mockDashboardFetchSnapshot = vi.fn().mockResolvedValue(mockDashboardSnapsh
 const mockDashboardToggleSkill = vi.fn().mockResolvedValue(undefined);
 const mockDashboardUpdateSecurityProfile = vi.fn().mockResolvedValue(undefined);
 const mockDashboardSubscribe = vi.fn().mockResolvedValue(vi.fn());
+const mockDashboardListBrainVitalsRuns = vi.fn().mockResolvedValue({ runs: [] });
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -355,11 +356,13 @@ vi.mock('../../src/lib/dashboard-api.js', () => ({
     toggleSkill: ReturnType<typeof vi.fn>;
     updateSecurityProfile: ReturnType<typeof vi.fn>;
     subscribeToDashboard: ReturnType<typeof vi.fn>;
+    listBrainVitalsRuns: ReturnType<typeof vi.fn>;
   }) {
     this.fetchSnapshot = mockDashboardFetchSnapshot;
     this.toggleSkill = mockDashboardToggleSkill;
     this.updateSecurityProfile = mockDashboardUpdateSecurityProfile;
     this.subscribeToDashboard = mockDashboardSubscribe;
+    this.listBrainVitalsRuns = mockDashboardListBrainVitalsRuns;
   }),
 }));
 

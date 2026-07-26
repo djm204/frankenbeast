@@ -6,6 +6,7 @@ import { ProviderPanel } from '../components/providers/provider-panel';
 import { AvailabilityPanel } from '../components/availability/availability-panel';
 import { SloPanel } from '../components/availability/slo-panel';
 import { BrainPanel } from '../components/brain/brain-panel';
+import { BrainVitalsPanel } from '../components/brain-vitals/brain-vitals-panel';
 import type { DashboardApiClient, DashboardSecurity, DashboardSnapshot } from '../lib/dashboard-api';
 
 interface DashboardPageProps {
@@ -390,6 +391,7 @@ export function DashboardPage({ client }: DashboardPageProps) {
         )}
         <ProviderPanel providers={providers} />
         <BrainPanel client={client} />
+        <BrainVitalsPanel client={client} />
         <AvailabilityPanel availability={availability ?? undefined} />
         <SloPanel slo={slo} />
       </div>
