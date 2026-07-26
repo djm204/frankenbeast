@@ -42,8 +42,10 @@ interface PersistedAuditEvent {
 export class RuntimeActionStore {
   private readonly entries = new Map<string, MemoryEntry>();
   private readonly auditEvents: RuntimeActionAuditEvent[] = [];
+  private readonly pending = new Set<Promise<unknown>>();
   private readonly db: Database.Database | undefined;
   private destroyed = false;
+  private shuttingDown = false;
 
   constructor(options: RuntimeActionStoreOptions = {}) {
     if (!options.databasePath) return;
@@ -69,6 +71,7 @@ export class RuntimeActionStore {
   }
 
   reserve(key: string, fingerprint: string, expiresAt: number, now = Date.now()): RuntimeActionReservation {
+    if (this.shuttingDown) throw new Error('Runtime action store is shutting down');
     if (!this.db) return this.reserveMemory(key, fingerprint, expiresAt, now);
     const reserve = this.db.transaction((): RuntimeActionReservation => {
       this.db!.prepare('DELETE FROM runtime_action_idempotency WHERE expires_at <= ?').run(now);
@@ -120,6 +123,20 @@ export class RuntimeActionStore {
     return (this.db.prepare(`
       SELECT event_json FROM runtime_action_audit ORDER BY id ASC
     `).all() as PersistedAuditEvent[]).map(({ event_json }) => JSON.parse(event_json) as RuntimeActionAuditEvent);
+  }
+
+  track<T>(operation: Promise<T>): Promise<T> {
+    const tracked = operation.finally(() => this.pending.delete(tracked));
+    this.pending.add(tracked);
+    return tracked;
+  }
+
+  beginShutdown(): void {
+    this.shuttingDown = true;
+  }
+
+  async drain(): Promise<void> {
+    await Promise.allSettled([...this.pending]);
   }
 
   destroy(): void {

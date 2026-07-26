@@ -126,6 +126,18 @@ describe('startChatServer comms pass-through', () => {
     expect(opts.runtimeActionStore).toBeDefined();
     expect(opts.runtimeActionStore!.listAuditEvents()).toEqual([]);
     await expect(stat(join(projectDir, 'chat', 'runtime-actions', 'actions.sqlite'))).resolves.toBeDefined();
+    const beginShutdown = vi.spyOn(opts.runtimeActionStore!, 'beginShutdown');
+    const drain = vi.spyOn(opts.runtimeActionStore!, 'drain');
+    const destroy = vi.spyOn(opts.runtimeActionStore!, 'destroy');
+
+    await handle.close();
+    handle = undefined;
+
+    expect(beginShutdown).toHaveBeenCalledOnce();
+    expect(drain).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(beginShutdown.mock.invocationCallOrder[0]).toBeLessThan(drain.mock.invocationCallOrder[0]!);
+    expect(drain.mock.invocationCallOrder[0]).toBeLessThan(destroy.mock.invocationCallOrder[0]!);
   });
 
   it('closes analytics dependencies when the chat server shuts down', async () => {

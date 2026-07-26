@@ -327,6 +327,8 @@ if (args.includes('show')) {
   it('translates task pause into the supported Hermes schedule operation', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    createCurrentKanban(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'));
     let status = 'ready';
     const calls: string[][] = [];
     const adapter = new HermesRuntimeAdapter({
@@ -412,6 +414,33 @@ if (args.includes('show')) {
       idempotencyKey: 'cancel:t_deadbeef:unsupported',
       action: { type: 'task.cancel', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef' },
     }))).resolves.toEqual(expect.objectContaining({ status: 'unsupported' }));
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses mutations for workspaces whose database escapes Hermes home', async () => {
+    const home = await createHome();
+    const outside = await createHome();
+    createCurrentKanban(join(outside, 'kanban.db'));
+    const boardsRoot = join(home, 'kanban', 'boards');
+    await mkdir(boardsRoot, { recursive: true });
+    await symlink(outside, join(boardsRoot, 'escape'), 'dir');
+    const calls: string[][] = [];
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        calls.push([...args]);
+        return { stdout: JSON.stringify({ task: { status: 'ready' } }), stderr: '', exitCode: 0 };
+      },
+    });
+
+    await expect(adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:escaped-workspace:one',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:escape', taskId: 'hermes:escape:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    }))).resolves.toEqual(expect.objectContaining({ status: 'failed' }));
     expect(calls).toEqual([]);
   });
 

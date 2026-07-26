@@ -225,6 +225,40 @@ describe('smart-swarm runtime routes', () => {
     ]);
   });
 
+  it('completes idempotency before an optional external audit hook settles', async () => {
+    const { app, adapter, actionAudit } = createRoutes();
+    actionAudit.mockImplementation(() => new Promise(() => {}));
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied',
+      },
+    }));
+    const body = JSON.stringify({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:nonblocking-audit',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    });
+    const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+    });
+
+    const first = await Promise.race([
+      request(),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('audit hook blocked completion')), 100)),
+    ]);
+    expect(first.status).toBe(200);
+    await expect((await request()).json()).resolves.toEqual({
+      data: expect.objectContaining({ status: 'applied', replayed: true }),
+    });
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+  });
+
   it('checks adapter action support and returns a typed unsupported response without side effects', async () => {
     const { app, adapter } = createRoutes();
     const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
