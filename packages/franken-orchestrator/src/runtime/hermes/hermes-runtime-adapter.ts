@@ -25,6 +25,7 @@ import {
 
 export interface HermesRuntimeAdapterOptions {
   hermesHome?: string | undefined;
+  kanbanDbPath?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   now?: (() => Date) | undefined;
   busyTimeoutMs?: number | undefined;
@@ -68,6 +69,7 @@ const REQUIRED_SCHEMA: Record<string, string[]> = {
 };
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
+const MAX_CURSOR_CHARS = 12 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
@@ -80,7 +82,14 @@ function nowIso(now: () => Date): string {
 
 function optionalHome(options: HermesRuntimeAdapterOptions): string | undefined {
   const env = options.env ?? process.env;
-  const value = options.hermesHome ?? env['HERMES_HOME'];
+  const value = options.hermesHome ?? env['HERMES_HOME']
+    ?? (env['HOME'] ? resolve(env['HOME'], '.hermes') : undefined);
+  return value?.trim() || undefined;
+}
+
+function optionalKanbanDbPath(options: HermesRuntimeAdapterOptions): string | undefined {
+  const env = options.env ?? process.env;
+  const value = options.kanbanDbPath ?? env['HERMES_KANBAN_DB'];
   return value?.trim() || undefined;
 }
 
@@ -271,7 +280,7 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
 }
 
 function cursorForPositions(positions: Map<string, CursorValue>): string {
-  return Buffer.from(JSON.stringify({
+  const cursor = Buffer.from(JSON.stringify({
     p: [...positions].map(([workspaceId, cursor]) => [
       workspaceId,
       cursor.occurredAt,
@@ -279,6 +288,10 @@ function cursorForPositions(positions: Map<string, CursorValue>): string {
       cursor.sourceId,
     ]),
   })).toString('base64url');
+  if (cursor.length > MAX_CURSOR_CHARS) {
+    throw new RangeError('Hermes workspace set exceeds the supported runtime cursor size');
+  }
+  return cursor;
 }
 
 function eventOrder(a: CursorValue, b: CursorValue): number {
@@ -297,11 +310,13 @@ function runtimeEventOrder(a: RuntimeEvent, b: RuntimeEvent): number {
 export class HermesRuntimeAdapter implements RuntimeAdapter {
   readonly id = 'hermes';
   private readonly home: string | undefined;
+  private readonly kanbanDbPath: string | undefined;
   private readonly now: () => Date;
   private readonly busyTimeoutMs: number;
 
   constructor(options: HermesRuntimeAdapterOptions = {}) {
     this.home = optionalHome(options);
+    this.kanbanDbPath = optionalKanbanDbPath(options);
     this.now = options.now ?? (() => new Date());
     this.busyTimeoutMs = options.busyTimeoutMs ?? 2000;
   }
@@ -312,7 +327,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const compatible = inspected.filter((source) => source.status === 'compatible').length;
     const unavailable = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatible = inspected.filter((source) => source.status === 'schema-incompatible').length;
-    const unavailableMessage = this.home
+    const unavailableMessage = this.home || this.kanbanDbPath
       ? 'No canonical Hermes Kanban database was found'
       : 'Hermes home is not configured; set HERMES_HOME or pass hermesHome';
     const health = inspected.length === 0
@@ -388,7 +403,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const unavailableCount = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
     const state = inspected.length === 0
-      ? (inspection.discoveryMessage || !this.home ? 'unavailable' as const : 'empty' as const)
+      ? 'unavailable' as const
       : compatibleCount === 0 && unavailableCount > 0
         ? 'unavailable' as const
         : compatibleCount === 0 && incompatibleCount === inspected.length
@@ -401,7 +416,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const message = state === 'unavailable'
       ? (inspection.discoveryMessage
           ? boundedText(inspection.discoveryMessage)
-          : this.home ? 'Discovered Hermes databases are unavailable' : 'Hermes home is not configured')
+          : this.home || this.kanbanDbPath
+            ? 'Discovered Hermes databases are unavailable'
+            : 'Hermes home is not configured')
       : state === 'schema-incompatible'
         ? 'No selected Hermes database has a supported schema'
         : state === 'degraded'
@@ -483,18 +500,22 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   private async discoverSources(): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
-    if (!this.home) return { sources: [] };
-    const home = resolve(this.home);
+    if (!this.home && !this.kanbanDbPath) return { sources: [] };
+    const home = this.home ? resolve(this.home) : undefined;
     const sources: DatabaseSource[] = [];
     let discoveryMessage: string | undefined;
-    const globalPath = resolve(home, 'kanban.db');
+    const globalPath = this.kanbanDbPath ? resolve(this.kanbanDbPath) : resolve(home!, 'kanban.db');
     try {
-      if (await this.isSafeDatabase(home, globalPath)) {
+      const safe = this.kanbanDbPath
+        ? await this.isDatabase(globalPath)
+        : await this.isSafeDatabase(home!, globalPath);
+      if (safe) {
         sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: globalPath });
       }
     } catch (error) {
       discoveryMessage = error instanceof Error ? error.message : 'Hermes database discovery failed';
     }
+    if (!home) return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
     const boardsRoot = resolve(home, 'kanban', 'boards');
     let entries;
     try {
@@ -524,6 +545,15 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     try {
       const [resolvedHome, resolvedPath, fileStat] = await Promise.all([realpath(home), realpath(path), stat(path)]);
       return fileStat.isFile() && (resolvedPath === resolvedHome || resolvedPath.startsWith(`${resolvedHome}${sep}`));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
+  private async isDatabase(path: string): Promise<boolean> {
+    try {
+      return (await stat(path)).isFile();
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
       throw error;
