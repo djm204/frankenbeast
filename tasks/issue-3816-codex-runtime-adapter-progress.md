@@ -18,5 +18,7 @@
 - [x] Run focused runtime verification (27/27), root lint/typecheck/build, and full tests (full suite reached 4,637/4,640 orchestrator tests; three unrelated environment/order-sensitive CLI tests remain red).
 - [x] Publish the rebased remediation commits and reply to/resolve all four Codex threads.
 - [x] Rebase onto #3821's final exact clean head `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e`.
+- [x] Remediate fifth-round Codex findings 3653658278, 3653658281, 3653658283, and 3653658284 under RED→GREEN; focused verification passes 52/52.
+- [ ] Obtain explicit tier escalation approval before any sixth `@codex review` trigger (default five-invocation cap is exhausted).
 - [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.

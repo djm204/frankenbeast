@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import {
   RuntimeEventPageSchema,
   RuntimeSnapshotSchema,
@@ -47,6 +48,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 2_000;
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_THREAD_PAGES = 100;
+const MAX_CURSOR_JSON_BYTES = 64 * 1024;
 const THREAD_STATUS_TYPES = new Set(['active', 'idle', 'notLoaded', 'systemError']);
 const THREAD_SOURCE_KINDS = [
   'cli', 'vscode', 'exec', 'appServer', 'subAgent',
@@ -63,6 +65,7 @@ interface CodexThread {
   ephemeral: boolean;
   modelProvider: string;
   status: { type: string; activeFlags?: string[] | undefined };
+  archived?: boolean | undefined;
 }
 
 class CodexSchemaError extends Error {}
@@ -147,25 +150,41 @@ function workspaceId(cwd: string): string {
   return `codex:workspace:${workspaceKey(cwd)}`;
 }
 
+function threadKey(threadId: string): string {
+  return createHash('sha256').update(threadId).digest('hex').slice(0, 16);
+}
+
 function agentState(status: CodexThread['status']): RuntimeAgent['state'] {
   switch (status.type) {
     case 'active': return status.activeFlags?.some((flag) => (
       flag === 'waitingOnApproval' || flag === 'waitingOnUserInput'
     )) ? 'blocked' : 'running';
     case 'idle': return 'idle';
-    case 'notLoaded': return 'offline';
+    // A freshly spawned read-only app-server reports threads owned by other
+    // Codex processes as notLoaded, which is not evidence they are offline.
+    case 'notLoaded': return 'unknown';
     case 'systemError': return 'blocked';
     default: return 'unknown';
   }
 }
 
-function eventCursor(thread: CodexThread, boundaryStatuses?: Record<string, string>): string {
-  return Buffer.from(JSON.stringify({
-    occurredAt: timestamp(thread.updatedAt),
-    threadId: thread.id,
-    status: thread.status.type,
+function eventStatus(thread: CodexThread): string {
+  return thread.archived ? 'archived' : thread.status.type;
+}
+
+function eventCursor(
+  thread: CodexThread,
+  boundaryStatuses?: Record<string, string>,
+  watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
+): string {
+  const payload = Buffer.from(JSON.stringify({
+    version: 2,
+    occurredAt: watermark?.occurredAt ?? timestamp(thread.updatedAt),
+    threadId: watermark?.threadId ?? thread.id,
+    status: eventStatus(thread),
     ...(boundaryStatuses ? { boundaryStatuses } : {}),
-  })).toString('base64url');
+  }));
+  return `z.${deflateRawSync(payload).toString('base64url')}`;
 }
 
 interface CodexCursor {
@@ -178,10 +197,17 @@ interface CodexCursor {
 function parseCursor(value: string | undefined): CodexCursor | null {
   if (!value) return null;
   try {
-    const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const serialized = value.startsWith('z.')
+      ? inflateRawSync(Buffer.from(value.slice(2), 'base64url'), {
+          maxOutputLength: MAX_CURSOR_JSON_BYTES,
+        }).toString('utf8')
+      : Buffer.from(value, 'base64url').toString('utf8');
+    const decoded = JSON.parse(serialized) as Record<string, unknown>;
     const boundaryStatuses = decoded['boundaryStatuses'];
     if (
-      typeof decoded['occurredAt'] !== 'string'
+      (decoded['version'] !== undefined && decoded['version'] !== 2)
+      || Buffer.byteLength(serialized) > MAX_CURSOR_JSON_BYTES
+      || typeof decoded['occurredAt'] !== 'string'
       || Number.isNaN(Date.parse(decoded.occurredAt))
       || new Date(decoded.occurredAt).toISOString() !== decoded.occurredAt
       || typeof decoded.threadId !== 'string'
@@ -192,15 +218,25 @@ function parseCursor(value: string | undefined): CodexCursor | null {
         || typeof boundaryStatuses !== 'object'
         || Array.isArray(boundaryStatuses)
         || Object.entries(boundaryStatuses).length > MAX_ACTIVITY_LIMIT
-        || Object.entries(boundaryStatuses).some(([id, status]) => id.length === 0 || typeof status !== 'string' || status.length === 0)
+        || Object.entries(boundaryStatuses).some(([id, status]) => (
+          id.length === 0
+          || (decoded['version'] === 2 && !/^[a-f0-9]{16}$/.test(id))
+          || typeof status !== 'string'
+          || status.length === 0
+        ))
       ))
     ) throw new Error('invalid');
+    const normalizedStatuses = boundaryStatuses === undefined
+      ? undefined
+      : Object.fromEntries(Object.entries(boundaryStatuses as Record<string, string>).map(
+          ([id, status]) => [decoded['version'] === 2 ? id : threadKey(id), status],
+        ));
     return {
       occurredAt: decoded['occurredAt'] as string,
       threadId: decoded['threadId'] as string,
       ...(decoded['status'] !== undefined ? { status: decoded['status'] as string } : {}),
-      ...(boundaryStatuses !== undefined
-        ? { boundaryStatuses: boundaryStatuses as Record<string, string> }
+      ...(normalizedStatuses !== undefined
+        ? { boundaryStatuses: normalizedStatuses }
         : {}),
     };
   } catch {
@@ -213,23 +249,28 @@ function compareCursor(a: CodexCursor, b: CodexCursor): number {
 }
 
 function rememberStatus(statuses: Record<string, string>, threadId: string, status: string): void {
-  if (!Object.hasOwn(statuses, threadId) && Object.keys(statuses).length >= MAX_ACTIVITY_LIMIT) {
+  const key = threadKey(threadId);
+  if (!Object.hasOwn(statuses, key) && Object.keys(statuses).length >= MAX_ACTIVITY_LIMIT) {
     const oldestThreadId = Object.keys(statuses)[0];
     if (oldestThreadId !== undefined) delete statuses[oldestThreadId];
   }
-  statuses[threadId] = status;
+  statuses[key] = status;
 }
 
-function eventForThread(thread: CodexThread, boundaryStatuses?: Record<string, string>): RuntimeEvent {
+function eventForThread(
+  thread: CodexThread,
+  boundaryStatuses?: Record<string, string>,
+  watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
+): RuntimeEvent {
   return {
-    id: `codex:thread:${thread.id}:${thread.updatedAt}:${thread.status.type}`,
-    cursor: eventCursor(thread, boundaryStatuses),
+    id: `codex:thread:${thread.id}:${thread.updatedAt}:${eventStatus(thread)}`,
+    cursor: eventCursor(thread, boundaryStatuses, watermark),
     workspaceId: workspaceId(thread.cwd),
     taskId: null,
     runId: null,
     type: 'lifecycle',
     occurredAt: timestamp(thread.updatedAt)!,
-    summary: `Codex thread is ${thread.status.type}`,
+    summary: `Codex thread is ${eventStatus(thread)}`,
     metadata: { agentId: `codex:thread:${thread.id}`, sessionId: thread.sessionId },
   };
 }
@@ -256,6 +297,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
   private async readThreadPages(options: {
     pageSize: number;
     signal?: AbortSignal | undefined;
+    archived?: boolean | undefined;
     stop: (threads: CodexThread[]) => boolean;
   }): Promise<{ threads: CodexThread[]; rejected: number; truncated: boolean }> {
     const threads: CodexThread[] = [];
@@ -268,10 +310,13 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
         sortDirection: 'desc',
         sourceKinds: THREAD_SOURCE_KINDS,
         useStateDbOnly: true,
+        ...(options.archived !== undefined ? { archived: options.archived } : {}),
         ...(cursor ? { cursor } : {}),
       }, { signal: options.signal, timeoutMs: this.requestTimeoutMs });
       const page = parseThreadList(response);
-      threads.push(...page.threads);
+      threads.push(...page.threads.map((thread) => (
+        options.archived ? { ...thread, archived: true } : thread
+      )));
       rejected += page.rejected;
       if (options.stop(threads) || page.nextCursor === null) {
         return { threads, rejected, truncated: false };
@@ -423,19 +468,30 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
     const limit = normalizeLimit(request.limit);
     const after = parseCursor(request.cursor);
-    const parsed = await this.readThreadPages({
+    const stop = (threads: CodexThread[]): boolean => after === null
+      ? request.workspaceId === undefined || threads.filter(
+          (thread) => workspaceId(thread.cwd) === request.workspaceId,
+        ).length >= limit
+      : threads.some((thread) => timestamp(thread.updatedAt)! < after.occurredAt);
+    const active = await this.readThreadPages({
       pageSize: MAX_ACTIVITY_LIMIT,
       signal: request.signal,
-      stop: (threads) => after === null
-        ? request.workspaceId === undefined || threads.filter(
-            (thread) => workspaceId(thread.cwd) === request.workspaceId,
-          ).length >= limit
-        : threads.some((thread) => timestamp(thread.updatedAt)! < after.occurredAt),
+      archived: false,
+      stop,
     });
-    if (parsed.truncated) {
+    const archived = await this.readThreadPages({
+      pageSize: MAX_ACTIVITY_LIMIT,
+      signal: request.signal,
+      archived: true,
+      stop,
+    });
+    if (active.truncated || archived.truncated) {
       throw new CodexSchemaError('Codex event pagination exceeded the bounded page limit');
     }
-    const matchingThreads = parsed.threads
+    const activeIds = new Set(active.threads.map((thread) => thread.id));
+    const matchingThreads = [...active.threads, ...archived.threads.filter(
+      (thread) => !activeIds.has(thread.id),
+    )]
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId);
     const candidates = matchingThreads
       .map((thread) => ({
@@ -443,15 +499,16 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
         cursor: {
           occurredAt: timestamp(thread.updatedAt)!,
           threadId: thread.id,
-          status: thread.status.type,
+          status: eventStatus(thread),
         },
       }))
       .filter((entry) => {
         if (!after) return true;
         const order = compareCursor(entry.cursor, after);
         if (order <= 0 && after.boundaryStatuses) {
-          if (Object.hasOwn(after.boundaryStatuses, entry.cursor.threadId)) {
-            return after.boundaryStatuses[entry.cursor.threadId] !== entry.cursor.status;
+          const key = threadKey(entry.cursor.threadId);
+          if (Object.hasOwn(after.boundaryStatuses, key)) {
+            return after.boundaryStatuses[key] !== entry.cursor.status;
           }
           if (entry.cursor.occurredAt === after.occurredAt) return true;
         }
@@ -464,9 +521,13 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           .slice(0, limit)
           .sort((a, b) => compareCursor(a.cursor, b.cursor));
     const emittedStatuses = after?.boundaryStatuses ? { ...after.boundaryStatuses } : {};
+    let watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'> | undefined = after ?? undefined;
     const events = entries.map((entry) => {
       rememberStatus(emittedStatuses, entry.cursor.threadId, entry.cursor.status);
-      return eventForThread(entry.thread, emittedStatuses);
+      if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
+        watermark = entry.cursor;
+      }
+      return eventForThread(entry.thread, emittedStatuses, watermark);
     });
     return RuntimeEventPageSchema.parse({
       events,
