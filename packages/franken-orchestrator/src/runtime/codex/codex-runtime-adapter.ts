@@ -143,12 +143,14 @@ function eventCursor(thread: CodexThread): string {
   return Buffer.from(JSON.stringify({
     occurredAt: timestamp(thread.updatedAt),
     threadId: thread.id,
+    status: thread.status.type,
   })).toString('base64url');
 }
 
 interface CodexCursor {
   occurredAt: string;
   threadId: string;
+  status?: string | undefined;
 }
 
 function parseCursor(value: string | undefined): CodexCursor | null {
@@ -161,6 +163,7 @@ function parseCursor(value: string | undefined): CodexCursor | null {
       || new Date(decoded.occurredAt).toISOString() !== decoded.occurredAt
       || typeof decoded.threadId !== 'string'
       || decoded.threadId.length === 0
+      || (decoded.status !== undefined && (typeof decoded.status !== 'string' || decoded.status.length === 0))
     ) throw new Error('invalid');
     return decoded as CodexCursor;
   } catch {
@@ -174,7 +177,7 @@ function compareCursor(a: CodexCursor, b: CodexCursor): number {
 
 function eventForThread(thread: CodexThread): RuntimeEvent {
   return {
-    id: `codex:thread:${thread.id}:${thread.updatedAt}`,
+    id: `codex:thread:${thread.id}:${thread.updatedAt}:${thread.status.type}`,
     cursor: eventCursor(thread),
     workspaceId: workspaceId(thread.cwd),
     taskId: null,
@@ -209,7 +212,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     pageSize: number;
     signal?: AbortSignal | undefined;
     stop: (threads: CodexThread[]) => boolean;
-  }): Promise<{ threads: CodexThread[]; rejected: number }> {
+  }): Promise<{ threads: CodexThread[]; rejected: number; truncated: boolean }> {
     const threads: CodexThread[] = [];
     let rejected = 0;
     let cursor: string | null = null;
@@ -224,10 +227,12 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       const page = parseThreadList(response);
       threads.push(...page.threads);
       rejected += page.rejected;
-      if (options.stop(threads) || page.nextCursor === null) return { threads, rejected };
+      if (options.stop(threads) || page.nextCursor === null) {
+        return { threads, rejected, truncated: false };
+      }
       cursor = page.nextCursor;
     }
-    throw new CodexSchemaError('Codex thread pagination exceeded the bounded page limit');
+    return { threads, rejected, truncated: true };
   }
 
   async describe(): Promise<RuntimeProvider> {
@@ -282,7 +287,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
 
   async getSnapshot(request: RuntimeSnapshotRequest = {}): Promise<RuntimeSnapshot> {
     const limit = normalizeLimit(request.activityLimit);
-    let parsed: { threads: CodexThread[]; rejected: number };
+    let parsed: { threads: CodexThread[]; rejected: number; truncated: boolean };
     try {
       parsed = await this.readThreadPages({
         pageSize: request.workspaceId === undefined ? limit : MAX_ACTIVITY_LIMIT,
@@ -347,14 +352,17 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       events.push(eventForThread(thread));
     }
 
-    const state = parsed.rejected > 0
+    const state = parsed.rejected > 0 || parsed.truncated
       ? 'degraded' as const
       : selected.length > 0 ? 'ready' as const : 'empty' as const;
+    const message = parsed.truncated
+      ? 'Codex workspace metadata was limited by the bounded scan'
+      : parsed.rejected > 0 ? 'Some Codex thread metadata was incompatible' : undefined;
     return RuntimeSnapshotSchema.parse({
       providerId: this.id,
       state,
       capturedAt: this.now().toISOString(),
-      ...(parsed.rejected > 0 ? { message: 'Some Codex thread metadata was incompatible' } : {}),
+      ...(message ? { message } : {}),
       workspaces: { status: 'available', data: [...workspacesById.values()].sort((a, b) => a.id.localeCompare(b.id)) },
       agents: { status: 'available', data: agents.sort((a, b) => a.id.localeCompare(b.id)) },
       tasks: { status: 'unsupported', reason: UNSUPPORTED_TASKS },
@@ -371,17 +379,30 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     const parsed = await this.readThreadPages({
       pageSize: MAX_ACTIVITY_LIMIT,
       signal: request.signal,
-      stop: (threads) => after === null || threads.some(
-        (thread) => timestamp(thread.updatedAt)! < after.occurredAt,
-      ),
+      stop: (threads) => after === null
+        ? request.workspaceId === undefined || threads.filter(
+            (thread) => workspaceId(thread.cwd) === request.workspaceId,
+          ).length >= limit
+        : threads.some((thread) => timestamp(thread.updatedAt)! < after.occurredAt),
     });
+    if (parsed.truncated) {
+      throw new CodexSchemaError('Codex event pagination exceeded the bounded page limit');
+    }
     const entries = parsed.threads
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId)
       .map((thread) => ({
-        cursor: { occurredAt: timestamp(thread.updatedAt)!, threadId: thread.id },
+        cursor: {
+          occurredAt: timestamp(thread.updatedAt)!,
+          threadId: thread.id,
+          status: thread.status.type,
+        },
         event: eventForThread(thread),
       }))
-      .filter((entry) => !after || compareCursor(entry.cursor, after) > 0)
+      .filter((entry) => {
+        if (!after) return true;
+        const order = compareCursor(entry.cursor, after);
+        return order > 0 || (order === 0 && after.status !== undefined && entry.cursor.status !== after.status);
+      })
       .sort((a, b) => compareCursor(a.cursor, b.cursor))
       .slice(0, limit);
     const events = entries.map((entry) => entry.event);
