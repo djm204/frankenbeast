@@ -7,7 +7,7 @@
 - [x] RED→GREEN: add latest-score and bounded time-range history queries for direct and worker-backed SQLite paths.
 - [x] Export the public API and document the v1 formula, weights, normalization, and on-demand rationale.
 - [x] Run focused tests plus `@franken/observer` test, lint, typecheck, and build gates.
-- [ ] Commit and push the unique issue branch; open exactly one PR closing #3731.
+- [x] Commit and push the unique issue branch; open exactly one PR closing #3731: https://github.com/djm204/frankenbeast/pull/3797.
 - [ ] Complete exact-head GitHub Codex review loops, resolve all threads, and verify exact-head CI.
 - [ ] Squash-merge, verify #3731 closed, and record merge/test/review evidence.
 
