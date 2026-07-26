@@ -52,8 +52,13 @@ type RuntimeRow = Record<string, unknown>;
 interface CursorValue {
   occurredAt: string;
   workspaceId: string;
-  source: 'comment' | 'event';
+  source: 'event' | 'comment';
   sourceId: number;
+}
+
+interface RequestCursorState {
+  legacy?: CursorValue | undefined;
+  positions: Map<string, CursorValue>;
 }
 
 const REQUIRED_SCHEMA: Record<string, string[]> = {
@@ -64,7 +69,7 @@ const REQUIRED_SCHEMA: Record<string, string[]> = {
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_SUMMARY_CHARS = 512;
-const ABSOLUTE_PATH_RE = /(?:^|\s)(\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+))/gu;
+const ABSOLUTE_PATH_RE = /(?:^|\s)(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 
 function nowIso(now: () => Date): string {
   return now().toISOString();
@@ -116,13 +121,18 @@ function mapTaskState(status: unknown): RuntimeTask['state'] {
     case 'running': return 'running';
     case 'blocked': return 'blocked';
     case 'done':
-    case 'completed': return 'succeeded';
+    case 'completed':
+    case 'complete':
+    case 'success': return 'succeeded';
     case 'failed':
     case 'gave_up':
     case 'crashed':
     case 'timed_out':
+    case 'timeout':
+    case 'error':
     case 'spawn_failed': return 'failed';
-    case 'cancelled': return 'cancelled';
+    case 'cancelled':
+    case 'canceled': return 'cancelled';
     case 'archived': return 'archived';
     default: return 'unknown';
   }
@@ -137,12 +147,17 @@ function mapRunState(status: unknown, outcome: unknown): 'queued' | 'running' | 
     case 'running': return 'running';
     case 'blocked': return 'blocked';
     case 'done':
-    case 'completed': return 'succeeded';
-    case 'cancelled': return 'cancelled';
+    case 'completed':
+    case 'complete':
+    case 'success': return 'succeeded';
+    case 'cancelled':
+    case 'canceled': return 'cancelled';
     case 'crashed':
     case 'failed':
     case 'gave_up':
     case 'timed_out':
+    case 'timeout':
+    case 'error':
     case 'spawn_failed': return 'failed';
     default: return 'unknown';
   }
@@ -192,6 +207,33 @@ function parseCursor(value: string | undefined): CursorValue | undefined {
   }
 }
 
+function parseRequestCursor(value: string | undefined): RequestCursorState {
+  if (!value) return { positions: new Map() };
+  try {
+    const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as { positions?: unknown };
+    if (decoded.positions && typeof decoded.positions === 'object' && !Array.isArray(decoded.positions)) {
+      const positions = new Map<string, CursorValue>();
+      for (const [workspaceId, encoded] of Object.entries(decoded.positions)) {
+        if (typeof encoded !== 'string') throw new Error('invalid');
+        const cursor = parseCursor(encoded);
+        if (!cursor) throw new Error('invalid');
+        positions.set(workspaceId, cursor);
+      }
+      return { positions };
+    }
+  } catch (error) {
+    if (error instanceof RuntimeCursorError) throw error;
+    throw new RuntimeCursorError();
+  }
+  return { legacy: parseCursor(value), positions: new Map() };
+}
+
+function cursorForPositions(positions: Map<string, CursorValue>): string {
+  return Buffer.from(JSON.stringify({
+    positions: Object.fromEntries([...positions].map(([workspaceId, cursor]) => [workspaceId, cursorFor(cursor)])),
+  })).toString('base64url');
+}
+
 function eventOrder(a: CursorValue, b: CursorValue): number {
   return a.occurredAt.localeCompare(b.occurredAt)
     || a.workspaceId.localeCompare(b.workspaceId)
@@ -226,7 +268,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           checkedAt: nowIso(this.now),
           message: inspection.discoveryMessage ? boundedText(inspection.discoveryMessage) : unavailableMessage,
         }
-      : compatible === 0 && unavailable === inspected.length
+      : compatible === 0 && unavailable > 0
         ? { state: 'unavailable' as const, checkedAt: nowIso(this.now), message: 'Discovered Hermes databases are unavailable' }
         : compatible === 0 && incompatible === inspected.length
           ? { state: 'schema-incompatible' as const, checkedAt: nowIso(this.now), message: 'No discovered Hermes database has a supported schema' }
@@ -294,7 +336,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
     const state = inspected.length === 0
       ? (inspection.discoveryMessage || !this.home ? 'unavailable' as const : 'empty' as const)
-      : compatibleCount === 0 && unavailableCount === inspected.length
+      : compatibleCount === 0 && unavailableCount > 0
         ? 'unavailable' as const
         : compatibleCount === 0 && incompatibleCount === inspected.length
           ? 'schema-incompatible' as const
@@ -336,12 +378,13 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
 
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
     const limit = normalizeLimit(request.limit);
-    const after = parseCursor(request.cursor);
+    const cursorState = parseRequestCursor(request.cursor);
     const inspected = (await this.inspectSources()).sources.filter((source) => (
       source.status === 'compatible' && (request.workspaceId === undefined || source.workspaceId === request.workspaceId)
     ));
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
     for (const source of inspected) {
+      const after = cursorState.positions.get(source.workspaceId) ?? cursorState.legacy;
       try {
         for (const event of this.readEvents(source, after, limit + 1)) {
           const decoded = parseCursor(event.cursor);
@@ -352,16 +395,24 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       }
     }
     entries.sort((a, b) => eventOrder(a.cursor, b.cursor));
-    const filtered = after ? entries.filter((entry) => eventOrder(entry.cursor, after) > 0) : entries;
-    const page = after ? filtered.slice(0, limit) : filtered.slice(-limit);
+    const filtered = entries.filter((entry) => {
+      const after = cursorState.positions.get(entry.cursor.workspaceId) ?? cursorState.legacy;
+      return !after || eventOrder(entry.cursor, after) > 0;
+    });
+    const page = request.cursor ? filtered.slice(0, limit) : filtered.slice(-limit);
+    const positions = new Map(cursorState.positions);
+    if (cursorState.legacy) {
+      for (const source of inspected) positions.set(source.workspaceId, cursorState.legacy);
+    }
+    for (const entry of page) positions.set(entry.cursor.workspaceId, entry.cursor);
     return RuntimeEventPageSchema.parse({
       events: page.map((entry) => entry.event),
-      nextCursor: page.length > 0 ? page[page.length - 1]!.event.cursor : request.cursor ?? null,
+      nextCursor: page.length > 0 ? cursorForPositions(positions) : request.cursor ?? null,
     });
   }
 
   validateEventCursor(cursor: string): void {
-    parseCursor(cursor);
+    parseRequestCursor(cursor);
   }
 
   private async discoverSources(): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
@@ -671,7 +722,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         metadata: { source: 'task-comment', author: boundedText(comment['author']) },
       });
     }
-    normalizedEvents.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id));
+    normalizedEvents.sort((a, b) => eventOrder(parseCursor(a.cursor)!, parseCursor(b.cursor)!));
     return { tasks, runs, events: normalizedEvents.slice(-activityLimit), blockers, agents };
   }
 }

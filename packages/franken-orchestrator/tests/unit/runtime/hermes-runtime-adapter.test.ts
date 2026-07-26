@@ -204,6 +204,94 @@ describe('HermesRuntimeAdapter', () => {
 
     expect(page.events).not.toHaveLength(0);
     expect(page.events.every((event) => event.workspaceId === 'hermes:global')).toBe(true);
+    expect(page.nextCursor).not.toBeNull();
+
+    const recovered = new Database(boardPath);
+    recovered.prepare('UPDATE task_events SET created_at = ?').run(1_785_081_650);
+    recovered.close();
+    const replay = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({
+      cursor: page.nextCursor!,
+      limit: 10,
+    });
+
+    expect(replay.events.some((event) => event.workspaceId === 'hermes:alpha')).toBe(true);
+  });
+
+  it('preserves slash commands and API routes in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'Use /plan with /v1/users from /home/alice/private-repo',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'Use /plan with /v1/users from [REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
+  it('reports mixed unreadable and schema-incompatible sources as unavailable', async () => {
+    const home = await createHome();
+    const incompatible = new Database(join(home, 'kanban.db'));
+    incompatible.exec('CREATE TABLE tasks (id TEXT PRIMARY KEY);');
+    incompatible.close();
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    await writeFile(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'), 'not sqlite');
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.state).toBe('unavailable');
+    expect(snapshot.tasks.status).toBe('unsupported');
+  });
+
+  it('orders equal-timestamp snapshot events by numeric source ID', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('DELETE FROM task_comments').run();
+    db.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
+      2, 't_child', null, 'updated', '{}', 1_785_081_650,
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({ activityLimit: 2 });
+    if (snapshot.events.status !== 'available') throw new Error('Expected events');
+
+    expect(snapshot.events.data.map((event) => event.id)).toEqual([
+      'hermes:global:event:2',
+      'hermes:global:event:10',
+    ]);
+  });
+
+  it('normalizes established terminal Kanban task aliases', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('DELETE FROM task_links').run();
+    db.prepare('DELETE FROM tasks').run();
+    const insert = db.prepare('INSERT INTO tasks (id,title,status,created_at,workspace_kind) VALUES (?,?,?,?,?)');
+    for (const [id, status] of Object.entries({
+      complete: 'complete', success: 'success', error: 'error', timeout: 'timeout', canceled: 'canceled',
+    })) insert.run(id, id, status, 1_785_081_600, 'scratch');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.tasks.status !== 'available') throw new Error('Expected tasks');
+    const states = Object.fromEntries(snapshot.tasks.data.map((task) => [task.id.split(':').at(-1), task.state]));
+
+    expect(states).toEqual({
+      canceled: 'cancelled', complete: 'succeeded', error: 'failed', success: 'succeeded', timeout: 'failed',
+    });
   });
 
   it('reports inaccessible board discovery as unavailable instead of throwing', async () => {
