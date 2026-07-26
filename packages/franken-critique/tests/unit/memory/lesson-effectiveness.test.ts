@@ -365,4 +365,61 @@ describe('LessonEffectivenessTelemetry', () => {
 
     expect(event.injectionContext.taskId).toBe('task-scoped');
   });
+
+  it('rejects outcomes observed before the lesson was injected', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+
+    expect(() =>
+      telemetry.record({
+        lessonId: 'lesson-time-order',
+        lessonScope,
+        injectionContext: {
+          repo: 'djm204/frankenbeast',
+          taskId: 'task-time-order',
+        },
+        injectedAt: '2026-07-24T00:01:00.000Z',
+        observedAt: '2026-07-24T00:00:00.000Z',
+        taskSucceeded: true,
+        blockersBefore: 1,
+        blockersAfter: 0,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      }),
+    ).toThrow('observedAt must not precede injectedAt');
+    expect(telemetry.report().totalEvents).toBe(0);
+  });
+
+  it('rejects scope approval that postdates the lesson injection', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const postdatedScope: LessonScopeMetadata = {
+      ...lessonScope,
+      auditTrail: [
+        {
+          changedAt: '2026-07-25T00:00:00.000Z',
+          actor: 'reviewer',
+          toScope: 'repo',
+          reason: 'Approved after the attempted injection.',
+        },
+      ],
+    };
+
+    expect(() =>
+      telemetry.record({
+        lessonId: 'lesson-postdated-scope',
+        lessonScope: postdatedScope,
+        injectionContext: {
+          repo: 'djm204/frankenbeast',
+          taskId: 'task-postdated-scope',
+        },
+        injectedAt: '2026-07-24T00:00:00.000Z',
+        observedAt: '2026-07-24T00:01:00.000Z',
+        taskSucceeded: true,
+        blockersBefore: 1,
+        blockersAfter: 0,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      }),
+    ).toThrow('injection context is outside the reviewed lesson scope');
+    expect(telemetry.report().totalEvents).toBe(0);
+  });
 });

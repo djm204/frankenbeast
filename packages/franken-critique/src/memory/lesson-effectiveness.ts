@@ -63,6 +63,9 @@ export class LessonEffectivenessTelemetry {
     const lessonScope = normalizeLessonScope(input.lessonScope?.scope);
     const injectedAt = normalizeTimestamp(input.injectedAt, 'injectedAt');
     const observedAt = normalizeTimestamp(input.observedAt, 'observedAt');
+    if (Date.parse(observedAt) < Date.parse(injectedAt)) {
+      throw new RangeError('observedAt must not precede injectedAt.');
+    }
     const injectionContext = normalizeInjectionContext(input.injectionContext);
     requireApplicableScope(
       lessonId,
@@ -212,6 +215,14 @@ function requireApplicableScope(
   injectionContext: Omit<LessonInjectionContext, 'now'>,
   injectedAt: string,
 ): void {
+  const injectionTime = Date.parse(injectedAt);
+  const effectiveAuditTrail = lessonScope.auditTrail.filter((entry) => {
+    const changedAt = normalizeTimestamp(
+      entry.changedAt,
+      'lessonScope.auditTrail.changedAt',
+    );
+    return Date.parse(changedAt) <= injectionTime;
+  });
   const attributionLesson: CritiqueLesson = {
     evaluatorName: 'lesson-effectiveness-attribution',
     failureDescription: lessonId,
@@ -221,7 +232,10 @@ function requireApplicableScope(
       'lesson-effectiveness-attribution') as TaskId,
     timestamp: injectedAt,
     lifecycleStatus: 'active',
-    lessonScope,
+    lessonScope: {
+      ...lessonScope,
+      auditTrail: effectiveAuditTrail,
+    },
   };
   if (
     !isLessonApplicable(attributionLesson, {
