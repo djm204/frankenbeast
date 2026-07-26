@@ -14,8 +14,8 @@ function isAbsoluteHostPath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\');
 }
 
-const EMBEDDED_HOST_PATH_RE = /(^|\s)(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
-const EMBEDDED_POSIX_PATH_RE = /(^|\s)(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
+const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_HOST_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 const API_ROUTE_RE = /^\/(?:api|v\d+)(?:\/|$)/u;
 
@@ -30,7 +30,9 @@ function redactEmbeddedAbsoluteHostPaths(value: string): string {
     ),
   ).replace(
     QUOTED_POSIX_HOST_PATH_RE,
-    (_match, quote: string) => `${quote}[REDACTED_HOST_PATH]`,
+    (_match, quote: string, path: string) => (
+      API_ROUTE_RE.test(path) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
+    ),
   );
 }
 

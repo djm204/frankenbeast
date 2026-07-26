@@ -69,8 +69,9 @@ const REQUIRED_SCHEMA: Record<string, string[]> = {
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_SUMMARY_CHARS = 512;
-const ABSOLUTE_PATH_RE = /(?:^|\s)(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+const ABSOLUTE_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
+const API_ROUTE_RE = /^\/(?:api|v\d+)(?:\/|$)/u;
 
 function nowIso(now: () => Date): string {
   return now().toISOString();
@@ -115,8 +116,10 @@ function latestTimestamp(...values: unknown[]): string | null {
 function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
   const redacted = redactSensitiveText(value)
-    .replace(ABSOLUTE_PATH_RE, (match, path: string) => match.replace(path, '[REDACTED_HOST_PATH]'))
-    .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string) => `${quote}[REDACTED_HOST_PATH]`);
+    .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
+    .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string, path: string) => (
+      API_ROUTE_RE.test(path) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
+    ));
   return redacted.length <= MAX_SUMMARY_CHARS ? redacted : `${redacted.slice(0, MAX_SUMMARY_CHARS - 1)}…`;
 }
 

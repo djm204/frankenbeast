@@ -25,5 +25,5 @@ export interface RuntimeAdapter {
   describe(): Promise<RuntimeProvider>;
   getSnapshot(request?: RuntimeSnapshotRequest): Promise<RuntimeSnapshot>;
   getEvents(request?: RuntimeEventRequest): Promise<RuntimeEventPage>;
-  validateEventCursor?(cursor: string): void;
+  validateEventCursor(cursor: string): void;
 }

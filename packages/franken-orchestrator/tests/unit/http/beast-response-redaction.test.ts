@@ -24,6 +24,16 @@ describe('Beast response redaction', () => {
     );
   });
 
+  it('redacts embedded host paths after key-value delimiters', () => {
+    expect(redactAbsoluteHostPathValues('workspace=/home/alice/private-repo'))
+      .toBe('workspace=[REDACTED_HOST_PATH]');
+  });
+
+  it('preserves quoted API routes', () => {
+    expect(redactAbsoluteHostPathValues('Call "/v1/users" after setup'))
+      .toBe('Call "/v1/users" after setup');
+  });
+
   it('redacts quoted host paths rooted outside the common host allowlist', () => {
     expect(redactAbsoluteHostPathValues("ENOTDIR: scandir '/data/hermes/kanban/boards'"))
       .toBe("ENOTDIR: scandir '[REDACTED_HOST_PATH]'");

@@ -252,6 +252,48 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts host paths after key-value delimiters in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'workspace=/home/alice/private-repo',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'workspace=[REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
+  it('preserves quoted API routes in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'Call "/v1/users" after setup',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'Call "/v1/users" after setup',
+      })]),
+    }));
+  });
+
   it('reports mixed unreadable and schema-incompatible sources as unavailable', async () => {
     const home = await createHome();
     const incompatible = new Database(join(home, 'kanban.db'));

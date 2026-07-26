@@ -12,6 +12,9 @@ export class RuntimeAdapterRegistry {
     if (this.adapters.has(adapter.id)) {
       throw new Error(`Runtime adapter '${adapter.id}' is already registered`);
     }
+    if (typeof adapter.validateEventCursor !== 'function') {
+      throw new Error(`Runtime adapter '${adapter.id}' must implement validateEventCursor`);
+    }
     this.adapters.set(adapter.id, adapter);
   }
 
