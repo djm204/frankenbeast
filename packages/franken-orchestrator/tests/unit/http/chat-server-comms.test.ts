@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -163,6 +164,32 @@ describe('startChatServer comms pass-through', () => {
     expect(destroy).not.toHaveBeenCalled();
     expect(runtimeActionStore.reserve('key', 'fingerprint', Date.now() + 1000)).toEqual({ status: 'claimed' });
     runtimeActionStore.destroy();
+  });
+
+  it('destroys an owned runtime action store when server startup fails', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-startup-failure-'));
+    tempDirs.push(projectDir);
+    const occupied = createServer();
+    await new Promise<void>((resolve) => occupied.listen(0, '127.0.0.1', resolve));
+    const address = occupied.address();
+    if (!address || typeof address === 'string') throw new Error('Expected occupied TCP port');
+    const destroy = vi.spyOn(RuntimeActionStore.prototype, 'destroy');
+
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: address.port,
+        sessionStoreDir: join(projectDir, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: TEST_OPERATOR_TOKEN,
+      })).rejects.toThrow();
+
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      destroy.mockRestore();
+      await new Promise<void>((resolve, reject) => occupied.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it('closes analytics dependencies when the chat server shuts down', async () => {

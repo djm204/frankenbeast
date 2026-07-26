@@ -243,6 +243,39 @@ describe('HermesRuntimeAdapter', () => {
     expect(environments.some((env) => env === process.env)).toBe(false);
   });
 
+  it('pins Hermes mutations to the database source that authorized the action', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const inspectedDatabase = join(home, 'selected.db');
+    createCurrentKanban(inspectedDatabase);
+    const environments: NodeJS.ProcessEnv[] = [];
+    let status = 'ready';
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      kanbanDbPath: inspectedDatabase,
+      env: { HERMES_KANBAN_DB: join(home, 'conflicting.db') },
+      runCommand: async (_command, args, options) => {
+        environments.push(options.env);
+        if (args.includes('block')) status = 'blocked';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:database-source',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    }));
+
+    expect(environments).not.toHaveLength(0);
+    expect(environments.every((env) => env['HERMES_KANBAN_DB'] === inspectedDatabase)).toBe(true);
+  });
+
   it('does not inherit ambient process variables when no command environment is configured', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));

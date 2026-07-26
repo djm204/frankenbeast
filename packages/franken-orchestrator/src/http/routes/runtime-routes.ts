@@ -438,7 +438,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           status: 'unsupported',
           providerId: adapter.id,
           correlationId: request.correlationId,
-          reason: capability.reason,
+          reason: capability.reason.slice(0, 1000),
           audit: actionAudit(request.action, 'unsupported'),
         });
       } else if (requiresGovernor(request.action)) {

@@ -356,10 +356,25 @@ describe('smart-swarm runtime routes', () => {
     await mkdir(actionDir);
     await chmod(actionDir, 0o755);
 
-    const store = new RuntimeActionStore({ databasePath: join(actionDir, 'actions.sqlite') });
+    const store = new RuntimeActionStore({
+      databasePath: join(actionDir, 'actions.sqlite'),
+      hardenDatabaseDirectory: true,
+    });
     actionStores.push(store);
 
     expect((await stat(actionDir)).mode & 0o777).toBe(0o700);
+  });
+
+  it('does not change permissions on a caller-owned database parent', async () => {
+    if (process.platform === 'win32') return;
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-shared-parent-'));
+    tempDirs.push(dir);
+    await chmod(dir, 0o755);
+
+    const store = new RuntimeActionStore({ databasePath: join(dir, 'actions.sqlite') });
+    actionStores.push(store);
+
+    expect((await stat(dir)).mode & 0o777).toBe(0o755);
   });
 
   it('completes idempotency before an optional external audit hook settles', async () => {
@@ -417,6 +432,36 @@ describe('smart-swarm runtime routes', () => {
     await expect(response.json()).resolves.toEqual({
       data: expect.objectContaining({ status: 'unsupported', correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566' }),
     });
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('preserves unsupported status when a capability reason exceeds the action-result bound', async () => {
+    const { app, adapter } = createRoutes();
+    const provider = await adapter.describe();
+    vi.mocked(adapter.describe).mockResolvedValue({
+      ...provider,
+      capabilities: {
+        ...provider.capabilities,
+        pause: { status: 'unsupported', reason: 'r'.repeat(1200) },
+      },
+    });
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'pause:t_deadbeef:long-capability-reason',
+        action: {
+          type: 'task.pause', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { status: string; reason: string } };
+    expect(body.data.status).toBe('unsupported');
+    expect(body.data.reason).toHaveLength(1000);
     expect(adapter.executeAction).not.toHaveBeenCalled();
   });
 
