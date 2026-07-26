@@ -593,10 +593,28 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           : [];
         const runRows = db.prepare('SELECT * FROM task_runs ORDER BY started_at, id').all() as RuntimeRow[];
         const eventRows = db.prepare('SELECT * FROM task_events ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[];
-        const commentRows = this.hasTable(db, 'task_comments')
-          ? db.prepare('SELECT id, task_id, author, body, created_at FROM task_comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
-          : [];
-        return this.normalizeRows(source, taskRows, linkRows, runRows, eventRows, commentRows, activityLimit);
+        const blockerEventRows = db.prepare(`
+          SELECT event.*
+          FROM task_events event
+          JOIN tasks task ON task.id = event.task_id
+          WHERE task.status = 'blocked'
+            AND event.kind = 'blocked'
+            AND event.id = (
+              SELECT latest.id
+              FROM task_events latest
+              WHERE latest.task_id = event.task_id AND latest.kind = 'blocked'
+              ORDER BY latest.created_at DESC, latest.id DESC
+              LIMIT 1
+            )
+        `).all() as RuntimeRow[];
+        const commentRows = this.hasTable(db, 'comments')
+          ? db.prepare('SELECT id, task_id, NULL AS author, body, created_at FROM comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
+          : this.hasTable(db, 'task_comments')
+            ? db.prepare('SELECT id, task_id, author, body, created_at FROM task_comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
+            : [];
+        return this.normalizeRows(
+          source, taskRows, linkRows, runRows, eventRows, commentRows, activityLimit, blockerEventRows,
+        );
       }).deferred();
     } finally {
       db.close();
@@ -608,9 +626,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     try {
       return db.transaction(() => {
         const eventRows = this.readActivityRows(db, 'task_events', 'event', source.workspaceId, after, limit);
-        const commentRows = this.hasTable(db, 'task_comments')
-          ? this.readActivityRows(db, 'task_comments', 'comment', source.workspaceId, after, limit)
-          : [];
+        const commentRows = this.hasTable(db, 'comments')
+          ? this.readActivityRows(db, 'comments', 'comment', source.workspaceId, after, limit)
+          : this.hasTable(db, 'task_comments')
+            ? this.readActivityRows(db, 'task_comments', 'comment', source.workspaceId, after, limit)
+            : [];
         return this.normalizeRows(source, [], [], [], eventRows, commentRows, limit * 2).events;
       }).deferred();
     } finally {
@@ -620,7 +640,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
 
   private readActivityRows(
     db: Database.Database,
-    table: 'task_events' | 'task_comments',
+    table: 'task_events' | 'comments' | 'task_comments',
     activitySource: 'event' | 'comment',
     workspaceId: string,
     after: CursorValue | undefined,
@@ -663,6 +683,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     eventRows: RuntimeRow[],
     commentRows: RuntimeRow[],
     activityLimit: number,
+    blockerEventRows: RuntimeRow[] = eventRows,
   ) {
     const dependencies = new Map<string, string[]>();
     for (const link of linkRows) {
@@ -746,7 +767,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       lastActiveAt: value.timestamps.sort().at(-1) ?? null,
     }));
     const blockedAtByTask = new Map<string, string>();
-    for (const event of eventRows) {
+    for (const event of blockerEventRows) {
       if (event['kind'] !== 'blocked' || event['task_id'] == null) continue;
       const taskKey = String(event['task_id']);
       const occurredAt = requiredTimestamp(event['created_at']);
