@@ -72,7 +72,7 @@ const MAX_SUMMARY_CHARS = 512;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
-const API_ROUTE_RE = /^\/(?:api|v\d+)(?:\/|$)/u;
+const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 
 function nowIso(now: () => Date): string {
   return now().toISOString();
@@ -745,6 +745,13 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       state: value.states.includes('running') ? 'running' : value.states.includes('blocked') ? 'blocked' : 'idle',
       lastActiveAt: value.timestamps.sort().at(-1) ?? null,
     }));
+    const blockedAtByTask = new Map<string, string>();
+    for (const event of eventRows) {
+      if (event['kind'] !== 'blocked' || event['task_id'] == null) continue;
+      const taskKey = String(event['task_id']);
+      const occurredAt = requiredTimestamp(event['created_at']);
+      if (occurredAt > (blockedAtByTask.get(taskKey) ?? '')) blockedAtByTask.set(taskKey, occurredAt);
+    }
     const blockers: RuntimeBlocker[] = taskRows
       .filter((task) => task['status'] === 'blocked')
       .map((task) => ({
@@ -753,7 +760,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         taskId: taskId(source.workspaceId, task['id']),
         category: blockerCategory(task['block_kind']),
         summary: boundedText(task['result']) || 'Task is blocked',
-        createdAt: timestamp(task['started_at']) ?? requiredTimestamp(task['created_at']),
+        createdAt: blockedAtByTask.get(String(task['id']))
+          ?? timestamp(task['started_at'])
+          ?? requiredTimestamp(task['created_at']),
         metadata: { runtimeStatus: 'blocked' },
       }));
     const normalizedEvents: RuntimeEvent[] = [];

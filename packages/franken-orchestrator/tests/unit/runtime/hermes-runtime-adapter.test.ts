@@ -457,6 +457,20 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('timestamps blockers from their latest blocking transition', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.blockers).toEqual(expect.objectContaining({
+      data: [expect.objectContaining({
+        taskId: 'hermes:global:t_child',
+        createdAt: '2026-07-26T16:00:50.000Z',
+      })],
+    }));
+  });
+
   it('degrades a workspace with corrupt required timestamps instead of fabricating epoch activity', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');

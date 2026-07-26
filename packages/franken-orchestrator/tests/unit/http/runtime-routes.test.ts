@@ -127,6 +127,27 @@ describe('smart-swarm runtime routes', () => {
     expect(text).toContain('[REDACTED_HOST_PATH]');
   });
 
+  it('rejects snapshots whose provider id differs from the selected adapter', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({
+      providerId: 'other-runtime',
+      state: 'empty',
+      capturedAt: '2026-07-26T12:00:00.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'unsupported', reason: 'No source' },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/snapshot', { headers: authHeaders() });
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain('other-runtime');
+  });
+
   it('returns a client error when an adapter rejects a malformed cursor', async () => {
     const { app, adapter } = createRoutes();
 
@@ -178,6 +199,24 @@ describe('smart-swarm runtime routes', () => {
     });
     expect(secondValid.status).toBe(429);
     if (secondValid.body) await secondValid.body.cancel();
+  });
+
+  it('rate limits unauthenticated stream attempts before unknown-provider lookup', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 1, windowMs: 60_000 },
+    });
+
+    const first = await app.request('/v1/smart-swarm/providers/not-registered/events/random-one');
+    const second = await app.request('/v1/smart-swarm/providers/another-provider/events/random-two');
+
+    expect(first.status).toBe(401);
+    expect(second.status).toBe(429);
   });
 
   it('rejects a malformed SSE cursor before consuming its one-shot ticket', async () => {

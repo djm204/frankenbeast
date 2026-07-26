@@ -143,7 +143,11 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       ...(workspaceId ? { workspaceId } : {}),
       ...(activityLimit !== undefined ? { activityLimit } : {}),
     };
-    return c.json({ data: runtimeResponse(RuntimeSnapshotSchema.parse(await adapter.getSnapshot(request))) });
+    const snapshot = RuntimeSnapshotSchema.parse(await adapter.getSnapshot(request));
+    if (snapshot.providerId !== adapter.id) {
+      throw new Error(`Runtime snapshot provider id '${snapshot.providerId}' does not match adapter '${adapter.id}'`);
+    }
+    return c.json({ data: runtimeResponse(snapshot) });
   });
 
   app.get(`${BASE_PATH}/:providerId/events`, async (c) => {
@@ -185,7 +189,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   app.get(`${BASE_PATH}/:providerId/events/:connectionId`, (c) => {
     const providerId = c.req.param('providerId');
     const connectionId = c.req.param('connectionId');
-    const adapter = adapterOr404(deps.registry, providerId);
     const ticket = getCookie(c, TICKET_COOKIE);
     if (!ticket) {
       if (!limiter.take('ticket:runtime-stream:invalid').allowed) {
@@ -193,6 +196,10 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
+    if (!limiter.take('ticket:runtime-stream:candidate').allowed) {
+      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    }
+    const adapter = adapterOr404(deps.registry, providerId);
     const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
     validateAdapterCursor(adapter, initialCursor);
     const ticketStatus = deps.ticketStore.consume(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
