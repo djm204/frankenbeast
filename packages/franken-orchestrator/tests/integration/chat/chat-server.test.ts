@@ -162,6 +162,35 @@ describe('chat server bootstrap', () => {
     expect(server.server.listenerCount('upgrade')).toBe(0);
   });
 
+  it('awaits asynchronous Beast-service disposal during shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    let releaseDispose: (() => void) | undefined;
+    let notifyDisposeStarted: (() => void) | undefined;
+    const disposeStarted = new Promise<void>((resolve) => { notifyDisposeStarted = resolve; });
+    const disposeBeastControl = vi.fn(() => new Promise<void>((resolve) => {
+      releaseDispose = resolve;
+      notifyDisposeStarted?.();
+    }));
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+      disposeBeastControl,
+    });
+
+    let closed = false;
+    const closePromise = server.close().then(() => { closed = true; });
+    await disposeStarted;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(closed).toBe(false);
+    releaseDispose?.();
+    await closePromise;
+    expect(disposeBeastControl).toHaveBeenCalledOnce();
+  });
+
   it('mounts beast routes on the live server when beast control is configured', async () => {
     mkdirSync(TMP, { recursive: true });
     const llm = { complete: vi.fn().mockResolvedValue('Server reply') };

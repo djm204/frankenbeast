@@ -253,9 +253,13 @@ export class CliObserverBridge implements IObserverModule {
       if (this.trace) {
         await this.traceAdapter?.flush(this.trace);
       }
+    } catch {
+      // Trace finalization is best-effort and must not suppress adapter cleanup.
+    }
+    try {
       await this.compactionAdapter?.close?.();
     } catch {
-      // Observer shutdown is best-effort and must not fail a completed run.
+      // Adapter shutdown is best-effort and must not fail a completed run.
     }
   }
 

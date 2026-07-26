@@ -20,4 +20,5 @@
 - [x] Deduplicate/resiliently stream SSE status events and attribute vitals activity to the producing run.
 - [x] Propagate run/agent identity through CLI phases, telemetry, and resource sampling.
 - [x] RED→GREEN: bound/index per-second snapshot run reads by brain and activity window.
+- [x] RED→GREEN: address invocation-4 findings for awaited chat disposal, lazy legacy trace lookup, normalized SSE activity filtering, failure-safe adapter close, and container telemetry-path validation.
 - [ ] Merge the PR, verify issue #3732 closes, and record final evidence.

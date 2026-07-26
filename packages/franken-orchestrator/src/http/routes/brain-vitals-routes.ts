@@ -147,9 +147,12 @@ export class BrainVitalsService {
       to: new Date(now).toISOString(),
     });
     const lifecycleAggregate = lifecycle.definitions.find((value) => value.definitionId === brainId);
-    const traceSummaries = await this.options.observer.listTraceSummaries?.();
+    let traceSummaries: Promise<TraceSummary[]> | undefined;
+    const getTraceSummaries = this.options.observer.listTraceSummaries
+      ? () => traceSummaries ??= this.options.observer.listTraceSummaries!()
+      : undefined;
     const details = await Promise.all(
-      runs.map((run) => this.readRunTelemetry(run, since, now, traceSummaries)),
+      runs.map((run) => this.readRunTelemetry(run, since, now, getTraceSummaries)),
     );
     const tokenTotals = sumTokenTotals(details.map((detail) => detail.tokens));
     const compactions = details.flatMap((detail) => detail.compactions);
@@ -329,10 +332,10 @@ export class BrainVitalsService {
     run: BeastRun,
     since: number,
     before: number,
-    traceSummaries?: readonly TraceSummary[],
+    getTraceSummaries?: () => Promise<readonly TraceSummary[]>,
   ) {
     const [trace, compactions, resources] = await Promise.all([
-      this.findRunTrace(run.id, traceSummaries),
+      this.findRunTrace(run.id, getTraceSummaries),
       this.options.observer.queryCompactions({ runId: run.id, since, limit: MAX_OBSERVER_ROWS }),
       this.options.observer.queryResourceSamples({ runId: run.id, since, before, limit: MAX_OBSERVER_ROWS }),
     ]);
@@ -345,10 +348,16 @@ export class BrainVitalsService {
     };
   }
 
-  private async findRunTrace(runId: string, summaries?: readonly TraceSummary[]): Promise<Trace | null> {
+  private async findRunTrace(
+    runId: string,
+    getTraceSummaries?: () => Promise<readonly TraceSummary[]>,
+  ): Promise<Trace | null> {
     const direct = await this.options.observer.queryByTraceId(runId);
     if (direct || !this.options.observer.listTraceSummaries) return direct;
-    const matching = (summaries ?? await this.options.observer.listTraceSummaries())
+    const summaries = getTraceSummaries
+      ? await getTraceSummaries()
+      : await this.options.observer.listTraceSummaries();
+    const matching = summaries
       .filter((summary) => summary.goal === runId)
       .sort((left, right) => right.startedAt - left.startedAt)[0];
     return matching ? this.options.observer.queryByTraceId(matching.id) : null;
@@ -537,7 +546,7 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
   });
   app.get('/v1/brain-vitals/:brainId/events/:connectionId', (c) => {
-    const brainId = c.req.param('brainId');
+    const brainId = normalizeBrainId(c.req.param('brainId'));
     const ticket = getCookie(c, BRAIN_VITALS_SSE_TICKET_COOKIE);
     if (!ticket) {
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);

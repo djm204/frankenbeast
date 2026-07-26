@@ -274,6 +274,23 @@ describe('brain vitals routes', () => {
     await expect(observer.queryResourceSamples({ runId: 'old-run' })).resolves.toHaveLength(0);
   });
 
+  it('does not scan trace summaries when runs have directly correlated traces', async () => {
+    const { observer, repository, service } = createFixture();
+    const run = repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    const trace = TraceContext.createTrace(run.id);
+    trace.id = run.id;
+    TraceContext.endTrace(trace);
+    await observer.flush(trace);
+    const listTraceSummaries = vi.spyOn(observer, 'listTraceSummaries');
+
+    await service.snapshot('reviewer');
+
+    expect(listTraceSummaries).not.toHaveBeenCalled();
+  });
+
   it('attributes aggregate cache activity to the run whose telemetry changed', async () => {
     const { eventBus, observer, repository, service } = createFixture();
     const older = repository.createRun({
@@ -523,6 +540,44 @@ describe('brain vitals routes', () => {
     expect(text).toContain('"kind":"compaction.completed"');
     expect(text).toContain(`"runId":"${run.id}"`);
     expect(text).toContain(`"timestamp":${NOW}`);
+  });
+
+  it('normalizes the brain id before filtering SSE activity', async () => {
+    const { app, eventBus } = createFixture();
+    const encodedBrainId = encodeURIComponent(' reviewer ');
+    const ticketResponse = await app.request(`/v1/brain-vitals/${encodedBrainId}/events/ticket`, {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    const { connectionId } = await ticketResponse.json() as { connectionId: string };
+    const cookie = ticketResponse.headers.get('set-cookie')?.split(';')[0];
+    const response = await app.request(`/v1/brain-vitals/${encodedBrainId}/events/${connectionId}`, {
+      headers: { cookie: cookie! },
+    });
+    const reader = response.body!.getReader();
+    await reader.read();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const activityRead = reader.read();
+    eventBus.publish({
+      type: 'brain-vitals.activity',
+      data: {
+        brainId: 'reviewer',
+        dimension: 'churn',
+        kind: 'churn.running',
+        runId: 'run-normalized',
+        timestamp: NOW,
+      },
+    });
+    const activity = await Promise.race([
+      activityRead,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('activity timeout')), 100)),
+    ]);
+    const text = new TextDecoder().decode(activity.value);
+    await reader.cancel();
+
+    expect(text).toContain('event: activity');
+    expect(text).toContain('"runId":"run-normalized"');
   });
 
   it('mounts the route family on the production Beast daemon service bundle', async () => {

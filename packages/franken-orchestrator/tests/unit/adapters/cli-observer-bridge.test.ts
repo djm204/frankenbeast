@@ -318,6 +318,26 @@ describe('CliObserverBridge', () => {
       expect(flush.mock.calls[0]?.[0].spans[0]?.status).toBe('error');
     });
 
+    it('closes the telemetry adapter when final trace flushing fails', async () => {
+      const close = vi.fn(async () => undefined);
+      const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {
+        recordCompaction: vi.fn(async () => undefined),
+        queryCompactions: vi.fn(async () => []),
+        aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
+        close,
+      };
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        compactionAdapter,
+        traceAdapter: { flush: vi.fn(async () => { throw new Error('SQLite database is locked'); }) },
+      });
+      bridge.startTrace('run-with-locked-trace-db');
+
+      await expect(bridge.close()).resolves.toBeUndefined();
+
+      expect(close).toHaveBeenCalledOnce();
+    });
+
     it('keeps observer adapter shutdown failures best-effort', async () => {
       const close = vi.fn(async () => { throw new Error('SQLite worker close timed out'); });
       const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {

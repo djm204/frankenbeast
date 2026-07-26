@@ -7,7 +7,7 @@ import { ProcessBeastExecutor, type ProcessBeastExecutorOptions } from './proces
 import { ProcessSupervisor, type ProcessSupervisorLike } from './process-supervisor.js';
 import { remapHostWorkspacePath, toDockerSpec, writableWorkspaceUser } from './docker-container-runtime.js';
 import { DEFAULT_SANDBOX_POLICY, type SandboxPolicy } from './sandbox-policy.js';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 export interface ContainerBeastExecutorDeps {
   readonly repository: SQLiteBeastRepository;
@@ -62,6 +62,12 @@ function parseRunConfigOwner(user: `${number}:${number}`): { uid: number; gid: n
   return { uid: uid!, gid: gid! };
 }
 
+function isOutsideWorkspace(path: string, workspaceHostPath: string): boolean {
+  if (!isAbsolute(path)) return false;
+  const relativePath = relative(resolve(workspaceHostPath), resolve(path));
+  return relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath);
+}
+
 export class ContainerBeastExecutor implements BeastExecutor {
   private readonly inner: ProcessBeastExecutor;
 
@@ -86,11 +92,8 @@ export class ContainerBeastExecutor implements BeastExecutor {
       if (!brain || typeof brain !== 'object' || Array.isArray(brain)) return snapshot;
       const dbPath = (brain as Record<string, unknown>).dbPath;
       if (typeof dbPath !== 'string') return snapshot;
-      if (dbPath !== ':memory:' && isAbsolute(dbPath)) {
-        const relativePath = relative(resolve(policy.workspaceHostPath), resolve(dbPath));
-        if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
-          throw new Error(`Container brain.dbPath must be inside the mounted workspace: ${dbPath}`);
-        }
+      if (dbPath !== ':memory:' && isOutsideWorkspace(dbPath, policy.workspaceHostPath)) {
+        throw new Error(`Container brain.dbPath must be inside the mounted workspace: ${dbPath}`);
       }
       return {
         ...snapshot,
@@ -101,9 +104,19 @@ export class ContainerBeastExecutor implements BeastExecutor {
       };
     };
     const nextAttemptNumber = (run: BeastRun): number => deps.repository.listAttempts(run.id).length + 1;
-    options.transformSpec = (run, _originalSpec, mergedSpec) => toDockerSpec(mergedSpec, policy, {
-      containerName: containerNameForRunAttempt(run, nextAttemptNumber(run)),
-    });
+    options.transformSpec = (run, _originalSpec, mergedSpec) => {
+      if (
+        deps.telemetryDatabasePath
+        && isOutsideWorkspace(deps.telemetryDatabasePath, policy.workspaceHostPath)
+      ) {
+        throw new Error(
+          `Container telemetryDatabasePath must be inside the mounted workspace: ${deps.telemetryDatabasePath}`,
+        );
+      }
+      return toDockerSpec(mergedSpec, policy, {
+        containerName: containerNameForRunAttempt(run, nextAttemptNumber(run)),
+      });
+    };
     options.attemptMetadata = (run, originalSpec, dockerSpec, handle) => (
       containerAttemptMetadata(policy, run, originalSpec, dockerSpec, handle, nextAttemptNumber(run))
     );
