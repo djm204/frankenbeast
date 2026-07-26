@@ -128,6 +128,15 @@ describe('OllamaRuntimeAdapter', () => {
     })).toThrow(/endpoint id/i);
   });
 
+  it('rejects duplicate endpoint identifiers during construction', () => {
+    expect(() => new OllamaRuntimeAdapter({
+      endpoints: [
+        { id: 'shared', baseUrl: 'http://127.0.0.1:11434' },
+        { id: 'shared', baseUrl: 'http://127.0.0.1:11435' },
+      ],
+    })).toThrow(/unique/i);
+  });
+
   it('rejects event cursors because Ollama does not expose historical runtime events', () => {
     const adapter = new OllamaRuntimeAdapter();
 
@@ -273,6 +282,36 @@ describe('OllamaRuntimeAdapter', () => {
       },
     });
     expect(JSON.stringify(snapshot)).not.toContain('ollama.invalid');
+  });
+
+  it('cancels every response body when any Ollama API request fails', async () => {
+    const cancellations = [vi.fn(), vi.fn(), vi.fn()];
+    let index = 0;
+    const fetchImpl = vi.fn(async () => {
+      const cancel = cancellations[index++]!;
+      return new Response(new ReadableStream({ cancel }), { status: index === 1 ? 500 : 200 });
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({ state: 'unavailable' });
+    for (const cancel of cancellations) expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('marks schema-incompatible successful responses unavailable', async () => {
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl: vi.fn(async () => Response.json({})),
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({
+      state: 'unavailable',
+      workspaces: {
+        data: [{ metadata: { diagnostic: 'Ollama endpoint returned an invalid API payload' } }],
+      },
+    });
   });
 
   it('coalesces concurrent polls and rate-limits repeated endpoint reads', async () => {

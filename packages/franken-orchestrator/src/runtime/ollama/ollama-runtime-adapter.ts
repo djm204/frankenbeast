@@ -165,10 +165,15 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
     if (endpoints.length > MAX_ENDPOINTS) {
       throw new RangeError(`Ollama polling supports at most ${MAX_ENDPOINTS} endpoints`);
     }
+    const endpointIds = new Set<string>();
     for (const endpoint of endpoints) {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/u.test(endpoint.id)) {
         throw new OllamaEndpointError('Ollama endpoint id must be a non-empty identifier');
       }
+      if (endpointIds.has(endpoint.id)) {
+        throw new OllamaEndpointError('Ollama endpoint ids must be unique');
+      }
+      endpointIds.add(endpoint.id);
     }
     this.endpoints = endpoints.map((endpoint) => ({ ...endpoint }));
     this.now = options.now ?? (() => new Date());
@@ -377,8 +382,11 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
           this.fetchImpl(endpointUrl(config.baseUrl, 'api/tags'), init),
           this.fetchImpl(endpointUrl(config.baseUrl, 'api/ps'), init),
         ]);
-        for (const response of [versionResponse, tagsResponse, psResponse]) {
-          if (!response.ok) throw new OllamaEndpointError(`Ollama endpoint returned HTTP ${response.status}`);
+        const responses = [versionResponse, tagsResponse, psResponse];
+        const failedResponse = responses.find((response) => !response.ok);
+        if (failedResponse) {
+          await Promise.allSettled(responses.map(async (response) => await response.body?.cancel()));
+          throw new OllamaEndpointError(`Ollama endpoint returned HTTP ${failedResponse.status}`);
         }
         const [versionValue, tagsValue, psValue] = await Promise.all([
           readBoundedJson(versionResponse, this.maxResponseBytes),
@@ -387,8 +395,16 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
         ]);
         const version = versionValue && typeof versionValue === 'object'
           && typeof (versionValue as { version?: unknown }).version === 'string'
+          && (versionValue as { version: string }).version.trim().length > 0
           ? (versionValue as { version: string }).version
           : undefined;
+        const tagsValid = tagsValue && typeof tagsValue === 'object'
+          && Array.isArray((tagsValue as { models?: unknown }).models);
+        const psValid = psValue && typeof psValue === 'object'
+          && Array.isArray((psValue as { models?: unknown }).models);
+        if (!version || !tagsValid || !psValid) {
+          throw new OllamaEndpointError('Ollama endpoint returned an invalid API payload');
+        }
         return {
           config,
           ...(version ? { version } : {}),
