@@ -231,6 +231,8 @@ describe('BrainVitalsPanel', () => {
     });
 
     await waitFor(() => expect(cacheNode.getAttribute('data-activity-count')).toBe('201'));
+    fireEvent.click(cacheNode);
+    expect(screen.getAllByRole('button', { name: /Open run run-1 from cache activity/ })).toHaveLength(200);
   });
 
   it('counts every delivered event on the local receipt clock', async () => {

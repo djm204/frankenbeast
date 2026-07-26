@@ -7,7 +7,11 @@ import type {
   DashboardApiClient,
 } from '../../lib/dashboard-api';
 import { SlideInPanel } from '../beasts/slide-in-panel';
-import { BrainPulseMap, type BrainPulseActivity } from './brain-pulse-map';
+import {
+  BrainPulseMap,
+  type BrainPulseActivity,
+  type BrainPulseActivityReceipts,
+} from './brain-pulse-map';
 
 interface BrainVitalsPanelProps {
   client: DashboardApiClient;
@@ -24,6 +28,10 @@ interface AggregatePoint {
   timestamp: number;
   totalTokens: number;
   estimatedUsd: number;
+}
+
+function emptyActivityReceipts(): BrainPulseActivityReceipts {
+  return { cache: [], compaction: [], churn: [], resource: [], cost: [] };
 }
 
 function describeError(error: unknown): string {
@@ -123,6 +131,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
   const [resourcePoints, setResourcePoints] = useState<ResourcePoint[]>([]);
   const [aggregatePoints, setAggregatePoints] = useState<AggregatePoint[]>([]);
   const [activities, setActivities] = useState<BrainPulseActivity[]>([]);
+  const [activityReceipts, setActivityReceipts] = useState(emptyActivityReceipts);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -148,6 +157,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setResourcePoints([]);
     setAggregatePoints([]);
     setActivities([]);
+    setActivityReceipts(emptyActivityReceipts());
     runCacheRef.current.clear();
     nextRunCursorRef.current = undefined;
 
@@ -220,6 +230,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
     setResourcePoints([]);
     setAggregatePoints([]);
     setActivities([]);
+    setActivityReceipts(emptyActivityReceipts());
     latestSnapshotTimestampRef.current = 0;
     setSelectedRunId(null);
     setRunDetail(null);
@@ -276,6 +287,13 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
       (activity) => {
         if (!active || generationRef.current !== generation) return;
         const receivedAt = Date.now();
+        setActivityReceipts((current) => ({
+          ...current,
+          [activity.dimension]: [
+            ...current[activity.dimension].filter((timestamp) => timestamp >= receivedAt - 60_000),
+            receivedAt,
+          ],
+        }));
         setActivities((current) => {
           const recent = current.filter((candidate) => (
             candidate.receivedAt >= receivedAt - 60_000
@@ -285,7 +303,7 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
             ...activity,
             receivedAt,
             sequence: activitySequenceRef.current,
-          }];
+          }].slice(-200);
         });
         if (
           activity.dimension !== 'churn'
@@ -390,7 +408,12 @@ export function BrainVitalsPanel({ client }: BrainVitalsPanelProps) {
 
       {snapshot && (
         <>
-          <BrainPulseMap snapshot={snapshot} activities={activities} onOpenRun={(runId) => void openRun(runId)} />
+          <BrainPulseMap
+            snapshot={snapshot}
+            activities={activities}
+            activityReceipts={activityReceipts}
+            onOpenRun={(runId) => void openRun(runId)}
+          />
 
           <div className="brain-vitals-panel__metrics">
             <article className="brain-vitals-panel__score" aria-label={`Health score ${snapshot.health.score}`}>

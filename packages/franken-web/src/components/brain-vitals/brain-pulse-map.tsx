@@ -25,9 +25,12 @@ export interface BrainPulseActivity extends BrainVitalsActivity {
   readonly sequence: number;
 }
 
+export type BrainPulseActivityReceipts = Readonly<Record<BrainVitalsDimension, readonly number[]>>;
+
 interface BrainPulseMapProps {
   snapshot: BrainVitalsSnapshot;
   activities: readonly BrainPulseActivity[];
+  activityReceipts: BrainPulseActivityReceipts;
   onOpenRun: (runId: string) => void;
 }
 
@@ -65,7 +68,7 @@ function aggregateHealthState(score: number): Exclude<HealthState, 'unavailable'
   return 'danger';
 }
 
-export function BrainPulseMap({ snapshot, activities, onOpenRun }: BrainPulseMapProps) {
+export function BrainPulseMap({ snapshot, activities, activityReceipts, onOpenRun }: BrainPulseMapProps) {
   const [now, setNow] = useState(() => Date.now());
   const [selectedDimension, setSelectedDimension] = useState<BrainVitalsDimension | null>(null);
 
@@ -76,12 +79,21 @@ export function BrainPulseMap({ snapshot, activities, onOpenRun }: BrainPulseMap
 
   useEffect(() => {
     setNow(Date.now());
-  }, [activities]);
+  }, [activityReceipts]);
 
   const recentActivities = useMemo(() => activities.filter((activity) => (
     activity.receivedAt >= now - ACTIVITY_WINDOW_MS
     && activity.receivedAt <= now + 5_000
   )), [activities, now]);
+  const recentActivityCounts = useMemo(() => Object.fromEntries(DIMENSIONS.map((dimension) => [
+    dimension,
+    activityReceipts[dimension].filter((receivedAt) => (
+      receivedAt >= now - ACTIVITY_WINDOW_MS && receivedAt <= now + 5_000
+    )).length,
+  ])) as Record<BrainVitalsDimension, number>, [activityReceipts, now]);
+  const recentActivityCount = DIMENSIONS.reduce((total, dimension) => (
+    total + recentActivityCounts[dimension]
+  ), 0);
 
   const selectedActivities = selectedDimension
     ? recentActivities.filter((activity) => activity.dimension === selectedDimension)
@@ -94,7 +106,7 @@ export function BrainPulseMap({ snapshot, activities, onOpenRun }: BrainPulseMap
           <h4>Live Brain Pulse Map</h4>
           <p>Pulse rate reflects real activity events observed in the last minute.</p>
         </div>
-        <small>{recentActivities.length} recent {recentActivities.length === 1 ? 'event' : 'events'}</small>
+        <small>{recentActivityCount} recent {recentActivityCount === 1 ? 'event' : 'events'}</small>
       </header>
 
       {/* A fixed grid keeps all dimensions legible and keyboard reachable at narrow dashboard widths. */}
@@ -107,7 +119,7 @@ export function BrainPulseMap({ snapshot, activities, onOpenRun }: BrainPulseMap
           <strong>{Math.round(snapshot.health.score)}</strong>
         </div>
         {DIMENSIONS.map((dimension) => {
-          const count = recentActivities.filter((activity) => activity.dimension === dimension).length;
+          const count = recentActivityCounts[dimension];
           const value = healthValue(snapshot, dimension);
           const state = healthState(value);
           const activityState = pulseState(count);
