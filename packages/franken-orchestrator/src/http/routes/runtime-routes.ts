@@ -93,7 +93,7 @@ function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID
 function validateAdapterCursor(adapter: RuntimeAdapter, cursor: string | undefined): void {
   if (!cursor) return;
   try {
-    adapter.validateEventCursor?.(cursor);
+    adapter.validateEventCursor(cursor);
   } catch (error) {
     if (isInvalidCursorError(error)) {
       throw new HttpError(422, 'INVALID_CURSOR', error.message);

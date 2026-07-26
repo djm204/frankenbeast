@@ -43,6 +43,7 @@ function adapter(id: string): RuntimeAdapter {
       approvals: { status: 'unsupported', reason: 'No approval source' },
     })),
     getEvents: vi.fn(async () => ({ events: [], nextCursor: null })),
+    validateEventCursor: vi.fn(),
   };
 }
 
@@ -100,6 +101,12 @@ describe('provider-neutral runtime contract', () => {
     expect(registry.get('alpha').id).toBe('alpha');
     expect(() => registry.get('missing')).toThrow("Runtime adapter 'missing' is not registered");
     expect(() => registry.register(adapter('alpha'))).toThrow("Runtime adapter 'alpha' is already registered");
+  });
+
+  it('rejects adapters that cannot prevalidate event cursors', () => {
+    const missingValidator = { ...adapter('missing-validator'), validateEventCursor: undefined } as unknown as RuntimeAdapter;
+    expect(() => new RuntimeAdapterRegistry([missingValidator]))
+      .toThrow(/must implement validateEventCursor/);
   });
 
   it('rejects adapters whose described provider id differs from their registry id', async () => {
