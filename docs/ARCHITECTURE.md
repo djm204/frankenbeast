@@ -456,7 +456,7 @@ The shipped HTTP server is integrated in `@franken/orchestrator`:
 |---------|----------|-------|
 | Chat server | `packages/franken-orchestrator/src/http/chat-server.ts` | Default port `3737`; WebSocket path `/v1/chat/ws`; loopback dev mode can run without an operator token. |
 | Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Always mounts chat (+ WebSocket) and analytics; mounts Beast agents/SSE, network, and skills/dashboard routes when their deps are supplied. When comms channels are enabled, the `chat-server` CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/*`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) mounts when `securityConfig` is passed. |
-| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @franken/web run dev:chat`. |
+| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @franken/web run dev:chat`. The overview keeps the read-only faculty Brain panel separate from the operational Brain Vitals panel. Brain Vitals discovers real definitions/runs through `/v1/beasts/runs`, reads snapshot/history/per-run telemetry through `/v1/brain-vitals/*`, and receives live snapshots/activity through the one-shot cookie-ticket SSE route. |
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
 

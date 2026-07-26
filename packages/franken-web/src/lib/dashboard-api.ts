@@ -1,4 +1,19 @@
 import { extractResponseErrorMessage, toError } from './http-error';
+import {
+  BrainVitalsApiClient,
+  type BrainVitalsActivity,
+  type BrainHealthSample,
+  type BrainVitalsRunDetail,
+  type BrainVitalsSnapshot,
+  type BrainVitalsWindow,
+} from './brain-vitals-api';
+
+export type {
+  BrainHealthSample,
+  BrainVitalsRunDetail,
+  BrainVitalsSnapshot,
+  BrainVitalsWindow,
+} from './brain-vitals-api';
 
 export interface DashboardSkill {
   name: string;
@@ -138,7 +153,39 @@ export interface DashboardBrainLesson {
 }
 
 export class DashboardApiClient {
-  constructor(private readonly baseUrl: string) {}
+  private readonly brainVitals: BrainVitalsApiClient;
+
+  constructor(private readonly baseUrl: string) {
+    this.brainVitals = new BrainVitalsApiClient(baseUrl);
+  }
+
+  listBrainVitalsRuns(limit = 100, cursor?: string) {
+    return this.brainVitals.listRuns(limit, cursor);
+  }
+
+  fetchBrainVitalsSnapshot(brainId: string): Promise<BrainVitalsSnapshot> {
+    return this.brainVitals.fetchSnapshot(brainId);
+  }
+
+  fetchBrainVitalsHistory(
+    brainId: string,
+    window = '1h',
+  ): Promise<{ data: BrainHealthSample[]; window: BrainVitalsWindow }> {
+    return this.brainVitals.fetchHistory(brainId, window);
+  }
+
+  fetchBrainVitalsRun(brainId: string, runId: string): Promise<BrainVitalsRunDetail> {
+    return this.brainVitals.fetchRun(brainId, runId);
+  }
+
+  subscribeToBrainVitals(
+    brainId: string,
+    onSnapshot: (snapshot: BrainVitalsSnapshot) => void,
+    onError?: (error: Error) => void,
+    onActivity?: (activity: BrainVitalsActivity) => void,
+  ) {
+    return this.brainVitals.subscribe(brainId, onSnapshot, onError, onActivity);
+  }
 
   async fetchSnapshot(): Promise<DashboardSnapshot> {
     const res = await fetch(`${this.baseUrl}/api/dashboard`);
