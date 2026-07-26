@@ -180,7 +180,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const runtimeRegistry = opts.runtimeRegistry ?? createDefaultRuntimeAdapterRegistry({
     ...(opts.hermesHome ? { hermesHome: opts.hermesHome } : {}),
     ...(opts.networkControl
-      ? { egressPolicy: opts.networkControl.getConfig().network.egressPolicy }
+      ? { egressPolicyProvider: () => opts.networkControl?.getConfig().network.egressPolicy }
       : {}),
   });
   const chatRateLimiter = opts.chatRateLimiter

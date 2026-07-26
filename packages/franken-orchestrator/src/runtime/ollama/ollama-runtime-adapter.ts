@@ -35,6 +35,7 @@ export interface OllamaRuntimeAdapterOptions {
   requestTimeoutMs?: number | undefined;
   maxResponseBytes?: number | undefined;
   egressPolicy?: EgressPolicyConfig | undefined;
+  egressPolicyProvider?: (() => EgressPolicyConfig | undefined) | undefined;
   egressOverride?: EgressOverride | undefined;
   egressAudit?: EgressAuditSink | undefined;
   fetchImpl?: typeof fetch | undefined;
@@ -180,13 +181,16 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
     this.minimumPollIntervalMs = boundedInteger('minimumPollIntervalMs', options.minimumPollIntervalMs, 1_000, 0, 60_000);
     this.requestTimeoutMs = boundedInteger('requestTimeoutMs', options.requestTimeoutMs, 5_000, 1, 60_000);
     this.maxResponseBytes = boundedInteger('maxResponseBytes', options.maxResponseBytes, 1_048_576, 1, 10_485_760);
-    this.fetchImpl = createEgressGuardedFetch({
-      lane: 'operator',
-      policy: options.egressPolicy,
-      override: options.egressOverride,
-      audit: options.egressAudit,
-      fetchImpl: options.fetchImpl,
-    });
+    this.fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const guardedFetch = createEgressGuardedFetch({
+        lane: 'operator',
+        policy: options.egressPolicyProvider?.() ?? options.egressPolicy,
+        override: options.egressOverride,
+        audit: options.egressAudit,
+        fetchImpl: options.fetchImpl,
+      });
+      return await guardedFetch(input, init);
+    }) as typeof fetch;
   }
 
   async describe(): Promise<RuntimeProvider> {
@@ -377,12 +381,25 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
           headers.set('authorization', `Bearer ${apiKey}`);
         }
         const init: RequestInit = { headers, redirect: 'error', signal: requestSignal };
-        const [versionResponse, tagsResponse, psResponse] = await Promise.all([
+        const settledResponses = await Promise.allSettled([
           this.fetchImpl(endpointUrl(config.baseUrl, 'api/version'), init),
           this.fetchImpl(endpointUrl(config.baseUrl, 'api/tags'), init),
           this.fetchImpl(endpointUrl(config.baseUrl, 'api/ps'), init),
         ]);
-        const responses = [versionResponse, tagsResponse, psResponse];
+        const rejectedResponse = settledResponses.find((result) => result.status === 'rejected');
+        if (rejectedResponse) {
+          await Promise.allSettled(settledResponses.flatMap((result) => (
+            result.status === 'fulfilled' ? [result.value.body?.cancel()] : []
+          )));
+          throw rejectedResponse.reason;
+        }
+        const responses = settledResponses.map((result) => {
+          if (result.status === 'rejected') throw result.reason;
+          return result.value;
+        });
+        const versionResponse = responses[0]!;
+        const tagsResponse = responses[1]!;
+        const psResponse = responses[2]!;
         const failedResponse = responses.find((response) => !response.ok);
         if (failedResponse) {
           await Promise.allSettled(responses.map(async (response) => await response.body?.cancel()));

@@ -300,6 +300,23 @@ describe('OllamaRuntimeAdapter', () => {
     for (const cancel of cancellations) expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it('cancels fulfilled sibling response bodies when an Ollama transport request rejects', async () => {
+    const cancellations = [vi.fn(), vi.fn()];
+    let index = 0;
+    const fetchImpl = vi.fn(async () => {
+      const call = index++;
+      if (call === 1) throw new TypeError('transport failed');
+      return new Response(new ReadableStream({ cancel: cancellations[call === 0 ? 0 : 1] }));
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({ state: 'unavailable' });
+    for (const cancel of cancellations) expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('marks schema-incompatible successful responses unavailable', async () => {
     const adapter = new OllamaRuntimeAdapter({
       endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
