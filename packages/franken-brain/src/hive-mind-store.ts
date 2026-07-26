@@ -18,12 +18,19 @@ const MAX_ENTRY_BYTES = 64 * 1024;
 const MAX_POLL_LIMIT = 1_000;
 const DEFAULT_MAX_ENTRIES_PER_NAMESPACE = 10_000;
 const MAX_CONFIGURED_ENTRIES_PER_NAMESPACE = 1_000_000;
+const SECURE_DELETE_PENDING_KEY = 'secure-delete-pending';
+const MIGRATION_SECURE_DELETE_PENDING_VALUE = 'migration';
+const LEGACY_PUBLISHER_MIGRATION_KEY_PREFIX = 'legacy-publisher-migration:';
+const MIGRATION_CHECKPOINT_RETRY_MS = 10;
+const MIGRATION_CHECKPOINT_TIMEOUT_MS = 5_000;
 const UNSAFE_AGENT_TYPE_ID_CHARACTERS = /[<>:"/\\|?*\u0000-\u001f\u007f]/u;
 const WINDOWS_RESERVED_AGENT_TYPE_ID =
   /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 
 export interface HiveMindLessonPublishEntry {
   readonly kind: 'lesson';
+  /** Stable review-candidate identity used for precise revision revocation. */
+  readonly candidateId?: string;
   readonly key: string;
   readonly status: 'pending' | 'approved';
   readonly lesson: ConsolidatedLesson;
@@ -68,6 +75,30 @@ interface HiveMindRow {
   kind: string;
   payload: string;
   publishedAt: string;
+}
+
+interface WalCheckpointResult {
+  busy: number;
+  log: number;
+  checkpointed: number;
+}
+
+function truncateWalOrThrow(db: Database.Database): void {
+  const [result] = db.pragma('wal_checkpoint(TRUNCATE)') as WalCheckpointResult[];
+  if (!result || result.busy !== 0) {
+    throw new Error('Secure deletion could not truncate the Hive WAL because a reader is active');
+  }
+}
+
+function truncateWalAfterConcurrentMigrationOrThrow(db: Database.Database): void {
+  const deadline = Date.now() + MIGRATION_CHECKPOINT_TIMEOUT_MS;
+  const waitBuffer = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+  do {
+    const [result] = db.pragma('wal_checkpoint(TRUNCATE)') as WalCheckpointResult[];
+    if (result?.busy === 0) return;
+    Atomics.wait(waitBuffer, 0, 0, MIGRATION_CHECKPOINT_RETRY_MS);
+  } while (Date.now() < deadline);
+  throw new Error('Secure deletion could not truncate the Hive WAL because a reader is active');
 }
 
 function assertSafeAgentTypeId(agentTypeId: string): void {
@@ -139,6 +170,7 @@ function parseRow(row: HiveMindRow): HiveMindEntry {
     const lessonPayload = payload as HiveMindLessonPublishEntry;
     if (
       typeof lessonPayload.key !== 'string'
+      || (lessonPayload.candidateId !== undefined && typeof lessonPayload.candidateId !== 'string')
       || (lessonPayload.status !== 'pending' && lessonPayload.status !== 'approved')
       || !lessonPayload.lesson
       || lessonPayload.lesson.kind !== 'consolidated-lesson'
@@ -171,7 +203,10 @@ export class HiveMindStore {
   private readonly db: Database.Database;
   private readonly maxEntriesPerNamespace: number;
 
-  constructor(dbPath = '.fbeast/hive/hive.db', options: HiveMindStoreOptions = {}) {
+  constructor(
+    private readonly dbPath = '.fbeast/hive/hive.db',
+    options: HiveMindStoreOptions = {},
+  ) {
     this.maxEntriesPerNamespace = options.maxEntriesPerNamespace ?? DEFAULT_MAX_ENTRIES_PER_NAMESPACE;
     if (
       !Number.isSafeInteger(this.maxEntriesPerNamespace)
@@ -185,6 +220,7 @@ export class HiveMindStore {
     if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.pragma('busy_timeout = 5000');
+    if (dbPath !== ':memory:') this.db.pragma('secure_delete = ON');
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
     this.db.exec(`
@@ -198,7 +234,12 @@ export class HiveMindStore {
       );
       CREATE INDEX IF NOT EXISTS idx_hive_mind_poll
         ON hive_mind_entries(namespace, id);
+      CREATE TABLE IF NOT EXISTS hive_mind_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `);
+    this.retryPendingSecureDelete();
   }
 
   publish(
@@ -208,6 +249,7 @@ export class HiveMindStore {
   ): HiveMindEntry {
     assertNamespace(namespace);
     assertPublisherId(publisherId);
+    this.retryPendingSecureDelete();
     if (entry.kind !== 'lesson' && entry.kind !== 'episode') {
       throw new TypeError('Hive mind entry kind must be lesson or episode');
     }
@@ -245,6 +287,7 @@ export class HiveMindStore {
 
   poll(namespace: HiveMindNamespace, options: HiveMindPollOptions = {}): HiveMindEntry[] {
     assertNamespace(namespace);
+    this.retryPendingSecureDelete();
     const { sinceId, limit } = assertPollOptions(options);
     const clauses = ['namespace = ?', 'id > ?'];
     const parameters: Array<string | number> = [namespace, sinceId];
@@ -271,6 +314,7 @@ export class HiveMindStore {
   /** Return the newest bounded window, ordered newest first. */
   recent(namespace: HiveMindNamespace, options: HiveMindRecentOptions = {}): HiveMindEntry[] {
     assertNamespace(namespace);
+    this.retryPendingSecureDelete();
     const { limit } = assertPollOptions(options);
     const clauses = ['namespace = ?'];
     const parameters: Array<string | number> = [namespace];
@@ -302,6 +346,78 @@ export class HiveMindStore {
     );
   }
 
+  deleteLessonPublication(
+    namespace: HiveMindNamespace,
+    publisherId: string,
+    candidateId: string,
+    key: string,
+  ): number {
+    return this.deletePublishedWhere(
+      namespace,
+      publisherId,
+      entry => entry.kind === 'lesson'
+        && (entry.candidateId === candidateId
+          || (entry.candidateId === undefined && entry.key === key && entry.status === 'pending')),
+    );
+  }
+
+  /** Purge every legacy publication in one namespace before durable ownership is adopted. */
+  deleteNamespace(namespace: HiveMindNamespace): number {
+    assertNamespace(namespace);
+    this.retryPendingSecureDelete();
+    const remove = this.db.transaction(() => {
+      const result = this.db.prepare(`
+        DELETE FROM hive_mind_entries WHERE namespace = ?
+      `).run(namespace);
+      if (result.changes > 0 && this.dbPath !== ':memory:') {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO hive_mind_metadata (key, value) VALUES (?, '1')
+        `).run(SECURE_DELETE_PENDING_KEY);
+      }
+      return result.changes;
+    });
+    const removed = remove.immediate();
+    if (removed > 0 && this.dbPath !== ':memory:') this.purgeDeletedContent();
+    return removed;
+  }
+
+  /**
+   * Record durable publisher adoption once per namespace, optionally purging
+   * publications from the preceding process-random ownership model.
+   */
+  completeLegacyPublisherMigration(
+    namespace: HiveMindNamespace,
+    purgeLegacyPublications: boolean,
+  ): boolean {
+    assertNamespace(namespace);
+    this.retryPendingSecureDelete();
+    const migrationKey = `${LEGACY_PUBLISHER_MIGRATION_KEY_PREFIX}${namespace}`;
+    const migrate = this.db.transaction(() => {
+      const migrated = this.db.prepare(`
+        SELECT 1 FROM hive_mind_metadata WHERE key = ?
+      `).get(migrationKey);
+      if (migrated) return { completed: false, removed: 0 };
+
+      const removed = purgeLegacyPublications
+        ? this.db.prepare('DELETE FROM hive_mind_entries WHERE namespace = ?').run(namespace).changes
+        : 0;
+      this.db.prepare(`
+        INSERT INTO hive_mind_metadata (key, value) VALUES (?, '1')
+      `).run(migrationKey);
+      if (removed > 0 && this.dbPath !== ':memory:') {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO hive_mind_metadata (key, value) VALUES (?, ?)
+        `).run(SECURE_DELETE_PENDING_KEY, MIGRATION_SECURE_DELETE_PENDING_VALUE);
+      }
+      return { completed: true, removed };
+    });
+    const result = migrate.immediate();
+    if (result.removed > 0 && this.dbPath !== ':memory:') {
+      this.purgeDeletedContent();
+    }
+    return result.completed;
+  }
+
   deletePublishedWhere(
     namespace: HiveMindNamespace,
     publisherId: string,
@@ -317,16 +433,54 @@ export class HiveMindStore {
        ORDER BY id ASC
     `).all(namespace, publisherId) as HiveMindRow[];
     const ids = rows.map(parseRow).filter(predicate).map(entry => entry.id);
-    if (ids.length === 0) return 0;
+    if (ids.length === 0) {
+      if (this.dbPath !== ':memory:' && this.hasPendingSecureDelete()) {
+        this.purgeDeletedContent();
+      }
+      return 0;
+    }
     const remove = this.db.transaction(() => {
       const statement = this.db.prepare('DELETE FROM hive_mind_entries WHERE id = ?');
       for (const id of ids) statement.run(id);
+      if (this.dbPath !== ':memory:') {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO hive_mind_metadata (key, value) VALUES (?, '1')
+        `).run(SECURE_DELETE_PENDING_KEY);
+      }
     });
     remove.immediate();
+    if (this.dbPath !== ':memory:') {
+      this.purgeDeletedContent();
+    }
     return ids.length;
   }
 
+  private hasPendingSecureDelete(): boolean {
+    return this.db.prepare(`
+      SELECT 1 FROM hive_mind_metadata WHERE key = ?
+    `).get(SECURE_DELETE_PENDING_KEY) !== undefined;
+  }
+
+  private retryPendingSecureDelete(): void {
+    if (this.dbPath !== ':memory:' && this.hasPendingSecureDelete()) {
+      this.purgeDeletedContent();
+    }
+  }
+
+  private purgeDeletedContent(): void {
+    const pending = this.db.prepare(`
+      SELECT value FROM hive_mind_metadata WHERE key = ?
+    `).get(SECURE_DELETE_PENDING_KEY) as { value: string } | undefined;
+    if (pending?.value === MIGRATION_SECURE_DELETE_PENDING_VALUE) {
+      truncateWalAfterConcurrentMigrationOrThrow(this.db);
+    } else {
+      truncateWalOrThrow(this.db);
+    }
+    this.db.prepare('DELETE FROM hive_mind_metadata WHERE key = ?').run(SECURE_DELETE_PENDING_KEY);
+  }
+
   close(): void {
+    this.retryPendingSecureDelete();
     this.db.close();
   }
 }
