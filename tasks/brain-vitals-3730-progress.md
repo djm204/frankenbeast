@@ -10,9 +10,9 @@
 - [x] GREEN: implement the minimal sampler, estimator, interval lifecycle, and SQLite persistence.
 - [x] Export and document the public resource telemetry API and caveats.
 - [x] Run focused observer tests, typecheck, build, lint, and relevant repository gates.
-- [ ] Commit and push the issue branch; open one PR closing #3730.
-- [ ] Obtain exact-head CI success and a clean Codex review with zero unresolved threads.
-- [ ] Merge, verify issue closure and clean worktree, and record the final handoff.
+- [x] Commit and push the issue branch; open PR #3795 closing #3730.
+- [x] Obtain exact-head CI success and a clean Codex review with zero unresolved threads: head `afd15536fee9957ff1e4afde53ac6425c577fd65` passed 4/4 checks with 8 threads / 0 unresolved.
+- [x] Merge, verify issue closure and clean worktree, and record the final handoff: PR #3795 merged as `f39e2ad6673d4eade82ffb4b0ae6ba7897173110`; issue #3730 is `CLOSED/COMPLETED`; implementation handoff `t_dde334ff` and verifier `t_8aa0af15` passed.
 
 ## Verification notes
 
