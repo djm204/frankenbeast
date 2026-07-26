@@ -3,6 +3,7 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { deflateRawSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCodexAppServerRequest } from '../../../src/runtime/codex/codex-app-server-client.js';
 import { CodexRuntimeAdapter } from '../../../src/runtime/codex/codex-runtime-adapter.js';
@@ -446,6 +447,29 @@ input.on('line', (line) => {
     });
   });
 
+  it('does not report server-local notLoaded status as a live offline agent state', async () => {
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [{
+          id: 'persisted-elsewhere', sessionId: 'session-elsewhere', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'notLoaded' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const snapshot = await adapter.getSnapshot();
+
+    expect(snapshot.agents).toEqual({
+      status: 'available',
+      data: [expect.objectContaining({
+        id: 'codex:thread:persisted-elsewhere',
+        state: 'unknown',
+      })],
+    });
+  });
+
   it('provides stable bounded event polling and rejects malformed cursors', async () => {
     const threads = [
       {
@@ -569,6 +593,35 @@ input.on('line', (line) => {
     ]);
   });
 
+  it('does not replay unchanged newer threads after an older status-only event', async () => {
+    let olderStatus = 'active';
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [
+          {
+            id: 'newer', sessionId: 'session-newer', cliVersion: '0.145.0',
+            createdAt: 100, updatedAt: 300, cwd: '/workspace/project',
+            ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+          },
+          {
+            id: 'older', sessionId: 'session-older', cliVersion: '0.145.0',
+            createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+            ephemeral: false, modelProvider: 'openai', status: { type: olderStatus },
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 2 });
+    olderStatus = 'idle';
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 2 });
+    const third = await adapter.getEvents({ cursor: second.nextCursor!, limit: 2 });
+
+    expect(second.events.map((event) => event.id)).toEqual(['codex:thread:older:200:idle']);
+    expect(third).toEqual({ events: [], nextCursor: second.nextCursor });
+  });
+
   it('keeps emitted cursors valid when a timestamp tie exceeds the status bound', async () => {
     const boundaryStatuses = Object.fromEntries(Array.from({ length: 500 }, (_, index) => [
       `thread-${String(index).padStart(3, '0')}`,
@@ -599,6 +652,75 @@ input.on('line', (line) => {
       events: [],
       nextCursor: page.nextCursor,
     });
+  });
+
+  it('keeps a full status baseline below the HTTP header limit', async () => {
+    const threads = Array.from({ length: 500 }, (_, index) => {
+      const suffix = index.toString(16).padStart(12, '0');
+      return {
+        id: `00000000-0000-4000-8000-${suffix}`,
+        sessionId: `session-${index}`,
+        cliVersion: '0.145.0',
+        createdAt: 100,
+        updatedAt: 200,
+        cwd: '/workspace/project',
+        ephemeral: false,
+        modelProvider: 'openai',
+        status: { type: 'idle' },
+      };
+    });
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({ data: threads, nextCursor: null }),
+    });
+
+    const page = await adapter.getEvents({ limit: 500 });
+
+    expect(page.events).toHaveLength(500);
+    expect(Buffer.byteLength(page.nextCursor!)).toBeLessThan(16 * 1024);
+    expect(() => adapter.validateEventCursor?.(page.nextCursor!)).not.toThrow();
+  });
+
+  it('rejects compact cursors with non-hashed status keys', () => {
+    const cursor = `z.${deflateRawSync(Buffer.from(JSON.stringify({
+      version: 2,
+      occurredAt: '1970-01-01T00:03:20.000Z',
+      threadId: 'thread-1',
+      status: 'idle',
+      boundaryStatuses: { 'unbounded-raw-thread-id': 'idle' },
+    }))).toString('base64url')}`;
+    const adapter = new CodexRuntimeAdapter({ request: async () => ({ data: [] }) });
+
+    expect(() => adapter.validateEventCursor?.(cursor)).toThrow(expect.objectContaining({
+      code: 'INVALID_CURSOR',
+    }));
+  });
+
+  it('emits a terminal lifecycle event for archived threads', async () => {
+    const request = vi.fn(async (_method: string, params: Record<string, unknown>) => ({
+      data: params['archived'] === true
+        ? [{
+            id: 'archived-thread', sessionId: 'session-archived', cliVersion: '0.145.0',
+            createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+            ephemeral: false, modelProvider: 'openai', status: { type: 'notLoaded' },
+          }]
+        : [],
+      nextCursor: null,
+    }));
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    const page = await adapter.getEvents({ limit: 10 });
+
+    expect(page.events).toEqual([
+      expect.objectContaining({
+        id: 'codex:thread:archived-thread:200:archived',
+        summary: 'Codex thread is archived',
+      }),
+    ]);
+    expect(request).toHaveBeenCalledWith(
+      'thread/list',
+      expect.objectContaining({ archived: true }),
+      expect.any(Object),
+    );
   });
 
   it('returns the newest matching events on an initial poll', async () => {
@@ -669,7 +791,12 @@ input.on('line', (line) => {
     expect(page.events).toEqual([
       expect.objectContaining({ id: 'codex:thread:target:200:idle', workspaceId }),
     ]);
-    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(request).toHaveBeenCalledWith(
+      'thread/list',
+      expect.objectContaining({ archived: true }),
+      expect.any(Object),
+    );
   });
 
   it('paginates before applying a bounded workspace snapshot filter', async () => {
