@@ -171,4 +171,24 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
     vi.useRealTimers();
   });
+
+  it('does not retry permanent stream ticket authentication failures', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const error = vi.fn();
+    const connection = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn(), error, connection });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }));
+    expect(connection).not.toHaveBeenCalledWith('reconnecting');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    vi.useRealTimers();
+  });
 });

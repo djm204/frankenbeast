@@ -205,6 +205,19 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText(/operator token/)).toBeDefined();
   });
 
+  it('retries provider discovery from the recovery action', async () => {
+    const listProviders = vi.fn()
+      .mockRejectedValueOnce(new SmartSwarmApiError('Unauthorized', 401))
+      .mockResolvedValue([provider]);
+    render(<SmartSwarmPage client={createClient({ listProviders })} />);
+    await screen.findByText('Operator authentication required');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry smart-swarm' }));
+
+    expect(await screen.findByText('Live dashboard')).toBeDefined();
+    expect(listProviders).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a failed initial snapshot load', async () => {
     const fetchSnapshot = vi.fn()
       .mockRejectedValueOnce(new Error('Temporary snapshot outage'))
@@ -240,6 +253,23 @@ describe('SmartSwarmPage', () => {
     expect(subscribe).not.toHaveBeenCalled();
   });
 
+  it('opens provider-wide streams when workspace discovery is unavailable', async () => {
+    const subscribe = vi.fn().mockImplementation(async (_providerId, _workspaceId, handlers) => {
+      handlers.connection?.('connected');
+      return vi.fn();
+    });
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        workspaces: { status: 'unsupported', reason: 'Workspace discovery unavailable.' },
+      }),
+      subscribe,
+    })} />);
+
+    expect(await screen.findByText('Live · connected')).toBeDefined();
+    expect(subscribe).toHaveBeenCalledWith('hermes', undefined, expect.any(Object));
+  });
+
   it('clears transient stream errors after reconnection', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     render(<SmartSwarmPage client={createClient({
@@ -256,6 +286,31 @@ describe('SmartSwarmPage', () => {
     handlers.connection?.('connected');
 
     await waitFor(() => expect(screen.queryByText('Smart-swarm unavailable')).toBeNull());
+  });
+
+  it('does not clear snapshot failures when the stream reconnects', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockRejectedValueOnce(new Error('Snapshot refresh failed'));
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        nextHandlers.connection?.('connected');
+        return vi.fn();
+      }),
+    })} />);
+    await screen.findByText('Live · connected');
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+
+    act(() => handlers.event({ ...baseEvent, id: 'refresh-event', cursor: 'refresh-cursor' }));
+    expect(await screen.findByText('Snapshot refresh failed', {}, { timeout: 1_000 })).toBeDefined();
+    act(() => handlers.connection?.('connected'));
+
+    expect(screen.getByText('Snapshot refresh failed')).toBeDefined();
   });
 
   it('coalesces snapshot refreshes from bursts of streamed activity', async () => {
@@ -282,6 +337,73 @@ describe('SmartSwarmPage', () => {
 
     expect(fetchSnapshot).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+  });
+
+  it('serializes streamed refreshes while a snapshot request is in flight', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    let resolveRefresh!: (value: RuntimeSnapshot) => void;
+    const pendingRefresh = new Promise<RuntimeSnapshot>((resolve) => { resolveRefresh = resolve; });
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockReturnValueOnce(pendingRefresh)
+      .mockResolvedValue(snapshot);
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+
+    act(() => handlers.event({ ...baseEvent, id: 'first', cursor: 'first' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+    act(() => handlers.event({ ...baseEvent, id: 'second', cursor: 'second' }));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(fetchSnapshot).toHaveBeenCalledTimes(3);
+
+    resolveRefresh(snapshot);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(4), { timeout: 1_000 });
+  });
+
+  it('keeps newest activity first before and after snapshot refreshes', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+    const newestEvent = {
+      ...baseEvent,
+      id: 'newest-event',
+      cursor: 'newest-cursor',
+      occurredAt: '2026-07-26T19:00:00.000Z',
+      summary: 'Newest event',
+    };
+    const refreshedSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      events: { status: 'available', data: [baseEvent, newestEvent] },
+    };
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValue(refreshedSnapshot);
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+
+    act(() => handlers.event(newestEvent));
+    expect(screen.getByText('Newest event').compareDocumentPosition(screen.getByText('Focused tests passed')))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+    await waitFor(() => expect(
+      screen.getByText('Newest event').compareDocumentPosition(screen.getByText('Focused tests passed')),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING));
   });
 
   it('clears stale topology while switching runtime providers', async () => {
@@ -330,24 +452,66 @@ describe('SmartSwarmPage', () => {
     }));
   });
 
+  it('refreshes the provider workspace catalog without remounting', async () => {
+    const secondWorkspace = { id: 'board-secondary', name: 'Secondary board', kind: 'board' as const, state: 'available' as const };
+    const expandedSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      workspaces: {
+        status: 'available',
+        data: [...snapshot.workspaces.status === 'available' ? snapshot.workspaces.data : [], secondWorkspace],
+      },
+    };
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(expandedSnapshot);
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh workspaces' }));
+
+    await waitFor(() => expect((screen.getByLabelText('Workspace') as HTMLSelectElement).options).toHaveLength(2));
+    expect(fetchSnapshot).toHaveBeenLastCalledWith('hermes', { activityLimit: 1 });
+  });
+
   it('bounds large live task topologies instead of freezing the operator view', async () => {
     const baseTask = snapshot.tasks.status === 'available' ? snapshot.tasks.data[0]! : undefined;
-    if (!baseTask) throw new Error('Expected a task fixture');
+    const baseAgent = snapshot.agents.status === 'available' ? snapshot.agents.data[0]! : undefined;
+    const baseBlocker = snapshot.blockers.status === 'available' ? snapshot.blockers.data[0]! : undefined;
+    const baseApproval = snapshot.approvals.status === 'available' ? snapshot.approvals.data[0]! : undefined;
+    if (!baseTask || !baseAgent || !baseBlocker || !baseApproval) throw new Error('Expected dense fixtures');
     const denseSnapshot: RuntimeSnapshot = {
       ...snapshot,
+      agents: {
+        status: 'available',
+        data: Array.from({ length: 205 }, (_, index) => ({ ...baseAgent, id: `agent-${index}` })),
+      },
       tasks: {
         status: 'available',
         data: Array.from({ length: 205 }, (_, index) => ({
           ...baseTask,
           id: `task-${index}`,
-          title: `Runtime task ${index}`,
+          title: index === 204 ? 'Important blocked task' : `Runtime task ${index}`,
+          state: index === 204 ? 'blocked' : 'succeeded',
         })),
+      },
+      blockers: {
+        status: 'available',
+        data: Array.from({ length: 205 }, (_, index) => ({ ...baseBlocker, id: `blocker-${index}` })),
+      },
+      approvals: {
+        status: 'available',
+        data: Array.from({ length: 205 }, (_, index) => ({ ...baseApproval, id: `approval-${index}` })),
       },
     };
     render(<SmartSwarmPage client={createClient({ fetchSnapshot: vi.fn().mockResolvedValue(denseSnapshot) })} />);
 
     expect(await screen.findByText('Showing 200 of 205 tasks')).toBeDefined();
-    expect(screen.getAllByRole('button', { name: /Inspect Runtime task/ })).toHaveLength(200);
+    expect(screen.getByRole('button', { name: 'Inspect Important blocked task' })).toBeDefined();
+    expect(screen.getAllByRole('button', { name: /Inspect/ })).toHaveLength(200);
+    expect(screen.getByText('Showing 100 of 205 agents')).toBeDefined();
+    expect(screen.getByText('Showing 100 of 205 blockers')).toBeDefined();
+    expect(screen.getByText('Showing 100 of 205 approvals')).toBeDefined();
   });
 
   it('keeps dependency evidence keyed by stable task identity', async () => {

@@ -148,6 +148,10 @@ export class SmartSwarmApiError extends Error {
   }
 }
 
+function isPermanentAuthenticationError(error: unknown): boolean {
+  return error instanceof SmartSwarmApiError && (error.status === 401 || error.status === 403);
+}
+
 export class SmartSwarmApiClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -191,7 +195,7 @@ export class SmartSwarmApiClient {
         void connect().catch((error: unknown) => {
           if (closed) return;
           handlers.error?.(error instanceof Error ? error : new Error('Unable to reconnect smart-swarm activity.'));
-          scheduleReconnect();
+          if (!isPermanentAuthenticationError(error)) scheduleReconnect();
         });
       }, 1_000);
     };
@@ -234,7 +238,7 @@ export class SmartSwarmApiClient {
       await connect();
     } catch (error) {
       handlers.error?.(error instanceof Error ? error : new Error('Unable to connect smart-swarm activity.'));
-      scheduleReconnect();
+      if (!isPermanentAuthenticationError(error)) scheduleReconnect();
     }
     return () => {
       closed = true;
