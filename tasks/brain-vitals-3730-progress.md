@@ -16,7 +16,7 @@
 
 ## Verification notes
 
-- Focused resource tests: 17 passed, covering a real spawned process, CPU/RSS, estimates, configurable intervals, serialized/manual drain semantics, persistence, and indexed queries.
-- Observer package: 38 files / 944 tests passed; lint, typecheck, and build passed.
+- Focused resource tests: 20 passed, covering a real spawned process, CPU/RSS, estimates, configurable intervals, monotonic energy, async lifecycle draining, persistence, indexed queries, and explicit retention pruning.
+- Observer package: 38 files / 947 tests passed; lint, typecheck, and build passed.
 - Repository lint, typecheck, and build passed. Full concurrent repository test runs exposed unrelated orchestrator timing flakes; every reported failing file passed in isolation while the observer package remained green.
 - Independent review findings on lifecycle overlap, query-plan index use, identifier normalization, and import-time child-process mocking were resolved; the second pass reported no additional findings.

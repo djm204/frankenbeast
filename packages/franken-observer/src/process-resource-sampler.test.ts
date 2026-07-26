@@ -16,6 +16,7 @@ const children: ChildProcess[] = [];
 
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
   }
@@ -142,6 +143,23 @@ describe('ProcessResourceSampler', () => {
     });
   });
 
+  it('uses monotonic elapsed time when the wall clock moves backward', async () => {
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(10_000)
+      .mockReturnValueOnce(1);
+    const sampler = new ProcessResourceSampler({
+      pid: process.pid,
+      agentId: 'agent-clock',
+      runId: 'run-clock',
+    });
+
+    await sampler.sample();
+    const second = await sampler.sample();
+
+    expect(second.timestamp).toBe(1);
+    expect(second.estimatedEnergyWh).toBeGreaterThan(0);
+  });
+
   it('drains a manual sample before stopping', async () => {
     let releaseWrite: (() => void) | undefined;
     let writeCompleted = false;
@@ -178,6 +196,27 @@ describe('ProcessResourceSampler', () => {
 
     sampler.start();
     await expect(sampler.stop()).resolves.toBeUndefined();
+  });
+
+  it('awaits asynchronous sample callbacks before stopping', async () => {
+    let releaseCallback: (() => void) | undefined;
+    let callbackCompleted = false;
+    const sampler = new ProcessResourceSampler({
+      pid: process.pid,
+      agentId: 'agent-callback',
+      runId: 'run-callback',
+      async onSample() {
+        await new Promise<void>(resolve => { releaseCallback = resolve; });
+        callbackCompleted = true;
+      },
+    });
+
+    const sampling = sampler.sample();
+    setTimeout(() => releaseCallback?.(), 10);
+    const callbackCompletedWhenStopped = await sampler.stop().then(() => callbackCompleted);
+    await sampling;
+
+    expect(callbackCompletedWhenStopped).toBe(true);
   });
 
   it('persists sampled runtime data through SQLite', async () => {
@@ -235,6 +274,7 @@ describe('SQLiteAdapter resource samples', () => {
     await expect(adapter.queryResourceSamples({ runId: 'run-2' })).resolves.toEqual([
       persistedSample({ timestamp: 1_500, runId: 'run-2' }),
     ]);
+    await expect(adapter.queryResourceSamples({ agentId: ' ', runId: 'run-1' })).resolves.toHaveLength(5);
 
     await adapter.close();
   });
@@ -259,6 +299,21 @@ describe('SQLiteAdapter resource samples', () => {
     await adapter.deleteTrace('shared-id');
 
     await expect(adapter.queryResourceSamples({ runId: 'shared-id' })).resolves.toHaveLength(1);
+    await adapter.close();
+  });
+
+  it('supports explicit retention pruning without deleting recent samples', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'resource-retention-'));
+    tempDirs.push(dir);
+    const adapter = new SQLiteAdapter(join(dir, 'traces.db'));
+    await adapter.recordResourceSample(persistedSample({ runId: 'run-retention', timestamp: 1_000 }));
+    await adapter.recordResourceSample(persistedSample({ runId: 'run-retention', timestamp: 2_000 }));
+
+    await expect(adapter.deleteResourceSamplesBefore(1_500)).resolves.toBe(1);
+    await expect(adapter.queryResourceSamples({ runId: 'run-retention' })).resolves.toEqual([
+      persistedSample({ runId: 'run-retention', timestamp: 2_000 }),
+    ]);
+
     await adapter.close();
   });
 });

@@ -29,6 +29,7 @@ import {
   DELETE_SPANS_BY_TRACE,
   DELETE_COMPACTIONS_BY_RUN,
   DELETE_COMPACTIONS_BEFORE,
+  DELETE_RESOURCE_SAMPLES_BEFORE,
   DELETE_TRACE,
   UPSERT_COMPACTION_EVENT,
   SELECT_COMPACTION_EVENTS,
@@ -157,6 +158,7 @@ type SQLiteWorkerOperation =
   | 'aggregateCompactions'
   | 'recordResourceSample'
   | 'queryResourceSamples'
+  | 'deleteResourceSamplesBefore'
 
 interface SQLiteWorkerResponse {
   id: number
@@ -252,6 +254,8 @@ function execute(operation, payload) {
     case 'recordResourceSample':
       db.prepare(sql.insertResourceSample).run(payload.sample)
       return undefined
+    case 'deleteResourceSamplesBefore':
+      return db.prepare(sql.deleteResourceSamplesBefore).run(payload.before).changes
     case 'queryResourceSamples': {
       const query = payload.query
       const statement = query.agentId === null
@@ -334,6 +338,7 @@ class SQLiteWorkerClient {
             deleteSpansByTrace: DELETE_SPANS_BY_TRACE,
             deleteCompactionsByRun: DELETE_COMPACTIONS_BY_RUN,
             deleteCompactionsBefore: DELETE_COMPACTIONS_BEFORE,
+            deleteResourceSamplesBefore: DELETE_RESOURCE_SAMPLES_BEFORE,
             deleteTrace: DELETE_TRACE,
             upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
             selectCompactionEvents: SELECT_COMPACTION_EVENTS,
@@ -1072,9 +1077,25 @@ export class SQLiteAdapter implements ExportAdapter {
     })
   }
 
+  async deleteResourceSamplesBefore(before: number): Promise<number> {
+    if (!Number.isSafeInteger(before) || before < 0) {
+      return Promise.reject(new RangeError('resource sample retention cutoff must be a non-negative safe integer'))
+    }
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('delete old process resource samples', () => (
+          this.workerClient!.request<number>('deleteResourceSamplesBefore', { before })
+        ))
+      }
+      return this.withSqliteLockRetry('delete old process resource samples', () => (
+        this.db.prepare(DELETE_RESOURCE_SAMPLES_BEFORE).run(before).changes
+      ))
+    })
+  }
+
   async queryResourceSamples(query: ProcessResourceSampleQuery): Promise<ProcessResourceSample[]> {
-    const agentId = query.agentId?.trim()
-    const runId = query.runId?.trim()
+    const agentId = query.agentId?.trim() || undefined
+    const runId = query.runId?.trim() || undefined
     if (!agentId && !runId) {
       return Promise.reject(new TypeError('queryResourceSamples requires agentId or runId'))
     }

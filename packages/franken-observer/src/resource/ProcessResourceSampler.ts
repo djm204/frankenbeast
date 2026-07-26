@@ -44,7 +44,7 @@ export interface ProcessResourceSamplerOptions extends ProcessPowerModel {
   /** Sampling cadence in milliseconds. Default: 5000. */
   readonly intervalMs?: number;
   readonly adapter?: ProcessResourceSampleAdapter;
-  readonly onSample?: (sample: ProcessResourceSample) => void;
+  readonly onSample?: (sample: ProcessResourceSample) => void | Promise<void>;
   readonly onError?: (error: Error) => void | Promise<void>;
 }
 
@@ -96,12 +96,12 @@ export class ProcessResourceSampler {
   private readonly idleWatts: number;
   private readonly tdpWatts: number;
   private readonly adapter: ProcessResourceSampleAdapter | undefined;
-  private readonly onSample: ((sample: ProcessResourceSample) => void) | undefined;
+  private readonly onSample: ((sample: ProcessResourceSample) => void | Promise<void>) | undefined;
   private readonly onError: ((error: Error) => void | Promise<void>) | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private inFlight: Promise<void> | undefined;
   private sampleQueue: Promise<void> = Promise.resolve();
-  private previousTimestamp: number | undefined;
+  private previousSampleAt: bigint | undefined;
   private previousCpuUsage = process.cpuUsage();
   private previousCpuAt = process.hrtime.bigint();
 
@@ -139,13 +139,14 @@ export class ProcessResourceSampler {
       ? this.sampleCurrentProcess()
       : await this.sampleChildProcess();
     const timestamp = wallClockNow();
+    const sampledAt = process.hrtime.bigint();
     const estimatedWatts = estimateProcessPower(usage.cpuPercent, {
       idleWatts: this.idleWatts,
       tdpWatts: this.tdpWatts,
     });
-    const elapsedMs = this.previousTimestamp === undefined
+    const elapsedHours = this.previousSampleAt === undefined
       ? 0
-      : Math.max(0, timestamp - this.previousTimestamp);
+      : Number(sampledAt - this.previousSampleAt) / 3_600_000_000_000;
     const sample: ProcessResourceSample = {
       agentId: this.agentId,
       runId: this.runId,
@@ -153,12 +154,12 @@ export class ProcessResourceSampler {
       cpuPercent: usage.cpuPercent,
       rssBytes: usage.rssBytes,
       estimatedWatts,
-      estimatedEnergyWh: estimatedWatts * (elapsedMs / 3_600_000),
+      estimatedEnergyWh: estimatedWatts * elapsedHours,
       timestamp,
     };
-    this.previousTimestamp = timestamp;
+    this.previousSampleAt = sampledAt;
     await this.adapter?.recordResourceSample(sample);
-    this.onSample?.(sample);
+    await this.onSample?.(sample);
     return sample;
   }
 

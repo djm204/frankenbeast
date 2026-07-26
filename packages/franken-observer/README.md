@@ -324,11 +324,16 @@ const history = await db.queryResourceSamples({
   since: Date.now() - 60_000,
   before: Date.now(),
 })
+
+// Apply an operator-chosen retention policy (for example, keep 30 days).
+const deleted = await db.deleteResourceSamplesBefore(Date.now() - 30 * 24 * 60 * 60 * 1_000)
 ```
 
 Current-process sampling uses Node's built-in CPU and memory APIs. Child-PID sampling uses `ps`, avoiding a native addon for v1 and working on Linux/macOS; Windows child-PID sampling is explicitly unsupported. `ps` reports a lifetime-average CPU percentage rather than a hardware-counter interval, so precision varies by platform.
 
-`estimatedWatts` and `estimatedEnergyWh` are **best-effort estimates, not measurements**. The configurable linear model is `idleWatts + min(cpuPercent, 100) / 100 × tdpWatts`; it does not read RAPL, IPMI, battery, or other hardware sensors. Configure the values per host and do not use them for billing-grade energy accounting.
+`estimatedWatts` and `estimatedEnergyWh` are **best-effort estimates, not measurements**. The configurable linear model is `idleWatts + min(cpuPercent, 100) / 100 × tdpWatts`; elapsed energy uses a monotonic clock so wall-clock corrections do not distort intervals. It does not read RAPL, IPMI, battery, or other hardware sensors. Configure the values per host and do not use them for billing-grade energy accounting.
+
+Periodic samples are not pruned implicitly because retention requirements vary by deployment. Long-running operators should schedule `deleteResourceSamplesBefore()` with an explicit cutoff; it returns the number of deleted rows.
 
 ---
 
