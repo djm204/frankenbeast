@@ -621,9 +621,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       });
     }
 
-    const previousState = await this.readTaskStatus(request.action);
-    const mutation = await this.runHermes(this.mutationArgs(request.action));
-    const currentState = await this.readTaskStatus(request.action);
+    const previousState = await this.readTaskStatus(request.action, workspace.path);
+    const mutation = await this.runHermes(this.mutationArgs(request.action), workspace.path);
+    const currentState = await this.readTaskStatus(request.action, workspace.path);
     if (
       !this.postconditionSatisfied(request.action, currentState)
       || (request.action.type === 'policy.apply' && !this.promotionSucceeded(mutation))
@@ -695,8 +695,14 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private async readTaskStatus(action: Exclude<RuntimeAction, { type: 'approval.resolve' }>): Promise<string> {
-    const result = await this.runHermes(this.commandArgs(action, 'show', ['--json', this.rawTaskId(action)]));
+  private async readTaskStatus(
+    action: Exclude<RuntimeAction, { type: 'approval.resolve' }>,
+    databasePath: string,
+  ): Promise<string> {
+    const result = await this.runHermes(
+      this.commandArgs(action, 'show', ['--json', this.rawTaskId(action)]),
+      databasePath,
+    );
     try {
       const parsed = JSON.parse(result.stdout) as { task?: { status?: unknown }; status?: unknown };
       const status = parsed.task?.status ?? parsed.status;
@@ -707,9 +713,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     throw new Error('Hermes task status response was invalid');
   }
 
-  private async runHermes(args: string[]): Promise<HermesCommandResult> {
+  private async runHermes(args: string[], databasePath: string): Promise<HermesCommandResult> {
     const result = await this.runCommand(this.command, args, {
-      env: { ...this.env, HERMES_HOME: this.home! },
+      env: { ...this.env, HERMES_HOME: this.home!, HERMES_KANBAN_DB: databasePath },
       timeoutMs: COMMAND_TIMEOUT_MS,
       maxOutputBytes: COMMAND_MAX_OUTPUT_BYTES,
     });

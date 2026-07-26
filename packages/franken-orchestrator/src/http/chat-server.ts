@@ -385,6 +385,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const ownedRuntimeActionStore = effectiveOperatorToken && !options.runtimeActionStore
     ? new RuntimeActionStore({
         databasePath: join(options.sessionStoreDir, 'runtime-actions', 'actions.sqlite'),
+        hardenDatabaseDirectory: true,
       })
     : undefined;
   const runtimeActionStore = options.runtimeActionStore ?? ownedRuntimeActionStore;
@@ -438,17 +439,28 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   };
   const webSocketServer = attachChatWebSocketServer(attachOptions);
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => {
-      server.off('error', reject);
-      resolve();
+  let address: ReturnType<typeof server.address>;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, host, () => {
+        server.off('error', reject);
+        resolve();
+      });
     });
-  });
-
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('Chat server did not bind to a TCP address');
+    address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Chat server did not bind to a TCP address');
+    }
+  } catch (error) {
+    server.closeAllConnections();
+    webSocketServer.close();
+    ownedRuntimeActionStore?.beginShutdown();
+    await ownedRuntimeActionStore?.drain();
+    chatStreamTicketStore?.destroy();
+    ownedRuntimeActionStore?.destroy();
+    ownedBrainRegistry?.close();
+    throw error;
   }
 
   const url = localPlaintextOrSecureEndpoint(host, address.port);

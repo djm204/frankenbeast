@@ -21,6 +21,7 @@ export type RuntimeActionReservation =
 
 export interface RuntimeActionStoreOptions {
   databasePath?: string | undefined;
+  hardenDatabaseDirectory?: boolean | undefined;
 }
 
 interface MemoryEntry {
@@ -51,7 +52,7 @@ export class RuntimeActionStore {
     if (!options.databasePath) return;
     const databaseDir = dirname(options.databasePath);
     mkdirSync(databaseDir, { recursive: true, mode: 0o700 });
-    chmodSync(databaseDir, 0o700);
+    if (options.hardenDatabaseDirectory) chmodSync(databaseDir, 0o700);
     this.db = new Database(options.databasePath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('busy_timeout = 5000');
