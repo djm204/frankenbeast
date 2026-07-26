@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   TokenCounter,
   CostCalculator,
   CircuitBreaker,
   LoopDetector,
+  type CompactionEventAdapter,
 } from '@franken/observer';
 import { CliObserverBridge } from '../../../src/adapters/cli-observer-bridge.js';
 import type { IObserverModule } from '../../../src/deps.js';
@@ -296,6 +297,53 @@ describe('CliObserverBridge', () => {
 
       const spend = await bridge.getTokenSpend('session-disabled-cache');
       expect(spend.estimatedCostUsd).toBeCloseTo(22.95, 8);
+    });
+  });
+
+  describe('close()', () => {
+    it('keeps observer adapter shutdown failures best-effort', async () => {
+      const close = vi.fn(async () => { throw new Error('SQLite worker close timed out'); });
+      const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {
+        recordCompaction: vi.fn(async () => undefined),
+        queryCompactions: vi.fn(async () => []),
+        aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
+        close,
+      };
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        compactionAdapter,
+      });
+
+      await expect(bridge.close()).resolves.toBeUndefined();
+      expect(close).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('recordCompaction()', () => {
+    it('correlates compaction telemetry with the persisted trace id', async () => {
+      const recordCompaction = vi.fn(async () => undefined);
+      const compactionAdapter: CompactionEventAdapter = {
+        recordCompaction,
+        queryCompactions: vi.fn(async () => []),
+        aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
+      };
+      const bridge = new CliObserverBridge({ ...defaultConfig, compactionAdapter });
+      bridge.startTrace('chunk-session-1');
+      const traceId = bridge.observerDeps.trace.id;
+
+      await bridge.recordCompaction({
+        sessionId: 'chunk-session-1',
+        generation: 1,
+        triggerReason: 'threshold',
+        tokensBefore: 900,
+        tokensAfter: 120,
+        timestamp: 1_750_000_000_000,
+      });
+
+      expect(recordCompaction).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'chunk-session-1',
+        runId: traceId,
+      }));
     });
   });
 

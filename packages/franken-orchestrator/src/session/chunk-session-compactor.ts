@@ -1,12 +1,29 @@
 import { createChunkTranscriptEntry, type ChunkSession, type ChunkTranscriptEntry } from './chunk-session.js';
-import { isoNow } from '@franken/types';
+import { isoNow, wallClockNow } from '@franken/types';
+
+export type ChunkCompactionTriggerReason = 'threshold' | 'manual';
+
+export interface ChunkCompactionObservation {
+  readonly sessionId: string;
+  readonly generation: number;
+  readonly triggerReason: ChunkCompactionTriggerReason;
+  readonly tokensBefore: number;
+  readonly tokensAfter: number;
+  readonly timestamp: number;
+}
 
 export interface ChunkSessionCompactorDeps {
   summarize(prompt: string): Promise<string>;
+  measureSessionTokens?: ((session: ChunkSession) => number) | undefined;
+  onCompaction?: ((event: ChunkCompactionObservation) => Promise<void>) | undefined;
 }
 
 export class ChunkSessionCompactor {
-  constructor(private readonly deps: ChunkSessionCompactorDeps) {}
+  constructor(private readonly deps: ChunkSessionCompactorDeps) {
+    if (deps.onCompaction !== undefined && deps.measureSessionTokens === undefined) {
+      throw new Error('measureSessionTokens is required when onCompaction is configured');
+    }
+  }
 
   buildCompactionPrompt(session: ChunkSession): string {
     const transcript = session.transcript
@@ -27,7 +44,7 @@ export class ChunkSessionCompactor {
     const retained = this.retainCriticalTranscript(session.transcript);
     const compactionEntry = createChunkTranscriptEntry('compaction_summary', summary);
 
-    return {
+    const compacted: ChunkSession = {
       ...session,
       compactionGeneration: session.compactionGeneration + 1,
       transcript: [...retained, compactionEntry],
@@ -45,6 +62,39 @@ export class ChunkSessionCompactor {
       },
       updatedAt: now,
     };
+
+    return compacted;
+  }
+
+  async recordCompaction(
+    previous: ChunkSession,
+    compacted: ChunkSession,
+    triggerReason: ChunkCompactionTriggerReason = 'manual',
+  ): Promise<void> {
+    if (!this.deps.onCompaction) return;
+    await this.deps.onCompaction({
+      sessionId: compacted.sessionId,
+      generation: compacted.compactionGeneration,
+      triggerReason,
+      tokensBefore: this.deps.measureSessionTokens!(previous),
+      tokensAfter: this.deps.measureSessionTokens!(compacted),
+      timestamp: wallClockNow(),
+    });
+  }
+
+  async compactAndRecord(
+    session: ChunkSession,
+    persist: (compacted: ChunkSession) => void | Promise<void>,
+    triggerReason: ChunkCompactionTriggerReason = 'manual',
+  ): Promise<ChunkSession> {
+    const compacted = await this.compact(session);
+    await persist(compacted);
+    try {
+      await this.recordCompaction(session, compacted, triggerReason);
+    } catch {
+      // Operational telemetry must not abort a successfully committed compaction.
+    }
+    return compacted;
   }
 
   private retainCriticalTranscript(entries: readonly ChunkTranscriptEntry[]): ChunkTranscriptEntry[] {

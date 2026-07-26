@@ -4,11 +4,18 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Worker } from 'node:worker_threads'
+import { wallClockNow } from '@franken/types'
 import type { Trace, Span } from '../../core/types.js'
 import type { ExportAdapter, TraceSummary } from '../../export/ExportAdapter.js'
+import {
+  COMPACTION_RETENTION_MS,
+  type CompactionEvent,
+  type CompactionEventQuery,
+} from '../../compaction-metrics.js'
 import { warnIfTraceHasActiveSpans } from '../../export/ExportAdapter.js'
 import {
   CREATE_TABLES,
+  MIGRATE_COMPACTION_EVENT_IDENTITY,
   UPSERT_TRACE,
   UPSERT_SPAN,
   SELECT_TRACE,
@@ -16,7 +23,12 @@ import {
   SELECT_ALL_TRACE_IDS,
   SELECT_TRACE_SUMMARIES,
   DELETE_SPANS_BY_TRACE,
+  DELETE_COMPACTIONS_BY_RUN,
+  DELETE_COMPACTIONS_BEFORE,
   DELETE_TRACE,
+  UPSERT_COMPACTION_EVENT,
+  SELECT_COMPACTION_EVENTS,
+  SELECT_COMPACTION_AGGREGATE,
 } from './schema.js'
 
 interface TraceRow {
@@ -62,7 +74,8 @@ interface FlushedSpanState {
   thoughtBlocksJson: string
 }
 
-const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_traces_startedAt'
+const SQLITE_SCHEMA_SENTINEL_INDEX = 'idx_compaction_events_session_timestamp'
+const COMPACTION_PRIMARY_KEY = ['runId', 'sessionId', 'generation']
 
 export interface SQLiteAdapterOptions {
   /** Maximum flushed-span snapshots retained for repeated-flush dirty checks. */
@@ -117,7 +130,15 @@ interface NormalizedLockRetryOptions {
   onDiagnostic?: (diagnostic: SQLiteLockRetryDiagnostic) => void
 }
 
-type SQLiteWorkerOperation = 'flush' | 'queryByTraceId' | 'listTraceIds' | 'listTraceSummaries' | 'deleteTrace'
+type SQLiteWorkerOperation =
+  | 'flush'
+  | 'queryByTraceId'
+  | 'listTraceIds'
+  | 'listTraceSummaries'
+  | 'deleteTrace'
+  | 'recordCompaction'
+  | 'queryCompactions'
+  | 'aggregateCompactions'
 
 interface SQLiteWorkerResponse {
   id: number
@@ -185,13 +206,31 @@ function execute(operation, payload) {
       return db.prepare(sql.selectTraceSummaries).all()
     case 'deleteTrace': {
       const deleteSpans = db.prepare(sql.deleteSpansByTrace)
+      const deleteCompactions = db.prepare(sql.deleteCompactionsByRun)
       const deleteTrace = db.prepare(sql.deleteTrace)
       db.transaction((traceId) => {
         deleteSpans.run(traceId)
+        deleteCompactions.run(traceId)
         deleteTrace.run(traceId)
       })(payload.traceId)
       return undefined
     }
+    case 'recordCompaction':
+      db.transaction((event, retentionCutoff) => {
+        db.prepare(sql.upsertCompactionEvent).run(event)
+        db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
+      })(payload.event, payload.retentionCutoff)
+      return undefined
+    case 'queryCompactions':
+      return db.transaction((query, retentionCutoff) => {
+        db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
+        return db.prepare(sql.selectCompactionEvents).all(query)
+      })(payload.query, payload.retentionCutoff)
+    case 'aggregateCompactions':
+      return db.transaction((query, retentionCutoff) => {
+        db.prepare(sql.deleteCompactionsBefore).run(retentionCutoff)
+        return db.prepare(sql.selectCompactionAggregate).get(query)
+      })(payload.query, payload.retentionCutoff)
     default:
       throw new Error('Unknown SQLite worker operation: ' + operation)
   }
@@ -263,7 +302,12 @@ class SQLiteWorkerClient {
             selectAllTraceIds: SELECT_ALL_TRACE_IDS,
             selectTraceSummaries: SELECT_TRACE_SUMMARIES,
             deleteSpansByTrace: DELETE_SPANS_BY_TRACE,
+            deleteCompactionsByRun: DELETE_COMPACTIONS_BY_RUN,
+            deleteCompactionsBefore: DELETE_COMPACTIONS_BEFORE,
             deleteTrace: DELETE_TRACE,
+            upsertCompactionEvent: UPSERT_COMPACTION_EVENT,
+            selectCompactionEvents: SELECT_COMPACTION_EVENTS,
+            selectCompactionAggregate: SELECT_COMPACTION_AGGREGATE,
           },
         },
       },
@@ -591,11 +635,27 @@ export class SQLiteAdapter implements ExportAdapter {
       this.withSqliteLockRetrySync('initialize SQLite adapter', () => {
         this.db.pragma('journal_mode = WAL')
         this.db.pragma('foreign_keys = ON')
-        const traceIndexes = this.db.pragma("index_list('traces')") as Array<{ name?: unknown }>
-        const schemaInitialized = Array.isArray(traceIndexes)
-          && traceIndexes.some(index => index.name === SQLITE_SCHEMA_SENTINEL_INDEX)
+        const compactionIndexes = this.db.pragma("index_list('compaction_events')") as Array<{ name?: unknown }>
+        const schemaInitialized = Array.isArray(compactionIndexes)
+          && compactionIndexes.some(index => index.name === SQLITE_SCHEMA_SENTINEL_INDEX)
         if (!schemaInitialized) {
           this.db.exec(CREATE_TABLES)
+        } else {
+          const rawTableInfo = this.db.pragma("table_info('compaction_events')") as unknown
+          const tableInfo = (Array.isArray(rawTableInfo) ? rawTableInfo : []) as Array<{
+            name?: unknown
+            pk?: unknown
+          }>
+          const primaryKey = tableInfo
+            .filter(column => typeof column.pk === 'number' && column.pk > 0)
+            .sort((left, right) => (left.pk as number) - (right.pk as number))
+            .map(column => column.name)
+          if (primaryKey.length > 0 && (
+            primaryKey.length !== COMPACTION_PRIMARY_KEY.length
+            || !COMPACTION_PRIMARY_KEY.every((name, index) => primaryKey[index] === name)
+          )) {
+            this.db.exec(MIGRATE_COMPACTION_EVENT_IDENTITY)
+          }
         }
       })
       const isTransientDatabase = databasePath === ':memory:' || databasePath === ''
@@ -870,9 +930,11 @@ export class SQLiteAdapter implements ExportAdapter {
     } else {
       await this.withSqliteLockRetry('delete trace transaction', () => {
         const deleteSpans = this.db.prepare(DELETE_SPANS_BY_TRACE)
+        const deleteCompactions = this.db.prepare(DELETE_COMPACTIONS_BY_RUN)
         const deleteTrace = this.db.prepare(DELETE_TRACE)
         const transaction = this.db.transaction((id: string) => {
           deleteSpans.run(id)
+          deleteCompactions.run(id)
           deleteTrace.run(id)
         })
 
@@ -884,6 +946,75 @@ export class SQLiteAdapter implements ExportAdapter {
       this.flushedSpanSnapshotCount -= flushed.size
       this.flushedSpans.delete(traceId)
     }
+  }
+
+  async recordCompaction(event: CompactionEvent): Promise<void> {
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        await this.withSqliteLockRetry('record compaction event', () => (
+          this.workerClient!.request<void>('recordCompaction', {
+            event,
+            retentionCutoff: wallClockNow() - COMPACTION_RETENTION_MS,
+          })
+        ))
+        return
+      }
+      await this.withSqliteLockRetry('record compaction event', () => {
+        const transaction = this.db.transaction((record: CompactionEvent) => {
+          this.db.prepare(UPSERT_COMPACTION_EVENT).run(record)
+          this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
+        })
+        transaction(event)
+      })
+    })
+  }
+
+  async queryCompactions(query: CompactionEventQuery): Promise<CompactionEvent[]> {
+    return this.enqueueSqliteOperation(async () => {
+      const params = {
+        sessionId: query.sessionId,
+        since: query.since ?? 0,
+        limit: query.limit,
+      }
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('query compaction events', () => (
+          this.workerClient!.request<CompactionEvent[]>('queryCompactions', {
+            query: params,
+            retentionCutoff: wallClockNow() - COMPACTION_RETENTION_MS,
+          })
+        ))
+      }
+      return this.withSqliteLockRetry('query compaction events', () => this.db.transaction(() => {
+        this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
+        return this.db.prepare(SELECT_COMPACTION_EVENTS).all(params) as CompactionEvent[]
+      })())
+    })
+  }
+
+  async aggregateCompactions(query: { sessionId: string; since: number; before: number }): Promise<{
+    count: number
+    latestAt: number | null
+  }> {
+    return this.enqueueSqliteOperation(async () => {
+      if (this.workerClient !== undefined) {
+        return this.withSqliteLockRetry('aggregate compaction events', () => (
+          this.workerClient!.request<{ count: number; latestAt: number | null }>(
+            'aggregateCompactions',
+            {
+              query,
+              retentionCutoff: wallClockNow() - COMPACTION_RETENTION_MS,
+            },
+          )
+        ))
+      }
+      return this.withSqliteLockRetry('aggregate compaction events', () => this.db.transaction(() => {
+        this.db.prepare(DELETE_COMPACTIONS_BEFORE).run(wallClockNow() - COMPACTION_RETENTION_MS)
+        return this.db.prepare(SELECT_COMPACTION_AGGREGATE).get(query) as {
+          count: number
+          latestAt: number | null
+        }
+      })())
+    })
   }
 
   private enqueueSqliteOperation<T>(action: () => Promise<T>): Promise<T> {

@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync, readdirSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
-import { AuditTrailStore, type ReplayRecord } from '@franken/observer';
+import { AuditTrailStore, SQLiteAdapter, type ReplayRecord } from '@franken/observer';
 import { BeastLogger, setPlainOutput } from '../logging/beast-logger.js';
 import { MartinLoop } from '../skills/martin-loop.js';
 import { GitBranchIsolator } from '../skills/git-branch-isolator.js';
@@ -460,6 +460,24 @@ type CleanupWarningLogger = Pick<BeastLogger, 'warn'> | ((message: string, scope
 
 type SessionArtifactRemover = (targetPath: string) => void;
 
+export function createBestEffortCompactionAdapter(
+  databasePath: string,
+  warn: CleanupWarningLogger,
+  createAdapter: (path: string) => SQLiteAdapter = path => new SQLiteAdapter(path),
+): SQLiteAdapter | undefined {
+  try {
+    return createAdapter(databasePath);
+  } catch (error) {
+    const message = `Compaction telemetry disabled: ${errorMessage(error)}`;
+    if (typeof warn === 'function') {
+      warn(message, 'dep-factory');
+    } else {
+      warn.warn(message, 'dep-factory');
+    }
+    return undefined;
+  }
+}
+
 function warnSessionArtifactCleanupFailure(
   artifactPath: string,
   error: unknown,
@@ -525,8 +543,13 @@ async function createObserverDeps(
   });
   const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
-  const observerBridge = new CliObserverBridge({ budgetLimitUsd: config.budget, replayStore });
   const runSessionId = options.runSessionId ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
+  const observerBridge = new CliObserverBridge({
+    budgetLimitUsd: config.budget,
+    sessionId: runSessionId,
+    replayStore,
+    compactionAdapter: createBestEffortCompactionAdapter(options.paths.tracesDb, logger),
+  });
   if (config.enableTracing) {
     observerBridge.startTrace(runSessionId);
   }
@@ -973,6 +996,16 @@ function createCliExecutorDeps(
           });
           return response.trim();
         },
+        measureSessionTokens: (session) => {
+          const providerName = session.activeProvider ?? session.contextWindow.provider;
+          const rendered = stack.chunkSessionRenderer.render(session, stack.registry.get(providerName));
+          return observer.observerBridge.estimateContextWindow({
+            renderedPrompt: rendered.prompt,
+            provider: providerName,
+            maxTokens: session.contextWindow.maxTokens,
+          }).usedTokens;
+        },
+        onCompaction: event => observer.observerBridge.recordCompaction(event),
       }),
       contextUsage: (prompt: string, provider: string, maxTokens: number) =>
         observer.observerBridge.estimateContextWindow({
@@ -1145,8 +1178,12 @@ function appendAuditFinalize(
 
 function createObserverFinalize(observer: ObserverDepsBundle): () => Promise<void> {
   return async () => {
-    if (observer.traceViewerHandle) {
-      await observer.traceViewerHandle.stop();
+    try {
+      if (observer.traceViewerHandle) {
+        await observer.traceViewerHandle.stop();
+      }
+    } finally {
+      await observer.observerBridge.close();
     }
   };
 }
@@ -1160,6 +1197,10 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     allowTrustedCommandOverrides: options.trustProviderCommandOverrides,
   };
   assertTrustedProviderCommandOverrides(options.providersConfig, commandOverridePolicy);
+  assertTrustedProviderCommandOverrideEntries(
+    consolidatedProviderCommandOverrides(options.orchestratorConfig?.consolidatedProviders),
+    commandOverridePolicy,
+  );
   const artifacts = createSessionArtifacts(options);
   clearSessionArtifacts(options, artifacts);
 

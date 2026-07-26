@@ -38,6 +38,7 @@ const traceViewerMocks = vi.hoisted(() => ({
 const observerDepsMocks = vi.hoisted(() => ({
   enabled: { kind: 'enabled-observer-deps' },
   disabled: { kind: 'disabled-observer-deps' },
+  close: vi.fn(async () => {}),
 }));
 
 vi.mock('../../../src/logging/beast-logger.js', () => ({
@@ -68,6 +69,7 @@ vi.mock('../../../src/adapters/cli-observer-bridge.js', () => ({
     this.getActiveSessionId = vi.fn(() => undefined);
     this.recordReplay = vi.fn();
     this.getReplayManifest = vi.fn(() => [...mockBridgeReplayManifest]);
+    this.close = observerDepsMocks.close;
     this.observerDeps = observerDepsMocks.enabled;
     this.disabledObserverDeps = observerDepsMocks.disabled;
   }),
@@ -261,6 +263,7 @@ describe('dep-factory provider wiring', () => {
     optionalModuleMocks.critiqueError = undefined;
     optionalModuleMocks.governorError = undefined;
     traceViewerMocks.stop.mockClear();
+    observerDepsMocks.close.mockClear();
     mockBridgeReplayManifest.length = 0;
   });
 
@@ -288,6 +291,33 @@ describe('dep-factory provider wiring', () => {
     } finally {
       rmSync(testDir, { recursive: true, force: true });
     }
+  });
+
+  it('keeps compaction telemetry initialization failures best-effort', async () => {
+    const { createBestEffortCompactionAdapter } = await import('../../../src/cli/dep-factory.js');
+    const warn = vi.fn();
+
+    const adapter = createBestEffortCompactionAdapter(
+      '/readonly/traces.db',
+      warn,
+      () => { throw new Error('database is locked'); },
+    );
+
+    expect(adapter).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Compaction telemetry disabled: database is locked'),
+      'dep-factory',
+    );
+  });
+
+  it('closes compaction telemetry when trace viewer shutdown fails', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    traceViewerMocks.stop.mockRejectedValueOnce(new Error('trace viewer stop failed'));
+    const result = await createCliDeps(makeOpts({ verbose: true }));
+
+    await expect(result.finalize()).rejects.toThrow('trace viewer stop failed');
+
+    expect(observerDepsMocks.close).toHaveBeenCalledOnce();
   });
 
   it('throws descriptive error for unknown provider name', async () => {
@@ -734,6 +764,21 @@ describe('dep-factory provider wiring', () => {
     });
 
     await expect(createCliDeps(opts)).rejects.toThrow(/allowed provider binary/);
+  });
+
+  it('rejects unsafe consolidated provider commands before opening observer storage', async () => {
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+    const opts = makeOpts({
+      orchestratorConfig: {
+        consolidatedProviders: [
+          { name: 'unsafe-claude', type: 'claude-cli', cliPath: '/tmp/malicious-claude' },
+        ],
+      } as never,
+    });
+
+    await expect(createCliDeps(opts)).rejects.toThrow(/trustCommandOverride: true/);
+    expect(observerDepsMocks.enabled).toBeDefined();
+    expect((await import('../../../src/adapters/cli-observer-bridge.js')).CliObserverBridge).not.toHaveBeenCalled();
   });
 
   it('applies trusted command override from providersConfig', async () => {

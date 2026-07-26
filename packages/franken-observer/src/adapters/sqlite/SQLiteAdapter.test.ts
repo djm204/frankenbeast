@@ -49,7 +49,7 @@ describe('SQLiteAdapter', () => {
       'busy_timeout = 5000',
       'journal_mode = WAL',
       'foreign_keys = ON',
-      "index_list('traces')",
+      "index_list('compaction_events')",
     ])
     expect(execMock).toHaveBeenCalledTimes(1)
 
@@ -58,8 +58,10 @@ describe('SQLiteAdapter', () => {
 
   it('executes schema DDL only once when multiple adapters open the same initialized database', () => {
     pragmaMock.mockImplementation((statement: string) => {
-      if (statement === "index_list('traces')") {
-        return execMock.mock.calls.length === 0 ? [] : [{ name: 'idx_traces_startedAt' }]
+      if (statement === "index_list('compaction_events')") {
+        return execMock.mock.calls.length === 0
+          ? []
+          : [{ name: 'idx_compaction_events_session_timestamp' }]
       }
       return undefined
     })
@@ -71,6 +73,29 @@ describe('SQLiteAdapter', () => {
 
     first.close()
     second.close()
+  })
+
+  it('migrates the legacy compaction identity to include runId', () => {
+    pragmaMock.mockImplementation((statement: string) => {
+      if (statement === "index_list('compaction_events')") {
+        return [{ name: 'idx_compaction_events_session_timestamp' }]
+      }
+      if (statement === "table_info('compaction_events')") {
+        return [
+          { name: 'sessionId', pk: 1 },
+          { name: 'generation', pk: 2 },
+          { name: 'runId', pk: 0 },
+        ]
+      }
+      return undefined
+    })
+
+    const adapter = createSQLiteAdapter('/tmp/legacy-compactions.db')
+
+    expect(execMock).toHaveBeenCalledWith(expect.stringContaining(
+      'PRIMARY KEY (runId, sessionId, generation)',
+    ))
+    adapter.close()
   })
 
   it('validates retry options before opening a database handle', () => {

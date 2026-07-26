@@ -76,7 +76,7 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 | `GeminiProvider` | `packages/franken-orchestrator/src/skills/providers/gemini-provider.ts` | Gemini CLI provider. `gemini -p --yolo` with stream-json, strips `GEMINI*`/`GOOGLE*` env vars. |
 | `AiderProvider` | `packages/franken-orchestrator/src/skills/providers/aider-provider.ts` | Aider CLI provider. `aider --message --yes-always`. LiteLLM handles retries internally. |
 | `CliLlmAdapter` | `packages/franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping an `ICliProvider` for single-shot LLM completions. Used by plan/interview phases. Delegates env filtering and output normalization to the provider. |
-| `CliObserverBridge` | `packages/franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline and estimates context-window usage for compaction. |
+| `CliObserverBridge` | `packages/franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline, estimates context-window usage for compaction, and persists completed compaction telemetry to the canonical traces database. |
 | `CliSkillExecutor` | `packages/franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs MartinLoop, manages recovery commits, and passes chunk-session services into the loop. |
 | `MartinLoop` | `packages/franken-orchestrator/src/skills/martin-loop.ts` | Core loop: load or create canonical `ChunkSession`, render the provider request, capture output, snapshot before compaction, compact at `>= 85%` usage, and continue until `<promise>TAG</promise>` or max iterations. Rate-limit cascade still rotates through fallback providers. |
 | `FileChunkSessionStore` | `packages/franken-orchestrator/src/session/chunk-session-store.ts` | Persists canonical chunk execution state under `.fbeast/.build/chunk-sessions/<plan>/<chunk>.json`. |
@@ -174,7 +174,7 @@ flowchart TD
     COB -.->|"budget enforcement"| CSE
 ```
 
-**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` also estimates rendered context-window usage so chunk execution can snapshot and compact before exceeding the provider budget.
+**Observer integration:** Each iteration records spans via `TraceContext.startSpan()`, token usage via `SpanLifecycle.recordTokenUsage()`, and cost via `CostCalculator`. The `CircuitBreaker` checks budget before each CLI spawn. `LoopDetector` detects repeated failures. `CliObserverBridge` also estimates rendered context-window usage so chunk execution can snapshot and compact before exceeding the provider budget. Completed threshold compactions, plus manual compactions committed through `ChunkSessionCompactor.compactAndRecord()`, are written to the observer SQLite database with the chunk-session id, Beast run id, generation, trigger reason, before/after token estimates, and a wall-clock timestamp. `CompactionMetrics` provides bounded event queries and a windowed `compactionRate()` aggregation for later Brain Vitals consumers.
 
 #### Canonical Chunk Sessions
 
@@ -186,6 +186,7 @@ Provider-native session continuation is now an optimization only:
 - if the provider changes or its native state is lost, the next provider replays from the canonical chunk session
 - before compaction, MartinLoop writes a snapshot to `.fbeast/.build/chunk-session-snapshots/`
 - at `>= 85%` rendered context usage, the loop compacts transcript history into a `compaction_summary` and resumes from that compacted state
+- after a successful compaction is persisted, `MartinLoop` asks `ChunkSessionCompactor` to emit the operational record through `CliObserverBridge`; telemetry is best-effort so observer storage failures cannot roll back the canonical session, while the in-memory session counter remains the CLI display source and SQLite provides the queryable export path
 
 **Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
 

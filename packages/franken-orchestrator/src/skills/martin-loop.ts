@@ -769,6 +769,7 @@ export class MartinLoop {
     if (!chunkSession) return undefined;
 
     let nextSession = this.appendIterationOutput(chunkSession, activeProvider, normalizedStdout, iteration);
+    let compactionSourceSession: ChunkSession | undefined;
 
     if (config.contextUsage) {
       const usage = config.contextUsage(renderedPrompt, activeProvider, resolved.defaultContextWindowTokens());
@@ -811,6 +812,7 @@ export class MartinLoop {
       config.snapshotStore.writeSnapshot(nextSession, 'pre-compaction');
       config.sessionStore?.save(nextSession);
       try {
+        compactionSourceSession = nextSession;
         nextSession = await config.compactor.compact(nextSession);
       } catch (error) {
         if (config.abortSignal?.aborted || isAbortError(error)) {
@@ -830,6 +832,14 @@ export class MartinLoop {
     }
 
     config.sessionStore?.save(nextSession);
+
+    if (compactionSourceSession && config.compactor) {
+      try {
+        await config.compactor.recordCompaction(compactionSourceSession, nextSession, 'threshold');
+      } catch {
+        // Operational telemetry must not abort a successfully committed compaction.
+      }
+    }
 
     return nextSession;
   }
