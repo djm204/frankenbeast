@@ -149,6 +149,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       eventBus,
       runConfigDir,
       runConfigRoot: projectRoot,
+      telemetryDatabasePath: tracesDb,
       resourceSamplerFactory: ({ pid, agentId, runId }) => new ProcessResourceSampler({
         pid,
         agentId,
@@ -165,6 +166,7 @@ export function createBeastServices(paths: BeastServicePaths): BeastServiceBundl
       logStore,
       eventBus,
       onRunStatusChange: (runId: string) => runService.notifyRunStatusChange(runId),
+      telemetryDatabasePath: tracesDb,
       supervisorFactory: () => new ProcessSupervisor({
         projectRoot,
         onOrphanProcessSwept: () => lifecycleMetrics.recordOrphanProcessSwept(),

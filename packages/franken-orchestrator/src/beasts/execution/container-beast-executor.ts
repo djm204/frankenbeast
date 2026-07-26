@@ -16,6 +16,7 @@ export interface ContainerBeastExecutorDeps {
   readonly onRunStatusChange?: ProcessBeastExecutorOptions['onRunStatusChange'];
   readonly policy?: SandboxPolicy | undefined;
   readonly supervisorFactory?: () => ProcessSupervisorLike;
+  readonly telemetryDatabasePath?: string | undefined;
 }
 
 function containerNameForRunAttempt(run: BeastRun, attemptNumber: number): string {
@@ -75,6 +76,9 @@ export class ContainerBeastExecutor implements BeastExecutor {
     }
     if (deps.eventBus) {
       options.eventBus = deps.eventBus;
+    }
+    if (deps.telemetryDatabasePath) {
+      options.telemetryDatabasePath = deps.telemetryDatabasePath;
     }
     options.runConfigOwner = () => parseRunConfigOwner(writableWorkspaceUser(policy));
     options.transformRunConfigSnapshot = (snapshot) => {

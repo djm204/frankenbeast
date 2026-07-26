@@ -14,4 +14,9 @@
 - [x] Address all 14 findings from the first exact-head Codex round with regression coverage: stable run correlation, production resource samples, preserved budgets, proxy/route auth, exact SSE exemptions, rate limiting, sanitized bounded drill-down responses, brain-scoped churn, normalized IDs, bounded history, retry-window accounting, and cheap event filtering.
 - [x] Verify 151 focused tests, package typecheck/lint/build, and the full root test suite (10 packages; 4,571 orchestrator tests).
 - [ ] Complete the final exact-head Codex review round, resolve all threads, and verify exact-head CI.
+- [x] RED→GREEN: represent missing container resource telemetry as unavailable and exclude it from health scoring.
+- [x] RED→GREEN: persist production traces under the Beast run ID in the daemon telemetry database.
+- [x] RED→GREEN: filter telemetry windows, serialize health persistence, and prune resource retention.
+- [x] Deduplicate/resiliently stream SSE status events and attribute vitals activity to the producing run.
+- [x] Propagate run/agent identity through CLI phases, telemetry, and resource sampling.
 - [ ] Merge the PR, verify issue #3732 closes, and record final evidence.

@@ -1,9 +1,11 @@
 import {
   BrainHealthScorer,
+  DEFAULT_BRAIN_HEALTH_WEIGHTS,
   calculateBrainHealthScore,
   cacheHitRatio,
   type BrainHealthSample,
   type BrainHealthSampleAdapter,
+  type BrainHealthWeights,
   type CompactionEvent,
   type CostCalculator,
   type ProcessResourceSample,
@@ -34,11 +36,13 @@ const SNAPSHOT_POLL_MS = 1_000;
 const HEARTBEAT_MS = 30_000;
 const HEALTH_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const HEALTH_HISTORY_SAMPLE_MS = 60_000;
+const RESOURCE_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const RUN_EVENT_LIMIT = 100;
 const BRAIN_VITALS_SSE_TICKET_COOKIE = 'frankenbeast_brain_vitals_sse_ticket';
 
 interface BrainVitalsObserver extends BrainHealthSampleAdapter {
   deleteHealthScoresBefore(before: number): Promise<number>;
+  deleteResourceSamplesBefore(before: number): Promise<number>;
   flush(trace: Trace): Promise<void>;
   recordCompaction(event: CompactionEvent): Promise<void>;
   recordResourceSample(sample: ProcessResourceSample): Promise<void>;
@@ -105,6 +109,7 @@ export class BrainVitalsService {
   private readonly directBudgetBurn = new Map<string, number>();
   private readonly lastPersistedHealthAt = new Map<string, number>();
   private lastHealthPruneAt = Number.NEGATIVE_INFINITY;
+  private lastResourcePruneAt = Number.NEGATIVE_INFINITY;
 
   constructor(private readonly options: BrainVitalsServiceOptions) {
     this.health = new BrainHealthScorer(options.observer);
@@ -115,6 +120,10 @@ export class BrainVitalsService {
     brainId = normalizeBrainId(brainId);
     const now = this.now();
     const since = now - windowMs;
+    if (now - this.lastResourcePruneAt >= HEALTH_HISTORY_SAMPLE_MS) {
+      await this.options.observer.deleteResourceSamplesBefore(now - RESOURCE_RETENTION_MS);
+      this.lastResourcePruneAt = now;
+    }
     const allBrainRuns = this.options.runs.listRuns().filter((run) => run.definitionId === brainId);
     const runs = allBrainRuns.filter((run) => (
       run.status === 'queued'
@@ -151,7 +160,8 @@ export class BrainVitalsService {
     const churnRatio = spawnCount + orphaned === 0
       ? 0
       : clamp((failed + stopped + orphaned) / (spawnCount + orphaned));
-    const currentResourcePressure = latestResource === null ? 0 : resourcePressure(latestResource);
+    const resourceAvailable = latestResource !== null;
+    const currentResourcePressure = resourceAvailable ? resourcePressure(latestResource) : 0;
     const signals = {
       taskSuccessRate: lifecycleAggregate?.completionRate
         ?? (terminal === 0 ? 0 : completed / terminal),
@@ -161,9 +171,14 @@ export class BrainVitalsService {
       resourcePressure: currentResourcePressure,
       budgetBurnRatio: burnRatio,
     };
-    const health = await this.healthSample(brainId, signals, now);
+    const health = await this.healthSample(
+      brainId,
+      signals,
+      now,
+      resourceAvailable ? DEFAULT_BRAIN_HEALTH_WEIGHTS : WITHOUT_RESOURCE_HEALTH_WEIGHTS,
+    );
     this.publishNewCompactions(brainId, compactions);
-    this.publishSignalChanges(brainId, runs, tokenTotals, latestResource, burnRatio, now);
+    this.publishSignalChanges(runs, details, now);
 
     return {
       brainId,
@@ -195,6 +210,7 @@ export class BrainVitalsService {
         runDurationMs: lifecycleAggregate?.runDurationMs ?? null,
       },
       resource: {
+        availability: resourceAvailable ? 'available' : 'unavailable',
         latest: latestResource,
         sampleCount: resources.length,
         estimatedEnergyWh: resources.reduce((total, sample) => total + sample.estimatedEnergyWh, 0),
@@ -309,7 +325,7 @@ export class BrainVitalsService {
       this.options.observer.queryResourceSamples({ runId: run.id, since, before, limit: MAX_OBSERVER_ROWS }),
     ]);
     return {
-      tokens: traceTokenTotals(trace, this.options.costCalculator),
+      tokens: traceTokenTotals(trace, this.options.costCalculator, since, before),
       // sessionId is the stable Beast run id. Compaction runId is the observer
       // trace id for older writers, so filtering by it would hide real records.
       compactions: compactions.filter((event) => event.timestamp <= before),
@@ -362,45 +378,43 @@ export class BrainVitalsService {
   }
 
   private publishSignalChanges(
-    brainId: string,
     runs: readonly BeastRun[],
-    tokens: TokenAndCostTotals,
-    latestResource: ProcessResourceSample | null,
-    budgetBurnRatio: number,
+    details: readonly { tokens: TokenAndCostTotals; resources: readonly ProcessResourceSample[] }[],
     timestamp: number,
   ): void {
-    const current: ActivityFingerprint = {
-      promptTokens: tokens.promptTokens,
-      cacheReadTokens: tokens.cacheReadTokens,
-      budgetBurnRatio,
-      resourcePressure: latestResource ? resourcePressure(latestResource) : 0,
-      resourceTimestamp: latestResource?.timestamp ?? null,
-    };
-    const previous = this.activityFingerprints.get(brainId);
-    this.activityFingerprints.set(brainId, current);
-    if (!previous) return;
-    const latestRun = [...runs].sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-    if (!latestRun) return;
-
-    if (current.promptTokens > previous.promptTokens) {
-      const cacheKind = current.cacheReadTokens > previous.cacheReadTokens ? 'cache.hit' : 'cache.miss';
-      this.publishActivityForRun(latestRun.id, 'cache', cacheKind, timestamp);
-    }
-    const costKind = crossedBudgetThreshold(previous.budgetBurnRatio, current.budgetBurnRatio);
-    if (costKind) {
-      this.publishActivityForRun(latestRun.id, 'cost', costKind, timestamp);
-    }
-    if (
-      previous.resourcePressure < 0.8
-      && current.resourcePressure >= 0.8
-      && current.resourceTimestamp !== previous.resourceTimestamp
-    ) {
-      this.publishActivityForRun(
-        latestResource?.runId ?? latestRun.id,
-        'resource',
-        'resource.threshold_crossed',
-        current.resourceTimestamp ?? timestamp,
-      );
+    for (const [index, run] of runs.entries()) {
+      const telemetry = details[index];
+      if (!telemetry) continue;
+      const latestResource = telemetry.resources.at(-1) ?? null;
+      const budget = readBudget(run);
+      const current: ActivityFingerprint = {
+        promptTokens: telemetry.tokens.promptTokens,
+        cacheReadTokens: telemetry.tokens.cacheReadTokens,
+        budgetBurnRatio: budget === null ? 0 : clamp(telemetry.tokens.estimatedUsd / budget),
+        resourcePressure: latestResource ? resourcePressure(latestResource) : 0,
+        resourceTimestamp: latestResource?.timestamp ?? null,
+      };
+      const previous = this.activityFingerprints.get(run.id);
+      this.activityFingerprints.set(run.id, current);
+      if (!previous) continue;
+      if (current.promptTokens > previous.promptTokens) {
+        const cacheKind = current.cacheReadTokens > previous.cacheReadTokens ? 'cache.hit' : 'cache.miss';
+        this.publishActivityForRun(run.id, 'cache', cacheKind, timestamp);
+      }
+      const costKind = crossedBudgetThreshold(previous.budgetBurnRatio, current.budgetBurnRatio);
+      if (costKind) this.publishActivityForRun(run.id, 'cost', costKind, timestamp);
+      if (
+        previous.resourcePressure < 0.8
+        && current.resourcePressure >= 0.8
+        && current.resourceTimestamp !== previous.resourceTimestamp
+      ) {
+        this.publishActivityForRun(
+          latestResource?.runId ?? run.id,
+          'resource',
+          'resource.threshold_crossed',
+          current.resourceTimestamp ?? timestamp,
+        );
+      }
     }
   }
 
@@ -408,34 +422,44 @@ export class BrainVitalsService {
     brainId: string,
     signals: BrainHealthSample['signals'],
     timestamp: number,
+    weights: BrainHealthWeights,
   ): Promise<BrainHealthSample> {
     if (timestamp - this.lastHealthPruneAt >= HEALTH_HISTORY_SAMPLE_MS) {
       await this.options.observer.deleteHealthScoresBefore(timestamp - HEALTH_HISTORY_RETENTION_MS);
       this.lastHealthPruneAt = timestamp;
     }
     const lastPersistedAt = this.lastPersistedHealthAt.get(brainId);
-    if (lastPersistedAt === undefined || timestamp - lastPersistedAt >= HEALTH_HISTORY_SAMPLE_MS) {
-      const sample = await this.health.computeAndPersist(brainId, signals, timestamp);
-      this.lastPersistedHealthAt.set(brainId, timestamp);
-      return sample;
-    }
-    const latest = await this.health.getHealthScore(brainId);
-    return {
+    const sample: BrainHealthSample = {
       brainId,
-      score: calculateBrainHealthScore(signals),
+      score: calculateBrainHealthScore(signals, weights),
       signals: { ...signals },
-      weights: latest?.weights ?? {
-        taskSuccessRate: 0.3,
-        cacheHitRatio: 0.15,
-        compactionPressure: 0.15,
-        churnRatio: 0.15,
-        resourcePressure: 0.1,
-        budgetBurnRatio: 0.15,
-      },
+      weights: { ...weights },
       timestamp,
     };
+    if (lastPersistedAt === undefined || timestamp - lastPersistedAt >= HEALTH_HISTORY_SAMPLE_MS) {
+      this.lastPersistedHealthAt.set(brainId, timestamp);
+      try {
+        await this.options.observer.recordHealthScore(sample);
+      } catch (error) {
+        if (this.lastPersistedHealthAt.get(brainId) === timestamp) {
+          this.lastPersistedHealthAt.delete(brainId);
+        }
+        throw error;
+      }
+      return sample;
+    }
+    return sample;
   }
 }
+
+const WITHOUT_RESOURCE_HEALTH_WEIGHTS: BrainHealthWeights = Object.freeze({
+  taskSuccessRate: DEFAULT_BRAIN_HEALTH_WEIGHTS.taskSuccessRate / (1 - DEFAULT_BRAIN_HEALTH_WEIGHTS.resourcePressure),
+  cacheHitRatio: DEFAULT_BRAIN_HEALTH_WEIGHTS.cacheHitRatio / (1 - DEFAULT_BRAIN_HEALTH_WEIGHTS.resourcePressure),
+  compactionPressure: DEFAULT_BRAIN_HEALTH_WEIGHTS.compactionPressure / (1 - DEFAULT_BRAIN_HEALTH_WEIGHTS.resourcePressure),
+  churnRatio: DEFAULT_BRAIN_HEALTH_WEIGHTS.churnRatio / (1 - DEFAULT_BRAIN_HEALTH_WEIGHTS.resourcePressure),
+  resourcePressure: 0,
+  budgetBurnRatio: DEFAULT_BRAIN_HEALTH_WEIGHTS.budgetBurnRatio / (1 - DEFAULT_BRAIN_HEALTH_WEIGHTS.resourcePressure),
+});
 
 export interface BrainVitalsRouteDeps {
   service: BrainVitalsService;
@@ -531,7 +555,7 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
             });
             return;
           }
-          if (event.type !== 'run.status' && event.type !== 'run.event') return;
+          if (event.type !== 'run.status') return;
           const runId = typeof data.runId === 'string' ? data.runId : undefined;
           const run = runId ? await deps.service.runDetails(brainId, runId) : null;
           if (run) {
@@ -547,7 +571,7 @@ export function createBrainVitalsRoutes(deps: BrainVitalsRouteDeps): Hono {
             });
           }
         } catch {
-          unsubscribe();
+          // Keep the subscription alive across one transient telemetry read failure.
         }
       });
       let snapshotPending = false;
@@ -614,8 +638,16 @@ function parseWindowMs(value: string | undefined): number | null {
   return Number.isSafeInteger(windowMs) && windowMs > 0 && windowMs <= 86_400_000 ? windowMs : null;
 }
 
-function traceTokenTotals(trace: Trace | null, costCalculator: CostCalculator): TokenAndCostTotals {
-  const entries = trace?.spans.map((span) => ({
+function traceTokenTotals(
+  trace: Trace | null,
+  costCalculator: CostCalculator,
+  since = 0,
+  before = Number.MAX_SAFE_INTEGER,
+): TokenAndCostTotals {
+  const entries = trace?.spans.filter((span) => {
+    const activityAt = span.endedAt ?? span.startedAt;
+    return activityAt >= since && activityAt <= before;
+  }).map((span) => ({
     model: typeof span.metadata.model === 'string' ? span.metadata.model : 'unknown',
     promptTokens: tokenCount(span.metadata.promptTokens),
     completionTokens: tokenCount(span.metadata.completionTokens),

@@ -17,8 +17,16 @@ import {
 import type { BeastDefinition } from '../../../src/beasts/types.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
-function createTestRun(repo: SQLiteBeastRepository) {
+function createTestRun(repo: SQLiteBeastRepository, tracked = false) {
+  const trackedAgentId = tracked
+    ? repo.createTrackedAgent({
+      definitionId: 'martin-loop', source: 'cli', status: 'dispatching', createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} }, initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z', updatedAt: '2026-03-10T00:00:00.000Z',
+    }).id
+    : undefined;
   return repo.createRun({
+    ...(trackedAgentId ? { trackedAgentId } : {}),
     definitionId: 'martin-loop',
     definitionVersion: 1,
     executionMode: 'process',
@@ -167,14 +175,19 @@ describe('ProcessBeastExecutor', () => {
     };
     const sampler = { start: vi.fn(), stop: vi.fn(async () => {}) };
     const resourceSamplerFactory = vi.fn(() => sampler);
-    const executor = new ProcessBeastExecutor(repo, logs, supervisor, { resourceSamplerFactory });
-    const run = createTestRun(repo);
+    const telemetryDatabasePath = join(workDir, 'shared-traces.db');
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      resourceSamplerFactory,
+      telemetryDatabasePath,
+    });
+    const run = createTestRun(repo, true);
 
     const attempt = await executor.start(run, martinLoopDefinition);
     expect(spawnedEnv?.FRANKENBEAST_BEAST_RUN_ID).toBe(run.id);
+    expect(spawnedEnv?.FRANKENBEAST_TRACES_DB).toBe(telemetryDatabasePath);
     expect(resourceSamplerFactory).toHaveBeenCalledWith(expect.objectContaining({
       pid: 4242,
-      agentId: 'martin-loop',
+      agentId: run.trackedAgentId,
       runId: run.id,
     }));
     expect(sampler.start).toHaveBeenCalledOnce();

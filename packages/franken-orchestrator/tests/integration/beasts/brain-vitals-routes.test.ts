@@ -112,6 +112,7 @@ describe('brain vitals routes', () => {
       cacheReadTokens: 200,
     });
     TraceContext.endSpan(span);
+    Object.assign(span, { startedAt: NOW - 5_000, endedAt: NOW - 5_000 });
     TraceContext.endTrace(trace);
     await observer.flush(trace);
     await observer.recordCompaction({
@@ -171,6 +172,122 @@ describe('brain vitals routes', () => {
         cost: { estimatedUsd: expect.any(Number), budgetUsd: 2 },
       },
     });
+  });
+
+  it('marks missing container resource telemetry unavailable and excludes it from health scoring', async () => {
+    const { app, repository } = createFixture();
+    const run = repository.createRun({
+      definitionId: 'reviewer',
+      definitionVersion: 1,
+      executionMode: 'container',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'operator',
+      createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    const attempt = repository.createAttempt(run.id, {
+      status: 'completed',
+      startedAt: '2026-07-26T06:01:00.000Z',
+    });
+    repository.updateAttempt(attempt.id, {
+      status: 'completed',
+      finishedAt: '2026-07-26T06:10:00.000Z',
+      exitCode: 0,
+    });
+    repository.updateRun(run.id, {
+      status: 'completed',
+      startedAt: '2026-07-26T06:01:00.000Z',
+      finishedAt: '2026-07-26T06:10:00.000Z',
+      latestExitCode: 0,
+    });
+
+    const response = await app.request('/v1/brain-vitals/reviewer', { headers: authHeaders() });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        health: {
+          score: 83.33,
+          weights: { resourcePressure: 0 },
+        },
+        resource: {
+          availability: 'unavailable',
+          latest: null,
+          sampleCount: 0,
+        },
+      },
+    });
+  });
+
+  it('filters snapshot token telemetry to the requested time window', async () => {
+    const { observer, repository, service } = createFixture();
+    const run = repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T04:00:00.000Z',
+    });
+    const trace = TraceContext.createTrace(run.id);
+    const oldSpan = TraceContext.startSpan(trace, { name: 'old' });
+    SpanLifecycle.recordTokenUsage(oldSpan, { model: 'gpt-4o', promptTokens: 900, completionTokens: 0 });
+    TraceContext.endSpan(oldSpan);
+    Object.assign(oldSpan, { startedAt: NOW - 2 * 60 * 60 * 1_000, endedAt: NOW - 2 * 60 * 60 * 1_000 });
+    const recentSpan = TraceContext.startSpan(trace, { name: 'recent' });
+    SpanLifecycle.recordTokenUsage(recentSpan, { model: 'gpt-4o', promptTokens: 100, completionTokens: 0 });
+    TraceContext.endSpan(recentSpan);
+    Object.assign(recentSpan, { startedAt: NOW - 1_000, endedAt: NOW - 1_000 });
+    TraceContext.endTrace(trace);
+    await observer.flush(trace);
+
+    const snapshot = await service.snapshot('reviewer');
+    const details = await service.runDetails('reviewer', run.id);
+
+    expect(snapshot.cache.promptTokens).toBe(100);
+    expect(details?.tokens.promptTokens).toBe(1_000);
+  });
+
+  it('serializes concurrent health persistence and prunes expired resource samples', async () => {
+    const { observer, repository, service } = createFixture();
+    repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    await observer.recordResourceSample({
+      agentId: 'old-agent', runId: 'old-run', pid: 1, cpuPercent: 1, rssBytes: 1,
+      estimatedWatts: 1, estimatedEnergyWh: 1, timestamp: NOW - 25 * 60 * 60 * 1_000,
+    });
+
+    await Promise.all([service.snapshot('reviewer'), service.snapshot('reviewer')]);
+
+    await expect(observer.queryHealthScores({ brainId: 'reviewer' })).resolves.toHaveLength(1);
+    await expect(observer.queryResourceSamples({ runId: 'old-run' })).resolves.toHaveLength(0);
+  });
+
+  it('attributes aggregate cache activity to the run whose telemetry changed', async () => {
+    const { eventBus, observer, repository, service } = createFixture();
+    const older = repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:00:00.000Z',
+    });
+    repository.createRun({
+      definitionId: 'reviewer', definitionVersion: 1, executionMode: 'process', configSnapshot: {},
+      dispatchedBy: 'dashboard', dispatchedByUser: 'operator', createdAt: '2026-07-26T06:10:00.000Z',
+    });
+    await service.snapshot('reviewer');
+    const events: Array<Record<string, unknown>> = [];
+    const unsubscribe = eventBus.subscribe(event => {
+      if (event.type === 'brain-vitals.activity') events.push(event.data);
+    });
+    const trace = TraceContext.createTrace(older.id);
+    const span = TraceContext.startSpan(trace, { name: 'older-run-usage' });
+    SpanLifecycle.recordTokenUsage(span, { model: 'gpt-4o', promptTokens: 100, completionTokens: 0 });
+    TraceContext.endSpan(span);
+    Object.assign(span, { startedAt: NOW - 1_000, endedAt: NOW - 1_000 });
+    TraceContext.endTrace(trace);
+    await observer.flush(trace);
+
+    await service.snapshot('reviewer');
+    unsubscribe();
+
+    expect(events).toContainEqual(expect.objectContaining({ dimension: 'cache', runId: older.id }));
   });
 
   it('filters persisted score history with a bounded window', async () => {
@@ -480,6 +597,7 @@ describe('brain vitals routes', () => {
       cacheReadTokens: 200,
     });
     TraceContext.endSpan(span);
+    Object.assign(span, { startedAt: NOW - 1_000, endedAt: NOW - 1_000 });
     TraceContext.endTrace(trace);
     await observer.flush(trace);
     await observer.recordResourceSample({

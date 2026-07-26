@@ -370,6 +370,7 @@ export interface ProcessBeastExecutorOptions {
     agentId: string;
     runId: string;
   }) => { start(): void; stop(): Promise<void> };
+  telemetryDatabasePath?: string | undefined;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -766,7 +767,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
     const resourceSampler = this.options.resourceSamplerFactory?.({
       pid: handle.pid,
-      agentId: run.definitionId,
+      agentId: run.trackedAgentId ?? run.definitionId,
       runId: run.id,
     });
     if (resourceSampler) {
@@ -828,6 +829,9 @@ export class ProcessBeastExecutor implements BeastExecutor {
         ...moduleEnv,
         FRANKENBEAST_RUN_CONFIG: configFilePath,
         FRANKENBEAST_BEAST_RUN_ID: run.id,
+        ...(this.options.telemetryDatabasePath
+          ? { FRANKENBEAST_TRACES_DB: this.options.telemetryDatabasePath }
+          : {}),
         [RUN_CONFIG_INTEGRITY_ENV]: configManifestPath,
         [RUN_CONFIG_INTEGRITY_SECRET_ENV]: runConfigIntegritySecret,
       },

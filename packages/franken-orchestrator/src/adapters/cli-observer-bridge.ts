@@ -21,6 +21,7 @@ export interface CliObserverBridgeConfig {
   compactionAdapter?: (CompactionEventAdapter & {
     close?: (() => void | Promise<void>) | undefined;
   }) | undefined;
+  traceAdapter?: { flush(trace: Trace): Promise<void> } | undefined;
 }
 
 interface ReplayCaptureRecord {
@@ -63,6 +64,7 @@ export class CliObserverBridge implements IObserverModule {
   private readonly replayStore?: ReplayContentStoreLike | undefined;
   private readonly compactionMetrics?: CompactionMetrics | undefined;
   private readonly compactionAdapter?: CliObserverBridgeConfig['compactionAdapter'];
+  private readonly traceAdapter?: CliObserverBridgeConfig['traceAdapter'];
   private readonly replayManifest: ReplayRecord[] = [];
   private trace: Trace | undefined;
   private activeSessionId: string | undefined;
@@ -75,6 +77,7 @@ export class CliObserverBridge implements IObserverModule {
     this.replayStore = config.replayStore;
     this.activeSessionId = config.sessionId;
     this.compactionAdapter = config.compactionAdapter;
+    this.traceAdapter = config.traceAdapter;
     this.compactionMetrics = config.compactionAdapter
       ? new CompactionMetrics(config.compactionAdapter)
       : undefined;
@@ -82,7 +85,9 @@ export class CliObserverBridge implements IObserverModule {
 
   startTrace(sessionId: string): void {
     this.activeSessionId = sessionId;
-    this.trace = TraceContext.createTrace(sessionId);
+    const trace = TraceContext.createTrace(sessionId);
+    trace.id = sessionId;
+    this.trace = trace;
   }
 
   getActiveSessionId(): string | undefined {
@@ -234,6 +239,12 @@ export class CliObserverBridge implements IObserverModule {
 
   async close(): Promise<void> {
     try {
+      if (this.trace?.status === 'active') {
+        TraceContext.endTrace(this.trace);
+      }
+      if (this.trace) {
+        await this.traceAdapter?.flush(this.trace);
+      }
       await this.compactionAdapter?.close?.();
     } catch {
       // Observer shutdown is best-effort and must not fail a completed run.

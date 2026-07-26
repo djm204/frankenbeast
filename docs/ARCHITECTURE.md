@@ -1069,6 +1069,10 @@ non-secret connection id and stores the ticket in a 30-second, `HttpOnly`,
 
 Snapshots aggregate persisted run lifecycle, token/cache, compaction, process
 resource, cost/budget, and brain-health score data by Beast `definitionId`.
+When no resource sample exists (including container runs without container-aware
+sampling), the snapshot reports resource availability as `unavailable` and
+renormalizes the health weights to exclude resource pressure rather than
+treating missing telemetry as healthy zero pressure.
 The stream sends a fresh snapshot every second and separate typed `activity`
 events for cache hits/misses, compaction completion, lifecycle churn,
 resource-threshold crossings, and budget-threshold crossings.
