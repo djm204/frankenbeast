@@ -162,6 +162,40 @@ describe('smart-swarm runtime routes', () => {
     expect(adapter.getEvents).not.toHaveBeenCalled();
   });
 
+  it('preserves opaque runtime cursors and identifiers in event responses', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getEvents).mockResolvedValueOnce(RuntimeEventPageSchema.parse({
+      events: [{
+        id: '/events/123',
+        cursor: '/offset/123',
+        workspaceId: '/workspaces/alpha',
+        taskId: '/tasks/456',
+        runId: '/runs/789',
+        type: 'lifecycle',
+        occurredAt: '2026-07-26T12:00:00.000Z',
+        summary: 'opaque cursor event',
+        metadata: {},
+      }],
+      nextCursor: '/offset/123',
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/events', { headers: authHeaders() });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({
+        events: [expect.objectContaining({
+          id: '/events/123',
+          cursor: '/offset/123',
+          workspaceId: '/workspaces/alpha',
+          taskId: '/tasks/456',
+          runId: '/runs/789',
+        })],
+        nextCursor: '/offset/123',
+      }),
+    });
+  });
+
   it('rate limits unauthenticated stream attempts with a stable bucket', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);

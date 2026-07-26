@@ -46,7 +46,7 @@ function redactEmbeddedAbsoluteHostPaths(value: string): string {
 export function redactAbsoluteHostPathValues(value: unknown): unknown {
   if (typeof value === 'string') {
     return isApplicationPath(value)
-      ? value
+      ? redactEmbeddedAbsoluteHostPaths(value)
       : isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : redactEmbeddedAbsoluteHostPaths(value);
   }
   if (Array.isArray(value)) {

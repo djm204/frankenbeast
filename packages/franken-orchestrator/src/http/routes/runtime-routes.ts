@@ -80,8 +80,20 @@ function validateInterval(name: string, value: number | undefined, fallback: num
   return resolved;
 }
 
+function redactRuntimePaths(value: unknown, inMetadata = false): unknown {
+  if (typeof value === 'string') return redactAbsoluteHostPathValues(value);
+  if (Array.isArray(value)) return value.map((entry) => redactRuntimePaths(entry, inMetadata));
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => {
+    const opaqueContractField = !inMetadata
+      && (key === 'id' || key === 'cursor' || key === 'nextCursor' || key.endsWith('Id'));
+    return [key, opaqueContractField ? entry : redactRuntimePaths(entry, inMetadata || key === 'metadata')];
+  }));
+}
+
 function runtimeResponse(value: unknown): unknown {
-  return redactAbsoluteHostPathValues(redactLogData(value));
+  return redactRuntimePaths(redactLogData(value));
 }
 
 function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID_CURSOR' } {
