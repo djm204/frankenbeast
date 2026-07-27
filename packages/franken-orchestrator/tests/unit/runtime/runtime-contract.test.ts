@@ -125,6 +125,14 @@ describe('provider-neutral runtime contract', () => {
       action: { ...request.action, taskId: 'provider/task @ shard 1' },
     }).action).toEqual(expect.objectContaining({ taskId: 'provider/task @ shard 1' }));
 
+    const approvalId = `provider approval/${'x'.repeat(220)}`;
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: {
+        type: 'approval.resolve', workspaceId: 'workspace-1', approvalId, decision: 'approve',
+      },
+    }).action).toEqual(expect.objectContaining({ approvalId }));
+
     expect(RuntimeActionRequestSchema.parse({
       ...request,
       action: { ...request.action, workspaceId: 'provider/workspace @ shard 1' },

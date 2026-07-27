@@ -37,4 +37,5 @@
 - [x] Fence malformed or request-mismatched post-mutation adapter results under a failing regression test.
 - [x] Resolve Windows Hermes executables with `PATHEXT` and portable path separators under a failing regression test.
 - [x] Continue all server cleanup when shutdown claim fencing fails under a failing regression test.
+- [x] Address exact-head Codex round 14 with red-green regressions for pre-expiry lease retry headroom, fallback uncertain audit forwarding after atomic completion failure, and opaque approval action IDs.
 - [ ] Run focused/package/root verification, publish one immutable head, resolve all six threads, and pass exact-head Codex/CI gates without merging.

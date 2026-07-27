@@ -8,6 +8,7 @@ const CorrelationIdSchema = z.string().uuid();
 const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
 const RuntimeWorkspaceIdSchema = z.string().min(1);
 const RuntimeTaskIdSchema = z.string().min(1);
+const RuntimeApprovalIdSchema = z.string().min(1);
 const RuntimeActionWorkspaceIdSchema = RuntimeWorkspaceIdSchema;
 const RuntimeActionTaskIdSchema = RuntimeTaskIdSchema;
 const BoundedReasonSchema = z.string().trim().min(1).max(1000);
@@ -25,7 +26,7 @@ export const RuntimeActionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('approval.resolve'),
     workspaceId: RuntimeActionWorkspaceIdSchema,
-    approvalId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u),
+    approvalId: RuntimeApprovalIdSchema,
     decision: z.enum(['approve', 'reject']),
     reason: BoundedReasonSchema.optional(),
   }).strict(),
@@ -204,7 +205,7 @@ export const RuntimeBlockerSchema = z.object({
 }).strict();
 
 export const RuntimeApprovalSchema = z.object({
-  id: z.string().min(1),
+  id: RuntimeApprovalIdSchema,
   workspaceId: z.string().min(1),
   taskId: z.string().min(1).nullable(),
   state: z.enum(['pending', 'approved', 'rejected', 'expired', 'unknown']),

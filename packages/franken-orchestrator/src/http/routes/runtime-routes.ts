@@ -58,7 +58,7 @@ const MAX_TIMER_INTERVAL_MS = 2_147_483_647;
 const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 const MAX_SSE_CURSOR_ID_CHARS = 4 * 1024;
 const IDEMPOTENCY_TTL_MS = 10 * 60_000;
-const IDEMPOTENCY_RENEW_RETRY_MS = IDEMPOTENCY_TTL_MS / 4;
+const IDEMPOTENCY_RENEW_RETRY_MS = IDEMPOTENCY_TTL_MS / 8;
 const MAX_ACTION_BODY_BYTES = 16 * 1024;
 
 
@@ -623,8 +623,20 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
           );
         } catch (error) {
-          actionStore.fence(key, fingerprint, reservation.claimToken);
-          throw error;
+          const uncertainAudit = { ...audit, currentState: 'uncertain' };
+          let fenceError: unknown;
+          try {
+            actionStore.fence(key, fingerprint, reservation.claimToken);
+          } catch (caught) {
+            fenceError = caught;
+          }
+          try {
+            actionStore.recordAudit(uncertainAudit);
+          } catch {
+            // The external audit sink remains available when durable audit storage is not.
+          }
+          forwardActionAudit(uncertainAudit);
+          throw fenceError ?? error;
         }
         forwardActionAudit(audit);
         return completed;

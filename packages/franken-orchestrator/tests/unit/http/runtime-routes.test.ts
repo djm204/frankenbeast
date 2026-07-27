@@ -300,6 +300,7 @@ describe('smart-swarm runtime routes', () => {
     try {
       const actionStore = new RuntimeActionStore();
       const renew = vi.spyOn(actionStore, 'renew')
+        .mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); })
         .mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); });
       const { app, adapter } = createRoutes(actionStore);
       let finish!: () => void;
@@ -330,8 +331,10 @@ describe('smart-swarm runtime routes', () => {
       const first = request();
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       expect(renew).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(2.5 * 60_000);
+      await vi.advanceTimersByTimeAsync(1.25 * 60_000);
       expect(renew).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1.25 * 60_000);
+      expect(renew).toHaveBeenCalledTimes(3);
       await vi.advanceTimersByTimeAsync(2.5 * 60_000);
       const retry = request();
       await vi.advanceTimersByTimeAsync(0);
@@ -771,7 +774,7 @@ describe('smart-swarm runtime routes', () => {
         SELECT RAISE(ABORT, 'audit database is busy');
       END;
     `);
-    const { app, adapter } = createRoutes(actionStore);
+    const { app, adapter, actionAudit } = createRoutes(actionStore);
     vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
       status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
       audit: {
@@ -806,6 +809,12 @@ describe('smart-swarm runtime routes', () => {
       key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
     )).toEqual({ status: 'pending' });
     expect(actionStore.listAuditEvents()).toEqual([]);
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      outcome: 'applied',
+      currentState: 'uncertain',
+    }));
     expect(adapter.executeAction).toHaveBeenCalledOnce();
     faultDb.close();
   });
