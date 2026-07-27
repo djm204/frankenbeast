@@ -275,7 +275,7 @@ describe("dependency CI guards for issue #1414", () => {
           wanted: "29.1.1",
           latest: "30.0.0",
           location: "node_modules/jsdom",
-          dependent: "frankenbeast-smart-swarm-3815",
+          dependent: "frankenbeast",
         },
       ],
     });
