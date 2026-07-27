@@ -181,6 +181,20 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('rejects dot-segment scoped workspace names', async () => {
+    const home = await createHome();
+    const traversedDir = join(home, 'kanban');
+    await mkdir(traversedDir, { recursive: true });
+    createCurrentKanban(join(traversedDir, 'kanban.db'));
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({
+      workspaceId: 'hermes:..',
+    });
+
+    expect(snapshot.workspaces).toEqual({ status: 'available', data: [] });
+    expect(snapshot.state).toBe('empty');
+  });
+
   it('returns an empty snapshot for a missing workspace when discovered sources are schema-incompatible', async () => {
     const home = await createHome();
     const db = new Database(join(home, 'kanban.db'));
@@ -815,6 +829,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts host paths enclosed by angle brackets', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'failed at </home/alice/private/config>',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'failed at <[REDACTED_HOST_PATH]>',
+      })]),
+    }));
+  });
+
   it('redacts route-shaped host paths after storage-key delimiters', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -1289,6 +1324,22 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot.agents).toEqual(expect.objectContaining({
       data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' })]),
     }));
+  });
+
+  it('normalizes stopped runs as cancelled', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE task_runs SET outcome = ?, status = ? WHERE id = ?').run('stopped', 'stopped', 1);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.runs.status !== 'available') throw new Error('Expected runs');
+
+    expect(snapshot.runs.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:run:1', state: 'cancelled' }),
+    ]));
   });
 
   it('bounds historical snapshot runs while retaining the current run', async () => {

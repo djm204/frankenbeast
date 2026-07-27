@@ -83,6 +83,7 @@ const QUOTED_POSIX_PATH_RES = [
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
   /(")(\/[^"]+|[A-Za-z]:[\\/][^"]+|\\\\[^"]+)(?=")/gu,
 ];
+const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
 const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
@@ -154,6 +155,7 @@ function boundedText(value: unknown): string {
   let redacted = redactSensitiveText(value)
     .replace(QUOTED_FILE_URL_RE, '$1file://[REDACTED_HOST_PATH]$1')
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
+    .replace(ANGLE_BRACKET_HOST_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
     .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => (
       hasApiRouteContext(source, path, offset, prefix) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
@@ -210,7 +212,8 @@ function mapRunState(status: unknown, outcome: unknown): 'queued' | 'running' | 
     case 'complete':
     case 'success': return 'succeeded';
     case 'cancelled':
-    case 'canceled': return 'cancelled';
+    case 'canceled':
+    case 'stopped': return 'cancelled';
     case 'crashed':
     case 'failed':
     case 'gave_up':
@@ -639,7 +642,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       const boardName = workspaceId === 'hermes:board:global'
         ? 'global'
         : /^hermes:([A-Za-z0-9._-]+)$/u.exec(workspaceId)?.[1];
-      if (!boardName) return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
+      if (!boardName || boardName === '.' || boardName === '..') {
+        return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
+      }
       const path = resolve(boardsRoot, boardName, 'kanban.db');
       try {
         if (await this.isSafeDatabase(home, path)) {

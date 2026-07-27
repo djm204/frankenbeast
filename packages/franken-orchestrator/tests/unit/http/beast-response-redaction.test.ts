@@ -117,6 +117,11 @@ describe('Beast response redaction', () => {
       .toBe('open "file://[REDACTED_HOST_PATH]"');
   });
 
+  it('redacts host paths enclosed by angle brackets', () => {
+    expect(redactAbsoluteHostPathValues('failed at </home/alice/private/config>'))
+      .toBe('failed at <[REDACTED_HOST_PATH]>');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',

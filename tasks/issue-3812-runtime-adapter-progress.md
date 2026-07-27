@@ -114,8 +114,14 @@
 - [x] Reproduce and remediate complete quoted `file://` URL redaction, best-effort retention-refresh exception containment, bounded pointerless/current run selection, and configured-path scoped identity deduplication.
 - [x] Verify the cursor-sensitive-text finding was already covered by the global `errorHandler`: the route response returned `token=<redacted>` and never exposed `secret-value`; avoid redundant route-local behavior.
 - [x] Verify 146/146 focused tests, package/root typecheck-lint-build, and `git diff --check`; full package suite remains at the established unrelated three-failure baseline (4,700/4,703 passing).
-- [ ] Commit/push round 29, reply to and resolve all six threads, and trigger the next exact-head review within the authorized tier-50 policy.
+- [x] Commit/push round 29 as `188ee726d8560648dafe07b562143e0f19ce66c5`; reply to and resolve all six threads; trigger the next exact-head review within the authorized tier-50 policy.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
+## Exact-head round 30 follow-up
+
+- [x] Push `188ee726d8560648dafe07b562143e0f19ce66c5`; reply to/resolve all six round-29 threads; verify 4/4 exact-head CI checks green; trigger Codex at `2026-07-27T08:41:10Z`.
+- [x] Reproduce and remediate stopped-run cancellation normalization, angle-bracket host-path redaction in shared/direct DTO paths, and dot-segment scoped workspace traversal.
+- [ ] Verify, commit/push, resolve all three round-30 threads, and obtain a fresh exact-head clean review with zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
 
