@@ -1,7 +1,8 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-27 — Managed-service CLI visibility must use explicit operator paths
-- A managed service that rebuilds `PATH` should add only explicit conventional operator locations (for example `$HOME/.local/bin` and `/usr/local/bin`) beside the runtime/system directories; never copy the parent shell's `PATH`, because arbitrary inherited entries would undo process isolation.
+- A managed service that rebuilds `PATH` should add only explicit conventional operator locations (for example `$HOME/.local/bin` and `/usr/local/bin`) beside the runtime/system directories; never copy the parent shell's `PATH`, because arbitrary inherited entries would undo process isolation. Validate home-derived entries as absolute and delimiter-free before adding them.
+- Audit nested child launchers after widening a managed PATH. Bare commands that were safe only under the old restricted PATH (such as a dashboard process spawning `npm`) must be replaced with already-resolved trusted executable/CLI paths.
 - Verify this boundary from the real detached child rather than only the launching shell: inspect only the child `PATH` from `/proc/<pid>/environ`, resolve required CLI names against that exact value, and query the authenticated managed dashboard health snapshot while keeping all credential values out of output.
 
 ## 2026-07-25 — Cross-agent hive activity needs explicit attribution truth

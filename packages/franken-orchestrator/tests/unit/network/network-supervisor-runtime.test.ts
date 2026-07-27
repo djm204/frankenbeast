@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { delimiter, join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   healthcheckNetworkService,
@@ -248,6 +248,23 @@ describe('startNetworkService', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32').each([
+    'relative/network-home',
+    `/safe${delimiter}/tmp/network-attacker`,
+  ])('excludes an unsafe HOME value from the managed PATH: %s', async (operatorHome) => {
+    vi.stubEnv('HOME', operatorHome);
+
+    await expect(startNetworkService(makeService('npm'), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+    const pathEntries = (spawnOptions?.env?.PATH ?? '').split(delimiter);
+    for (const injectedEntry of join(operatorHome, '.local', 'bin').split(delimiter)) {
+      expect(pathEntries).not.toContain(injectedEntry);
+    }
+  });
+
   it('inherits only credentials required by the managed service', async () => {
     vi.stubEnv('FRANKENBEAST_BEAST_OPERATOR_TOKEN', 'operator-token-for-test');
     vi.stubEnv('FRANKENBEAST_PASSPHRASE', 'vault-passphrase-for-test');
@@ -367,6 +384,21 @@ describe('startNetworkService', () => {
     })).resolves.toEqual({ pid: 4242 });
 
     expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('pins the nested dashboard build to the resolved npm CLI', async () => {
+    await expect(startNetworkService(makeService('node', {
+      args: DASHBOARD_ARGS,
+    }, { id: 'dashboard-web' }), {
+      detached: false,
+    })).resolves.toEqual({ pid: 4242 });
+
+    const spawnedArgs = spawnMock.mock.calls[0]?.[1] as string[] | undefined;
+    const buildCommandIndex = spawnedArgs?.indexOf('--build-command') ?? -1;
+    const buildArgsIndex = spawnedArgs?.indexOf('--build-args') ?? -1;
+    expect(spawnedArgs?.[buildCommandIndex + 1]).toBe(process.execPath);
+    expect(isAbsolute(spawnedArgs?.[buildArgsIndex + 1] ?? '')).toBe(true);
+    expect(spawnedArgs?.[buildArgsIndex + 1]).toMatch(/npm-cli\.js$/);
   });
 
   it('rejects dashboard build commands outside the nested build allowlist', async () => {
