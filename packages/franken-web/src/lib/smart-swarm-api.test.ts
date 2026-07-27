@@ -5,6 +5,8 @@ const BASE_URL = 'http://localhost:4173';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe('SmartSwarmApiClient', () => {
@@ -57,6 +59,7 @@ describe('SmartSwarmApiClient', () => {
 
   it('reconnects the live stream with the last real event cursor', async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     const sources: Array<{
       close: ReturnType<typeof vi.fn>;
       listeners: Record<string, (event: MessageEvent) => void>;
@@ -115,6 +118,7 @@ describe('SmartSwarmApiClient', () => {
 
   it('continues reconnecting after a transient ticket failure', async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     const listeners: Array<Record<string, (event: MessageEvent) => void>> = [];
     const EventSourceMock = vi.fn(function (this: EventSource) {
       const sourceListeners: Record<string, (event: MessageEvent) => void> = {};
@@ -136,7 +140,9 @@ describe('SmartSwarmApiClient', () => {
     listeners[0]!.error!(new MessageEvent('error'));
     await vi.advanceTimersByTimeAsync(1_000);
     expect(error).toHaveBeenCalledWith(expect.objectContaining({ status: 503 }));
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(EventSourceMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
 
     expect(EventSourceMock).toHaveBeenCalledTimes(2);
     unsubscribe();
@@ -145,6 +151,7 @@ describe('SmartSwarmApiClient', () => {
 
   it('marks a reconnect unavailable after permanent authentication failure', async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     const listeners: Record<string, (event: MessageEvent) => void> = {};
     const EventSourceMock = vi.fn(function (this: EventSource) {
       this.close = vi.fn();
@@ -170,6 +177,7 @@ describe('SmartSwarmApiClient', () => {
 
   it('retries when the initial stream ticket request fails', async () => {
     vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     const EventSourceMock = vi.fn(function (this: EventSource) {
       this.close = vi.fn();
       this.addEventListener = vi.fn() as EventSource['addEventListener'];
