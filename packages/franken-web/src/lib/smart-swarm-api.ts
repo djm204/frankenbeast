@@ -1,5 +1,8 @@
 import { extractResponseErrorMessage } from './http-error';
 
+const STREAM_RECONNECT_BASE_DELAY_MS = 1_000;
+const STREAM_RECONNECT_MAX_DELAY_MS = 30_000;
+
 export type RuntimeCapability =
   | { status: 'supported' }
   | { status: 'unsupported'; reason: string };
@@ -178,6 +181,7 @@ export class SmartSwarmApiClient {
     const baseUrl = this.baseUrl;
     let source: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectAttempt = 0;
     let cursor: string | undefined;
     let closed = false;
 
@@ -190,6 +194,15 @@ export class SmartSwarmApiClient {
       if (closed || reconnectTimer) return;
       closeSource();
       handlers.connection?.('reconnecting');
+      reconnectAttempt += 1;
+      const exponentialDelay = Math.min(
+        STREAM_RECONNECT_BASE_DELAY_MS * 2 ** (reconnectAttempt - 1),
+        STREAM_RECONNECT_MAX_DELAY_MS,
+      );
+      const reconnectDelay = Math.min(
+        exponentialDelay + Math.random() * STREAM_RECONNECT_BASE_DELAY_MS,
+        STREAM_RECONNECT_MAX_DELAY_MS,
+      );
       reconnectTimer = setTimeout(() => {
         reconnectTimer = undefined;
         void connect().catch((error: unknown) => {
@@ -198,7 +211,7 @@ export class SmartSwarmApiClient {
           if (isPermanentAuthenticationError(error)) handlers.connection?.('unavailable');
           else scheduleReconnect();
         });
-      }, 1_000);
+      }, reconnectDelay);
     };
 
     async function connect() {
@@ -220,7 +233,10 @@ export class SmartSwarmApiClient {
       const query = search.size > 0 ? `?${search.toString()}` : '';
       const streamPath = `/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
       source = new EventSource(`${baseUrl}${streamPath}${query}`, { withCredentials: true });
-      source.addEventListener('open', () => handlers.connection?.('connected'));
+      source.addEventListener('open', () => {
+        reconnectAttempt = 0;
+        handlers.connection?.('connected');
+      });
       source.addEventListener('activity', (rawEvent) => {
         try {
           const event = JSON.parse((rawEvent as MessageEvent<string>).data) as RuntimeEvent;

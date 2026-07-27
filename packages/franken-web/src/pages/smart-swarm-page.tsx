@@ -32,8 +32,28 @@ function capabilityReason(capability: RuntimeCapability): string | null {
   return capability.status === 'unsupported' ? capability.reason : null;
 }
 
-function taskActivityRank(state: string): number {
-  return ['succeeded', 'failed', 'cancelled', 'archived'].includes(state) ? 1 : 0;
+function taskActivityRank(state: RuntimeTask['state']): number {
+  const rank: Record<RuntimeTask['state'], number> = {
+    blocked: 0,
+    running: 1,
+    ready: 2,
+    queued: 3,
+    unknown: 4,
+    failed: 5,
+    succeeded: 6,
+    cancelled: 7,
+    archived: 8,
+  };
+  return rank[state];
+}
+
+function compareTaskActivity(left: RuntimeTask, right: RuntimeTask): number {
+  const stateDifference = taskActivityRank(left.state) - taskActivityRank(right.state);
+  if (stateDifference !== 0) return stateDifference;
+  const priorityDifference = (left.priority ?? Number.MAX_SAFE_INTEGER) - (right.priority ?? Number.MAX_SAFE_INTEGER);
+  if (priorityDifference !== 0) return priorityDifference;
+  const recencyDifference = Date.parse(right.updatedAt ?? right.createdAt) - Date.parse(left.updatedAt ?? left.createdAt);
+  return recencyDifference !== 0 ? recencyDifference : left.id.localeCompare(right.id);
 }
 
 function StateNotice({ provider, snapshot, workspaceName, error, onRetry }: {
@@ -207,12 +227,14 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         if (cancelled) return;
         setSnapshot(nextSnapshot);
         if (!workspaceId) setWorkspaceCatalog(nextSnapshot.workspaces);
-        const nextWorkspaces = available(nextSnapshot.workspaces) ?? [];
-        setWorkspaceId((current) => (
-          nextWorkspaces.some((workspace) => workspace.id === current)
-            ? current
-            : nextWorkspaces[0]?.id ?? ''
-        ));
+        if (nextSnapshot.workspaces.status === 'available') {
+          const nextWorkspaces = nextSnapshot.workspaces.data;
+          setWorkspaceId((current) => (
+            nextWorkspaces.some((workspace) => workspace.id === current)
+              ? current
+              : nextWorkspaces[0]?.id ?? ''
+          ));
+        }
         setSelectedTaskId((current) => (
           current && (available(nextSnapshot.tasks) ?? []).some((task) => task.id === current)
             ? current
@@ -289,7 +311,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const visibleAgents = filteredAgents.slice(0, MAX_VISIBLE_EVIDENCE);
   const filteredTasks = tasks.filter((task) => !workspaceId || task.workspaceId === workspaceId);
   const visibleTasks = [...filteredTasks]
-    .sort((left, right) => taskActivityRank(left.state) - taskActivityRank(right.state))
+    .sort(compareTaskActivity)
     .slice(0, MAX_VISIBLE_TASKS);
   const filteredEvents = events
     .filter((event) => !workspaceId || event.workspaceId === workspaceId)

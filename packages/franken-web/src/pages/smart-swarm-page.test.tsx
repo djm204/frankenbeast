@@ -325,6 +325,31 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText('Live dashboard')).toBeDefined();
   });
 
+  it('preserves the selected workspace when its scoped snapshot cannot discover workspaces', async () => {
+    const secondWorkspace = { id: 'board-secondary', name: 'Secondary board', kind: 'board' as const, state: 'available' as const };
+    const expandedSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      workspaces: {
+        status: 'available',
+        data: [...snapshot.workspaces.status === 'available' ? snapshot.workspaces.data : [], secondWorkspace],
+      },
+    };
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(expandedSnapshot)
+      .mockResolvedValueOnce(expandedSnapshot)
+      .mockResolvedValueOnce({
+        ...expandedSnapshot,
+        workspaces: { status: 'unsupported', reason: 'Workspace discovery is temporarily unavailable.' },
+      });
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+
+    fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: 'board-secondary' } });
+
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+    expect(screen.getByLabelText('Workspace')).toHaveProperty('value', 'board-secondary');
+  });
+
   it('clears transient stream errors after reconnection', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     render(<SmartSwarmPage client={createClient({
@@ -758,7 +783,7 @@ describe('SmartSwarmPage', () => {
           ...baseTask,
           id: `task-${index}`,
           title: index === 204 ? 'Important blocked task' : `Runtime task ${index}`,
-          state: index === 204 ? 'blocked' : 'succeeded',
+          state: index === 204 ? 'blocked' : 'queued',
         })),
       },
       blockers: {
