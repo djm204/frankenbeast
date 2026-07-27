@@ -383,13 +383,8 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         });
       })()
     : undefined;
-  const ownedRuntimeActionStore = effectiveOperatorToken && !options.runtimeActionStore
-    ? new RuntimeActionStore({
-        databasePath: join(options.sessionStoreDir, 'runtime-actions', 'actions.sqlite'),
-        hardenDatabaseDirectory: true,
-      })
-    : undefined;
-  const runtimeActionStore = options.runtimeActionStore ?? ownedRuntimeActionStore;
+  let ownedRuntimeActionStore: RuntimeActionStore | undefined;
+  let runtimeActionStore = options.runtimeActionStore;
   const chatMessageRateLimit = options.chatMessageRateLimit
     ?? options.chatRateLimit
     ?? options.beastControl?.rateLimit;
@@ -398,6 +393,13 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   let webSocketServer: ReturnType<typeof attachChatWebSocketServer> | undefined;
   let address: ReturnType<ReturnType<typeof createServer>['address']>;
   try {
+    if (effectiveOperatorToken && !options.runtimeActionStore) {
+      ownedRuntimeActionStore = new RuntimeActionStore({
+        databasePath: join(options.sessionStoreDir, 'runtime-actions', 'actions.sqlite'),
+        hardenDatabaseDirectory: true,
+      });
+      runtimeActionStore = ownedRuntimeActionStore;
+    }
     const createdApp = createChatApp({
       sessionStore,
       engine: runtime.engine,

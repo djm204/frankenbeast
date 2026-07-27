@@ -341,6 +341,75 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('does not complete an action after lease renewal reports lost ownership', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      const renew = vi.spyOn(actionStore, 'renew').mockReturnValue(false);
+      const completeWithAudit = vi.spyOn(actionStore, 'completeWithAudit');
+      const { app, adapter } = createRoutes(actionStore);
+      let finishAction!: () => void;
+      const blocked = new Promise<void>((resolve) => { finishAction = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const response = app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          idempotencyKey: 'block:t_deadbeef:lost-lease',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Retry later',
+          },
+        }),
+      });
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(renew).toHaveReturnedWith(false);
+      finishAction();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((await response).status).toBe(409);
+      expect(completeWithAudit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fences stale action claims from completing a replacement reservation', () => {
+    const actionStore = new RuntimeActionStore();
+    const first = actionStore.reserve('key', 'fingerprint', 1_000, 0);
+    const replacement = actionStore.reserve('key', 'fingerprint', 2_001, 1_001);
+    expect(first).toEqual(expect.objectContaining({ status: 'claimed', claimToken: expect.any(String) }));
+    expect(replacement).toEqual(expect.objectContaining({ status: 'claimed', claimToken: expect.any(String) }));
+    if (first.status !== 'claimed' || replacement.status !== 'claimed') throw new Error('Expected claimed actions');
+    expect(replacement.claimToken).not.toBe(first.claimToken);
+    const result = RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: 'blocker.add',
+        targetId: 'hermes:global:t_deadbeef', outcome: 'applied',
+      },
+    });
+    const audit = { ...result.audit, providerId: 'hermes', correlationId: result.correlationId };
+
+    expect(() => actionStore.completeWithAudit(
+      'key', 'fingerprint', first.claimToken, result, 3_000, audit, 2_000,
+    )).toThrow('Runtime action reservation was lost');
+    expect(() => actionStore.completeWithAudit(
+      'key', 'fingerprint', replacement.claimToken, result, 3_000, audit, 2_000,
+    )).not.toThrow();
+  });
+
   it('fails closed when an adapter returns a result for a different request', async () => {
     const { app, adapter, actionAudit } = createRoutes();
     vi.mocked(adapter.executeAction).mockResolvedValue(RuntimeActionResultSchema.parse({

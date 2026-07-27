@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
@@ -14,7 +15,7 @@ export interface RuntimeActionAuditEvent extends RuntimeActionAudit {
 }
 
 export type RuntimeActionReservation =
-  | { status: 'claimed' }
+  | { status: 'claimed'; claimToken: string }
   | { status: 'conflict' }
   | { status: 'pending' }
   | { status: 'completed'; result: RuntimeActionResult };
@@ -26,12 +27,14 @@ export interface RuntimeActionStoreOptions {
 
 interface MemoryEntry {
   fingerprint: string;
+  claimToken: string;
   expiresAt: number;
   result?: RuntimeActionResult | undefined;
 }
 
 interface PersistedEntry {
   fingerprint: string;
+  claim_token: string | null;
   expires_at: number;
   result_json: string | null;
 }
@@ -60,6 +63,7 @@ export class RuntimeActionStore {
       CREATE TABLE IF NOT EXISTS runtime_action_idempotency (
         action_key TEXT PRIMARY KEY,
         fingerprint TEXT NOT NULL,
+        claim_token TEXT,
         expires_at INTEGER NOT NULL,
         result_json TEXT
       );
@@ -71,48 +75,61 @@ export class RuntimeActionStore {
         event_json TEXT NOT NULL
       );
     `);
+    const idempotencyColumns = this.db.pragma('table_info(runtime_action_idempotency)') as Array<{ name: string }>;
+    if (!idempotencyColumns.some(({ name }) => name === 'claim_token')) {
+      this.db.exec('ALTER TABLE runtime_action_idempotency ADD COLUMN claim_token TEXT');
+    }
   }
 
   reserve(key: string, fingerprint: string, expiresAt: number, now = Date.now()): RuntimeActionReservation {
     if (this.shuttingDown) throw new Error('Runtime action store is shutting down');
     if (!this.db) return this.reserveMemory(key, fingerprint, expiresAt, now);
+    const claimToken = randomUUID();
     const reserve = this.db.transaction((): RuntimeActionReservation => {
       this.db!.prepare('DELETE FROM runtime_action_idempotency WHERE expires_at <= ?').run(now);
       const existing = this.db!.prepare(`
-        SELECT fingerprint, expires_at, result_json
+        SELECT fingerprint, claim_token, expires_at, result_json
         FROM runtime_action_idempotency
         WHERE action_key = ?
       `).get(key) as PersistedEntry | undefined;
       if (existing) return this.reservationFor(existing.fingerprint, existing.result_json, fingerprint);
       this.db!.prepare(`
-        INSERT INTO runtime_action_idempotency (action_key, fingerprint, expires_at, result_json)
-        VALUES (?, ?, ?, NULL)
-      `).run(key, fingerprint, expiresAt);
-      return { status: 'claimed' };
+        INSERT INTO runtime_action_idempotency (action_key, fingerprint, claim_token, expires_at, result_json)
+        VALUES (?, ?, ?, ?, NULL)
+      `).run(key, fingerprint, claimToken, expiresAt);
+      return { status: 'claimed', claimToken };
     });
     return reserve.immediate();
   }
 
-  renew(key: string, fingerprint: string, expiresAt: number): boolean {
+  renew(key: string, fingerprint: string, claimToken: string, expiresAt: number): boolean {
     if (!this.db) {
       const entry = this.entries.get(key);
-      if (!entry || entry.fingerprint !== fingerprint || entry.result) return false;
+      if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken || entry.result) return false;
       entry.expiresAt = expiresAt;
       return true;
     }
     const update = this.db.prepare(`
       UPDATE runtime_action_idempotency
       SET expires_at = ?
-      WHERE action_key = ? AND fingerprint = ? AND result_json IS NULL
-    `).run(expiresAt, key, fingerprint);
+      WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
+    `).run(expiresAt, key, fingerprint, claimToken);
     return update.changes === 1;
   }
 
-  complete(key: string, fingerprint: string, result: RuntimeActionResult, expiresAt: number): void {
+  complete(
+    key: string,
+    fingerprint: string,
+    claimToken: string,
+    result: RuntimeActionResult,
+    expiresAt: number,
+  ): void {
     const parsed = RuntimeActionResultSchema.parse(result);
     if (!this.db) {
       const entry = this.entries.get(key);
-      if (!entry || entry.fingerprint !== fingerprint) throw new Error('Runtime action reservation was lost');
+      if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken) {
+        throw new Error('Runtime action reservation was lost');
+      }
       entry.result = parsed;
       entry.expiresAt = expiresAt;
       return;
@@ -120,14 +137,15 @@ export class RuntimeActionStore {
     const update = this.db.prepare(`
       UPDATE runtime_action_idempotency
       SET result_json = ?, expires_at = ?
-      WHERE action_key = ? AND fingerprint = ?
-    `).run(JSON.stringify(parsed), expiresAt, key, fingerprint);
+      WHERE action_key = ? AND fingerprint = ? AND claim_token = ?
+    `).run(JSON.stringify(parsed), expiresAt, key, fingerprint, claimToken);
     if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
   }
 
   completeWithAudit(
     key: string,
     fingerprint: string,
+    claimToken: string,
     result: RuntimeActionResult,
     expiresAt: number,
     event: RuntimeActionAuditEvent,
@@ -137,7 +155,9 @@ export class RuntimeActionStore {
     const audit = { ...event };
     if (!this.db) {
       const entry = this.entries.get(key);
-      if (!entry || entry.fingerprint !== fingerprint) throw new Error('Runtime action reservation was lost');
+      if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken) {
+        throw new Error('Runtime action reservation was lost');
+      }
       entry.result = parsed;
       entry.expiresAt = expiresAt;
       this.auditEvents.push(audit);
@@ -147,8 +167,8 @@ export class RuntimeActionStore {
       const update = this.db!.prepare(`
         UPDATE runtime_action_idempotency
         SET result_json = ?, expires_at = ?
-        WHERE action_key = ? AND fingerprint = ?
-      `).run(JSON.stringify(parsed), expiresAt, key, fingerprint);
+        WHERE action_key = ? AND fingerprint = ? AND claim_token = ?
+      `).run(JSON.stringify(parsed), expiresAt, key, fingerprint, claimToken);
       if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
       this.db!.prepare(`
         INSERT INTO runtime_action_audit (occurred_at, event_json)
@@ -214,8 +234,9 @@ export class RuntimeActionStore {
           ? { status: 'completed', result: existing.result }
           : { status: 'pending' };
     }
-    this.entries.set(key, { fingerprint, expiresAt });
-    return { status: 'claimed' };
+    const claimToken = randomUUID();
+    this.entries.set(key, { fingerprint, claimToken, expiresAt });
+    return { status: 'claimed', claimToken };
   }
 
   private reservationFor(

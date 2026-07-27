@@ -568,9 +568,12 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
+    let ownershipLost = false;
     const lease = setInterval(() => {
       try {
-        actionStore.renew(key, fingerprint, Date.now() + IDEMPOTENCY_TTL_MS);
+        if (!actionStore.renew(
+          key, fingerprint, reservation.claimToken, Date.now() + IDEMPOTENCY_TTL_MS,
+        )) ownershipLost = true;
       } catch {
         // A transient store failure must not escape the timer; later ticks retry
         // while the tracked action remains the authoritative in-process claim.
@@ -582,9 +585,15 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         const completed = RuntimeActionResultSchema.parse(redactRuntimePaths(
           await executeAction(adapter, request),
         ));
+        if (ownershipLost) {
+          throw new HttpError(
+            409, 'RUNTIME_ACTION_CLAIM_LOST', 'Runtime action claim expired while the provider operation was in progress',
+          );
+        }
         const audit = actionAuditEvent(adapter.id, request, completed.audit);
         actionStore.completeWithAudit(
-          key, fingerprint, completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
+          key, fingerprint, reservation.claimToken,
+          completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
         );
         forwardActionAudit(audit);
         return completed;
@@ -597,7 +606,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       const completed = await result;
       return c.json({ data: runtimeResponse(completed) });
     } finally {
-      inFlightActions.delete(key);
+      if (inFlightActions.get(key) === result) inFlightActions.delete(key);
     }
   });
 

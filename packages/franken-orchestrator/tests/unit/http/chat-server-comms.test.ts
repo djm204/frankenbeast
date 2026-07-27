@@ -31,6 +31,7 @@ import { startChatServer } from '../../../src/http/chat-server.js';
 import { createChatApp } from '../../../src/http/chat-app.js';
 import { hashChatRateLimitPrincipal } from '../../../src/http/chat-rate-limit.js';
 import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
+import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 import type { ChatServerHandle } from '../../../src/http/chat-server.js';
@@ -162,8 +163,34 @@ describe('startChatServer comms pass-through', () => {
     expect(beginShutdown).not.toHaveBeenCalled();
     expect(drain).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
-    expect(runtimeActionStore.reserve('key', 'fingerprint', Date.now() + 1000)).toEqual({ status: 'claimed' });
+    expect(runtimeActionStore.reserve('key', 'fingerprint', Date.now() + 1000)).toEqual(expect.objectContaining({
+      status: 'claimed', claimToken: expect.any(String),
+    }));
     runtimeActionStore.destroy();
+  });
+
+  it('destroys earlier owned stores when runtime action store construction fails', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-action-store-construction-failure-'));
+    tempDirs.push(projectDir);
+    const sessionStoreDir = join(projectDir, 'chat');
+    await mkdir(sessionStoreDir, { recursive: true });
+    await writeFile(join(sessionStoreDir, 'runtime-actions'), 'blocks action-store directory creation');
+    const destroyTickets = vi.spyOn(SseConnectionTicketStore.prototype, 'destroy');
+
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir,
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: TEST_OPERATOR_TOKEN,
+      })).rejects.toThrow();
+
+      expect(destroyTickets).toHaveBeenCalledOnce();
+    } finally {
+      destroyTickets.mockRestore();
+    }
   });
 
   it('destroys an owned runtime action store when app creation fails before listen', async () => {
