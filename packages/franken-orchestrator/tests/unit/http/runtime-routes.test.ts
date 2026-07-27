@@ -349,6 +349,50 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('fails closed before repeated renewal errors can reach the lease deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      const renew = vi.spyOn(actionStore, 'renew').mockImplementation(() => {
+        throw new Error('SQLITE_BUSY');
+      });
+      const { app, adapter } = createRoutes(actionStore);
+      let finish!: () => void;
+      const blocked = new Promise<void>((resolve) => { finish = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const response = app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          idempotencyKey: 'block:t_deadbeef:renew-deadline',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Slow provider',
+          },
+        }),
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000 - 1_000);
+      expect(renew).toHaveBeenCalled();
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((await response).status).toBe(409);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not complete an action after lease renewal reports lost ownership', async () => {
     vi.useFakeTimers();
     try {
@@ -396,6 +440,53 @@ describe('smart-swarm runtime routes', () => {
           currentState: 'uncertain',
         }),
       ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forwards lost-claim audit evidence when durable audit storage fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      vi.spyOn(actionStore, 'renew').mockReturnValue(false);
+      vi.spyOn(actionStore, 'recordAudit').mockImplementation(() => {
+        throw new Error('SQLITE_BUSY');
+      });
+      const { app, adapter, actionAudit } = createRoutes(actionStore);
+      let finishAction!: () => void;
+      const blocked = new Promise<void>((resolve) => { finishAction = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const response = app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          idempotencyKey: 'block:t_deadbeef:lost-lease-audit-failure',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Retry later',
+          },
+        }),
+      });
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      finishAction();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((await response).status).toBe(409);
+      expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+        providerId: 'hermes', outcome: 'applied', currentState: 'uncertain',
+      }));
     } finally {
       vi.useRealTimers();
     }

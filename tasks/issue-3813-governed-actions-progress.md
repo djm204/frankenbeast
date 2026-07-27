@@ -40,3 +40,4 @@
 - [x] Address exact-head Codex round 14 with red-green regressions for pre-expiry lease retry headroom, fallback uncertain audit forwarding after atomic completion failure, and opaque approval action IDs.
 - [x] Address exact-head Codex round 15 with red-green regressions for Windows command shims, CLI termination fencing/finalization, per-claim shutdown fence retries, and fallback uncertainty fencing/auditing.
 - [ ] Run focused/package/root verification, publish one immutable head, resolve all six threads, and pass exact-head Codex/CI gates without merging.
+- [ ] Address exact-head Codex round 16: exclude shell-only Windows Hermes shims from governed mutations, renew transient lease failures before expiry with positive headroom, and forward lost-claim uncertainty evidence even when durable audit storage fails. Test-first regressions and all local verification layers pass; publish, resolve the three threads, and rerun exact-head Codex/CI.

@@ -4,10 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import {
-  HermesRuntimeAdapter,
-  hermesCommandRequiresShell,
-} from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
+import { HermesRuntimeAdapter } from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
 import {
   RuntimeActionRequestSchema,
   RuntimeCursorError,
@@ -166,7 +163,7 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
-  it('discovers bare Hermes commands through Windows PATHEXT', async () => {
+  it('does not advertise shell-only Windows Hermes shims for governed mutations', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
     const binDir = join(home, 'bin');
@@ -179,18 +176,14 @@ describe('HermesRuntimeAdapter', () => {
         env: { PATH: binDir, PATHEXT: '.COM;.EXE;.CMD' },
       }).describe();
 
-      expect(provider.capabilities.blockers).toEqual({ status: 'supported' });
+      expect(provider.capabilities.blockers).toEqual({
+        status: 'unsupported', reason: expect.stringContaining('command'),
+      });
     } finally {
       platform.mockRestore();
     }
   });
 
-  it('routes Windows command shims through the command processor', () => {
-    expect(hermesCommandRequiresShell('C:\\tools\\hermes.CMD', 'win32')).toBe(true);
-    expect(hermesCommandRequiresShell('C:\\tools\\hermes.BAT', 'win32')).toBe(true);
-    expect(hermesCommandRequiresShell('C:\\tools\\hermes.EXE', 'win32')).toBe(false);
-    expect(hermesCommandRequiresShell('/tools/hermes.cmd', 'linux')).toBe(false);
-  });
 
   it('uses the standard Hermes home beneath HOME by default', async () => {
     const home = await createHome();

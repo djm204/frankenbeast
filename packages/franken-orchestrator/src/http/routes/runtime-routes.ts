@@ -59,6 +59,7 @@ const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 const MAX_SSE_CURSOR_ID_CHARS = 4 * 1024;
 const IDEMPOTENCY_TTL_MS = 10 * 60_000;
 const IDEMPOTENCY_RENEW_RETRY_MS = IDEMPOTENCY_TTL_MS / 8;
+const IDEMPOTENCY_RENEW_HEADROOM_MS = 1_000;
 const MAX_ACTION_BODY_BYTES = 16 * 1024;
 
 
@@ -583,17 +584,31 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
     let ownershipLost = false;
+    let leaseDeadline = now + IDEMPOTENCY_TTL_MS;
     let lease: ReturnType<typeof setTimeout> | undefined;
     const scheduleLeaseRenewal = (delayMs: number) => {
       lease = setTimeout(() => {
         let nextDelayMs = IDEMPOTENCY_TTL_MS / 2;
         if (ownershipLost) return;
         try {
+          const renewedAt = Date.now();
           if (!actionStore.renew(
-            key, fingerprint, reservation.claimToken, Date.now() + IDEMPOTENCY_TTL_MS,
-          )) ownershipLost = true;
+            key, fingerprint, reservation.claimToken, renewedAt + IDEMPOTENCY_TTL_MS,
+          )) {
+            ownershipLost = true;
+          } else {
+            leaseDeadline = renewedAt + IDEMPOTENCY_TTL_MS;
+          }
         } catch {
-          nextDelayMs = IDEMPOTENCY_RENEW_RETRY_MS;
+          const remainingMs = leaseDeadline - Date.now();
+          if (remainingMs <= IDEMPOTENCY_RENEW_HEADROOM_MS) {
+            ownershipLost = true;
+          } else {
+            nextDelayMs = Math.min(
+              IDEMPOTENCY_RENEW_RETRY_MS,
+              remainingMs - IDEMPOTENCY_RENEW_HEADROOM_MS,
+            );
+          }
         }
         if (!ownershipLost) scheduleLeaseRenewal(nextDelayMs);
       }, delayMs);
@@ -610,7 +625,11 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             ...completed.audit,
             currentState: 'uncertain',
           });
-          actionStore.recordAudit(audit);
+          try {
+            actionStore.recordAudit(audit);
+          } catch {
+            // The external audit sink remains available when durable audit storage is not.
+          }
           forwardActionAudit(audit);
           throw new HttpError(
             409, 'RUNTIME_ACTION_CLAIM_LOST', 'Runtime action claim expired while the provider operation was in progress',
