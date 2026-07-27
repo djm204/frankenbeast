@@ -23,7 +23,7 @@ const QUOTED_HOST_PATH_RES = [
 ];
 const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
 const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
-const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
+const FILE_URL_RE = /\bfile:\/\/(?!\[REDACTED_HOST_PATH\])[^\s"'`<>\])},;!?]*[^\s"'`<>\])},;!?.]/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const API_ROUTE_KEYS = new Set(['route', 'endpoint', 'requestPath', 'pathname']);
 const SLASH_COMMANDS = new Set([
@@ -48,7 +48,9 @@ function hasApplicationRouteContext(
   if (!API_ROUTE_RE.test(path)) return false;
   if (allowApiRoute || (offset === 0 && /[?#]/u.test(path))) return true;
   const context = value.slice(0, offset + prefix.length);
-  return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check|and)\s+["']?$/iu.test(context);
+  return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check)\s+["']?$/iu.test(context)
+    || /\/(?:api|v\d+|comms|webhooks)(?:\/[^\s"'`]+)?\s+(?:and|or)\s+["']?$/iu.test(context)
+    || /\/(?:plan|run|status|diff|approve|reject|session|quit)\s+(?:and|with)\s+["']?$/iu.test(context);
 }
 
 function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean): string {

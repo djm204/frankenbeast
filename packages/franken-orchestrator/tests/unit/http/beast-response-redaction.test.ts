@@ -117,6 +117,13 @@ describe('Beast response redaction', () => {
       .toBe('open "file://[REDACTED_HOST_PATH]"');
   });
 
+  it('preserves delimiters after unquoted file URL host paths', () => {
+    expect(redactAbsoluteHostPathValues('See <file:///home/alice/a.txt> now'))
+      .toBe('See <file://[REDACTED_HOST_PATH]> now');
+    expect(redactAbsoluteHostPathValues('See file:///home/alice/a.txt, then continue.'))
+      .toBe('See file://[REDACTED_HOST_PATH], then continue.');
+  });
+
   it('redacts host paths enclosed by angle brackets', () => {
     expect(redactAbsoluteHostPathValues('failed at </home/alice/private/config>'))
       .toBe('failed at <[REDACTED_HOST_PATH]>');
@@ -127,6 +134,11 @@ describe('Beast response redaction', () => {
       .toBe('command failed >[REDACTED_HOST_PATH]');
     expect(redactAbsoluteHostPathValues('error)>C:\\Users\\alice\\secret'))
       .toBe('error)>[REDACTED_HOST_PATH]');
+  });
+
+  it('does not treat conjunctions as proof of an API route', () => {
+    expect(redactAbsoluteHostPathValues('failed under /home/alice and /api/private/config'))
+      .toBe('failed under [REDACTED_HOST_PATH] and [REDACTED_HOST_PATH]');
   });
 
   it('recursively removes host execution fields from SSE event data', () => {

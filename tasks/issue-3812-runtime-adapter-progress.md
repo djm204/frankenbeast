@@ -129,6 +129,12 @@
 - [x] Exclude pointerless active runs superseded by newer terminal runs, redact host paths after shell redirection delimiters, and sanitize asynchronous SSE adapter failures before Hono logs them.
 - [ ] Run focused/package/root verification, commit/push, reply to and resolve all three threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
+## Exact-head round 32 follow-up
+
+- [x] Push round 31 as `d39a5664c7fac2dc2136d64da2f947859e07e0e8`, resolve all three threads, verify zero paginated unresolved threads, and trigger Codex at `2026-07-27T09:26:39Z`.
+- [x] Reproduce and remediate unquoted file-URL delimiter loss, conjunction-based API-route path leakage, and empty compact/legacy cursor workspace IDs.
+- [ ] Run focused/package/root verification, commit/push, reply to and resolve all three threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.

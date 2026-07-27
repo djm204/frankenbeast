@@ -307,6 +307,20 @@ describe('HermesRuntimeAdapter', () => {
     });
   });
 
+  it('rejects empty workspace IDs in compact and legacy event cursors', () => {
+    const occurredAt = '2026-07-26T12:00:00.000Z';
+    const cursors = [
+      { p: [['', occurredAt, 0, 1]] },
+      { p: [['hermes:global', occurredAt, 0, 1, 0, '']] },
+      { occurredAt, workspaceId: '', source: 'event', sourceId: 1 },
+    ].map((cursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url'));
+    const adapter = new HermesRuntimeAdapter({ env: {} });
+
+    for (const cursor of cursors) {
+      expect(() => adapter.validateEventCursor(cursor)).toThrow(RuntimeCursorError);
+    }
+  });
+
   it('rejects oversized event cursors before decoding them', () => {
     const cursor = Buffer.from(JSON.stringify({
       p: [[
@@ -829,6 +843,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('preserves delimiters after unquoted file URL host paths', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'See <file:///home/alice/a.txt> now',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'See <file://[REDACTED_HOST_PATH]> now',
+      })]),
+    }));
+  });
+
   it('redacts host paths enclosed by angle brackets', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -867,6 +902,27 @@ describe('HermesRuntimeAdapter', () => {
       data: expect.arrayContaining([expect.objectContaining({
         id: 'hermes:global:t_parent',
         title: 'command failed >[REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
+  it('does not treat conjunctions as proof of an API route', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'failed under /home/alice with /v1/private/config',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'failed under [REDACTED_HOST_PATH] with [REDACTED_HOST_PATH]',
       })]),
     }));
   });

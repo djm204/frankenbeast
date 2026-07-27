@@ -85,7 +85,7 @@ const QUOTED_POSIX_PATH_RES = [
 ];
 const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
 const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
-const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
+const FILE_URL_RE = /\bfile:\/\/(?!\[REDACTED_HOST_PATH\])[^\s"'`<>\])},;!?]*[^\s"'`<>\])},;!?.]/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const SLASH_COMMANDS = new Set([
   '/plan', '/run', '/status', '/diff', '/approve', '/reject', '/session', '/quit',
@@ -147,7 +147,9 @@ function hasApiRouteContext(value: string, path: string, offset: number, prefix:
   if (!API_ROUTE_RE.test(path)) return false;
   if (offset === 0 && /[?#]/u.test(path)) return true;
   const context = value.slice(0, offset + prefix.length);
-  return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check|and|with)\s+["']?$/iu.test(context);
+  return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check)\s+["']?$/iu.test(context)
+    || /\/(?:api|v\d+|comms|webhooks)(?:\/[^\s"'`]+)?\s+(?:and|or)\s+["']?$/iu.test(context)
+    || /\/(?:plan|run|status|diff|approve|reject|session|quit)\s+(?:and|with)\s+["']?$/iu.test(context);
 }
 
 function boundedText(value: unknown): string {
@@ -259,6 +261,7 @@ function parseCursor(value: string | undefined): CursorValue | undefined {
       || Number.isNaN(Date.parse(decoded.occurredAt))
       || new Date(Date.parse(decoded.occurredAt)).toISOString() !== decoded.occurredAt
       || typeof decoded.workspaceId !== 'string'
+      || decoded.workspaceId.length < 1
       || (decoded.source !== 'event' && decoded.source !== 'comment')
       || !Number.isSafeInteger(decoded.sourceId)
       || (decoded.sourceId ?? -1) < 0
@@ -285,6 +288,7 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
         const source = sourceCode === 0 ? 'event' : sourceCode === 1 ? 'comment' : undefined;
         if (
           typeof workspaceId !== 'string'
+          || workspaceId.length < 1
           || typeof occurredAt !== 'string'
           || Number.isNaN(Date.parse(occurredAt))
           || new Date(Date.parse(occurredAt)).toISOString() !== occurredAt
@@ -294,7 +298,9 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
           || !Number.isSafeInteger(missingPolls)
           || (missingPolls as number) < 0
           || (missingPolls as number) > MISSING_WORKSPACE_GRACE_POLLS
-          || (cursorWorkspaceId !== undefined && typeof cursorWorkspaceId !== 'string')
+          || (cursorWorkspaceId !== undefined && (
+            typeof cursorWorkspaceId !== 'string' || cursorWorkspaceId.length < 1
+          ))
         ) throw new Error('invalid');
         positions.set(workspaceId, {
           workspaceId: (cursorWorkspaceId as string | undefined) ?? workspaceId,
@@ -309,7 +315,7 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
     if (decoded.positions && typeof decoded.positions === 'object' && !Array.isArray(decoded.positions)) {
       const positions = new Map<string, CursorPosition>();
       for (const [workspaceId, encoded] of Object.entries(decoded.positions)) {
-        if (typeof encoded !== 'string') throw new Error('invalid');
+        if (workspaceId.length < 1 || typeof encoded !== 'string') throw new Error('invalid');
         const cursor = parseCursor(encoded);
         if (!cursor || cursor.workspaceId !== workspaceId) throw new Error('invalid');
         positions.set(workspaceId, cursor);
