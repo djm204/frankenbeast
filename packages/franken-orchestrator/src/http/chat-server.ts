@@ -49,6 +49,7 @@ export interface StartChatServerOptions {
   llm: ILlmClient;
   executionLlm?: ILlmClient;
   projectName: string;
+  /** Explicit opt-in to provider-native session continuation. Defaults to provider-neutral transcript prompts. */
   sessionContinuation?: boolean;
   /** Optional dedicated chat operator token; when set, gates all /v1/chat/* routes. */
   operatorToken?: string;
@@ -333,7 +334,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
   const runtime = createChatRuntime({
     chatLlm: options.llm,
     projectName: options.projectName,
-    sessionContinuation: options.sessionContinuation ?? true,
+    sessionContinuation: options.sessionContinuation ?? false,
     ...(options.beastControl
       ? {
           beastDispatchAdapter: new ChatBeastDispatchAdapter({
