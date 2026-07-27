@@ -249,6 +249,72 @@ describe('SmartSwarmPage', () => {
     expect(executeAction.mock.calls[2]?.[1].idempotencyKey).not.toBe(retryKey);
   });
 
+  it('retires an uncertain action key after refreshed state confirms the postcondition', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    let currentSnapshot = snapshot;
+    const fetchSnapshot = vi.fn().mockImplementation(async () => currentSnapshot);
+    const executeAction = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network response lost'))
+      .mockResolvedValue({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await screen.findByText('network response lost');
+    const uncertainKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    currentSnapshot = {
+      ...snapshot,
+      tasks: {
+        status: 'available',
+        data: snapshot.tasks.status === 'available'
+          ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'ready' as const } : task)
+          : [],
+      },
+      blockers: { status: 'available', data: [] },
+    };
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+    act(() => handlers.event({ ...baseEvent, id: 'confirmed-action', cursor: 'confirmed-action' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+
+    currentSnapshot = {
+      ...snapshot,
+      blockers: {
+        status: 'available',
+        data: [{
+          id: 'blocker-2', workspaceId: 'board-main', taskId: 'task-live', category: 'dependency',
+          summary: 'Waiting for a new contract', createdAt: '2026-07-26T18:05:00.000Z',
+        }],
+      },
+    };
+    act(() => handlers.event({ ...baseEvent, id: 'new-blocker', cursor: 'new-blocker' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(4), { timeout: 6_000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(2));
+
+    expect(executeAction.mock.calls[1]?.[1].idempotencyKey).not.toBe(uncertainKey);
+  }, 10_000);
+
   it('submits a governed promotion and reports a typed rejection without claiming state changed', async () => {
     const executeAction = vi.fn().mockResolvedValue({
       status: 'rejected',

@@ -28,7 +28,7 @@ The script installs the pinned Playwright Chromium binary if absent, builds the 
 - a fresh Hermes comment reaches the dashboard over live SSE;
 - an interrupted dashboard proxy reconnects, obtains a new one-time stream ticket, and returns to connected state;
 - the dashboard resolves a real blocked Hermes task and verifies its CLI-visible postcondition;
-- a governed promote action is rejected without a governor and the task remains ready;
+- a governed promote action is rejected without a governor and the blocked task remains blocked;
 - an approval decision exercises Hermes' truthful typed `unsupported` result without mutating task state;
 - an initialized empty board renders the explicit empty state;
 - an incompatible board exercises degraded provider discovery while a compatible selected board remains usable;
@@ -53,16 +53,17 @@ Terminal 1, from the repository root:
 rm -f /tmp/franken-smart-swarm-manual.env
 umask 077
 HERMES_HOME="$(mktemp -d /tmp/franken-smart-swarm-manual.XXXXXX)"
+FRANKENBEAST_BASE_DIR="$(mktemp -d /tmp/franken-smart-swarm-state.XXXXXX)"
 OPERATOR_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(24).toString('hex'))")"
-printf 'export HERMES_HOME=%q\nexport HERMES_KANBAN_DB=%q\nexport FRANKENBEAST_BEAST_OPERATOR_TOKEN=%q\n' \
-  "$HERMES_HOME" "$HERMES_HOME/kanban.db" "$OPERATOR_TOKEN" > /tmp/franken-smart-swarm-manual.env
+printf 'export HERMES_HOME=%q\nexport HERMES_KANBAN_DB=%q\nexport FRANKENBEAST_BASE_DIR=%q\nexport FRANKENBEAST_BEAST_OPERATOR_TOKEN=%q\n' \
+  "$HERMES_HOME" "$HERMES_HOME/kanban.db" "$FRANKENBEAST_BASE_DIR" "$OPERATOR_TOKEN" > /tmp/franken-smart-swarm-manual.env
 source /tmp/franken-smart-swarm-manual.env
 hermes kanban init
 TASK_JSON="$(hermes kanban create 'Manual smart-swarm worker' --assignee default --workspace scratch --json)"
 TASK_ID="$(node -e 'console.log(JSON.parse(process.argv[1]).id)' "$TASK_JSON")"
 hermes kanban block --kind needs_input "$TASK_ID" 'Waiting for manual operator verification'
 printf 'export TASK_ID=%q\n' "$TASK_ID" >> /tmp/franken-smart-swarm-manual.env
-npm --workspace @franken/orchestrator run chat-server -- --port 3737
+npm --workspace @franken/orchestrator run chat-server -- --base-dir "$FRANKENBEAST_BASE_DIR" --port 3737
 ```
 
 Terminal 2, also from the repository root:
@@ -86,6 +87,7 @@ Confirm `Manual live SSE evidence` appears without refreshing. Stop both servers
 ```bash
 source /tmp/franken-smart-swarm-manual.env
 rm -rf "$HERMES_HOME"
+rm -rf "$FRANKENBEAST_BASE_DIR"
 rm -f /tmp/franken-smart-swarm-manual.env
-unset HERMES_HOME HERMES_KANBAN_DB FRANKENBEAST_BEAST_OPERATOR_TOKEN TASK_ID
+unset HERMES_HOME HERMES_KANBAN_DB FRANKENBEAST_BASE_DIR FRANKENBEAST_BEAST_OPERATOR_TOKEN TASK_ID
 ```

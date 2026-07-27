@@ -19,6 +19,13 @@ interface SmartSwarmPageProps {
   client: SmartSwarmApiClient;
 }
 
+interface PendingActionIntent {
+  idempotencyKey: string;
+  providerId: string;
+  taskId: string;
+  initialTaskState: RuntimeTask['state'];
+}
+
 const MAX_VISIBLE_TASKS = 200;
 const MAX_VISIBLE_EVIDENCE = 100;
 const STREAM_REFRESH_DEBOUNCE_MS = 250;
@@ -195,7 +202,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const currentWorkspaceId = useRef(workspaceId);
   currentWorkspaceId.current = workspaceId;
   const taskDetailTrigger = useRef<HTMLButtonElement | null>(null);
-  const actionIdempotencyKeys = useRef(new Map<string, string>());
+  const actionIdempotencyKeys = useRef(new Map<string, PendingActionIntent>());
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const error = snapshotError ?? providerError ?? workspaceCatalogError ?? streamError;
@@ -225,6 +232,16 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       })
     : [];
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+
+  useEffect(() => {
+    for (const [key, intent] of actionIdempotencyKeys.current) {
+      if (intent.providerId !== providerId) continue;
+      const currentTask = tasks.find((task) => task.id === intent.taskId);
+      if (currentTask && currentTask.state !== intent.initialTaskState) {
+        actionIdempotencyKeys.current.delete(key);
+      }
+    }
+  }, [providerId, tasks]);
 
   const taskNames = useMemo(() => new Map(tasks.map((task) => [task.id, task.title])), [tasks]);
   const newestUnfinishedRunByTask = useMemo(() => {
@@ -660,7 +677,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
   client: SmartSwarmApiClient;
   returnFocus: HTMLButtonElement | null;
-  actionIdempotencyKeys: Map<string, string>;
+  actionIdempotencyKeys: Map<string, PendingActionIntent>;
   onActionApplied(): void;
   onClose(): void;
 }) {
@@ -706,9 +723,14 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
             reason,
           };
       const actionIntentKey = `${provider.id}:${task.id}:${action}`;
-      const idempotencyKey = actionIdempotencyKeys.get(actionIntentKey)
-        ?? `${action}:${crypto.randomUUID()}`;
-      actionIdempotencyKeys.set(actionIntentKey, idempotencyKey);
+      const pendingIntent = actionIdempotencyKeys.get(actionIntentKey);
+      const idempotencyKey = pendingIntent?.idempotencyKey ?? `${action}:${crypto.randomUUID()}`;
+      actionIdempotencyKeys.set(actionIntentKey, pendingIntent ?? {
+        idempotencyKey,
+        providerId: provider.id,
+        taskId: task.id,
+        initialTaskState: task.state,
+      });
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
         idempotencyKey,

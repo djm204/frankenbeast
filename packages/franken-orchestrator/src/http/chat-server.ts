@@ -21,6 +21,7 @@ import { createChatApp } from './chat-app.js';
 import type { RuntimeActionAuditEvent } from './routes/runtime-routes.js';
 import type { IGovernorModule } from '../deps.js';
 import { RuntimeActionStore } from '../runtime/runtime-action-store.js';
+import type { RuntimeAdapterRegistry } from '../runtime/runtime-adapter-registry.js';
 import { attachChatWebSocketServer, type AttachChatWebSocketServerOptions, type ChatSocketMessageRateLimitOptions } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -82,6 +83,7 @@ export interface StartChatServerOptions {
   runtimeActionGovernor?: IGovernorModule;
   runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
   runtimeActionStore?: RuntimeActionStore;
+  runtimeRegistry?: RuntimeAdapterRegistry;
 }
 
 export interface ChatServerHandle {
@@ -425,6 +427,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
       ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
       ...(runtimeActionStore ? { runtimeActionStore } : {}),
+      ...(options.runtimeRegistry ? { runtimeRegistry: options.runtimeRegistry } : {}),
       chatRateLimiter,
       chatMutationAdmission,
       approvalAuditLog,
