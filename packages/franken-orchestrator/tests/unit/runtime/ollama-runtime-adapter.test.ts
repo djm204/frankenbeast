@@ -257,6 +257,23 @@ describe('OllamaRuntimeAdapter', () => {
     expect(endpoint.paths).toEqual(['/api/version', '/api/tags', '/api/ps']);
   });
 
+  it('accepts standard dot-localhost aliases as plaintext loopback endpoints', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/version') return Response.json({ version: '0.11.4' });
+      return Response.json({ models: [] });
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'local-alias', baseUrl: 'http://ollama.localhost:11434' }],
+      fetchImpl,
+    });
+
+    await expect(adapter.describe()).resolves.toMatchObject({
+      health: { state: 'connected' },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
   it('rejects plaintext non-loopback endpoints without exposing the configured URL', async () => {
     const adapter = new OllamaRuntimeAdapter({
       endpoints: [{ id: 'remote', baseUrl: 'http://ollama.internal.example:11434/private' }],

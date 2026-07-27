@@ -115,7 +115,8 @@ function endpointUrl(baseUrl: string, path: string): URL {
     throw new OllamaEndpointError('Ollama endpoint URL must use HTTP or HTTPS');
   }
   const hostname = base.hostname.replace(/^\[|\]$/gu, '').toLowerCase();
-  const loopback = hostname === 'localhost' || hostname === '::1' || /^127(?:\.\d{1,3}){3}$/u.test(hostname);
+  const loopback = hostname === 'localhost' || hostname.endsWith('.localhost')
+    || hostname === '::1' || /^127(?:\.\d{1,3}){3}$/u.test(hostname);
   if (base.protocol === 'http:' && !loopback) {
     throw new OllamaEndpointError('Remote Ollama endpoints must use HTTPS');
   }
