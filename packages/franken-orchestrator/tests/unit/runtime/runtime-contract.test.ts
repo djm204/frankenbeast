@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CodexRuntimeAdapter,
   RuntimeAdapterRegistry,
   RuntimeAgentSchema,
   RuntimeApprovalSchema,
@@ -151,11 +152,15 @@ describe('provider-neutral runtime contract', () => {
   });
 
   it('registers read-only runtime adapters without inventing availability', async () => {
-    const registry = createDefaultRuntimeAdapterRegistry({ env: {} });
+    const registry = createDefaultRuntimeAdapterRegistry({
+      env: { PATH: '' },
+      codex: { requestTimeoutMs: 25 },
+    });
 
     await expect(registry.list()).resolves.toEqual([
       expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
       expect.objectContaining({ id: 'ollama', health: expect.objectContaining({ state: 'unavailable' }) }),
+      expect.objectContaining({ id: 'codex', health: expect.objectContaining({ state: 'unavailable' }) }),
     ]);
   });
 
@@ -166,6 +171,7 @@ describe('provider-neutral runtime contract', () => {
     expect(orchestrator.RuntimeCursorError).toBe(RuntimeCursorError);
     expect(orchestrator.HermesRuntimeAdapter).toEqual(expect.any(Function));
     expect(orchestrator.OllamaRuntimeAdapter).toBe(OllamaRuntimeAdapter);
+    expect(orchestrator.CodexRuntimeAdapter).toBe(CodexRuntimeAdapter);
     expect(RuntimeAgentSchema).toEqual(expect.any(Object));
     expect(RuntimeRunSchema).toEqual(expect.any(Object));
     expect(orchestrator.RuntimeAgentSchema).toBe(RuntimeAgentSchema);

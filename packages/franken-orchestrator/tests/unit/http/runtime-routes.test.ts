@@ -1193,16 +1193,22 @@ describe('smart-swarm runtime routes', () => {
     expect(output).toContain('id: cursor-2');
     expect(output).toContain('event: checkpoint');
     expect(output).toContain('id: cursor-final');
+    expect(adapter.getEvents).toHaveBeenCalledWith(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }));
     await reader.cancel();
   });
 
   it('accepts large cursors that a runtime adapter can emit', async () => {
-    const { app } = createRoutes();
+    const { app, adapter } = createRoutes();
     const cursor = 'x'.repeat(70_000);
     const response = await app.request(`/v1/smart-swarm/providers/hermes/events?cursor=${cursor}`, {
       headers: authHeaders(),
     });
     expect(response.status).toBe(200);
+    expect(adapter.getEvents).toHaveBeenCalledWith(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it('rejects cursors too large for a replay-safe SSE id before writing', async () => {
