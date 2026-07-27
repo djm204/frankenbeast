@@ -24,6 +24,7 @@ const QUOTED_HOST_PATH_RES = [
 const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
 const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
 const FILE_URL_RE = /\bfile:\/\/(?!\[REDACTED_HOST_PATH\])[^\s"'`<>\])},;!?]*[^\s"'`<>\])},;!?.]/giu;
+const ENCODED_ABSOLUTE_PATH_RE = /(^|[=:#&])(?:%2f|%5c%5c|[A-Za-z](?::|%3a)%5c)[^&\s"'`#]*/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const API_ROUTE_KEYS = new Set(['route', 'endpoint', 'requestPath', 'pathname']);
 const SLASH_COMMANDS = new Set([
@@ -57,6 +58,7 @@ function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean):
   const redactedFileUrls = value
     .replace(QUOTED_FILE_URL_RE, '$1file://[REDACTED_HOST_PATH]$1')
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
+    .replace(ENCODED_ABSOLUTE_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ANGLE_BRACKET_HOST_PATH_RE, '$1[REDACTED_HOST_PATH]');
   const redacted = redactedFileUrls.replace(
     EMBEDDED_HOST_PATH_RE,

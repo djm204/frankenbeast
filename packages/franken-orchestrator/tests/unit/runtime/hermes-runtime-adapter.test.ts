@@ -793,6 +793,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts URL-encoded absolute host paths in application route values', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'GET /api/run?cwd=%2Fhome%2Falice%2Fsecret&mode=safe',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'GET /api/run?cwd=[REDACTED_HOST_PATH]&mode=safe',
+      })]),
+    }));
+  });
+
   it('redacts unquoted single-component POSIX paths for direct consumers', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -1367,6 +1388,11 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot.agents).toEqual(expect.objectContaining({
       data: expect.arrayContaining([
         expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
+      ]),
+    }));
+    expect(snapshot.runs).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({ id: 'hermes:global:run:1', sessionId: 'session-private' }),
       ]),
     }));
   });

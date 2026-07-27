@@ -89,6 +89,11 @@ describe('Beast response redaction', () => {
       .toBe('/v1/tasks#[REDACTED_HOST_PATH]');
   });
 
+  it('redacts URL-encoded absolute host paths in application route values', () => {
+    expect(redactAbsoluteHostPathValues('GET /api/run?cwd=%2Fhome%2Falice%2Fsecret&mode=safe'))
+      .toBe('GET /api/run?cwd=[REDACTED_HOST_PATH]&mode=safe');
+  });
+
   it('redacts quoted host paths rooted outside the common host allowlist', () => {
     expect(redactAbsoluteHostPathValues("ENOTDIR: scandir '/data/hermes/kanban/boards'"))
       .toBe("ENOTDIR: scandir '[REDACTED_HOST_PATH]'");

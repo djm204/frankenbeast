@@ -141,6 +141,12 @@
 - [x] Reproduce and remediate host-path leakage inside unquoted API-route query and fragment values in shared and direct-adapter redaction.
 - [ ] Run focused/package/root verification, commit/push, reply to and resolve the thread, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
+## Exact-head round 34 follow-up
+
+- [x] Push round 33 as `a2da5e462a2a54c10005d1381acfc44d84e803fa`, resolve the thread, verify zero paginated unresolved threads, and trigger Codex at `2026-07-27T10:06:38Z`.
+- [x] Reproduce and remediate pointerless-run session loss, URL-encoded host-path leakage, transient periodic stream-poll termination, and delayed initial heartbeat startup.
+- [ ] Run focused/package/root verification, commit/push, reply to and resolve all four threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.

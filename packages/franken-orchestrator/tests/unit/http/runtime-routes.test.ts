@@ -826,6 +826,66 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('retries after a transient periodic runtime poll failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      vi.mocked(adapter.getEvents)
+        .mockResolvedValueOnce(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }))
+        .mockRejectedValueOnce(new Error('SQLITE_BUSY'))
+        .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
+      let abortStream: (() => void) | undefined;
+      const stream = {
+        pipe: vi.fn().mockResolvedValue(undefined),
+        onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+      };
+      let settled = false;
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 1_000,
+        pollIntervalMs: 20,
+      }).finally(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(40);
+
+      expect(adapter.getEvents).toHaveBeenCalledTimes(3);
+      expect(settled).toBe(false);
+      abortStream!();
+      await streamDone;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts heartbeats while the initial runtime poll is pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      let releaseInitial!: (page: ReturnType<typeof RuntimeEventPageSchema.parse>) => void;
+      vi.mocked(adapter.getEvents).mockReturnValueOnce(new Promise((resolve) => { releaseInitial = resolve; }));
+      let abortStream: (() => void) | undefined;
+      const pipe = vi.fn().mockResolvedValue(undefined);
+      const stream = {
+        pipe,
+        onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+      };
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 20,
+        pollIntervalMs: 1_000,
+      });
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(pipe).toHaveBeenCalledTimes(1);
+      expect(await new Response(pipe.mock.calls[0]![0] as ReadableStream<Uint8Array>).text())
+        .toBe('event: heartbeat\ndata: \n\n');
+      abortStream!();
+      releaseInitial(RuntimeEventPageSchema.parse({ events: [], nextCursor: null }));
+      await streamDone;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('publishes cursor-only runtime checkpoints to SSE clients', async () => {
     const adapter = runtimeAdapter();
     vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({

@@ -256,6 +256,13 @@ export async function runRuntimeEventStream(
   let poll: ReturnType<typeof setInterval> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
+    heartbeat = setInterval(
+      () => {
+        if (queuedWrites > 0) return;
+        void writeSse({ event: 'heartbeat', data: '' }).catch(endStream);
+      },
+      options.heartbeatIntervalMs,
+    );
     const initialPublish = publish().catch((error: unknown) => {
       if (closed && pollController.signal.aborted) return;
       throw error;
@@ -265,14 +272,7 @@ export async function runRuntimeEventStream(
       await initialPublish;
       return;
     }
-    poll = setInterval(() => void publish().catch(endStream), options.pollIntervalMs);
-    heartbeat = setInterval(
-      () => {
-        if (queuedWrites > 0) return;
-        void writeSse({ event: 'heartbeat', data: '' }).catch(endStream);
-      },
-      options.heartbeatIntervalMs,
-    );
+    poll = setInterval(() => void publish().catch(() => {}), options.pollIntervalMs);
     await aborted;
     const pending = activePublish;
     if (pending) {

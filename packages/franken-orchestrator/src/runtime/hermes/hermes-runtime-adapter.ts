@@ -86,6 +86,7 @@ const QUOTED_POSIX_PATH_RES = [
 const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
 const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
 const FILE_URL_RE = /\bfile:\/\/(?!\[REDACTED_HOST_PATH\])[^\s"'`<>\])},;!?]*[^\s"'`<>\])},;!?.]/giu;
+const ENCODED_ABSOLUTE_PATH_RE = /(^|[=:#&])(?:%2f|%5c%5c|[A-Za-z](?::|%3a)%5c)[^&\s"'`#]*/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const SLASH_COMMANDS = new Set([
   '/plan', '/run', '/status', '/diff', '/approve', '/reject', '/session', '/quit',
@@ -157,6 +158,7 @@ function boundedText(value: unknown): string {
   let redacted = redactSensitiveText(value)
     .replace(QUOTED_FILE_URL_RE, '$1file://[REDACTED_HOST_PATH]$1')
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
+    .replace(ENCODED_ABSOLUTE_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ANGLE_BRACKET_HOST_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
     .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => {
@@ -973,9 +975,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const sessionByRunId = new Map<string, string>();
     const activeRunIds = new Set<string>();
     const pointerlessActiveTaskIds = new Set<string>();
+    const pointerlessSessionByTaskId = new Map<string, string>();
     for (const task of taskRows) {
       if (task['current_run_id'] == null) {
-        if (!isTerminalTaskStatus(task['status'])) pointerlessActiveTaskIds.add(String(task['id']));
+        if (!isTerminalTaskStatus(task['status'])) {
+          const rawTaskId = String(task['id']);
+          pointerlessActiveTaskIds.add(rawTaskId);
+          if (typeof task['session_id'] === 'string' && task['session_id']) {
+            pointerlessSessionByTaskId.set(rawTaskId, task['session_id']);
+          }
+        }
         continue;
       }
       const currentRunId = String(task['current_run_id']);
@@ -983,6 +992,17 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       if (typeof task['session_id'] === 'string' && task['session_id']) {
         sessionByRunId.set(currentRunId, task['session_id']);
       }
+    }
+    const latestPointerlessRunByTask = new Map<string, string>();
+    for (const run of runRows) {
+      const rawTaskId = String(run['task_id']);
+      if (pointerlessActiveTaskIds.has(rawTaskId)) {
+        latestPointerlessRunByTask.set(rawTaskId, String(run['id']));
+      }
+    }
+    for (const [rawTaskId, rawSessionId] of pointerlessSessionByTaskId) {
+      const latestRunId = latestPointerlessRunByTask.get(rawTaskId);
+      if (latestRunId) sessionByRunId.set(latestRunId, rawSessionId);
     }
     const runs: RuntimeRun[] = runRows.map((run) => {
       const rawTaskId = String(run['task_id']);
@@ -1004,13 +1024,6 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         },
       };
     });
-    const latestPointerlessRunByTask = new Map<string, string>();
-    for (const run of runRows) {
-      const rawTaskId = String(run['task_id']);
-      if (pointerlessActiveTaskIds.has(rawTaskId)) {
-        latestPointerlessRunByTask.set(rawTaskId, String(run['id']));
-      }
-    }
     const agentInputs = new Map<string, { states: string[]; timestamps: string[] }>();
     for (const task of taskRows) {
       if (typeof task['assignee'] !== 'string' || !task['assignee']) continue;
