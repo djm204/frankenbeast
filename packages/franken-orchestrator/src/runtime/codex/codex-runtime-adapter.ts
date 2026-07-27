@@ -110,6 +110,10 @@ function parseThread(value: unknown): CodexThread | null {
     || typeof (thread['status'] as Record<string, unknown>)['type'] !== 'string'
     || !THREAD_STATUS_TYPES.has((thread['status'] as Record<string, unknown>)['type'] as string)
     || (
+      (thread['status'] as Record<string, unknown>)['type'] === 'active'
+      && !Array.isArray((thread['status'] as Record<string, unknown>)['activeFlags'])
+    )
+    || (
       (thread['status'] as Record<string, unknown>)['activeFlags'] !== undefined
       && (
         !Array.isArray((thread['status'] as Record<string, unknown>)['activeFlags'])
@@ -183,11 +187,16 @@ interface CodexBoundaryThread {
   transitionSequence: number;
 }
 
+interface CodexCursorEncodingState {
+  boundarySaturated: boolean;
+}
+
 function eventCursor(
   status: string,
   boundaryThreads?: Record<string, CodexBoundaryThread>,
   watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
   scopeWorkspaceId?: string,
+  encodingState?: CodexCursorEncodingState,
 ): string {
   const serializedThreads = boundaryThreads
     ? Object.values(boundaryThreads).map((thread) => [
@@ -197,7 +206,7 @@ function eventCursor(
         thread.transitionSequence,
       ])
     : undefined;
-  let boundarySaturated = false;
+  let boundarySaturated = encodingState?.boundarySaturated ?? false;
   const encode = (): string => {
     const payload = Buffer.from(JSON.stringify({
       version: 3,
@@ -226,6 +235,7 @@ function eventCursor(
     serializedThreads.splice(0, lowerBound);
     encoded = encode();
   }
+  if (boundarySaturated && encodingState) encodingState.boundarySaturated = true;
   return encoded;
 }
 
@@ -360,6 +370,7 @@ function eventForThread(
   watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
   scopeWorkspaceId?: string,
   transitionSequence?: number,
+  encodingState?: CodexCursorEncodingState,
 ): RuntimeEvent {
   const currentWatermark = watermark ?? {
     occurredAt: timestamp(thread.updatedAt)!,
@@ -368,7 +379,13 @@ function eventForThread(
   return {
     id: `codex:thread:${thread.id}:${thread.updatedAt}:${eventStatus(thread)}`
       + (transitionSequence ? `:transition-${transitionSequence}` : ''),
-    cursor: eventCursor(eventStatus(thread), boundaryThreads, currentWatermark, scopeWorkspaceId),
+    cursor: eventCursor(
+      eventStatus(thread),
+      boundaryThreads,
+      currentWatermark,
+      scopeWorkspaceId,
+      encodingState,
+    ),
     workspaceId: workspaceId(thread.cwd),
     taskId: null,
     runId: null,
@@ -386,11 +403,12 @@ function eventForDisappearedThread(
   watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
   scopeWorkspaceId?: string,
   transitionSequence?: number,
+  encodingState?: CodexCursorEncodingState,
 ): RuntimeEvent {
   return {
     id: `codex:thread:${thread.threadId}:disappeared`
       + (transitionSequence ? `:transition-${transitionSequence}` : ''),
-    cursor: eventCursor('disappeared', boundaryThreads, watermark, scopeWorkspaceId),
+    cursor: eventCursor('disappeared', boundaryThreads, watermark, scopeWorkspaceId, encodingState),
     workspaceId: thread.workspaceId,
     taskId: null,
     runId: null,
@@ -735,6 +753,9 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           .slice(0, limit)
           .sort((a, b) => compareCursor(a.cursor, b.cursor));
     const emittedThreads = after?.boundaryThreads ? { ...after.boundaryThreads } : {};
+    const cursorEncodingState: CodexCursorEncodingState = {
+      boundarySaturated: after?.boundarySaturated === true,
+    };
     let watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'> | undefined = after ?? undefined;
     const events = entries.map((entry) => {
       if (entry.kind === 'thread') {
@@ -759,6 +780,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           watermark,
           request.workspaceId,
           transitionSequence,
+          cursorEncodingState,
         );
       } else {
         const transitionSequence = entry.thread.transitionSequence + 1;
@@ -777,6 +799,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           watermark,
           request.workspaceId,
           transitionSequence,
+          cursorEncodingState,
         );
       }
     });

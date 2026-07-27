@@ -318,41 +318,81 @@ input.on('line', (line) => {
     });
   });
 
-  it('ignores late output from an app-server process replaced after timeout', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-replace-'));
+  it('isolates a timed-out request from concurrent pending calls', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-request-deadline-'));
     tempPaths.push(directory);
-    const command = join(directory, 'codex-replace.cjs');
-    const startFile = join(directory, 'starts.txt');
+    const command = join(directory, 'codex-request-deadline.cjs');
     await writeFile(command, `#!/usr/bin/env node
-const fs = require('node:fs');
 const readline = require('node:readline');
-fs.appendFileSync(process.env.START_FILE, '1');
-const instance = fs.readFileSync(process.env.START_FILE, 'utf8').length;
-process.on('SIGTERM', () => setTimeout(() => process.stdout.write('{'), 10));
 const input = readline.createInterface({ input: process.stdin });
-let initialized = false;
 input.on('line', (line) => {
   const message = JSON.parse(line);
   if (message.method === 'initialize') {
-    const respond = () => process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');
-    if (instance === 1) respond(); else setTimeout(respond, 40);
-  } else if (message.method === 'initialized') {
-    initialized = true;
-  } else if (message.method === 'thread/list' && initialized && instance > 1) {
-    process.stdout.write(JSON.stringify({ id: message.id, result: { data: [], nextCursor: null } }) + '\\n');
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');
+  } else if (message.method === 'thread/list') {
+    setTimeout(() => process.stdout.write(JSON.stringify({
+      id: message.id,
+      result: { data: [], nextCursor: message.params.name }
+    }) + '\\n'), message.params.delay);
   }
 });
 `);
     await chmod(command, 0o700);
     const request = createCodexAppServerRequest({
       command,
-      env: { PATH: process.env['PATH'] ?? '', START_FILE: startFile },
+      env: { PATH: process.env['PATH'] ?? '' },
+    });
+    await request('thread/list', { name: 'warmup', delay: 0 }, { timeoutMs: 200 });
+
+    const short = request('thread/list', { name: 'short', delay: 100 }, { timeoutMs: 30 });
+    const long = request('thread/list', { name: 'long', delay: 80 }, { timeoutMs: 200 });
+    const [shortResult, longResult] = await Promise.allSettled([short, long]);
+
+    expect(shortResult).toEqual(expect.objectContaining({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: expect.stringContaining('request timed out') }),
+    }));
+    expect(longResult).toEqual({
+      status: 'fulfilled',
+      value: { data: [], nextCursor: 'long' },
+    });
+  });
+
+  it('ignores a late response after its request times out without replacing the server', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-late-response-'));
+    tempPaths.push(directory);
+    const command = join(directory, 'codex-late-response.cjs');
+    await writeFile(command, `#!/usr/bin/env node
+const readline = require('node:readline');
+const input = readline.createInterface({ input: process.stdin });
+let initialized = false;
+let requests = 0;
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');
+  } else if (message.method === 'initialized') {
+    initialized = true;
+  } else if (message.method === 'thread/list' && initialized) {
+    requests += 1;
+    const respond = () => process.stdout.write(JSON.stringify({
+      id: message.id,
+      result: { data: [], nextCursor: requests }
+    }) + '\\n');
+    if (requests === 1) setTimeout(respond, 250); else respond();
+  }
+});
+`);
+    await chmod(command, 0o700);
+    const request = createCodexAppServerRequest({
+      command,
+      env: { PATH: process.env['PATH'] ?? '' },
     });
 
     await expect(request('thread/list', {}, { timeoutMs: 200 })).rejects.toThrow('timed out');
     await expect(request('thread/list', {}, { timeoutMs: 1_000 })).resolves.toEqual({
       data: [],
-      nextCursor: null,
+      nextCursor: 2,
     });
   });
 
@@ -460,6 +500,28 @@ input.on('line', (line) => {
     expect(snapshot.message).toBe('Some Codex thread metadata was incompatible');
     expect(snapshot.agents).toEqual({ status: 'available', data: [] });
     expect(JSON.stringify(snapshot)).not.toContain('secret-status-value');
+  });
+
+  it('rejects active thread metadata that omits required active flags', async () => {
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [{
+          id: 'thread-missing-flags', sessionId: 'session-1', cliVersion: '0.145.0',
+          createdAt: 1_785_081_400, updatedAt: 1_785_081_660,
+          cwd: '/workspace/project', ephemeral: false, modelProvider: 'openai',
+          status: { type: 'active' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'degraded' }),
+    }));
+    await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({
+      state: 'degraded',
+      agents: { status: 'available', data: [] },
+    }));
   });
 
   it('maps bounded thread metadata without exposing prompts, host paths, or fabricated task semantics', async () => {
@@ -652,7 +714,8 @@ input.on('line', (line) => {
       data: [{
         id: 'thread-a', sessionId: 'session-a', cliVersion: '0.145.0',
         createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
-        ephemeral: false, modelProvider: 'openai', status: { type: status },
+        ephemeral: false, modelProvider: 'openai',
+        status: { type: status, ...(status === 'active' ? { activeFlags: [] } : {}) },
       }],
       nextCursor: null,
     }));
@@ -737,7 +800,8 @@ input.on('line', (line) => {
         {
           id: 'thread-a', sessionId: 'session-a', cliVersion: '0.145.0',
           createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
-          ephemeral: false, modelProvider: 'openai', status: { type: lowerStatus },
+          ephemeral: false, modelProvider: 'openai',
+          status: { type: lowerStatus, ...(lowerStatus === 'active' ? { activeFlags: [] } : {}) },
         },
       ],
       nextCursor: null,
@@ -765,7 +829,8 @@ input.on('line', (line) => {
         {
           id: 'older', sessionId: 'session-older', cliVersion: '0.145.0',
           createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
-          ephemeral: false, modelProvider: 'openai', status: { type: olderStatus },
+          ephemeral: false, modelProvider: 'openai',
+          status: { type: olderStatus, ...(olderStatus === 'active' ? { activeFlags: [] } : {}) },
         },
       ],
       nextCursor: null,
@@ -794,7 +859,8 @@ input.on('line', (line) => {
           {
             id: 'older', sessionId: 'session-older', cliVersion: '0.145.0',
             createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
-            ephemeral: false, modelProvider: 'openai', status: { type: olderStatus },
+            ephemeral: false, modelProvider: 'openai',
+            status: { type: olderStatus, ...(olderStatus === 'active' ? { activeFlags: [] } : {}) },
           },
         ],
         nextCursor: null,
@@ -886,7 +952,7 @@ input.on('line', (line) => {
     });
 
     const first = await adapter.getEvents({ limit: 500 });
-    threads[0]!.status.type = 'active';
+    threads[0]!.status = { type: 'active', activeFlags: [] } as { type: string };
     const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 500 });
     threads.push({
       id: 'thread-500', sessionId: 'session-500', cliVersion: '0.145.0',
@@ -894,7 +960,7 @@ input.on('line', (line) => {
       ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
     });
     const third = await adapter.getEvents({ cursor: second.nextCursor!, limit: 500 });
-    threads[0]!.status.type = 'idle';
+    threads[0]!.status = { type: 'idle' };
     const fourth = await adapter.getEvents({ cursor: third.nextCursor!, limit: 500 });
 
     expect(fourth.events.map((event) => event.summary)).toEqual(['Codex thread is idle']);
@@ -921,10 +987,15 @@ input.on('line', (line) => {
     });
 
     const page = await adapter.getEvents({ limit: 500 });
+    threads.at(-1)!.status = { type: 'active', activeFlags: [] } as { type: string };
+    const changed = await adapter.getEvents({ cursor: page.nextCursor!, limit: 500 });
+    const continuation = await adapter.getEvents({ cursor: changed.nextCursor!, limit: 500 });
 
     expect(page.events).toHaveLength(500);
     expect(Buffer.byteLength(page.nextCursor!)).toBeLessThanOrEqual(4_096);
     expect(() => adapter.validateEventCursor?.(page.nextCursor!)).not.toThrow();
+    expect(changed.events).toHaveLength(1);
+    expect(continuation).toEqual({ events: [], nextCursor: changed.nextCursor });
   });
 
   it('rejects compact cursors with non-hashed status keys', () => {

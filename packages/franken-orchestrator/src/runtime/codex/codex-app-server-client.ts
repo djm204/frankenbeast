@@ -292,7 +292,7 @@ export function createCodexAppServerRequest(
         ? (): void => settlePending(id, abortedError(requestOptions.signal!))
         : undefined;
       const timer = setTimeout(() => {
-        failServer(server, safeError('Codex app-server request timed out'));
+        settlePending(id, safeError('Codex app-server request timed out'));
       }, Math.max(1, deadline - Date.now()));
       pending.set(id, {
         resolve,
