@@ -182,6 +182,7 @@ export class SmartSwarmApiClient {
     let source: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectAttempt = 0;
+    let consecutivePreOpenFailures = 0;
     let cursor: string | undefined;
     let closed = false;
 
@@ -233,8 +234,11 @@ export class SmartSwarmApiClient {
       const query = search.size > 0 ? `?${search.toString()}` : '';
       const streamPath = `/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
       source = new EventSource(`${baseUrl}${streamPath}${query}`, { withCredentials: true });
+      let opened = false;
       source.addEventListener('open', () => {
+        opened = true;
         reconnectAttempt = 0;
+        consecutivePreOpenFailures = 0;
         handlers.connection?.('connected');
       });
       source.addEventListener('activity', (rawEvent) => {
@@ -244,9 +248,14 @@ export class SmartSwarmApiClient {
           handlers.event(event);
         } catch (error) {
           handlers.error?.(error instanceof Error ? error : new Error('Unable to parse smart-swarm activity.'));
+          scheduleReconnect();
         }
       });
       source.addEventListener('error', () => {
+        if (!opened && cursor) {
+          consecutivePreOpenFailures += 1;
+          if (consecutivePreOpenFailures >= 2) cursor = undefined;
+        }
         scheduleReconnect();
       });
     }
