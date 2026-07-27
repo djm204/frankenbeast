@@ -268,8 +268,14 @@ function allowlistedNetworkProcessEnv(
 function buildNetworkProcessPath(): string {
   const pathEntries = process.platform === 'win32'
     ? [dirname(process.execPath)]
-    : [dirname(process.execPath), '/usr/bin', '/bin'];
-  return pathEntries.join(delimiter);
+    : [
+        dirname(process.execPath),
+        ...(process.env.HOME ? [join(process.env.HOME, '.local', 'bin')] : []),
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+      ];
+  return [...new Set(pathEntries)].join(delimiter);
 }
 
 function buildNetworkProcessEnv(

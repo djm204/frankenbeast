@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { delimiter, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
   healthcheckNetworkService,
@@ -223,6 +224,29 @@ describe('startNetworkService', () => {
     ]);
     expect(Object.keys(spawnedEnv).every((key) => permittedKeys.has(key))).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'exposes conventional operator CLI directories without inheriting arbitrary PATH entries',
+    async () => {
+      const operatorHome = '/home/network-operator';
+      const untrustedDirectory = '/tmp/network-untrusted-bin';
+      vi.stubEnv('HOME', operatorHome);
+      vi.stubEnv('PATH', [untrustedDirectory, '/another/untrusted-bin'].join(delimiter));
+
+      await expect(startNetworkService(makeService('npm'), {
+        detached: false,
+      })).resolves.toEqual({ pid: 4242 });
+
+      const spawnOptions = spawnMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+      const pathEntries = (spawnOptions?.env?.PATH ?? '').split(delimiter);
+      expect(pathEntries).toEqual(expect.arrayContaining([
+        join(operatorHome, '.local', 'bin'),
+        '/usr/local/bin',
+      ]));
+      expect(pathEntries).not.toContain(untrustedDirectory);
+      expect(pathEntries).not.toContain('/another/untrusted-bin');
+    },
+  );
 
   it('inherits only credentials required by the managed service', async () => {
     vi.stubEnv('FRANKENBEAST_BEAST_OPERATOR_TOKEN', 'operator-token-for-test');
