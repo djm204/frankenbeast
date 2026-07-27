@@ -195,6 +195,7 @@ describe('SmartSwarmPage', () => {
     expect(await screen.findByText('Live state is degraded')).toBeDefined();
     expect(screen.getByText('Approvals are temporarily unreadable.')).toBeDefined();
     expect(screen.getByText('Live dashboard')).toBeDefined();
+    expect(screen.getByRole('region', { name: 'Provider capabilities' }).textContent).toContain('degraded');
   });
 
   it('ranks recent blockers and pending approvals before bounding evidence', async () => {
@@ -766,6 +767,23 @@ describe('SmartSwarmPage', () => {
     expect(fetchSnapshot).toHaveBeenLastCalledWith('hermes', { activityLimit: 1 });
   });
 
+  it('does not clear a topology failure after a workspace catalog refresh succeeds', async () => {
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockRejectedValueOnce(new Error('Topology refresh failed.'))
+      .mockResolvedValueOnce(snapshot);
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+    expect(await screen.findByText('Topology refresh failed.')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh workspaces' }));
+
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(4));
+    expect(screen.getByText('Topology refresh failed.')).toBeDefined();
+  });
+
   it('reconciles the selected workspace when a catalog refresh removes it', async () => {
     const secondWorkspace = { id: 'board-secondary', name: 'Secondary board', kind: 'board' as const, state: 'available' as const };
     const expandedSnapshot: RuntimeSnapshot = {
@@ -776,7 +794,16 @@ describe('SmartSwarmPage', () => {
       .mockResolvedValueOnce(expandedSnapshot)
       .mockResolvedValueOnce(expandedSnapshot)
       .mockResolvedValueOnce(expandedSnapshot)
-      .mockResolvedValue(snapshot);
+      .mockResolvedValue({
+        ...snapshot,
+        workspaces: {
+          status: 'available',
+          data: [
+            { id: 'board-offline', name: 'Offline board', kind: 'board', state: 'unavailable' },
+            snapshot.workspaces.status === 'available' ? snapshot.workspaces.data[0]! : secondWorkspace,
+          ],
+        },
+      });
     render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
     fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: 'board-secondary' } });
@@ -889,6 +916,7 @@ describe('SmartSwarmPage', () => {
         data: [
           { ...baseRun, id: 'older-open-run', state: 'running', finishedAt: null, startedAt: '2026-07-26T18:00:00Z', lastActiveAt: '2026-07-26T18:01:00Z' },
           { ...baseRun, id: 'newer-open-run', state: 'running', finishedAt: null, startedAt: '2026-07-26T19:00:00Z', lastActiveAt: '2026-07-26T19:01:00Z' },
+          { ...baseRun, id: 'terminal-without-finish-time', state: 'failed', finishedAt: null, startedAt: '2026-07-26T20:00:00Z', lastActiveAt: '2026-07-26T20:01:00Z' },
         ],
       },
     };
@@ -896,6 +924,7 @@ describe('SmartSwarmPage', () => {
 
     expect(await screen.findByText('Run newer-open-run: running')).toBeDefined();
     expect(screen.queryByText('Run older-open-run: running')).toBeNull();
+    expect(screen.queryByText('Run terminal-without-finish-time: failed')).toBeNull();
   });
 
   it('bounds large live task topologies instead of freezing the operator view', async () => {
@@ -922,7 +951,13 @@ describe('SmartSwarmPage', () => {
       ...snapshot,
       agents: {
         status: 'available',
-        data: Array.from({ length: 205 }, (_, index) => ({ ...baseAgent, id: `agent-${index}` })),
+        data: Array.from({ length: 205 }, (_, index) => ({
+          ...baseAgent,
+          id: `agent-${index}`,
+          displayName: index === 204 ? 'Critical blocked agent' : `Idle agent ${index}`,
+          state: index === 204 ? 'blocked' : 'idle',
+          lastActiveAt: index === 204 ? '2026-07-26T20:00:00.000Z' : '2026-07-25T20:00:00.000Z',
+        })),
       },
       tasks: {
         status: 'available',
@@ -949,6 +984,7 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByRole('button', { name: 'Inspect Important blocked task' })).toBeDefined();
     expect(screen.getAllByRole('button', { name: /Inspect/ })).toHaveLength(200);
     expect(screen.getByText('Showing 100 of 205 agents')).toBeDefined();
+    expect(screen.getByText('Critical blocked agent')).toBeDefined();
     expect(screen.getByText('Showing 100 of 205 blockers')).toBeDefined();
     expect(screen.getByText('Showing 100 of 205 approvals')).toBeDefined();
     expect(runFilterCalls).toBeLessThanOrEqual(1);

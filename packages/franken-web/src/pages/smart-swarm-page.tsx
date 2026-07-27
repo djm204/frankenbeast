@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SmartSwarmApiError,
+  type RuntimeAgent,
   type RuntimeCapability,
   type RuntimeConnectionState,
   type RuntimeEvent,
@@ -8,6 +9,7 @@ import {
   type RuntimeSection,
   type RuntimeSnapshot,
   type RuntimeTask,
+  type RuntimeWorkspace,
   type SmartSwarmApiClient,
 } from '../lib/smart-swarm-api';
 
@@ -19,6 +21,7 @@ const MAX_VISIBLE_TASKS = 200;
 const MAX_VISIBLE_EVIDENCE = 100;
 const STREAM_REFRESH_DEBOUNCE_MS = 250;
 const TOPOLOGY_REFRESH_INTERVAL_MS = 5_000;
+const TERMINAL_RUN_STATES = new Set(['succeeded', 'failed', 'cancelled']);
 
 function available<T>(section: RuntimeSection<T>): T | null {
   return section.status === 'available' ? section.data : null;
@@ -54,6 +57,28 @@ function compareTaskActivity(left: RuntimeTask, right: RuntimeTask): number {
   if (priorityDifference !== 0) return priorityDifference;
   const recencyDifference = Date.parse(right.updatedAt ?? right.createdAt) - Date.parse(left.updatedAt ?? left.createdAt);
   return recencyDifference !== 0 ? recencyDifference : left.id.localeCompare(right.id);
+}
+
+function preferredWorkspaceId(workspaces: RuntimeWorkspace[]): string {
+  return workspaces.find((workspace) => workspace.state === 'available')?.id
+    ?? workspaces.find((workspace) => workspace.state === 'degraded')?.id
+    ?? workspaces[0]?.id
+    ?? '';
+}
+
+function compareAgentActivity(left: RuntimeAgent, right: RuntimeAgent): number {
+  const rank: Record<RuntimeAgent['state'], number> = {
+    blocked: 0,
+    running: 1,
+    idle: 2,
+    unknown: 3,
+    offline: 4,
+  };
+  const stateDifference = rank[left.state] - rank[right.state];
+  if (stateDifference !== 0) return stateDifference;
+  const leftActiveAt = left.lastActiveAt ? Date.parse(left.lastActiveAt) : 0;
+  const rightActiveAt = right.lastActiveAt ? Date.parse(right.lastActiveAt) : 0;
+  return rightActiveAt - leftActiveAt || left.id.localeCompare(right.id);
 }
 
 function compareRuntimeEvidenceRecency(
@@ -145,6 +170,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [loading, setLoading] = useState(true);
   const [providerError, setProviderError] = useState<unknown>(null);
   const [snapshotError, setSnapshotError] = useState<unknown>(null);
+  const [workspaceCatalogError, setWorkspaceCatalogError] = useState<unknown>(null);
   const [streamError, setStreamError] = useState<unknown>(null);
   const [connection, setConnection] = useState<RuntimeConnectionState>('connecting');
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -162,7 +188,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const taskDetailTrigger = useRef<HTMLButtonElement | null>(null);
 
   const provider = providers.find((candidate) => candidate.id === providerId);
-  const error = snapshotError ?? providerError ?? streamError;
+  const error = snapshotError ?? providerError ?? workspaceCatalogError ?? streamError;
   const workspaces = available(workspaceCatalog ?? snapshot?.workspaces ?? { status: 'available', data: [] }) ?? [];
   const agents = snapshot ? available(snapshot.agents) ?? [] : [];
   const tasks = snapshot ? available(snapshot.tasks) ?? [] : [];
@@ -189,7 +215,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const newestUnfinishedRunByTask = useMemo(() => {
     const indexed = new Map<string, (typeof runs)[number]>();
     for (const run of runs) {
-      if (run.finishedAt !== null) continue;
+      if (run.finishedAt !== null || TERMINAL_RUN_STATES.has(run.state)) continue;
       const current = indexed.get(run.taskId);
       if (!current || Date.parse(run.lastActiveAt ?? run.startedAt) > Date.parse(current.lastActiveAt ?? current.startedAt)) {
         indexed.set(run.taskId, run);
@@ -232,6 +258,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           setWorkspaceId('');
           setSelectedTaskId(null);
           setSnapshotError(null);
+          setWorkspaceCatalogError(null);
           setStreamError(null);
         }
         setProviderId(nextProviderId);
@@ -275,7 +302,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           setWorkspaceId((current) => (
             nextWorkspaces.some((workspace) => workspace.id === current)
               ? current
-              : nextWorkspaces[0]?.id ?? ''
+              : preferredWorkspaceId(nextWorkspaces)
           ));
         }
         setSelectedTaskId((current) => (
@@ -354,7 +381,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   }, [client, provider, workspaceId, scheduleTopologyRefresh]);
 
   const filteredAgents = agents.filter((agent) => !workspaceId || agent.workspaceId === workspaceId);
-  const visibleAgents = filteredAgents.slice(0, MAX_VISIBLE_EVIDENCE);
+  const visibleAgents = [...filteredAgents].sort(compareAgentActivity).slice(0, MAX_VISIBLE_EVIDENCE);
   const filteredTasks = tasks.filter((task) => !workspaceId || task.workspaceId === workspaceId);
   const visibleTasks = [...filteredTasks]
     .sort(compareTaskActivity)
@@ -381,12 +408,12 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         if (!catalogWorkspaces.some((workspace) => workspace.id === currentWorkspaceId.current)) {
           setSnapshot(null);
           setSelectedTaskId(null);
-          setWorkspaceId(catalogWorkspaces[0]?.id ?? '');
+          setWorkspaceId(preferredWorkspaceId(catalogWorkspaces));
         }
       }
-      setSnapshotError(null);
+      setWorkspaceCatalogError(null);
     } catch (nextError) {
-      if (currentProviderId.current === requestedProviderId) setSnapshotError(nextError);
+      if (currentProviderId.current === requestedProviderId) setWorkspaceCatalogError(nextError);
     } finally {
       if (currentProviderId.current === requestedProviderId) setLoading(false);
     }
@@ -426,6 +453,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                 setWorkspaceCatalog(null);
                 setWorkspaceId('');
                 setSelectedTaskId(null);
+                setWorkspaceCatalogError(null);
                 setStreamError(null);
                 setProviderId(event.target.value);
               }}
@@ -496,7 +524,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             <div>
               <p className="eyebrow">Runtime status</p>
               <h3>{provider?.displayName ?? snapshot.providerId}</h3>
-              <p>{provider?.health.message ?? provider?.health.state ?? snapshot.state}</p>
+              <p>{snapshot.state === 'ready'
+                ? provider?.health.message ?? provider?.health.state ?? snapshot.state
+                : snapshot.state}</p>
             </div>
             <dl>
               {provider ? Object.entries(provider.capabilities).map(([name, capability]) => (
