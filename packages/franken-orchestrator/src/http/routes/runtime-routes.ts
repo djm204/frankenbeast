@@ -139,6 +139,15 @@ function runtimeStreamError(error: unknown): Error {
   return new Error(typeof redacted === 'string' ? redacted : 'Runtime event stream failed');
 }
 
+function isTransientRuntimePollError(error: unknown): boolean {
+  const code = error instanceof Error && 'code' in error
+    ? String((error as Error & { code?: unknown }).code ?? '')
+    : '';
+  const message = error instanceof Error ? error.message : String(error);
+  return /^(?:SQLITE_BUSY|SQLITE_LOCKED|EBUSY)$/u.test(code)
+    || /(?:SQLITE_(?:BUSY|LOCKED)|database (?:is )?(?:busy|locked|temporarily unavailable)|Every selected Hermes event source failed)/iu.test(message);
+}
+
 function refreshConsumedTicket(ticketStore: SseConnectionTicketStore, ticket: string): void {
   try {
     ticketStore.refreshConsumed(ticket);
@@ -265,6 +274,10 @@ export async function runRuntimeEventStream(
   };
 
   let consecutivePollFailures = 0;
+  const recordPollFailure = () => {
+    consecutivePollFailures += 1;
+    if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) endStream();
+  };
   try {
     heartbeat = setInterval(
       () => {
@@ -275,7 +288,8 @@ export async function runRuntimeEventStream(
     );
     const initialPublish = publish().catch((error: unknown) => {
       if (closed && pollController.signal.aborted) return;
-      throw error;
+      if (!isTransientRuntimePollError(error)) throw error;
+      recordPollFailure();
     });
     await Promise.race([initialPublish, aborted]);
     if (closed) {
@@ -286,10 +300,7 @@ export async function runRuntimeEventStream(
       if (activePublish) return;
       void publish().then(
         () => { consecutivePollFailures = 0; },
-        () => {
-          consecutivePollFailures += 1;
-          if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) endStream();
-        },
+        recordPollFailure,
       );
     }, options.pollIntervalMs);
     await aborted;

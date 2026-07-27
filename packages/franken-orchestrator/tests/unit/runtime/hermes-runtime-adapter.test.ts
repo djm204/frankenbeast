@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -388,6 +388,25 @@ describe('HermesRuntimeAdapter', () => {
     const dbPath = join(boardDir, 'kanban.db');
     createCurrentKanban(dbPath);
     const adapter = new HermesRuntimeAdapter({ hermesHome: home, kanbanDbPath: dbPath });
+
+    const unscoped = await adapter.getSnapshot();
+    const scoped = await adapter.getSnapshot({ workspaceId: 'hermes:alpha' });
+
+    expect(unscoped.workspaces).toEqual(expect.objectContaining({
+      data: [expect.objectContaining({ id: 'hermes:global' })],
+    }));
+    expect(scoped.workspaces).toEqual({ status: 'available', data: [] });
+    expect(scoped.state).toBe('empty');
+  });
+
+  it('does not expose the default global database through a scoped board symlink', async () => {
+    const home = await createHome();
+    const globalPath = join(home, 'kanban.db');
+    const boardDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(boardDir, { recursive: true });
+    createCurrentKanban(globalPath);
+    await symlink(globalPath, join(boardDir, 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
 
     const unscoped = await adapter.getSnapshot();
     const scoped = await adapter.getSnapshot({ workspaceId: 'hermes:alpha' });
@@ -897,6 +916,27 @@ describe('HermesRuntimeAdapter', () => {
       data: expect.arrayContaining([expect.objectContaining({
         id: 'hermes:global:t_parent',
         title: 'failed reading [REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
+  it('redacts forward-slash UNC paths without corrupting URLs for direct consumers', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'failed //server/share/secret but kept https://server/share/public',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'failed [REDACTED_HOST_PATH] but kept https://server/share/public',
       })]),
     }));
   });

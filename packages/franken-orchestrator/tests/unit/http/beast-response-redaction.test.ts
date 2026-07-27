@@ -74,6 +74,11 @@ describe('Beast response redaction', () => {
       .toBe('See http://[::1]/api/status');
   });
 
+  it('redacts forward-slash UNC paths without corrupting absolute URLs', () => {
+    expect(redactAbsoluteHostPathValues('failed //server/share/secret but kept https://server/share/public'))
+      .toBe('failed [REDACTED_HOST_PATH] but kept https://server/share/public');
+  });
+
   it('preserves quoted API routes', () => {
     expect(redactAbsoluteHostPathValues('Call "/v1/users" after setup'))
       .toBe('Call "/v1/users" after setup');

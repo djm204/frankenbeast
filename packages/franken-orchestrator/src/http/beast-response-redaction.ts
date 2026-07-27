@@ -15,6 +15,7 @@ function isAbsoluteHostPath(value: string): boolean {
 }
 
 const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
+const FORWARD_SLASH_UNC_RE = /(^|[\s=\[\]({}),;|!?#`>])(\/\/(?:[^/\s"'`?#&]+\/)+[^/\s"'`?#&]+)/gu;
 const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
 const QUOTED_HOST_PATH_RES = [
   /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
@@ -63,6 +64,9 @@ function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean):
     .replace(ANGLE_BRACKET_HOST_PATH_RE, '$1[REDACTED_HOST_PATH]');
   const redacted = redactedFileUrls.replace(
     EMBEDDED_HOST_PATH_RE,
+    (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
+  ).replace(
+    FORWARD_SLASH_UNC_RE,
     (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
   ).replace(
     EMBEDDED_POSIX_PATH_RE,

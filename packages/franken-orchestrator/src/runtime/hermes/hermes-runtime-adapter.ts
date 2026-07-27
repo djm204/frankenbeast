@@ -79,6 +79,7 @@ const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const SOURCE_INSPECTION_CACHE_TTL_MS = 1_000;
 const MAX_SOURCE_INSPECTION_CACHE_ENTRIES = 64;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
+const FORWARD_SLASH_UNC_RE = /(^|[\s=\[\]({}),;|!?#`>])(\/\/(?:[^/\s"'`?#&]+\/)+[^/\s"'`?#&]+)/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
 const QUOTED_POSIX_PATH_RES = [
   /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
@@ -164,6 +165,7 @@ function boundedText(value: unknown): string {
     .replace(ENCODED_ABSOLUTE_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ANGLE_BRACKET_HOST_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
+    .replace(FORWARD_SLASH_UNC_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
     .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => {
       if (!hasApiRouteContext(source, path, offset, prefix)) return `${prefix}[REDACTED_HOST_PATH]`;
       const suffixOffset = path.search(/[?#]/u);
@@ -649,7 +651,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     let discoveryMessage: string | undefined;
     const globalPath = this.kanbanDbPath ? resolve(this.kanbanDbPath) : resolve(home!, 'kanban.db');
     let configuredResolvedPath: string | undefined;
-    if (this.kanbanDbPath && workspaceId !== undefined && workspaceId !== 'hermes:global') {
+    if (workspaceId !== undefined && workspaceId !== 'hermes:global') {
       try {
         configuredResolvedPath = await realpath(globalPath);
       } catch {

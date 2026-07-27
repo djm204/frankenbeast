@@ -179,6 +179,15 @@
 - [x] Commit/push `3b8b8053c`, reply to and resolve all five threads, and reconcile this ledger.
 - [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
 
+## Exact-head round 38 follow-up
+
+- [x] Inspect the three current-head Codex findings on `afee21d5cf824083382211ec7f3b800bbc34fab7` and preserve the inherited RED regressions after duplicate-owner recovery.
+- [x] Deduplicate the default global database during scoped symlink discovery, redact forward-slash UNC paths in shared/direct runtime text, and retry only transient initial polling failures without swallowing permanent/SSE framing errors.
+- [x] Commit the round-38 remediation and rebase the branch cleanly onto exact `origin/main` `93337f76436466e89b17cd6371db056373780d54`.
+- [x] Run 149/149 focused tests plus package/root typecheck, lint, build, and the full orchestrator suite.
+- [ ] Push the rebased existing branch and reply to and resolve all three threads.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -212,3 +221,4 @@
 - Exact-head round 35 reproduced all three behavior findings RED and passes 139/139 focused adapter, route, and redaction tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,721/4,724 passing; all three CLI failures reproduce outside the runtime-adapter diff.
 - Exact-head round 36 reproduced three actionable behavior findings RED and passes 141/141 focused adapter, route, and redaction tests GREEN; the fourth schema finding was already satisfied and its proposed regression passed before implementation. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,723/4,726 passing.
 - Exact-head round 37 reproduced all five findings RED and passes 145/145 focused adapter, route, and redaction tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,727/4,730 passing.
+- Exact-head round 38 inherited all three findings with recorded RED evidence. Independent recovery exposed two incomplete composite changes (direct-adapter UNC redaction and over-broad initial error retry), corrected them, and passes 149/149 focused adapter, route, and redaction tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass after rebasing onto current `origin/main`; the full orchestrator suite remains at the established unrelated three-failure baseline with 4,731/4,734 passing.

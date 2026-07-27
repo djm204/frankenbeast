@@ -863,6 +863,40 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('retries after a transient initial runtime poll failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      vi.mocked(adapter.getEvents)
+        .mockRejectedValueOnce(new Error('SQLITE_BUSY'))
+        .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
+      let abortStream: (() => void) | undefined;
+      const stream = {
+        pipe: vi.fn().mockResolvedValue(undefined),
+        onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+      };
+      let settled = false;
+      let failure: unknown;
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 1_000,
+        pollIntervalMs: 20,
+      }).then(
+        () => { settled = true; },
+        (error: unknown) => { settled = true; failure = error; },
+      );
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(adapter.getEvents).toHaveBeenCalledTimes(2);
+      expect(settled).toBe(false);
+      expect(failure).toBeUndefined();
+      abortStream!();
+      await streamDone;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('counts one stalled periodic request as one failure when it rejects', async () => {
     vi.useFakeTimers();
     try {
