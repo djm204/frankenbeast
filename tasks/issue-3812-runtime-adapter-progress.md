@@ -48,7 +48,7 @@
 - [x] Inspect the three current-head Codex findings on `7d7a18eba55d02ff96bb815c183370e29fe0884b`.
 - [x] Reproduce and remediate scoped cursor outage retention, contextual API-route redaction, and stale pointerless-run fallback.
 - [x] Run focused tests plus package lint, typecheck, and build gates.
-- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
