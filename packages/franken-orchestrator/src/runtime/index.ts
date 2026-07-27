@@ -24,6 +24,7 @@ export type {
   RuntimeEvent,
   RuntimeEventPage,
   RuntimeAgent,
+  RuntimeApproval,
   RuntimeBlocker,
   RuntimeProvider,
   RuntimeRun,

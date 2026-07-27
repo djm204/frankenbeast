@@ -100,7 +100,11 @@ describe('smart-swarm runtime routes', () => {
     const snapshotText = await snapshot.text();
     expect(JSON.parse(snapshotText)).toEqual({ data: expect.objectContaining({ providerId: 'hermes' }) });
     expect(snapshotText).not.toContain('secret-route-value');
-    expect(adapter.getSnapshot).toHaveBeenCalledWith({ workspaceId: 'hermes:global', activityLimit: 25 });
+    expect(adapter.getSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: 'hermes:global',
+      activityLimit: 25,
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it('redacts absolute host paths embedded in provider-neutral response strings', async () => {
@@ -327,6 +331,118 @@ describe('smart-swarm runtime routes', () => {
 
     expect(first.status).toBe(401);
     expect(second.status).toBe(429);
+  });
+
+  it('rate limits authenticated requests by the verified operator identity', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 1, windowMs: 60_000 },
+    });
+
+    const first = await app.request('/v1/smart-swarm/providers', {
+      headers: {
+        authorization: 'junk-one',
+        'x-frankenbeast-operator-token': 'operator-secret',
+      },
+    });
+    const second = await app.request('/v1/smart-swarm/providers', {
+      headers: {
+        authorization: 'junk-two',
+        'x-frankenbeast-operator-token': 'operator-secret',
+      },
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
+
+  it('caps concurrent runtime polling streams', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const adapter = runtimeAdapter();
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 10, windowMs: 60_000 },
+      maxActiveStreams: 1,
+      pollIntervalMs: 10,
+      heartbeatIntervalMs: 20,
+    });
+    const openStream = async () => {
+      const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const { connectionId } = await ticketResponse.json() as { connectionId: string };
+      return app.request(`/v1/smart-swarm/providers/hermes/events/${connectionId}`, {
+        headers: { cookie },
+      });
+    };
+
+    const first = await openStream();
+    const second = await openStream();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    await first.body!.cancel();
+  });
+
+  it('releases stream capacity when the client disconnects during the initial poll', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const adapter = runtimeAdapter();
+    let resolveInitialPoll!: (page: ReturnType<typeof RuntimeEventPageSchema.parse>) => void;
+    const initialPoll = new Promise<ReturnType<typeof RuntimeEventPageSchema.parse>>((resolve) => {
+      resolveInitialPoll = resolve;
+    });
+    vi.mocked(adapter.getEvents)
+      .mockReturnValueOnce(initialPoll)
+      .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 10, windowMs: 60_000 },
+      maxActiveStreams: 1,
+      pollIntervalMs: 60_000,
+      heartbeatIntervalMs: 60_000,
+    });
+
+    const issue = async () => {
+      const response = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const cookie = response.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const { connectionId } = await response.json() as { connectionId: string };
+      return { cookie, connectionId };
+    };
+
+    const firstTicket = await issue();
+    const first = await app.request(`/v1/smart-swarm/providers/hermes/events/${firstTicket.connectionId}`, {
+      headers: { cookie: firstTicket.cookie },
+    });
+    await first.body!.cancel();
+    resolveInitialPoll(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
+    await initialPoll;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const secondTicket = await issue();
+    const second = await app.request(`/v1/smart-swarm/providers/hermes/events/${secondTicket.connectionId}`, {
+      headers: { cookie: secondTicket.cookie },
+    });
+
+    expect(second.status).toBe(200);
+    await second.body!.cancel();
   });
 
   it('rejects a malformed SSE cursor before consuming its one-shot ticket', async () => {

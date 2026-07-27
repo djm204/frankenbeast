@@ -57,9 +57,13 @@ interface CursorValue {
   sourceId: number;
 }
 
+interface CursorPosition extends CursorValue {
+  missingPolls?: number | undefined;
+}
+
 interface RequestCursorState {
   legacy?: CursorValue | undefined;
-  positions: Map<string, CursorValue>;
+  positions: Map<string, CursorPosition>;
 }
 
 const REQUIRED_SCHEMA: Record<string, string[]> = {
@@ -71,6 +75,7 @@ const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_CURSOR_CHARS = 12 * 1024;
 const MAX_SUMMARY_CHARS = 512;
+const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
@@ -78,6 +83,10 @@ const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 
 function nowIso(now: () => Date): string {
   return now().toISOString();
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  signal?.throwIfAborted();
 }
 
 function optionalHome(options: HermesRuntimeAdapterOptions): string | undefined {
@@ -244,10 +253,10 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
       positions?: unknown;
     };
     if (Array.isArray(decoded.p)) {
-      const positions = new Map<string, CursorValue>();
+      const positions = new Map<string, CursorPosition>();
       for (const entry of decoded.p) {
-        if (!Array.isArray(entry) || entry.length !== 4) throw new Error('invalid');
-        const [workspaceId, occurredAt, sourceCode, sourceId] = entry as unknown[];
+        if (!Array.isArray(entry) || (entry.length !== 4 && entry.length !== 5)) throw new Error('invalid');
+        const [workspaceId, occurredAt, sourceCode, sourceId, missingPolls = 0] = entry as unknown[];
         const source = sourceCode === 0 ? 'event' : sourceCode === 1 ? 'comment' : undefined;
         if (
           typeof workspaceId !== 'string'
@@ -257,17 +266,26 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
           || source === undefined
           || !Number.isSafeInteger(sourceId)
           || (sourceId as number) < 0
+          || !Number.isSafeInteger(missingPolls)
+          || (missingPolls as number) < 0
+          || (missingPolls as number) > MISSING_WORKSPACE_GRACE_POLLS
         ) throw new Error('invalid');
-        positions.set(workspaceId, { workspaceId, occurredAt, source, sourceId: sourceId as number });
+        positions.set(workspaceId, {
+          workspaceId,
+          occurredAt,
+          source,
+          sourceId: sourceId as number,
+          ...((missingPolls as number) > 0 ? { missingPolls: missingPolls as number } : {}),
+        });
       }
       return { positions };
     }
     if (decoded.positions && typeof decoded.positions === 'object' && !Array.isArray(decoded.positions)) {
-      const positions = new Map<string, CursorValue>();
+      const positions = new Map<string, CursorPosition>();
       for (const [workspaceId, encoded] of Object.entries(decoded.positions)) {
         if (typeof encoded !== 'string') throw new Error('invalid');
         const cursor = parseCursor(encoded);
-        if (!cursor) throw new Error('invalid');
+        if (!cursor || cursor.workspaceId !== workspaceId) throw new Error('invalid');
         positions.set(workspaceId, cursor);
       }
       return { positions };
@@ -279,13 +297,14 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
   return { legacy: parseCursor(value), positions: new Map() };
 }
 
-function cursorForPositions(positions: Map<string, CursorValue>): string {
+function cursorForPositions(positions: Map<string, CursorPosition>): string {
   const cursor = Buffer.from(JSON.stringify({
     p: [...positions].map(([workspaceId, cursor]) => [
       workspaceId,
       cursor.occurredAt,
       cursor.source === 'event' ? 0 : 1,
       cursor.sourceId,
+      ...(cursor.missingPolls ? [cursor.missingPolls] : []),
     ]),
   })).toString('base64url');
   if (cursor.length > MAX_CURSOR_CHARS) {
@@ -365,8 +384,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   async getSnapshot(request: RuntimeSnapshotRequest = {}): Promise<RuntimeSnapshot> {
+    throwIfAborted(request.signal);
     const activityLimit = normalizeLimit(request.activityLimit);
-    const inspection = await this.inspectSources();
+    const inspection = await this.inspectSources(request.signal);
+    throwIfAborted(request.signal);
     const inspected = inspection.sources.filter((source) => (
       request.workspaceId === undefined || source.workspaceId === request.workspaceId
     ));
@@ -385,6 +406,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     let queryFailures = 0;
 
     for (const source of inspected.filter((candidate) => candidate.status === 'compatible')) {
+      throwIfAborted(request.signal);
       try {
         const data = this.readSource(source, activityLimit);
         tasks.push(...data.tasks);
@@ -402,9 +424,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const compatibleCount = inspected.filter((source) => source.status === 'compatible').length;
     const unavailableCount = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
-    const workspaceFilterMiss = request.workspaceId !== undefined
-      && inspected.length === 0
-      && inspection.sources.some((source) => source.status === 'compatible');
+    const workspaceFilterMiss = request.workspaceId !== undefined && inspected.length === 0;
     const state = workspaceFilterMiss
       ? 'empty' as const
       : inspected.length === 0
@@ -452,15 +472,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
+    throwIfAborted(request.signal);
     const limit = normalizeLimit(request.limit);
     const cursorState = parseRequestCursor(request.cursor);
-    const selectedSources = (await this.inspectSources()).sources.filter((source) => (
+    const selectedSources = (await this.inspectSources(request.signal)).sources.filter((source) => (
       request.workspaceId === undefined || source.workspaceId === request.workspaceId
     ));
+    throwIfAborted(request.signal);
     const inspected = selectedSources.filter((source) => source.status === 'compatible');
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
     const sourceLatest = new Map<string, CursorValue>();
     for (const source of inspected) {
+      throwIfAborted(request.signal);
       const after = cursorState.positions.get(source.workspaceId) ?? cursorState.legacy;
       try {
         const events = this.readEvents(source, after, limit + 1);
@@ -482,9 +505,17 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     });
     const page = request.cursor ? filtered.slice(0, limit) : filtered.slice(-limit);
     const selectedWorkspaceIds = new Set(selectedSources.map((source) => source.workspaceId));
-    const positions = new Map(
-      [...cursorState.positions].filter(([workspaceId]) => selectedWorkspaceIds.has(workspaceId)),
-    );
+    const positions = new Map<string, CursorPosition>();
+    for (const [workspaceId, position] of cursorState.positions) {
+      if (selectedWorkspaceIds.has(workspaceId)) {
+        positions.set(workspaceId, { ...position, missingPolls: undefined });
+      } else if (
+        request.workspaceId === undefined
+        && (position.missingPolls ?? 0) < MISSING_WORKSPACE_GRACE_POLLS
+      ) {
+        positions.set(workspaceId, { ...position, missingPolls: (position.missingPolls ?? 0) + 1 });
+      }
+    }
     if (cursorState.legacy) {
       for (const source of inspected) positions.set(source.workspaceId, cursorState.legacy);
     }
@@ -518,7 +549,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     parseRequestCursor(cursor);
   }
 
-  private async discoverSources(): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
+  private async discoverSources(signal?: AbortSignal): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
+    throwIfAborted(signal);
     if (!this.home && !this.kanbanDbPath) return { sources: [] };
     const home = this.home ? resolve(this.home) : undefined;
     const sources: DatabaseSource[] = [];
@@ -526,40 +558,51 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     let discoveryMessage: string | undefined;
     const globalPath = this.kanbanDbPath ? resolve(this.kanbanDbPath) : resolve(home!, 'kanban.db');
     try {
+      throwIfAborted(signal);
       const safe = this.kanbanDbPath
         ? await this.isDatabase(globalPath)
         : await this.isSafeDatabase(home!, globalPath);
+      throwIfAborted(signal);
       if (safe) {
         const resolvedPath = await realpath(globalPath);
+        throwIfAborted(signal);
         discoveredPaths.add(resolvedPath);
         sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: resolvedPath });
       }
     } catch (error) {
+      throwIfAborted(signal);
       discoveryMessage = error instanceof Error ? error.message : 'Hermes database discovery failed';
     }
     if (!home) return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
     const boardsRoot = resolve(home, 'kanban', 'boards');
     let entries;
     try {
+      throwIfAborted(signal);
       entries = await readdir(boardsRoot, { withFileTypes: true });
+      throwIfAborted(signal);
     } catch (error) {
+      throwIfAborted(signal);
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         discoveryMessage = error instanceof Error ? error.message : 'Hermes board discovery failed';
       }
       return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
     }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      throwIfAborted(signal);
       if (!entry.isDirectory() || !/^[A-Za-z0-9._-]+$/u.test(entry.name)) continue;
       const path = resolve(boardsRoot, entry.name, 'kanban.db');
       try {
         if (await this.isSafeDatabase(home, path)) {
+          throwIfAborted(signal);
           const resolvedPath = await realpath(path);
+          throwIfAborted(signal);
           if (discoveredPaths.has(resolvedPath)) continue;
           discoveredPaths.add(resolvedPath);
           const workspaceId = entry.name === 'global' ? 'hermes:board:global' : `hermes:${entry.name}`;
           sources.push({ workspaceId, name: entry.name, kind: 'board', path: resolvedPath });
         }
       } catch (error) {
+        throwIfAborted(signal);
         discoveryMessage ??= error instanceof Error ? error.message : 'Hermes board discovery failed';
       }
     }
@@ -585,27 +628,29 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private async inspectSources(): Promise<SourceInspection> {
-    const discovery = await this.discoverSources();
-    const sources = discovery.sources.map((source) => {
+  private async inspectSources(signal?: AbortSignal): Promise<SourceInspection> {
+    const discovery = await this.discoverSources(signal);
+    const sources: InspectedSource[] = [];
+    for (const source of discovery.sources) {
+      throwIfAborted(signal);
       try {
         const db = this.open(source.path);
         try {
           const issue = this.schemaIssue(db);
-          return issue
+          sources.push(issue
             ? { ...source, status: 'schema-incompatible' as const, message: issue }
-            : { ...source, status: 'compatible' as const };
+            : { ...source, status: 'compatible' as const });
         } finally {
           db.close();
         }
       } catch (error) {
-        return {
+        sources.push({
           ...source,
           status: 'unavailable' as const,
           message: error instanceof Error ? error.message : 'Database unavailable',
-        };
+        });
       }
-    });
+    }
     return { sources, ...(discovery.discoveryMessage ? { discoveryMessage: discovery.discoveryMessage } : {}) };
   }
 
