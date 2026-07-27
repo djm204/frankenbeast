@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
-import { createRuntimeRoutes } from '../../../src/http/routes/runtime-routes.js';
+import { createRuntimeRoutes, runRuntimeEventStream } from '../../../src/http/routes/runtime-routes.js';
 import {
   RuntimeAdapterRegistry,
   RuntimeEventPageSchema,
@@ -421,9 +421,10 @@ describe('smart-swarm runtime routes', () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
     const adapter = runtimeAdapter();
-    const initialPoll = new Promise<ReturnType<typeof RuntimeEventPageSchema.parse>>(() => {});
     vi.mocked(adapter.getEvents)
-      .mockReturnValueOnce(initialPoll)
+      .mockImplementationOnce(({ signal } = {}) => new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }))
       .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
     const app = createRuntimeRoutes({
       registry: new RuntimeAdapterRegistry([adapter]),
@@ -460,6 +461,67 @@ describe('smart-swarm runtime routes', () => {
 
     expect(second.status).toBe(200);
     await second.body!.cancel();
+  });
+
+  it('keeps stream capacity reserved while a disconnected poll ignores cancellation', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents).mockReturnValue(new Promise(() => {}));
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      maxActiveStreams: 1,
+    });
+    const issue = async () => {
+      const response = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const cookie = response.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const { connectionId } = await response.json() as { connectionId: string };
+      return { cookie, connectionId };
+    };
+    const firstTicket = await issue();
+    const first = await app.request(`/v1/smart-swarm/providers/hermes/events/${firstTicket.connectionId}`, {
+      headers: { cookie: firstTicket.cookie },
+    });
+    await first.body!.cancel();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const secondTicket = await issue();
+    const second = await app.request(`/v1/smart-swarm/providers/hermes/events/${secondTicket.connectionId}`, {
+      headers: { cookie: secondTicket.cookie },
+    });
+
+    expect(second.status).toBe(429);
+    await second.body?.cancel();
+  });
+
+  it('ends runtime streams when a failure-preserving heartbeat write rejects', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+        events: [],
+        nextCursor: 'cursor-1',
+      }));
+      const pipe = vi.fn().mockRejectedValue(new Error('client disconnected'));
+      const stream = { pipe, onAbort: vi.fn() };
+
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 20,
+        pollIntervalMs: 100,
+      });
+      await vi.advanceTimersByTimeAsync(20);
+
+      await expect(streamDone).resolves.toBeUndefined();
+      expect(pipe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('closes polling streams when an adapter returns a permanent failure', async () => {

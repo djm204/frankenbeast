@@ -708,7 +708,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       return db.transaction(() => {
         const commentTable = this.commentTable(db);
         const taskRows = db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all() as RuntimeRow[];
-        const linkRows = this.hasTable(db, 'task_links')
+        const linkRows = this.hasColumns(db, 'task_links', ['parent_id', 'child_id'])
           ? db.prepare('SELECT parent_id, child_id FROM task_links ORDER BY parent_id, child_id').all() as RuntimeRow[]
           : [];
         const runRows = db.prepare('SELECT * FROM task_runs ORDER BY started_at, id').all() as RuntimeRow[];
@@ -839,7 +839,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       const currentRunId = String(task['current_run_id']);
       if (!isTerminalTaskStatus(task['status'])) activeRunIds.add(currentRunId);
       if (typeof task['session_id'] === 'string' && task['session_id']) {
-        sessionByRunId.set(currentRunId, boundedText(task['session_id']));
+        sessionByRunId.set(currentRunId, task['session_id']);
       }
     }
     const runs: RuntimeRun[] = runRows.map((run) => {

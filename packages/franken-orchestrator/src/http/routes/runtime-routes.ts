@@ -130,6 +130,114 @@ function validateAdapterCursor(adapter: RuntimeAdapter, cursor: string | undefin
   }
 }
 
+type RuntimeSseStream = Parameters<Parameters<typeof streamSSE>[1]>[0];
+
+interface RuntimeSseMessage {
+  data: string;
+  event?: string;
+  id?: string;
+}
+
+interface RuntimeEventStreamOptions {
+  initialCursor?: string | undefined;
+  workspaceId?: string | undefined;
+  pollIntervalMs: number;
+  heartbeatIntervalMs: number;
+}
+
+function runtimeSseBody(message: RuntimeSseMessage): ReadableStream<Uint8Array> {
+  const dataLines = message.data.split(/\r\n|\r|\n/u).map((line) => `data: ${line}`).join('\n');
+  const payload = [
+    message.id && `id: ${message.id}`,
+    message.event && `event: ${message.event}`,
+    dataLines,
+  ].filter(Boolean).join('\n') + '\n\n';
+  const bytes = new TextEncoder().encode(payload);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+export async function runRuntimeEventStream(
+  adapter: RuntimeAdapter,
+  stream: RuntimeSseStream,
+  options: RuntimeEventStreamOptions,
+): Promise<void> {
+  const pollController = new AbortController();
+  let cursor = options.initialCursor;
+  let polling = false;
+  let closed = false;
+  let resolveAbort!: () => void;
+  const aborted = new Promise<void>((resolve) => {
+    resolveAbort = resolve;
+  });
+  const endStream = () => {
+    if (closed) return;
+    closed = true;
+    pollController.abort();
+    resolveAbort();
+  };
+  stream.onAbort(endStream);
+
+  let writeChain = Promise.resolve();
+  const writeSse = (message: RuntimeSseMessage): Promise<void> => {
+    const write = writeChain.then(() => stream.pipe(runtimeSseBody(message)));
+    writeChain = write.catch(() => undefined);
+    return write;
+  };
+  const publish = async () => {
+    if (polling || closed) return;
+    polling = true;
+    try {
+      const page = RuntimeEventPageSchema.parse(await adapter.getEvents({
+        ...(cursor ? { cursor } : {}),
+        ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
+        limit: 100,
+        signal: pollController.signal,
+      }));
+      if (closed) return;
+      for (const event of page.events) {
+        await writeSse({
+          id: event.cursor,
+          event: 'activity',
+          data: JSON.stringify(runtimeResponse(event)),
+        });
+        cursor = event.cursor;
+      }
+      if (page.nextCursor) cursor = page.nextCursor;
+    } finally {
+      polling = false;
+    }
+  };
+
+  let poll: ReturnType<typeof setInterval> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  try {
+    const initialPublish = publish().catch((error: unknown) => {
+      if (closed && pollController.signal.aborted) return;
+      throw error;
+    });
+    await Promise.race([initialPublish, aborted]);
+    if (closed) {
+      await initialPublish;
+      return;
+    }
+    poll = setInterval(() => void publish().catch(endStream), options.pollIntervalMs);
+    heartbeat = setInterval(
+      () => void writeSse({ event: 'heartbeat', data: '' }).catch(endStream),
+      options.heartbeatIntervalMs,
+    );
+    await aborted;
+  } finally {
+    pollController.abort();
+    if (poll) clearInterval(poll);
+    if (heartbeat) clearInterval(heartbeat);
+  }
+}
+
 export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   const app = new Hono();
   const auth = requireOperatorAuth({ operatorToken: deps.operatorToken, security: deps.security });
@@ -264,51 +372,12 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     try {
       return streamSSE(c, async (stream) => {
         try {
-          let cursor = initialCursor;
-          let polling = false;
-          let closed = false;
-          let resolveAbort!: () => void;
-          const aborted = new Promise<void>((resolve) => {
-            resolveAbort = resolve;
-          });
-          stream.onAbort(() => {
-            closed = true;
-            resolveAbort();
-          });
-          const publish = async () => {
-            if (polling || closed) return;
-            polling = true;
-            try {
-              const page = RuntimeEventPageSchema.parse(await adapter.getEvents({
-                ...(cursor ? { cursor } : {}),
-                ...(workspaceId ? { workspaceId } : {}),
-                limit: 100,
-                signal: c.req.raw.signal,
-              }));
-              for (const event of page.events) {
-                await stream.writeSSE({
-                  id: event.cursor,
-                  event: 'activity',
-                  data: JSON.stringify(runtimeResponse(event)),
-                });
-                cursor = event.cursor;
-              }
-              if (page.nextCursor) cursor = page.nextCursor;
-            } finally {
-              polling = false;
-            }
-          };
-
-          await Promise.race([publish(), aborted]);
-          if (closed) return;
-          const poll = setInterval(() => void publish().catch(() => stream.abort()), pollIntervalMs);
-          const heartbeat = setInterval(
-            () => void stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => stream.abort()),
+          await runRuntimeEventStream(adapter, stream, {
+            initialCursor,
+            workspaceId,
+            pollIntervalMs,
             heartbeatIntervalMs,
-          );
-          await aborted;
-          clearInterval(poll);
-          clearInterval(heartbeat);
+          });
         } finally {
           activeStreams -= 1;
         }

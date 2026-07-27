@@ -18,40 +18,61 @@ const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:home|Users|private|var|t
 const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_HOST_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
+const API_ROUTE_KEYS = new Set(['route', 'endpoint', 'requestPath', 'pathname']);
 const SLASH_COMMANDS = new Set([
   '/plan', '/run', '/status', '/diff', '/approve', '/reject', '/session', '/quit',
 ]);
 
-function isApplicationPath(value: string): boolean {
+function isApplicationPath(value: string, allowApiRoute: boolean): boolean {
   const command = value.match(/^(\/[^\s]+)(?:\s|$)/u)?.[1];
-  return API_ROUTE_RE.test(value) || (command !== undefined && SLASH_COMMANDS.has(command));
+  return (allowApiRoute && API_ROUTE_RE.test(value))
+    || (API_ROUTE_RE.test(value) && /[?#]/u.test(value))
+    || (command !== undefined && SLASH_COMMANDS.has(command));
 }
 
-function redactEmbeddedAbsoluteHostPaths(value: string): string {
+function hasApplicationRouteContext(
+  value: string,
+  path: string,
+  offset: number,
+  prefix: string,
+  allowApiRoute: boolean,
+): boolean {
+  if (!API_ROUTE_RE.test(path)) return false;
+  if (allowApiRoute || (offset === 0 && /[?#]/u.test(path))) return true;
+  const context = value.slice(0, offset + prefix.length);
+  return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check|and)\s+["']?$/iu.test(context);
+}
+
+function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean): string {
   return value.replace(
     EMBEDDED_HOST_PATH_RE,
     (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
   ).replace(
     EMBEDDED_POSIX_PATH_RE,
-    (_match, prefix: string, path: string) => (
-      API_ROUTE_RE.test(path) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
+    (_match, prefix: string, path: string, offset: number, source: string) => (
+      hasApplicationRouteContext(source, path, offset, prefix, allowApiRoute)
+        ? `${prefix}${path}`
+        : `${prefix}[REDACTED_HOST_PATH]`
     ),
   ).replace(
     QUOTED_POSIX_HOST_PATH_RE,
-    (_match, quote: string, path: string) => (
-      API_ROUTE_RE.test(path) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
+    (_match, quote: string, path: string, offset: number, source: string) => (
+      hasApplicationRouteContext(source, path, offset, quote, allowApiRoute)
+        ? `${quote}${path}`
+        : `${quote}[REDACTED_HOST_PATH]`
     ),
   );
 }
 
-export function redactAbsoluteHostPathValues(value: unknown): unknown {
+function redactAbsoluteHostPathValue(value: unknown, key?: string): unknown {
   if (typeof value === 'string') {
-    return isApplicationPath(value)
-      ? redactEmbeddedAbsoluteHostPaths(value)
-      : isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : redactEmbeddedAbsoluteHostPaths(value);
+    const allowApiRoute = key !== undefined && API_ROUTE_KEYS.has(key);
+    return isApplicationPath(value, allowApiRoute)
+      ? redactEmbeddedAbsoluteHostPaths(value, allowApiRoute)
+      : isAbsoluteHostPath(value) ? '[REDACTED_HOST_PATH]' : redactEmbeddedAbsoluteHostPaths(value, allowApiRoute);
   }
   if (Array.isArray(value)) {
-    return value.map(redactAbsoluteHostPathValues);
+    return value.map((entry) => redactAbsoluteHostPathValue(entry, key));
   }
   if (!value || typeof value !== 'object') {
     return value;
@@ -59,8 +80,12 @@ export function redactAbsoluteHostPathValues(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
       .filter(([key]) => key !== 'projectRoot')
-      .map(([key, nested]) => [key, redactAbsoluteHostPathValues(nested)]),
+      .map(([nestedKey, nested]) => [nestedKey, redactAbsoluteHostPathValue(nested, nestedKey)]),
   );
+}
+
+export function redactAbsoluteHostPathValues(value: unknown): unknown {
+  return redactAbsoluteHostPathValue(value);
 }
 
 export function redactHostExecutionData(value: unknown): unknown {

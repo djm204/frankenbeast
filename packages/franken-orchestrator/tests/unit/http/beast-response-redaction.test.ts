@@ -22,11 +22,17 @@ describe('Beast response redaction', () => {
     )).toBe(
       'Sent /plan --design-doc through GET /v1/smart-swarm after reading [REDACTED_HOST_PATH]',
     );
+    expect(redactAbsoluteHostPathValues(
+      'Read /home/alice/private-repo/config.json before GET /v1/smart-swarm',
+    )).toBe(
+      'Read [REDACTED_HOST_PATH] before GET /v1/smart-swarm',
+    );
   });
 
-  it('preserves standalone slash commands and API routes', () => {
+  it('preserves standalone slash commands and explicit API route fields', () => {
     expect(redactAbsoluteHostPathValues('/plan')).toBe('/plan');
-    expect(redactAbsoluteHostPathValues('/v1/users')).toBe('/v1/users');
+    expect(redactAbsoluteHostPathValues('/v1/users')).toBe('[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues({ route: '/v1/users' })).toEqual({ route: '/v1/users' });
   });
 
   it('preserves a leading slash command with arguments', () => {
@@ -41,6 +47,8 @@ describe('Beast response redaction', () => {
   it('redacts embedded host paths after key-value delimiters', () => {
     expect(redactAbsoluteHostPathValues('workspace=/home/alice/private-repo'))
       .toBe('workspace=[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('cwd=/api/private/repo'))
+      .toBe('cwd=[REDACTED_HOST_PATH]');
   });
 
   it('redacts embedded host paths after punctuation boundaries', () => {

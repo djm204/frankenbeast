@@ -868,6 +868,46 @@ describe('HermesRuntimeAdapter', () => {
     expect(page.events.some((event) => event.id.includes(':comment:'))).toBe(false);
   });
 
+  it('ignores optional task-link tables that lack required columns', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec('DROP TABLE task_links; CREATE TABLE task_links (id INTEGER PRIMARY KEY);');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'ready',
+      tasks: expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({
+          id: 'hermes:global:t_parent',
+          dependencyIds: [],
+        })]),
+      }),
+    }));
+  });
+
+  it('preserves opaque Hermes session identifiers exactly', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const sessionId = `api_key=opaque/${'x'.repeat(600)}`;
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET session_id = ? WHERE id = ?').run(sessionId, 't_parent');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.runs).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:run:1',
+        sessionId,
+      })]),
+    }));
+  });
+
   it('degrades a workspace with corrupt required timestamps instead of fabricating epoch activity', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
