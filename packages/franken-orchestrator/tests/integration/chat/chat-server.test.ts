@@ -123,6 +123,74 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('includes persisted transcript context in the second default HTTP turn', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const llm = {
+      complete: vi.fn(async (prompt: string) => {
+        if (!prompt.includes('What code word did I give you?')) {
+          return 'I stored the code word raven.';
+        }
+        return prompt.includes('assistant: I stored the code word raven.')
+          ? 'The code word is raven.'
+          : 'I cannot recall the code word.';
+      }),
+    };
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm,
+      projectName: 'test-project',
+    });
+
+    try {
+      const createRes = await fetch(`${server.url}/v1/chat/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: 'proj' }),
+      });
+      expect(createRes.status).toBe(201);
+      const { data: session } = await createRes.json() as { data: { id: string } };
+
+      const firstRes = await fetch(`${server.url}/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Remember the code word raven.' }),
+      });
+      expect(firstRes.status).toBe(200);
+
+      const secondRes = await fetch(`${server.url}/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'What code word did I give you?' }),
+      });
+      expect(secondRes.status).toBe(200);
+
+      expect(llm.complete).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('user: Remember the code word raven.'),
+        { sessionContinue: false },
+      );
+      expect(llm.complete).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('assistant: I stored the code word raven.'),
+        { sessionContinue: false },
+      );
+
+      const sessionRes = await fetch(`${server.url}/v1/chat/sessions/${session.id}`);
+      expect(sessionRes.status).toBe(200);
+      const sessionBody = await sessionRes.json() as {
+        data: { transcript: Array<{ role: string; content: string }> };
+      };
+      expect(sessionBody.data.transcript.at(-1)).toMatchObject({
+        role: 'assistant',
+        content: 'The code word is raven.',
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
   it('removes websocket upgrade listeners and closes active sockets on shutdown', async () => {
     mkdirSync(TMP, { recursive: true });
     const server = await startChatServer({
