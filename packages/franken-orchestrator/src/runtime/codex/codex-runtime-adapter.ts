@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import {
+  RuntimeActionResultSchema,
   RuntimeEventPageSchema,
   RuntimeSnapshotSchema,
   RuntimeProviderSchema,
+  type RuntimeActionRequest,
+  type RuntimeActionResult,
   type RuntimeEventPage,
   type RuntimeProvider,
   type RuntimeAgent,
@@ -436,6 +439,24 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
 
   validateEventCursor(cursor: string): void {
     parseCursor(cursor);
+  }
+
+  async executeAction(request: RuntimeActionRequest): Promise<RuntimeActionResult> {
+    const targetId = request.action.type === 'approval.resolve'
+      ? request.action.approvalId
+      : request.action.taskId;
+    return RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: this.id,
+      correlationId: request.correlationId,
+      reason: READ_ONLY_REASON,
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: request.action.type,
+        targetId,
+        outcome: 'unsupported',
+      },
+    });
   }
 
   private async readThreadPages(options: {

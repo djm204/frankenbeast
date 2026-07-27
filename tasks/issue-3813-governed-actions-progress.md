@@ -27,5 +27,6 @@
 - [x] Address the next tier-12 follow-up with red-green regressions for startup cleanup on durable-store construction failure and claim-token fencing after lease ownership loss.
 - [x] Address the final tier-12 hardening round with red-green regressions for opaque governed-action identifiers, bounded runtime-action draining, and durable uncertain-completion fencing.
 - [x] Address the next exact-head Codex round with red-green regressions for opaque audit target identifiers, pre-expiry renewal retries, shutdown-time fencing of active durable claims, and uncertainty fencing for provider exceptions after execution begins.
+- [x] Rebase onto current `origin/main` `b7dedb7b53f76d7e0b8e28e090b711c7d7a992c9` after the Codex runtime adapter merged, and add its explicit read-only governed-action response under a failing adapter test so the provider-neutral contract remains buildable in PR merge refs.
 - [ ] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
 - [ ] Prepare the exact final handoff for root `t_25558345`, then block the task for review.
