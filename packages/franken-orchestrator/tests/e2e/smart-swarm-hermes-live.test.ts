@@ -84,6 +84,21 @@ async function productionBundleText(): Promise<string> {
   return (await Promise.all(files.map((file) => readFile(join(assetsDir, file), 'utf8')))).join('\n');
 }
 
+function isExpectedResourceFailure(failure: string): boolean {
+  if (failure.startsWith('404 ') && failure.includes('/v1/network/')) return true;
+  return failure.includes('/events/') && (
+    failure.includes('ERR_ABORTED') || failure.includes('ERR_INCOMPLETE_CHUNKED_ENCODING')
+  );
+}
+
+describe('smart-swarm browser resource failure classification', () => {
+  it('exempts only 404 responses from the unrelated network API', () => {
+    expect(isExpectedResourceFailure('404 http://127.0.0.1/v1/network/status')).toBe(true);
+    expect(isExpectedResourceFailure('500 http://127.0.0.1/v1/network/status')).toBe(false);
+    expect(isExpectedResourceFailure('net::ERR_FAILED http://127.0.0.1/v1/network/status')).toBe(false);
+  });
+});
+
 describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', () => {
   it('proves authenticated HTTP/SSE, real browser topology, governed actions, recovery, and cleanup', async () => {
     const marker = `live-e2e-${Date.now()}`;
@@ -290,13 +305,7 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       await page.getByLabel('Workspace').selectOption({ label: 'empty-e2e' });
       await expectBrowser(page.getByText('No runtime work in empty-e2e')).toBeVisible({ timeout: 10_000 });
       expect(browserErrors).toEqual([]);
-      const unexpectedResourceFailures = resourceFailures.filter((failure) => {
-        if (failure.includes('/v1/network/')) return false;
-        if (failure.includes('/events/') && (
-          failure.includes('ERR_ABORTED') || failure.includes('ERR_INCOMPLETE_CHUNKED_ENCODING')
-        )) return false;
-        return true;
-      });
+      const unexpectedResourceFailures = resourceFailures.filter((failure) => !isExpectedResourceFailure(failure));
       expect(unexpectedResourceFailures).toEqual([]);
 
       const bundle = await productionBundleText();

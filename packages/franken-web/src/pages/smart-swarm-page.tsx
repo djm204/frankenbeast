@@ -57,7 +57,7 @@ function actionPostconditionConfirmed(
     case 'task.cancel':
       return task.state === 'cancelled';
     case 'policy.apply':
-      return task.state === 'ready';
+      return task.state === 'ready' || task.state === 'running';
     case 'task.pause':
       return task.state === 'queued';
     case 'task.resume':
@@ -689,6 +689,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           actionIdempotencyKeys={actionIdempotencyKeys.current}
           actionPendingFromStore={selectedTaskActionPending}
           client={client}
+          key={`${provider.id}:${selectedTask.id}`}
           onActionApplied={() => setRefreshNonce((current) => current + 1)}
           onClose={() => setSelectedTaskId(null)}
           provider={provider}

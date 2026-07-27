@@ -204,6 +204,33 @@ describe('SmartSwarmPage', () => {
     await act(async () => finishAction?.());
   });
 
+  it('does not leak an action completion into another task detail dialog', async () => {
+    let finishAction: (() => void) | undefined;
+    const executeAction = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      finishAction = () => resolve({
+        status: 'rejected',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        reason: 'First task action rejected',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'rejected',
+        },
+      });
+    }));
+    render(<SmartSwarmPage client={createClient({ executeAction })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Contract root' }));
+
+    expect(screen.getByRole('dialog', { name: 'Contract root details' })).toBeDefined();
+    await act(async () => finishAction?.());
+    expect(screen.queryByText('rejected: First task action rejected')).toBeNull();
+  });
+
   it('resolves a supported blocker through the runtime API and refreshes the live postcondition', async () => {
     const executeAction = vi.fn().mockResolvedValue({
       status: 'applied',
@@ -473,6 +500,52 @@ describe('SmartSwarmPage', () => {
 
     expect(await screen.findByText('failed: Selected Hermes workspace is unavailable')).toBeDefined();
     expect(screen.queryByText(/unsupported: Selected Hermes workspace/)).toBeNull();
+  });
+
+  it('unlocks a promoted task when refreshed state is already running', async () => {
+    let currentSnapshot = snapshot;
+    const fetchSnapshot = vi.fn().mockImplementation(async () => currentSnapshot);
+    const executeAction = vi.fn().mockImplementation(async () => {
+      currentSnapshot = {
+        ...snapshot,
+        tasks: {
+          status: 'available',
+          data: snapshot.tasks.status === 'available'
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'running' as const } : task)
+            : [],
+        },
+        blockers: { status: 'available', data: [] },
+      };
+      return {
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'policy.apply',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      };
+    });
+    render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot,
+      listProviders: vi.fn().mockResolvedValue([{
+        ...provider,
+        capabilities: {
+          ...provider.capabilities,
+          pause: { status: 'supported' },
+          policyActions: { status: 'supported' },
+        },
+      }]),
+    })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Promote task' }));
+
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('button', { name: 'Pause task' })).toHaveProperty('disabled', false);
   });
 
   it.each([
