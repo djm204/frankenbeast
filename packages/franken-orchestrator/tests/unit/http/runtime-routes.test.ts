@@ -336,6 +336,11 @@ describe('smart-swarm runtime routes', () => {
       headers: { cookie: `frankenbeast_runtime_sse_ticket=${secondTicket}` },
     });
     expect(secondValid.status).toBe(429);
+    expect(ticketStore.check(
+      secondTicket,
+      'operator-secret',
+      `hermes:${secondConnectionId}`,
+    )).toBe('valid');
     if (secondValid.body) await secondValid.body.cancel();
   });
 
@@ -572,6 +577,41 @@ describe('smart-swarm runtime routes', () => {
 
       await expect(streamDone).resolves.toBeUndefined();
       expect(pipe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not queue heartbeats while an earlier stream write is backpressured', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+        events: [],
+        nextCursor: null,
+      }));
+      let releaseWrite!: () => void;
+      const stalledWrite = new Promise<void>((resolve) => { releaseWrite = resolve; });
+      const pipe = vi.fn()
+        .mockImplementationOnce(() => stalledWrite)
+        .mockResolvedValue(undefined);
+      let abortStream: (() => void) | undefined;
+      const stream = {
+        pipe,
+        onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+      };
+
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 20,
+        pollIntervalMs: 1_000,
+      });
+      await vi.advanceTimersByTimeAsync(120);
+      expect(pipe).toHaveBeenCalledTimes(1);
+      releaseWrite();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(pipe).toHaveBeenCalledTimes(1);
+      abortStream!();
+      await streamDone;
     } finally {
       vi.useRealTimers();
     }

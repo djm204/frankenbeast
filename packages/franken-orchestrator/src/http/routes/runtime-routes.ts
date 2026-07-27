@@ -186,10 +186,13 @@ export async function runRuntimeEventStream(
   stream.onAbort(endStream);
 
   let writeChain = Promise.resolve();
+  let queuedWrites = 0;
   const writeSse = (message: RuntimeSseMessage): Promise<void> => {
+    queuedWrites += 1;
     const write = writeChain.then(() => stream.pipe(runtimeSseBody(message)));
-    writeChain = write.catch(() => undefined);
-    return write;
+    const tracked = write.finally(() => { queuedWrites -= 1; });
+    writeChain = tracked.catch(() => undefined);
+    return tracked;
   };
   const publish = (): Promise<void> => {
     if (activePublish) return activePublish;
@@ -237,7 +240,10 @@ export async function runRuntimeEventStream(
     }
     poll = setInterval(() => void publish().catch(endStream), options.pollIntervalMs);
     heartbeat = setInterval(
-      () => void writeSse({ event: 'heartbeat', data: '' }).catch(endStream),
+      () => {
+        if (queuedWrites > 0) return;
+        void writeSse({ event: 'heartbeat', data: '' }).catch(endStream);
+      },
       options.heartbeatIntervalMs,
     );
     await aborted;
@@ -378,6 +384,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     if (activeStreams >= maxActiveStreams) {
       throw new HttpError(429, 'RUNTIME_STREAM_LIMIT', 'Concurrent runtime stream limit exceeded');
     }
+    if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
+      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    }
     const ticketStatus = deps.ticketStore.consume(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
     if (ticketStatus === 'reused') return c.body(null, 204);
     if (ticketStatus === 'invalid') {
@@ -385,9 +394,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
       }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
-    }
-    if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
     const workspaceId = c.req.query('workspaceId');
     activeStreams += 1;

@@ -51,6 +51,14 @@
 - [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
+## Exact-head round 22 follow-up
+
+- [x] Inspect the three current-head Codex findings on `1ffdbce6e37b572c0097ca07642157e37a7bb019`.
+- [x] Reproduce and remediate Markdown-code host-path leakage, valid-ticket rate-limit consumption, and unbounded heartbeat write queuing.
+- [x] Run focused tests plus package lint, typecheck, build, and full-suite gates.
+- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -74,3 +82,4 @@
 - Exact-head round 19 reproduced all five findings RED and passes 100/100 focused runtime, route, and ticket-store tests GREEN. Package/root typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,667/4,670 passing, while all non-orchestrator root package tests pass.
 - Exact-head round 20 reproduced all three findings RED and passes 90/90 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,671/4,674 passing.
 - Exact-head round 21 reproduced all three findings RED and passes 93/93 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass.
+- Exact-head round 22 reproduced all three findings RED and passes 96/96 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,677/4,680 passing.

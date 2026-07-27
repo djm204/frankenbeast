@@ -750,6 +750,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts host paths wrapped in Markdown backticks for direct consumers', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'read `/home/alice/repo/config.json`',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'read `[REDACTED_HOST_PATH]`',
+      })]),
+    }));
+  });
+
   it('redacts host paths after punctuation in normalized runtime text', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');

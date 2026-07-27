@@ -89,6 +89,11 @@ describe('Beast response redaction', () => {
       .toBe('failed under [REDACTED_HOST_PATH]');
   });
 
+  it('redacts host paths wrapped in Markdown backticks', () => {
+    expect(redactAbsoluteHostPathValues('read `/home/alice/repo/config.json`'))
+      .toBe('read `[REDACTED_HOST_PATH]`');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',
