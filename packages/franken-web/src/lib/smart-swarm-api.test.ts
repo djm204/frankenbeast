@@ -181,6 +181,33 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
   });
 
+  it('ignores callbacks from an event source superseded by reconnect', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<{ close: ReturnType<typeof vi.fn>; listeners: Record<string, (event: MessageEvent) => void> }> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const entry = { close: vi.fn(), listeners: {} as Record<string, (event: MessageEvent) => void> };
+      sources.push(entry);
+      this.close = entry.close;
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        entry.listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(Response.json({ connectionId: 'stream' }))));
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn() });
+    const oldError = sources[0]!.listeners.error!;
+    oldError(new MessageEvent('error'));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    oldError(new MessageEvent('error'));
+    expect(sources[1]!.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(EventSourceMock).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
   it('continues reconnecting after a transient ticket failure', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

@@ -233,15 +233,18 @@ export class SmartSwarmApiClient {
       if (cursor) search.set('cursor', cursor);
       const query = search.size > 0 ? `?${search.toString()}` : '';
       const streamPath = `/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
-      source = new EventSource(`${baseUrl}${streamPath}${query}`, { withCredentials: true });
+      const activeSource = new EventSource(`${baseUrl}${streamPath}${query}`, { withCredentials: true });
+      source = activeSource;
       let opened = false;
-      source.addEventListener('open', () => {
+      activeSource.addEventListener('open', () => {
+        if (source !== activeSource || closed) return;
         opened = true;
         reconnectAttempt = 0;
         consecutivePreOpenFailures = 0;
         handlers.connection?.('connected');
       });
-      source.addEventListener('activity', (rawEvent) => {
+      activeSource.addEventListener('activity', (rawEvent) => {
+        if (source !== activeSource || closed) return;
         try {
           const event = JSON.parse((rawEvent as MessageEvent<string>).data) as RuntimeEvent;
           cursor = event.cursor;
@@ -251,7 +254,8 @@ export class SmartSwarmApiClient {
           scheduleReconnect();
         }
       });
-      source.addEventListener('error', () => {
+      activeSource.addEventListener('error', () => {
+        if (source !== activeSource || closed) return;
         if (!opened && cursor) {
           consecutivePreOpenFailures += 1;
           if (consecutivePreOpenFailures >= 2) cursor = undefined;

@@ -56,6 +56,13 @@ function compareTaskActivity(left: RuntimeTask, right: RuntimeTask): number {
   return recencyDifference !== 0 ? recencyDifference : left.id.localeCompare(right.id);
 }
 
+function compareRuntimeEvidenceRecency(
+  left: { id: string; occurredAt: string },
+  right: { id: string; occurredAt: string },
+): number {
+  return Date.parse(right.occurredAt) - Date.parse(left.occurredAt) || left.id.localeCompare(right.id);
+}
+
 function StateNotice({ provider, snapshot, workspaceName, error, onRetry }: {
   provider: RuntimeProvider | undefined;
   snapshot: RuntimeSnapshot | null;
@@ -160,12 +167,36 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const agents = snapshot ? available(snapshot.agents) ?? [] : [];
   const tasks = snapshot ? available(snapshot.tasks) ?? [] : [];
   const runs = snapshot ? available(snapshot.runs) ?? [] : [];
-  const events = snapshot ? available(snapshot.events) ?? [] : [];
-  const blockers = snapshot ? available(snapshot.blockers) ?? [] : [];
-  const approvals = snapshot ? available(snapshot.approvals) ?? [] : [];
+  const events = snapshot
+    ? [...(available(snapshot.events) ?? [])].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE)
+    : [];
+  const blockers = snapshot
+    ? [...(available(snapshot.blockers) ?? [])]
+      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.id.localeCompare(right.id))
+    : [];
+  const approvals = snapshot
+    ? [...(available(snapshot.approvals) ?? [])]
+      .sort((left, right) => {
+        const stateDifference = Number(right.state === 'pending') - Number(left.state === 'pending');
+        if (stateDifference !== 0) return stateDifference;
+        return Date.parse(right.resolvedAt ?? right.createdAt) - Date.parse(left.resolvedAt ?? left.createdAt)
+          || left.id.localeCompare(right.id);
+      })
+    : [];
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
 
   const taskNames = useMemo(() => new Map(tasks.map((task) => [task.id, task.title])), [tasks]);
+  const newestUnfinishedRunByTask = useMemo(() => {
+    const indexed = new Map<string, (typeof runs)[number]>();
+    for (const run of runs) {
+      if (run.finishedAt !== null) continue;
+      const current = indexed.get(run.taskId);
+      if (!current || Date.parse(run.lastActiveAt ?? run.startedAt) > Date.parse(current.lastActiveAt ?? current.startedAt)) {
+        indexed.set(run.taskId, run);
+      }
+    }
+    return indexed;
+  }, [runs]);
 
   const scheduleTopologyRefresh = useCallback(() => {
     if (refreshTimer.current) return;
@@ -189,11 +220,21 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       .then((nextProviders) => {
         if (cancelled) return;
         setProviders(nextProviders);
-        setProviderId((current) => (
-          nextProviders.some((candidate) => candidate.id === current)
-            ? current
-            : nextProviders[0]?.id ?? ''
-        ));
+        const current = currentProviderId.current;
+        const nextProviderId = nextProviders.some((candidate) => candidate.id === current)
+          ? current
+          : nextProviders[0]?.id ?? '';
+        if (nextProviderId !== current) {
+          currentProviderId.current = nextProviderId;
+          currentWorkspaceId.current = '';
+          setSnapshot(null);
+          setWorkspaceCatalog(null);
+          setWorkspaceId('');
+          setSelectedTaskId(null);
+          setSnapshotError(null);
+          setStreamError(null);
+        }
+        setProviderId(nextProviderId);
         setProviderError(null);
         if (nextProviders.length === 0) setLoading(false);
       })
@@ -226,7 +267,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       activityLimit: 100,
     })
       .then((nextSnapshot) => {
-        if (cancelled) return;
+        if (cancelled || currentProviderId.current !== providerId) return;
         setSnapshot(nextSnapshot);
         if (!workspaceId) setWorkspaceCatalog(nextSnapshot.workspaces);
         if (nextSnapshot.workspaces.status === 'available') {
@@ -246,7 +287,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         setLoading(false);
       })
       .catch((nextError: unknown) => {
-        if (!cancelled) {
+        if (!cancelled && currentProviderId.current === providerId) {
           setSnapshotError(nextError);
           setLoading(false);
         }
@@ -288,7 +329,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           const withoutDuplicate = current.events.data.filter((candidate) => candidate.id !== event.id);
           return {
             ...current,
-            events: { status: 'available', data: [event, ...withoutDuplicate].slice(0, 100) },
+            events: {
+              status: 'available',
+              data: [event, ...withoutDuplicate].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE),
+            },
           };
         });
         scheduleTopologyRefresh();
@@ -492,9 +536,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                     .map((id) => ({ id, label: taskNames.get(id) ?? id }));
                   const dependencies = [...new Set(task.dependencyIds)]
                     .map((id) => ({ id, label: taskNames.get(id) ?? id }));
-                  const currentRun = runs
-                    .filter((run) => run.taskId === task.id && run.finishedAt === null)
-                    .sort((left, right) => Date.parse(right.lastActiveAt ?? right.startedAt) - Date.parse(left.lastActiveAt ?? left.startedAt))[0];
+                  const currentRun = newestUnfinishedRunByTask.get(task.id);
                   return (
                     <li key={task.id}>
                       <button
@@ -583,7 +625,21 @@ function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
   const resumeReason = capabilityReason(provider.capabilities.resume) ?? unwiredReason;
   const cancelReason = capabilityReason(provider.capabilities.cancellation) ?? unwiredReason;
   return (
-    <section aria-label={`${task.title} details`} aria-modal="true" className="smart-swarm-detail" role="dialog">
+    <section
+      aria-label={`${task.title} details`}
+      aria-modal="true"
+      className="smart-swarm-detail"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onClose();
+        } else if (event.key === 'Tab') {
+          event.preventDefault();
+          closeButton.current?.focus();
+        }
+      }}
+      role="dialog"
+    >
       <header>
         <div><p className="eyebrow">Task detail</p><h3>{task.title}</h3></div>
         <button className="button button--secondary button--compact" onClick={onClose} ref={closeButton} type="button">Close</button>
