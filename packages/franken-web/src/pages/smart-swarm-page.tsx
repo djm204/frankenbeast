@@ -672,9 +672,13 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
   }, [returnFocus]);
   const pauseReason = capabilityReason(provider.capabilities.pause);
   const resumeReason = capabilityReason(provider.capabilities.resume);
+  const resumeStateReason = 'Resume is disabled because normalized task state does not distinguish paused from queued work.';
   const cancelReason = capabilityReason(provider.capabilities.cancellation);
   const policyReason = capabilityReason(provider.capabilities.policyActions);
   const blockerReason = capabilityReason(provider.capabilities.blockers);
+  const policyStateReason = ['succeeded', 'failed', 'cancelled', 'archived'].includes(task.state)
+    ? 'Terminal and archived tasks cannot be promoted.'
+    : null;
 
   async function executeTaskAction(
     action: 'blocker.resolve' | 'task.pause' | 'task.resume' | 'task.cancel' | 'policy.apply',
@@ -762,7 +766,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
                 void executeTaskAction(
                   'blocker.resolve',
                   'Resolved from the authenticated smart-swarm dashboard',
-                  'Blocker resolved; live state refreshed.',
+                  'Blocker resolved; refreshing live state.',
                 );
               }}
               title={blockerReason ?? undefined}
@@ -777,7 +781,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
             void executeTaskAction(
               'task.pause',
               'Paused from the authenticated smart-swarm dashboard',
-              'Task paused; live state refreshed.',
+              'Task paused; refreshing live state.',
             );
           }}
           title={pauseReason ?? undefined}
@@ -785,15 +789,15 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
         >Pause task</button>
         {pauseReason ? <p>{pauseReason}</p> : null}
         <button
-          disabled={actionPending || resumeReason !== null || task.state !== 'queued'}
+          disabled
           onClick={() => {
             void executeTaskAction(
               'task.resume',
               'Resumed from the authenticated smart-swarm dashboard',
-              'Task resumed; live state refreshed.',
+              'Task resumed; refreshing live state.',
             );
           }}
-          title={resumeReason ?? undefined}
+          title={resumeReason ?? resumeStateReason}
           type="button"
         >Resume task</button>
         {resumeReason ? <p>{resumeReason}</p> : null}
@@ -803,7 +807,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
             void executeTaskAction(
               'task.cancel',
               'Cancelled from the authenticated smart-swarm dashboard',
-              'Task cancelled; live state refreshed.',
+              'Task cancelled; refreshing live state.',
             );
           }}
           title={cancelReason ?? undefined}
@@ -811,15 +815,15 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
         >Cancel task</button>
         {cancelReason ? <p>{cancelReason}</p> : null}
         <button
-          disabled={actionPending || policyReason !== null || task.state === 'succeeded' || task.state === 'cancelled'}
+          disabled={actionPending || policyReason !== null || policyStateReason !== null}
           onClick={() => {
             void executeTaskAction(
               'policy.apply',
               'Promoted from the authenticated smart-swarm dashboard',
-              'Task promoted; live state refreshed.',
+              'Task promoted; refreshing live state.',
             );
           }}
-          title={policyReason ?? undefined}
+          title={policyReason ?? policyStateReason ?? undefined}
           type="button"
         >Promote task</button>
         {policyReason ? <p>{policyReason}</p> : null}

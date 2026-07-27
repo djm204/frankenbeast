@@ -96,6 +96,8 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       kanbanDb: process.env['HERMES_KANBAN_DB'],
       operatorToken: process.env['FRANKENBEAST_BEAST_OPERATOR_TOKEN'],
       proxyTarget: process.env['VITE_API_PROXY_TARGET'],
+      configFile: process.env['FRANKENBEAST_CONFIG_FILE'],
+      configPath: process.env['FRANKENBEAST_CONFIG_PATH'],
       ambientHermes: Object.fromEntries(ambientHermesEnvKeys.map((key) => [key, process.env[key]])),
     };
     let backend: ChatServerHandle | undefined;
@@ -138,6 +140,8 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       process.env['HERMES_HOME'] = hermesHome;
       process.env['HERMES_KANBAN_DB'] = join(hermesHome, 'kanban.db');
       process.env['FRANKENBEAST_BEAST_OPERATOR_TOKEN'] = operatorToken;
+      process.env['FRANKENBEAST_CONFIG_FILE'] = join(hermesHome, 'missing-frankenbeast-config.json');
+      process.env['FRANKENBEAST_CONFIG_PATH'] = join(hermesHome, 'missing-frankenbeast-config.json');
 
       backend = await startChatServer({
         host: '127.0.0.1',
@@ -236,7 +240,7 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
 
       await page.getByRole('button', { name: new RegExp(`Inspect ${marker} Worker`) }).click();
       await page.getByRole('button', { name: 'Resolve blocker' }).click();
-      await expectBrowser(page.getByText('Blocker resolved; live state refreshed.')).toBeVisible({ timeout: 15_000 });
+      await expectBrowser(page.getByText('Blocker resolved; refreshing live state.')).toBeVisible({ timeout: 15_000 });
       await expect.poll(async () => (await readTask(hermesHome, worker.id)).status).toBe('ready');
 
       await expectBrowser(page.getByRole('button', { name: 'Promote task' })).toBeEnabled();
@@ -308,6 +312,8 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
           kanbanDb: 'HERMES_KANBAN_DB',
           operatorToken: 'FRANKENBEAST_BEAST_OPERATOR_TOKEN',
           proxyTarget: 'VITE_API_PROXY_TARGET',
+          configFile: 'FRANKENBEAST_CONFIG_FILE',
+          configPath: 'FRANKENBEAST_CONFIG_PATH',
         }[key]!;
         const scalarValue = value as string | undefined;
         if (scalarValue === undefined) delete process.env[envKey];

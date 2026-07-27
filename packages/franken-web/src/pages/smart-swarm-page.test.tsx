@@ -170,7 +170,7 @@ describe('SmartSwarmPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
 
-    await screen.findByText('Blocker resolved; live state refreshed.');
+    await screen.findByText('Blocker resolved; refreshing live state.');
     expect(executeAction).toHaveBeenCalledWith('hermes', expect.objectContaining({
       correlationId: expect.any(String),
       idempotencyKey: expect.any(String),
@@ -240,6 +240,35 @@ describe('SmartSwarmPage', () => {
         reason: 'Promoted from the authenticated smart-swarm dashboard',
       },
     }));
+  });
+
+  it.each([
+    ['queued', 'Resume task'],
+    ['archived', 'Promote task'],
+  ] as const)('keeps %s tasks out of unsafe %s actions', async (state, buttonName) => {
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        tasks: {
+          status: 'available' as const,
+          data: snapshot.tasks.status === 'available'
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state } : task)
+            : [],
+        },
+      }),
+      listProviders: vi.fn().mockResolvedValue([{
+        ...provider,
+        capabilities: {
+          ...provider.capabilities,
+          resume: { status: 'supported' },
+          policyActions: { status: 'supported' },
+        },
+      }]),
+    })} />);
+
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    expect(screen.getByRole('button', { name: buttonName })).toHaveProperty('disabled', true);
   });
 
   it('names the selected provider in a truthful empty state', async () => {
