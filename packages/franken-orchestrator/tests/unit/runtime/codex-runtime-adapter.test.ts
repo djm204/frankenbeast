@@ -557,10 +557,40 @@ input.on('line', (line) => {
 
     expect(second.events).toEqual([
       expect.objectContaining({
-        id: 'codex:thread:thread-a:200:blocked',
+        id: 'codex:thread:thread-a:200:blocked:transition-1',
         summary: 'Codex thread is blocked',
       }),
     ]);
+  });
+
+  it('gives repeated same-timestamp status transitions distinct event ids', async () => {
+    let activeFlags: string[] = [];
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [{
+          id: 'thread-a', sessionId: 'session-a', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai',
+          status: { type: 'active', activeFlags },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 1 });
+    activeFlags = ['waitingOnApproval'];
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 1 });
+    activeFlags = [];
+    const third = await adapter.getEvents({ cursor: second.nextCursor!, limit: 1 });
+    activeFlags = ['waitingOnApproval'];
+    const fourth = await adapter.getEvents({ cursor: third.nextCursor!, limit: 1 });
+
+    expect(new Set([
+      first.events[0]!.id,
+      second.events[0]!.id,
+      third.events[0]!.id,
+      fourth.events[0]!.id,
+    ])).toHaveLength(4);
   });
 
   it('preserves a lower-id thread status change behind a same-second cursor', async () => {
@@ -587,7 +617,7 @@ input.on('line', (line) => {
     const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 2 });
 
     expect(second.events.map((event) => event.id)).toEqual([
-      'codex:thread:thread-a:200:idle',
+      'codex:thread:thread-a:200:idle:transition-1',
     ]);
   });
 
@@ -615,7 +645,7 @@ input.on('line', (line) => {
     const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 2 });
 
     expect(second.events.map((event) => event.id)).toEqual([
-      'codex:thread:older:200:idle',
+      'codex:thread:older:200:idle:transition-1',
     ]);
   });
 
@@ -644,7 +674,9 @@ input.on('line', (line) => {
     const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 2 });
     const third = await adapter.getEvents({ cursor: second.nextCursor!, limit: 2 });
 
-    expect(second.events.map((event) => event.id)).toEqual(['codex:thread:older:200:idle']);
+    expect(second.events.map((event) => event.id)).toEqual([
+      'codex:thread:older:200:idle:transition-1',
+    ]);
     expect(third).toEqual({ events: [], nextCursor: second.nextCursor });
   });
 
@@ -703,6 +735,37 @@ input.on('line', (line) => {
     expect(first.events).toHaveLength(500);
     expect(second.events).toEqual([]);
     expect(third).toEqual({ events: [], nextCursor: second.nextCursor });
+  });
+
+  it('refreshes boundary recency when an existing thread changes status', async () => {
+    const threads = Array.from({ length: 500 }, (_, index) => ({
+      id: `thread-${String(index).padStart(3, '0')}`,
+      sessionId: `session-${index}`,
+      cliVersion: '0.145.0',
+      createdAt: 100,
+      updatedAt: 200,
+      cwd: '/workspace/project',
+      ephemeral: false,
+      modelProvider: 'openai',
+      status: { type: 'idle' },
+    }));
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({ data: threads, nextCursor: null }),
+    });
+
+    const first = await adapter.getEvents({ limit: 500 });
+    threads[0]!.status.type = 'active';
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 500 });
+    threads.push({
+      id: 'thread-500', sessionId: 'session-500', cliVersion: '0.145.0',
+      createdAt: 100, updatedAt: 201, cwd: '/workspace/project',
+      ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+    });
+    const third = await adapter.getEvents({ cursor: second.nextCursor!, limit: 500 });
+    threads[0]!.status.type = 'idle';
+    const fourth = await adapter.getEvents({ cursor: third.nextCursor!, limit: 500 });
+
+    expect(fourth.events.map((event) => event.summary)).toEqual(['Codex thread is idle']);
   });
 
   it('keeps a full status baseline below the HTTP header limit', async () => {
@@ -823,6 +886,27 @@ input.on('line', (line) => {
       .rejects.toThrow('incompatible thread metadata');
   });
 
+  it('confirms absence before emitting a disappeared lifecycle event', async () => {
+    let call = 0;
+    const thread = {
+      id: 'tracked-thread', sessionId: 'session-tracked', cliVersion: '0.145.0',
+      createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+      ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+    };
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => {
+        call += 1;
+        return { data: call === 1 || call === 5 ? [thread] : [], nextCursor: null };
+      },
+    });
+
+    const first = await adapter.getEvents({ limit: 10 });
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+
+    expect(second).toEqual({ events: [], nextCursor: first.nextCursor });
+    expect(call).toBe(6);
+  });
+
   it('returns the newest matching events on an initial poll', async () => {
     const thread = (id: string, updatedAt: number) => ({
       id, sessionId: `session-${id}`, cliVersion: '0.145.0',
@@ -923,6 +1007,32 @@ input.on('line', (line) => {
       limit: 1,
     })).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it('binds filtered snapshot event cursors to the requested workspace', async () => {
+    const cwd = '/workspace/a';
+    const workspaceId = `codex:workspace:${createHash('sha256')
+      .update(cwd).digest('hex').slice(0, 16)}`;
+    const adapter = new CodexRuntimeAdapter({
+      request: async (_method, params) => ({
+        data: params['archived'] === true ? [] : [{
+          id: 'workspace-a', sessionId: 'session-a', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd, ephemeral: false,
+          modelProvider: 'openai', status: { type: 'idle' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const snapshot = await adapter.getSnapshot({ workspaceId });
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+
+    await expect(adapter.getEvents({
+      cursor: snapshot.events.data[0]!.cursor,
+      workspaceId,
+      limit: 10,
+    })).resolves.toMatchObject({ events: expect.any(Array) });
   });
 
   it('paginates before applying a bounded workspace snapshot filter', async () => {

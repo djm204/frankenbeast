@@ -178,6 +178,7 @@ interface CodexBoundaryThread {
   threadId: string;
   workspaceId: string;
   status: string;
+  transitionSequence: number;
 }
 
 function eventCursor(
@@ -197,6 +198,7 @@ function eventCursor(
         thread.threadId,
         thread.workspaceId,
         thread.status,
+        thread.transitionSequence,
       ]),
     } : {}),
   }));
@@ -254,7 +256,7 @@ function parseCursor(value: string | undefined): CodexCursor | null {
         || boundaryThreads.length > MAX_ACTIVITY_LIMIT
         || boundaryThreads.some((thread) => (
           !Array.isArray(thread)
-          || thread.length !== 3
+          || (thread.length !== 3 && thread.length !== 4)
           || typeof thread[0] !== 'string'
           || thread[0].length === 0
           || thread[0].length > 1_024
@@ -263,15 +265,19 @@ function parseCursor(value: string | undefined): CodexCursor | null {
           || typeof thread[2] !== 'string'
           || thread[2].length === 0
           || thread[2].length > 64
+          || (thread.length === 4 && (
+            !Number.isSafeInteger(thread[3])
+            || (thread[3] as number) < 0
+          ))
         ))
       ))
     ) throw new Error('invalid');
     const normalizedBoundaryThreads = boundaryThreads === undefined
       ? undefined
-      : Object.fromEntries((boundaryThreads as [string, string, string][]).map(
-          ([threadId, currentWorkspaceId, status]) => [
+      : Object.fromEntries((boundaryThreads as [string, string, string, number?][]).map(
+          ([threadId, currentWorkspaceId, status, transitionSequence = 0]) => [
             threadKey(threadId),
-            { threadId, workspaceId: currentWorkspaceId, status },
+            { threadId, workspaceId: currentWorkspaceId, status, transitionSequence },
           ],
         ));
     const normalizedStatuses = normalizedBoundaryThreads !== undefined
@@ -308,9 +314,10 @@ function rememberThread(
   threads: Record<string, CodexBoundaryThread>,
   thread: CodexBoundaryThread,
 ): void {
-  const { threadId } = thread;
-  const key = threadKey(threadId);
-  if (!Object.hasOwn(threads, key) && Object.keys(threads).length >= MAX_ACTIVITY_LIMIT) {
+  const key = threadKey(thread.threadId);
+  if (Object.hasOwn(threads, key)) {
+    delete threads[key];
+  } else if (Object.keys(threads).length >= MAX_ACTIVITY_LIMIT) {
     const oldestThreadKey = Object.keys(threads)[0];
     if (oldestThreadKey !== undefined) delete threads[oldestThreadKey];
   }
@@ -322,13 +329,15 @@ function eventForThread(
   boundaryThreads?: Record<string, CodexBoundaryThread>,
   watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
   scopeWorkspaceId?: string,
+  transitionSequence?: number,
 ): RuntimeEvent {
   const currentWatermark = watermark ?? {
     occurredAt: timestamp(thread.updatedAt)!,
     threadId: thread.id,
   };
   return {
-    id: `codex:thread:${thread.id}:${thread.updatedAt}:${eventStatus(thread)}`,
+    id: `codex:thread:${thread.id}:${thread.updatedAt}:${eventStatus(thread)}`
+      + (transitionSequence ? `:transition-${transitionSequence}` : ''),
     cursor: eventCursor(eventStatus(thread), boundaryThreads, currentWatermark, scopeWorkspaceId),
     workspaceId: workspaceId(thread.cwd),
     taskId: null,
@@ -526,7 +535,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           sessionId: thread.sessionId,
         },
       });
-      events.push(eventForThread(thread));
+      events.push(eventForThread(thread, {}, undefined, request.workspaceId));
     }
 
     const state = parsed.rejected > 0 || parsed.truncated
@@ -578,10 +587,40 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       throw new CodexSchemaError('Codex app-server returned incompatible thread metadata');
     }
     const activeIds = new Set(active.threads.map((thread) => thread.id));
-    const matchingThreads = [...active.threads, ...archived.threads.filter(
+    let matchingThreads = [...active.threads, ...archived.threads.filter(
       (thread) => !activeIds.has(thread.id),
     )]
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId);
+    const observedKeys = new Set(matchingThreads.map((thread) => threadKey(thread.id)));
+    const needsAbsenceConfirmation = after?.boundaryThreads !== undefined
+      && Object.keys(after.boundaryThreads).some((key) => !observedKeys.has(key));
+    if (needsAbsenceConfirmation) {
+      const confirmedActive = await this.readThreadPages({
+        pageSize: MAX_ACTIVITY_LIMIT,
+        signal: request.signal,
+        archived: false,
+        stop,
+      });
+      const confirmedArchived = await this.readThreadPages({
+        pageSize: MAX_ACTIVITY_LIMIT,
+        signal: request.signal,
+        archived: true,
+        stop,
+      });
+      if (confirmedActive.truncated || confirmedArchived.truncated) {
+        throw new CodexSchemaError('Codex event pagination exceeded the bounded page limit');
+      }
+      if (confirmedActive.rejected > 0 || confirmedArchived.rejected > 0) {
+        throw new CodexSchemaError('Codex app-server returned incompatible thread metadata');
+      }
+      const threadsById = new Map(matchingThreads.map((thread) => [thread.id, thread]));
+      for (const thread of [...confirmedActive.threads, ...confirmedArchived.threads]) {
+        if (request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId) {
+          threadsById.set(thread.id, thread);
+        }
+      }
+      matchingThreads = [...threadsById.values()];
+    }
     const threadCandidates = matchingThreads
       .map((thread) => ({
         kind: 'thread' as const,
@@ -637,26 +676,41 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     let watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'> | undefined = after ?? undefined;
     const events = entries.map((entry) => {
       if (entry.kind === 'thread') {
+        const previousThread = emittedThreads[threadKey(entry.thread.id)];
+        const transitionSequence = previousThread === undefined
+          ? 0
+          : previousThread.status === entry.cursor.status
+            ? previousThread.transitionSequence
+            : previousThread.transitionSequence + 1;
         rememberThread(emittedThreads, {
           threadId: entry.thread.id,
           workspaceId: workspaceId(entry.thread.cwd),
           status: entry.cursor.status,
+          transitionSequence,
         });
+        if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
+          watermark = entry.cursor;
+        }
+        return eventForThread(
+          entry.thread,
+          emittedThreads,
+          watermark,
+          request.workspaceId,
+          transitionSequence,
+        );
       } else {
         delete emittedThreads[entry.key];
       }
       if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
         watermark = entry.cursor;
       }
-      return entry.kind === 'thread'
-        ? eventForThread(entry.thread, emittedThreads, watermark, request.workspaceId)
-        : eventForDisappearedThread(
-            entry.thread,
-            entry.cursor.occurredAt,
-            emittedThreads,
-            watermark,
-            request.workspaceId,
-          );
+      return eventForDisappearedThread(
+        entry.thread,
+        entry.cursor.occurredAt,
+        emittedThreads,
+        watermark,
+        request.workspaceId,
+      );
     });
     return RuntimeEventPageSchema.parse({
       events,
