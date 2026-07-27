@@ -77,6 +77,7 @@ const MAX_CURSOR_CHARS = 4 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const SOURCE_INSPECTION_CACHE_TTL_MS = 1_000;
+const MAX_SOURCE_INSPECTION_CACHE_ENTRIES = 64;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
 const QUOTED_POSIX_PATH_RES = [
@@ -84,7 +85,7 @@ const QUOTED_POSIX_PATH_RES = [
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
   /(")(\/[^"]+|[A-Za-z]:[\\/][^"]+|\\\\[^"]+)(?=")/gu,
 ];
-const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
+const ANGLE_BRACKET_HOST_PATH_RE = /(<)(\/[^/>]+\/[^>]+|[A-Za-z]:[\\/][^>]+|\\\\[^>]+)(?=>)/gu;
 const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
 const FILE_URL_RE = /\bfile:\/\/(?!\[REDACTED_HOST_PATH\])[^\s"'`<>\])},;!?]*[^\s"'`<>\])},;!?.]/giu;
 const ENCODED_ABSOLUTE_PATH_RE = /(^|[=:#&])(?:%2f|%5c%5c|[A-Za-z](?::|%3a)%5c)[^&\s"'`#]*/giu;
@@ -760,8 +761,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     if (!signal) return this.inspectSourcesFresh(undefined, workspaceId);
     const cacheKey = workspaceId ?? '*';
     const now = Date.now();
+    for (const [key, entry] of this.sourceInspectionCache) {
+      if (entry.expiresAt <= now) this.sourceInspectionCache.delete(key);
+    }
     let cached = this.sourceInspectionCache.get(cacheKey);
-    if (!cached || cached.expiresAt <= now) {
+    if (!cached) {
+      while (this.sourceInspectionCache.size >= MAX_SOURCE_INSPECTION_CACHE_ENTRIES) {
+        const oldestKey = this.sourceInspectionCache.keys().next().value as string | undefined;
+        if (oldestKey === undefined) break;
+        this.sourceInspectionCache.delete(oldestKey);
+      }
       cached = {
         expiresAt: now + SOURCE_INSPECTION_CACHE_TTL_MS,
         inspection: this.inspectSourcesFresh(undefined, workspaceId),

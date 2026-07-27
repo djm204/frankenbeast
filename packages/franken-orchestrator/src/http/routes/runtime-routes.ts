@@ -175,8 +175,8 @@ interface RuntimeEventStreamOptions {
 }
 
 function runtimeSseBody(message: RuntimeSseMessage): ReadableStream<Uint8Array> {
-  if (message.id && message.id.length > MAX_SSE_CURSOR_ID_CHARS) {
-    throw new Error(`Runtime SSE cursor IDs must be transport-safe values no longer than ${MAX_SSE_CURSOR_ID_CHARS} characters`);
+  if (message.id && new TextEncoder().encode(message.id).byteLength > MAX_SSE_CURSOR_ID_CHARS) {
+    throw new Error(`Runtime SSE cursor IDs must be transport-safe values no longer than ${MAX_SSE_CURSOR_ID_CHARS} bytes`);
   }
   if (message.id && /[\0\r\n]/u.test(message.id)) {
     throw new Error('Runtime SSE cursor IDs must be single-line values without NUL');
@@ -205,6 +205,8 @@ export async function runRuntimeEventStream(
   let cursor = options.initialCursor;
   let activePublish: Promise<void> | undefined;
   let closed = false;
+  let poll: ReturnType<typeof setInterval> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   let resolveAbort!: () => void;
   const aborted = new Promise<void>((resolve) => {
     resolveAbort = resolve;
@@ -212,6 +214,10 @@ export async function runRuntimeEventStream(
   const endStream = () => {
     if (closed) return;
     closed = true;
+    if (poll) clearInterval(poll);
+    if (heartbeat) clearInterval(heartbeat);
+    poll = undefined;
+    heartbeat = undefined;
     pollController.abort();
     resolveAbort();
   };
@@ -258,13 +264,11 @@ export async function runRuntimeEventStream(
     return pending;
   };
 
-  let poll: ReturnType<typeof setInterval> | undefined;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
   let consecutivePollFailures = 0;
   try {
     heartbeat = setInterval(
       () => {
-        if (queuedWrites > 0) return;
+        if (closed || queuedWrites > 0) return;
         void writeSse({ event: 'heartbeat', data: '' }).catch(endStream);
       },
       options.heartbeatIntervalMs,
@@ -361,7 +365,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     };
     const snapshot = RuntimeSnapshotSchema.parse(await adapter.getSnapshot(request));
     if (snapshot.providerId !== adapter.id) {
-      throw new Error(`Runtime snapshot provider id '${snapshot.providerId}' does not match adapter '${adapter.id}'`);
+      throw new Error('Runtime snapshot provider id does not match the selected adapter');
     }
     return c.json({ data: runtimeResponse(snapshot) });
   });

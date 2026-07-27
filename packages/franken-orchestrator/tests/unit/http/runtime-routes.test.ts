@@ -158,7 +158,7 @@ describe('smart-swarm runtime routes', () => {
 
   it('rejects snapshots whose provider id differs from the selected adapter', async () => {
     const { app, adapter } = createRoutes();
-    vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({
+    const snapshot = RuntimeSnapshotSchema.parse({
       providerId: 'other-runtime',
       state: 'empty',
       capturedAt: '2026-07-26T12:00:00.000Z',
@@ -169,12 +169,17 @@ describe('smart-swarm runtime routes', () => {
       events: { status: 'available', data: [] },
       blockers: { status: 'available', data: [] },
       approvals: { status: 'unsupported', reason: 'No source' },
-    }));
+    });
+    snapshot.providerId = 'API_KEY=runtime-secret /home/operator/private';
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(snapshot);
 
     const response = await app.request('/v1/smart-swarm/providers/hermes/snapshot', { headers: authHeaders() });
 
     expect(response.status).toBe(500);
-    expect(await response.text()).not.toContain('other-runtime');
+    expect(await response.text()).not.toContain('runtime-secret');
+    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain('runtime-secret');
+    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain('/home/operator/private');
   });
 
   it('returns a client error when an adapter rejects a malformed cursor', async () => {
@@ -815,12 +820,14 @@ describe('smart-swarm runtime routes', () => {
         pollIntervalMs: 20,
       }).finally(() => { settled = true; });
       await vi.advanceTimersByTimeAsync(20);
+      const writesBeforeAbort = vi.mocked(stream.pipe).mock.calls.length;
       abortStream!();
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(300);
       await Promise.resolve();
 
       expect(adapter.getEvents).toHaveBeenCalledTimes(2);
       expect(settled).toBe(false);
+      expect(stream.pipe).toHaveBeenCalledTimes(writesBeforeAbort);
     } finally {
       vi.useRealTimers();
     }
@@ -1165,6 +1172,23 @@ describe('smart-swarm runtime routes', () => {
     await expect(runRuntimeEventStream(adapter, stream as never, {
       heartbeatIntervalMs: 1_000,
       pollIntervalMs: 1_000,
+    })).rejects.toThrow('transport-safe');
+    expect(stream.pipe).not.toHaveBeenCalled();
+  });
+
+  it('measures replay-safe SSE cursor limits in UTF-8 bytes', async () => {
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents)
+      .mockResolvedValueOnce(RuntimeEventPageSchema.parse({
+        events: [],
+        nextCursor: '界'.repeat(2_000),
+      }))
+      .mockRejectedValue(new Error('permanent poll failure'));
+    const stream = { pipe: vi.fn(), onAbort: vi.fn() };
+
+    await expect(runRuntimeEventStream(adapter, stream as never, {
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1,
     })).rejects.toThrow('transport-safe');
     expect(stream.pipe).not.toHaveBeenCalled();
   });

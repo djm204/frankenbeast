@@ -168,6 +168,17 @@
 - [x] Commit/push `438e8bd68`, reply to and resolve all four threads, and reconcile this ledger.
 - [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
 
+## Exact-head round 37 follow-up
+
+- [x] Inspect the five current-head Codex findings on `a5fc16e704ae00933f73c8fd3f9fb5737db5ce3a` and reproduce each behavior with a focused RED regression.
+- [x] Preserve ordinary closing markup tags while retaining angle-bracket multi-segment host-path redaction.
+- [x] Bound shared Hermes source-inspection caching at 64 workspace scopes and evict expired/oldest entries.
+- [x] Enforce replay-safe SSE cursor limits in UTF-8 bytes and remove untrusted provider IDs from mismatch logs.
+- [x] Stop heartbeat timers immediately while cancellation-ignoring polls settle.
+- [x] Run focused, package, and root verification.
+- [ ] Commit/push, reply to and resolve all five threads, and reconcile this ledger.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -200,3 +211,4 @@
 - Exact-head round 28 reproduced all four new findings RED and passes 124/124 focused adapter, route, and ticket-store tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,694/4,697 passing.
 - Exact-head round 35 reproduced all three behavior findings RED and passes 139/139 focused adapter, route, and redaction tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,721/4,724 passing; all three CLI failures reproduce outside the runtime-adapter diff.
 - Exact-head round 36 reproduced three actionable behavior findings RED and passes 141/141 focused adapter, route, and redaction tests GREEN; the fourth schema finding was already satisfied and its proposed regression passed before implementation. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,723/4,726 passing.
+- Exact-head round 37 reproduced all five findings RED and passes 145/145 focused adapter, route, and redaction tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,727/4,730 passing.

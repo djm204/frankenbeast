@@ -734,6 +734,33 @@ describe('HermesRuntimeAdapter', () => {
     }
   });
 
+  it('bounds cached workspace inspections across arbitrary scoped requests', async () => {
+    vi.useFakeTimers();
+    try {
+      const home = await createHome();
+      const boardDir = join(home, 'kanban', 'boards', 'alpha');
+      const dbPath = join(boardDir, 'kanban.db');
+      await mkdir(boardDir, { recursive: true });
+      createCurrentKanban(dbPath);
+      const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+      const signal = new AbortController().signal;
+
+      const initial = await adapter.getEvents({ workspaceId: 'hermes:alpha', signal });
+      expect(initial.events.length).toBeGreaterThan(0);
+      await rm(dbPath);
+      for (let index = 0; index < 65; index += 1) {
+        await adapter.getEvents({ workspaceId: `hermes:missing-${index}`, signal });
+      }
+
+      await expect(adapter.getEvents({ workspaceId: 'hermes:alpha', signal })).resolves.toEqual({
+        events: [],
+        nextCursor: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects workspace sets that cannot fit in a bounded replay cursor', async () => {
     const home = await createHome();
     for (let index = 0; index < 100; index += 1) {
@@ -972,6 +999,27 @@ describe('HermesRuntimeAdapter', () => {
       data: expect.arrayContaining([expect.objectContaining({
         id: 'hermes:global:t_parent',
         title: 'failed at <[REDACTED_HOST_PATH]>',
+      })]),
+    }));
+  });
+
+  it('preserves ordinary closing markup tags in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'Use <div>text</div> and <status>ok</status>.',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'Use <div>text</div> and <status>ok</status>.',
       })]),
     }));
   });

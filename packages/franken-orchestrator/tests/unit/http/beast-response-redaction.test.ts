@@ -143,6 +143,11 @@ describe('Beast response redaction', () => {
       .toBe('failed at <[REDACTED_HOST_PATH]>');
   });
 
+  it('preserves ordinary closing markup tags', () => {
+    expect(redactAbsoluteHostPathValues('Use <div>text</div> and <status>ok</status>.'))
+      .toBe('Use <div>text</div> and <status>ok</status>.');
+  });
+
   it('redacts host paths after shell redirection delimiters', () => {
     expect(redactAbsoluteHostPathValues('command failed >/home/alice/private/output'))
       .toBe('command failed >[REDACTED_HOST_PATH]');
