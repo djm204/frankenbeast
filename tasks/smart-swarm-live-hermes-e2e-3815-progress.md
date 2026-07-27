@@ -24,5 +24,7 @@
 - [x] Remediate seventh-round Codex findings with running promotion confirmation, task-keyed dialog state, and strict network-404 failure exemption.
 - [x] Remediate eighth-round Codex finding by allowlisting only blocked and queued tasks for promotion.
 - [x] Remediate ninth-round Codex findings with blocked-state confirmation and fail-closed cancellation eligibility.
+- [x] Restore the repository dependency-freshness gate after OpenAI 7 and JSDOM 30 registry drift with exact dependent/location-scoped baselines and RED→GREEN checked-baseline regressions; no opportunistic major upgrade.
+- [x] Re-run the live dependency guard, 24/24 guard tests, serial orchestrator suite (4,887/4,887), root lint/typecheck/build, and `git diff --check`. The first concurrent full-suite run exposed eight load-sensitive orchestrator failures; all passed unchanged in the isolated serial rerun.
 - [ ] Run real `@codex review` to exact-head clean, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Record machine-readable root-blackboard and card handoff.
