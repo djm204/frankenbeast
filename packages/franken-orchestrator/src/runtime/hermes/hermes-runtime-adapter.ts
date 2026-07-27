@@ -134,8 +134,7 @@ function optionalHome(options: HermesRuntimeAdapterOptions): string | undefined 
 
 function optionalKanbanDbPath(options: HermesRuntimeAdapterOptions): string | undefined {
   const env = options.env ?? process.env;
-  const value = options.kanbanDbPath
-    ?? (options.hermesHome === undefined ? env['HERMES_KANBAN_DB'] : undefined);
+  const value = options.kanbanDbPath ?? env['HERMES_KANBAN_DB'];
   return value?.trim() || undefined;
 }
 
@@ -436,11 +435,13 @@ const defaultCommandRunner: HermesCommandRunner = (command, args, options) => ne
   });
 });
 
-function resolveCommandPath(command: string, pathValue: string | undefined): string {
-  if (isAbsolute(command) || command.includes(sep)) return command;
-  for (const directory of pathValue?.split(delimiter) ?? []) {
-    if (!directory) continue;
-    const candidate = resolve(directory, command);
+function resolveCommandPath(command: string, pathValue: string | undefined): string | undefined {
+  const candidates = isAbsolute(command) || command.includes(sep)
+    ? [command]
+    : (pathValue?.split(delimiter) ?? [])
+        .filter((directory) => directory.length > 0)
+        .map((directory) => resolve(directory, command));
+  for (const candidate of candidates) {
     try {
       accessSync(candidate, constants.X_OK);
       return candidate;
@@ -448,7 +449,7 @@ function resolveCommandPath(command: string, pathValue: string | undefined): str
       // Continue searching the executable path without passing it to the child.
     }
   }
-  return command;
+  return undefined;
 }
 
 export class HermesRuntimeAdapter implements RuntimeAdapter {
@@ -463,6 +464,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     inspection: Promise<SourceInspection>;
   }>();
   private readonly command: string;
+  private readonly commandAvailable: boolean;
   private readonly runCommand: HermesCommandRunner;
 
   constructor(options: HermesRuntimeAdapterOptions = {}) {
@@ -472,9 +474,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     this.now = options.now ?? (() => new Date());
     this.busyTimeoutMs = options.busyTimeoutMs ?? 2000;
     const command = options.command ?? 'hermes';
-    this.command = options.runCommand
-      ? command
+    const resolvedCommand = options.runCommand
+      ? undefined
       : resolveCommandPath(command, options.env?.['PATH'] ?? process.env['PATH']);
+    this.command = resolvedCommand ?? command;
+    this.commandAvailable = options.runCommand !== undefined || resolvedCommand !== undefined;
     this.runCommand = options.runCommand ?? defaultCommandRunner;
   }
 
@@ -500,9 +504,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         : inspection.discoveryMessage || compatible < inspected.length
           ? { state: 'degraded' as const, checkedAt: nowIso(this.now), message: 'One or more Hermes databases are unavailable or schema-incompatible' }
           : { state: 'connected' as const, checkedAt: nowIso(this.now) };
-    const mutationCapability = this.home
-      ? { status: 'supported' as const }
-      : { status: 'unsupported' as const, reason: 'Hermes home is required for supported mutation commands' };
+    const mutationCapability = !this.home
+      ? { status: 'unsupported' as const, reason: 'Hermes home is required for supported mutation commands' }
+      : !this.commandAvailable
+        ? { status: 'unsupported' as const, reason: 'Hermes command is unavailable for runtime mutations' }
+        : { status: 'supported' as const };
 
     return RuntimeProviderSchema.parse({
       id: this.id,

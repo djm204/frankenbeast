@@ -108,6 +108,24 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('preserves HERMES_KANBAN_DB when an explicit Hermes home is configured', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+
+    const snapshot = await new HermesRuntimeAdapter({
+      hermesHome: home,
+      env: { HERMES_KANBAN_DB: dbPath },
+    }).getSnapshot();
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'ready',
+      tasks: expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:t_parent' })]),
+      }),
+    }));
+  });
+
   it('does not advertise mutations for a read-only database-only configuration', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');
@@ -123,6 +141,25 @@ describe('HermesRuntimeAdapter', () => {
       pause: { status: 'unsupported', reason: expect.any(String) },
       resume: { status: 'unsupported', reason: expect.any(String) },
       policyActions: { status: 'unsupported', reason: expect.any(String) },
+    }));
+  });
+
+  it('does not advertise mutations when the Hermes command is unavailable', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+
+    const provider = await new HermesRuntimeAdapter({
+      hermesHome: home,
+      command: 'missing-hermes-command',
+      env: { PATH: join(home, 'empty-bin') },
+    }).describe();
+
+    expect(provider.capabilities).toEqual(expect.objectContaining({
+      snapshot: { status: 'supported' },
+      blockers: { status: 'unsupported', reason: expect.stringContaining('command') },
+      pause: { status: 'unsupported', reason: expect.stringContaining('command') },
+      resume: { status: 'unsupported', reason: expect.stringContaining('command') },
+      policyActions: { status: 'unsupported', reason: expect.stringContaining('command') },
     }));
   });
 

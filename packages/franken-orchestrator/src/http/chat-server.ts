@@ -390,78 +390,85 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       })
     : undefined;
   const runtimeActionStore = options.runtimeActionStore ?? ownedRuntimeActionStore;
-  const app = createChatApp({
-    sessionStore,
-    engine: runtime.engine,
-    runtime: runtime.runtime,
-    turnRunner: runtime.turnRunner,
-    sessionTokenSecret: tokenSecret,
-    ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
-    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
-    ...(options.beastControl ? { beastControl: options.beastControl } : {}),
-    ...(options.networkControl ? { networkControl: options.networkControl } : {}),
-    ...(securityConfig ? { securityConfig } : {}),
-    ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
-    ...(commsRuntime ? { commsRuntime } : {}),
-    ...(options.skillManager ? { skillManager: options.skillManager } : {}),
-    ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
-    ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
-    ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
-    ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
-    ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
-    ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
-    ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
-    ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
-    ...(runtimeActionStore ? { runtimeActionStore } : {}),
-    chatRateLimiter,
-    chatMutationAdmission,
-    approvalAuditLog,
-  });
-  const server = createServer((request, response) => {
-    void handleHonoHttpRequest(app, request, response);
-  });
   const chatMessageRateLimit = options.chatMessageRateLimit
     ?? options.chatRateLimit
     ?? options.beastControl?.rateLimit;
-
-  const attachOptions: AttachChatWebSocketServerOptions = {
-    server,
-    path,
-    runtime: runtime.runtime,
-    sessionStore,
-    tokenSecret,
-    chatRateLimiter,
-    chatMutationAdmission,
-    approvalAuditLog,
-    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
-    ...(chatMessageRateLimit ? { chatMessageRateLimit } : {}),
-    ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
-    ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
-  };
-  const webSocketServer = attachChatWebSocketServer(attachOptions);
-
-  let address: ReturnType<typeof server.address>;
+  let app: ReturnType<typeof createChatApp> | undefined;
+  let server: ReturnType<typeof createServer> | undefined;
+  let webSocketServer: ReturnType<typeof attachChatWebSocketServer> | undefined;
+  let address: ReturnType<ReturnType<typeof createServer>['address']>;
   try {
+    const createdApp = createChatApp({
+      sessionStore,
+      engine: runtime.engine,
+      runtime: runtime.runtime,
+      turnRunner: runtime.turnRunner,
+      sessionTokenSecret: tokenSecret,
+      ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
+      ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+      ...(options.beastControl ? { beastControl: options.beastControl } : {}),
+      ...(options.networkControl ? { networkControl: options.networkControl } : {}),
+      ...(securityConfig ? { securityConfig } : {}),
+      ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
+      ...(commsRuntime ? { commsRuntime } : {}),
+      ...(options.skillManager ? { skillManager: options.skillManager } : {}),
+      ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
+      ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
+      ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
+      ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
+      ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
+      ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+      ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
+      ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
+      ...(runtimeActionStore ? { runtimeActionStore } : {}),
+      chatRateLimiter,
+      chatMutationAdmission,
+      approvalAuditLog,
+    });
+    app = createdApp;
+    const createdServer = createServer((request, response) => {
+      void handleHonoHttpRequest(createdApp, request, response);
+    });
+    server = createdServer;
+    const attachOptions: AttachChatWebSocketServerOptions = {
+      server: createdServer,
+      path,
+      runtime: runtime.runtime,
+      sessionStore,
+      tokenSecret,
+      chatRateLimiter,
+      chatMutationAdmission,
+      approvalAuditLog,
+      ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+      ...(chatMessageRateLimit ? { chatMessageRateLimit } : {}),
+      ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+      ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
+    };
+    webSocketServer = attachChatWebSocketServer(attachOptions);
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(port, host, () => {
-        server.off('error', reject);
+      createdServer.once('error', reject);
+      createdServer.listen(port, host, () => {
+        createdServer.off('error', reject);
         resolve();
       });
     });
-    address = server.address();
+    address = createdServer.address();
     if (!address || typeof address === 'string') {
       throw new Error('Chat server did not bind to a TCP address');
     }
   } catch (error) {
-    server.closeAllConnections();
-    webSocketServer.close();
+    server?.closeAllConnections();
+    webSocketServer?.close();
     ownedRuntimeActionStore?.beginShutdown();
     await ownedRuntimeActionStore?.drain();
     chatStreamTicketStore?.destroy();
     ownedRuntimeActionStore?.destroy();
     ownedBrainRegistry?.close();
     throw error;
+  }
+
+  if (!app || !server || !webSocketServer) {
+    throw new Error('Chat server initialization did not complete');
   }
 
   const url = localPlaintextOrSecureEndpoint(host, address.port);

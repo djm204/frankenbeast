@@ -17,6 +17,7 @@ import {
 } from '../../runtime/runtime-action-store.js';
 export type { RuntimeActionAuditEvent } from '../../runtime/runtime-action-store.js';
 import {
+  RuntimeActionAuditSchema,
   RuntimeActionRequestSchema,
   RuntimeActionResultSchema,
   RuntimeEventPageSchema,
@@ -415,8 +416,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
     audit: RuntimeActionAudit,
   ): void => {
+    const sanitizedAudit = RuntimeActionAuditSchema.parse(redactRuntimePaths(audit));
     const event = {
-      ...audit,
+      ...sanitizedAudit,
       providerId,
       correlationId: request.correlationId,
       ...(request.causationId ? { causationId: request.causationId } : {}),

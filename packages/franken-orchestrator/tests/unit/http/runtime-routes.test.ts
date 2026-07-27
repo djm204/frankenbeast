@@ -183,6 +183,47 @@ describe('smart-swarm runtime routes', () => {
     expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-log');
   });
 
+  it('redacts adapter-provided state before persisting or forwarding action audits', async () => {
+    const actionStore = new RuntimeActionStore();
+    const { app, adapter, actionAudit } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'hermes',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied',
+        previousState: 'token=adapter-secret',
+        currentState: '/home/private/runtime-state',
+      },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:redacted-audit',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(actionAudit).toHaveBeenCalledOnce();
+    const durableAudit = JSON.stringify({
+      forwarded: actionAudit.mock.calls,
+      persisted: actionStore.listAuditEvents(),
+    });
+    expect(durableAudit).not.toContain('adapter-secret');
+    expect(durableAudit).not.toContain('/home/private/runtime-state');
+    expect(durableAudit).toContain('[REDACTED');
+  });
+
   it('keeps a slow in-flight action leased beyond the replay TTL', async () => {
     vi.useFakeTimers();
     try {

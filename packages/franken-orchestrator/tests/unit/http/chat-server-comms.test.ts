@@ -166,6 +166,30 @@ describe('startChatServer comms pass-through', () => {
     runtimeActionStore.destroy();
   });
 
+  it('destroys an owned runtime action store when app creation fails before listen', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-app-failure-'));
+    tempDirs.push(projectDir);
+    const destroy = vi.spyOn(RuntimeActionStore.prototype, 'destroy');
+    mockedCreateChatApp.mockImplementationOnce(() => {
+      throw new Error('invalid app configuration');
+    });
+
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir: join(projectDir, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: TEST_OPERATOR_TOKEN,
+      })).rejects.toThrow('invalid app configuration');
+
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      destroy.mockRestore();
+    }
+  });
+
   it('destroys an owned runtime action store when server startup fails', async () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-startup-failure-'));
     tempDirs.push(projectDir);
