@@ -243,6 +243,11 @@ export class SmartSwarmApiClient {
         consecutivePreOpenFailures = 0;
         handlers.connection?.('connected');
       });
+      activeSource.addEventListener('checkpoint', (rawEvent) => {
+        if (source !== activeSource || closed) return;
+        const lastEventId = (rawEvent as MessageEvent<string>).lastEventId;
+        if (lastEventId) cursor = lastEventId;
+      });
       activeSource.addEventListener('activity', (rawEvent) => {
         if (source !== activeSource || closed) return;
         try {

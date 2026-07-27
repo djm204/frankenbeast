@@ -116,6 +116,46 @@ describe('SmartSwarmApiClient', () => {
     vi.useRealTimers();
   });
 
+  it('reconnects the live stream from a cursor-only checkpoint', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<{
+      close: ReturnType<typeof vi.fn>;
+      listeners: Record<string, (event: MessageEvent) => void>;
+    }> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const source = {
+        close: vi.fn(),
+        listeners: {} as Record<string, (event: MessageEvent) => void>,
+      };
+      sources.push(source);
+      this.close = source.close;
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        source.listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-1' }))
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-2' })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    const unsubscribe = await client.subscribe('hermes', 'board/main', { event: vi.fn() });
+    sources[0]!.listeners.open!(new MessageEvent('open'));
+    const checkpoint = sources[0]!.listeners.checkpoint;
+    expect(checkpoint).toBeTypeOf('function');
+    checkpoint?.(new MessageEvent('checkpoint', { lastEventId: 'cursor/checkpoint-2' }));
+    sources[0]!.listeners.error!(new MessageEvent('error'));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(EventSourceMock).toHaveBeenNthCalledWith(
+      2,
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-2?workspaceId=board%2Fmain&cursor=cursor%2Fcheckpoint-2`,
+      { withCredentials: true },
+    );
+    unsubscribe();
+  });
+
   it('reconnects after a malformed activity event', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

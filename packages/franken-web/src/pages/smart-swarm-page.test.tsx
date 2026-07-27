@@ -581,6 +581,45 @@ describe('SmartSwarmPage', () => {
     expect(fetchSnapshot).toHaveBeenCalledTimes(3);
   });
 
+  it('preserves streamed activity that arrives while a snapshot refresh is in flight', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    let resolveRefresh!: (value: RuntimeSnapshot) => void;
+    const pendingRefresh = new Promise<RuntimeSnapshot>((resolve) => { resolveRefresh = resolve; });
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockReturnValueOnce(pendingRefresh)
+      .mockResolvedValue(snapshot);
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+    const streamedEvent = {
+      ...baseEvent,
+      id: 'streamed-during-refresh',
+      cursor: 'cursor-during-refresh',
+      occurredAt: '2026-07-26T18:00:03.000Z',
+      summary: 'Streamed during refresh',
+    };
+
+    act(() => handlers.event(streamedEvent));
+    expect(screen.getByText('Streamed during refresh')).toBeDefined();
+    await act(async () => {
+      resolveRefresh(snapshot);
+      await pendingRefresh;
+    });
+
+    expect(screen.getByText('Streamed during refresh')).toBeDefined();
+  });
+
   it('keeps newest activity first before and after snapshot refreshes', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
@@ -904,6 +943,41 @@ describe('SmartSwarmPage', () => {
 
     expect(screen.getByText('newest-run')).toBeDefined();
     expect(screen.queryByText('run-0')).toBeNull();
+  });
+
+  it('ranks recently finished runs before bounding task evidence', async () => {
+    const baseRun = snapshot.runs.status === 'available' ? snapshot.runs.data[0]! : undefined;
+    if (!baseRun) throw new Error('Expected a run fixture');
+    const runSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      runs: {
+        status: 'available',
+        data: [
+          ...Array.from({ length: 20 }, (_, index) => ({
+            ...baseRun,
+            id: `older-finished-run-${index}`,
+            state: 'succeeded' as const,
+            startedAt: `2026-07-25T${String(index).padStart(2, '0')}:00:00.000Z`,
+            finishedAt: `2026-07-25T${String(index).padStart(2, '0')}:30:00.000Z`,
+            lastActiveAt: null,
+          })),
+          {
+            ...baseRun,
+            id: 'recently-finished-long-run',
+            state: 'succeeded' as const,
+            startedAt: '2026-07-01T00:00:00.000Z',
+            finishedAt: '2026-07-27T00:00:00.000Z',
+            lastActiveAt: null,
+          },
+        ],
+      },
+    };
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot: vi.fn().mockResolvedValue(runSnapshot) })} />);
+    await screen.findByRole('button', { name: 'Inspect Live dashboard' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+
+    expect(screen.getByText('recently-finished-long-run')).toBeDefined();
   });
 
   it('shows the newest unfinished run on each task card', async () => {

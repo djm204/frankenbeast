@@ -14,6 +14,11 @@
 - [ ] Run the real GitHub @codex review loop to exact-head clean with zero unresolved threads; round nine returned five findings, all fixed locally under RED→GREEN, and the next exact-head review remains outstanding.
 - [ ] Verify exact-head CI is green and record evidence on the PM/root cards.
 - [ ] Request human review through the Kanban lifecycle with a structured handoff.
+- [x] RED→GREEN: persist cursor-only SSE checkpoint IDs across reconnects.
+- [x] RED→GREEN: merge snapshot completions with newer streamed activity.
+- [x] RED→GREEN: rank completed run evidence by `finishedAt` before the 20-run cap.
+- [x] Rebase onto current `origin/main` after #3834 and #3866, then rerun focused/full/browser and repository gates.
+- [ ] Publish one immutable PR #3867 head, reply/resolve the three current-head Codex threads, and obtain exact-head Codex/CI clean evidence with fully paginated zero unresolved threads.
 
 Verification note: `npm test` was also run at the repository root after the rebase. All non-orchestrator workspaces passed; the existing orchestrator suite reported 10 unrelated failures (timeouts plus network/run test pollution), while the 35 normalized-runtime tests and all 779 web tests passed in isolation.
 
@@ -34,3 +39,5 @@ Round-nine verification note: findings now derive degraded runtime status from t
 Round-ten verification note: rebased the full #3814 stack onto published upstream PR #3821 head `7ab5c52f429311f8bd247769dfa3a289a2f44302` without conflicts. The focused suite passes 41/41, the full franken-web suite passes 817/817 across 85 files, and root lint (zero errors), typecheck, build, plus `git diff --check` pass. Browser validation at `http://127.0.0.1:4174/#/smart-swarm` rendered the provider/workspace controls and explicit backend-disconnected `Smart-swarm unavailable / HTTP 404` state with zero JavaScript console errors. Force-with-lease publication is waiting for explicit human approval because preflight found 23 changed files (80 deleted lines) relative to remote head `a8a9d7db81db2121c4d240869f9ad2c8b1529a09`, exceeding the 20-file auto-force threshold.
 
 Final-main verification note: after #3812 squash-merged, rebased the 13 #3814-only commits onto immutable `origin/main` head `715da9d456d9a883aa96d85f53cbefca832da1c1` without conflicts. The focused smart-swarm/route/style suite passes 54/54, the full franken-web suite passes 817/817 across 85 files, and root lint (zero errors; pre-existing warnings only), typecheck, build, plus `git diff --check` pass. The resulting diff is limited to 10 web source/test/style files and this progress document; no Hive Brain or #3812 runtime-adapter files remain in the branch diff.
+
+Current-head closeout note: reproduced all three PR #3867 Codex P2 findings with failing tests, then fixed checkpoint reconnect cursors, in-flight snapshot/event merging, and finished-run ordering under GREEN. Rebasing the 14 dashboard commits onto `origin/main` `a372df380` (including merged #3834 and #3866) completed without conflicts. Focused coverage passes 53/53, the complete franken-web suite passes 820/820 across 85 files, and root lint (zero errors; pre-existing warnings only), typecheck, build, plus `git diff --check` pass. Browser verification at `http://127.0.0.1:4174/#/smart-swarm` rendered the real production route and explicit backend-disconnected `Smart-swarm unavailable / HTTP 404` state with zero JavaScript console errors.

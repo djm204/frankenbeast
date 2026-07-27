@@ -6,6 +6,7 @@ import {
   type RuntimeConnectionState,
   type RuntimeEvent,
   type RuntimeProvider,
+  type RuntimeRun,
   type RuntimeSection,
   type RuntimeSnapshot,
   type RuntimeTask,
@@ -86,6 +87,12 @@ function compareRuntimeEvidenceRecency(
   right: { id: string; occurredAt: string },
 ): number {
   return Date.parse(right.occurredAt) - Date.parse(left.occurredAt) || left.id.localeCompare(right.id);
+}
+
+function compareRuntimeRunRecency(left: RuntimeRun, right: RuntimeRun): number {
+  const leftAt = left.finishedAt ?? left.lastActiveAt ?? left.startedAt;
+  const rightAt = right.finishedAt ?? right.lastActiveAt ?? right.startedAt;
+  return Date.parse(rightAt) - Date.parse(leftAt) || left.id.localeCompare(right.id);
 }
 
 function StateNotice({ provider, snapshot, workspaceName, error, onRetry }: {
@@ -178,6 +185,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
   const snapshotRequestGeneration = useRef(0);
+  const streamEventGeneration = useRef(0);
+  const recentStreamEvents = useRef<Array<{ generation: number; event: RuntimeEvent }>>([]);
   const snapshotScope = useRef('');
   const refreshPending = useRef(false);
   const lastTopologyRefreshAt = useRef(0);
@@ -281,12 +290,14 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     if (snapshotScope.current !== nextScope) {
       snapshotScope.current = nextScope;
       snapshotRequestGeneration.current += 1;
+      recentStreamEvents.current = [];
       snapshotRequestsInFlight.current = 0;
       refreshPending.current = false;
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       refreshTimer.current = null;
     }
     const requestGeneration = snapshotRequestGeneration.current;
+    const requestStreamEventGeneration = streamEventGeneration.current;
     setLoading(true);
     snapshotRequestsInFlight.current += 1;
     void client.fetchSnapshot(providerId, {
@@ -295,7 +306,21 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     })
       .then((nextSnapshot) => {
         if (cancelled || currentProviderId.current !== providerId) return;
-        setSnapshot(nextSnapshot);
+        const streamedDuringRequest = recentStreamEvents.current
+          .filter(({ generation }) => generation > requestStreamEventGeneration)
+          .map(({ event }) => event);
+        setSnapshot(() => {
+          if (streamedDuringRequest.length === 0 || nextSnapshot.events.status !== 'available') return nextSnapshot;
+          const byId = new Map(nextSnapshot.events.data.map((event) => [event.id, event]));
+          for (const event of streamedDuringRequest) byId.set(event.id, event);
+          return {
+            ...nextSnapshot,
+            events: {
+              status: 'available',
+              data: [...byId.values()].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE),
+            },
+          };
+        });
         if (!workspaceId) setWorkspaceCatalog(nextSnapshot.workspaces);
         if (nextSnapshot.workspaces.status === 'available') {
           const nextWorkspaces = nextSnapshot.workspaces.data;
@@ -351,6 +376,11 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       },
       event: (event: RuntimeEvent) => {
         if (cancelled) return;
+        streamEventGeneration.current += 1;
+        recentStreamEvents.current = [
+          ...recentStreamEvents.current,
+          { generation: streamEventGeneration.current, event },
+        ].slice(-MAX_VISIBLE_EVIDENCE);
         setSnapshot((current) => {
           if (!current || current.events.status !== 'available') return current;
           const withoutDuplicate = current.events.data.filter((candidate) => candidate.id !== event.id);
@@ -627,7 +657,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           returnFocus={taskDetailTrigger.current}
           runs={runs
             .filter((run) => run.taskId === selectedTask.id)
-            .sort((left, right) => Date.parse(right.lastActiveAt ?? right.startedAt) - Date.parse(left.lastActiveAt ?? left.startedAt))
+            .sort(compareRuntimeRunRecency)
             .slice(0, 20)}
           task={selectedTask}
         />
