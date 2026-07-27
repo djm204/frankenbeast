@@ -70,6 +70,8 @@ describe('Beast response redaction', () => {
   it('preserves absolute URLs with path segments', () => {
     expect(redactAbsoluteHostPathValues('See https://example.com/docs/setup for details'))
       .toBe('See https://example.com/docs/setup for details');
+    expect(redactAbsoluteHostPathValues('See http://[::1]/api/status'))
+      .toBe('See http://[::1]/api/status');
   });
 
   it('preserves quoted API routes', () => {

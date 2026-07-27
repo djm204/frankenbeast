@@ -35,6 +35,8 @@ const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_MAX_ACTIVE_STREAMS = 32;
 const MAX_TIMER_INTERVAL_MS = 2_147_483_647;
+const MAX_CONSECUTIVE_POLL_FAILURES = 3;
+const MAX_SSE_CURSOR_ID_CHARS = 4 * 1024;
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -173,6 +175,9 @@ interface RuntimeEventStreamOptions {
 }
 
 function runtimeSseBody(message: RuntimeSseMessage): ReadableStream<Uint8Array> {
+  if (message.id && message.id.length > MAX_SSE_CURSOR_ID_CHARS) {
+    throw new Error(`Runtime SSE cursor IDs must be transport-safe values no longer than ${MAX_SSE_CURSOR_ID_CHARS} characters`);
+  }
   if (message.id && /[\0\r\n]/u.test(message.id)) {
     throw new Error('Runtime SSE cursor IDs must be single-line values without NUL');
   }
@@ -255,6 +260,7 @@ export async function runRuntimeEventStream(
 
   let poll: ReturnType<typeof setInterval> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  let consecutivePollFailures = 0;
   try {
     heartbeat = setInterval(
       () => {
@@ -272,7 +278,15 @@ export async function runRuntimeEventStream(
       await initialPublish;
       return;
     }
-    poll = setInterval(() => void publish().catch(() => {}), options.pollIntervalMs);
+    poll = setInterval(() => {
+      void publish().then(
+        () => { consecutivePollFailures = 0; },
+        () => {
+          consecutivePollFailures += 1;
+          if (consecutivePollFailures >= MAX_CONSECUTIVE_POLL_FAILURES) endStream();
+        },
+      );
+    }, options.pollIntervalMs);
     await aborted;
     const pending = activePublish;
     if (pending) {

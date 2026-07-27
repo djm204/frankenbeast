@@ -127,25 +127,37 @@
 
 - [x] Inspect the three current-head Codex findings on `8b0c4707f263de11d5edb2f3afb2e2e690b7fd9e` and reproduce each behavior with a failing regression test.
 - [x] Exclude pointerless active runs superseded by newer terminal runs, redact host paths after shell redirection delimiters, and sanitize asynchronous SSE adapter failures before Hono logs them.
-- [ ] Run focused/package/root verification, commit/push, reply to and resolve all three threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+- [x] Run focused/package/root verification, commit/push, and reply to and resolve all three threads.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
 ## Exact-head round 32 follow-up
 
 - [x] Push round 31 as `d39a5664c7fac2dc2136d64da2f947859e07e0e8`, resolve all three threads, verify zero paginated unresolved threads, and trigger Codex at `2026-07-27T09:26:39Z`.
 - [x] Reproduce and remediate unquoted file-URL delimiter loss, conjunction-based API-route path leakage, and empty compact/legacy cursor workspace IDs.
-- [ ] Run focused/package/root verification, commit/push, reply to and resolve all three threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+- [x] Run focused/package/root verification, commit/push, and reply to and resolve all three threads.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
 ## Exact-head round 33 follow-up
 
 - [x] Push round 32 as `d24af159a3a853bcfd6997f32888537a7a583902`, resolve all three threads, verify zero paginated unresolved threads, and trigger Codex at `2026-07-27T09:45:59Z`.
 - [x] Reproduce and remediate host-path leakage inside unquoted API-route query and fragment values in shared and direct-adapter redaction.
-- [ ] Run focused/package/root verification, commit/push, reply to and resolve the thread, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+- [x] Run focused/package/root verification, commit/push, and reply to and resolve the thread.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
 ## Exact-head round 34 follow-up
 
 - [x] Push round 33 as `a2da5e462a2a54c10005d1381acfc44d84e803fa`, resolve the thread, verify zero paginated unresolved threads, and trigger Codex at `2026-07-27T10:06:38Z`.
 - [x] Reproduce and remediate pointerless-run session loss, URL-encoded host-path leakage, transient periodic stream-poll termination, and delayed initial heartbeat startup.
-- [ ] Run focused/package/root verification, commit/push, reply to and resolve all four threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+- [x] Run focused/package/root verification, commit/push, and reply to and resolve all four threads.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+
+## Exact-head round 35 follow-up
+
+- [x] Inspect the four current-head Codex findings on `4804feb758b13841eeea52c255d14b74bf145a7f` and reproduce the three behavior findings with failing regression tests.
+- [x] Bound repeated periodic polling failures, preserve bracketed-host URL paths, bound replay-safe SSE cursor IDs, and reconcile stale progress-ledger items.
+- [x] Run focused/package/root verification.
+- [ ] Commit/push and reply to and resolve all four threads.
+- [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
 
 ## Verification notes
 
@@ -177,3 +189,4 @@
 - Exact-head round 26 reproduced all five findings RED and passes 134/134 focused adapter, route, redaction, and ticket-store tests GREEN. Package typecheck, lint (zero errors), and build pass.
 - Exact-head round 27 reproduced all four findings RED and passes 137/137 focused adapter, route, redaction, and ticket-store tests GREEN. Package typecheck, lint (zero errors; pre-existing warnings only), and build pass.
 - Exact-head round 28 reproduced all four new findings RED and passes 124/124 focused adapter, route, and ticket-store tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,694/4,697 passing.
+- Exact-head round 35 reproduced all three behavior findings RED and passes 139/139 focused adapter, route, and redaction tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,721/4,724 passing; all three CLI failures reproduce outside the runtime-adapter diff.

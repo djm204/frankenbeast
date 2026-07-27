@@ -45,10 +45,11 @@ function hasApplicationRouteContext(
   prefix: string,
   allowApiRoute: boolean,
 ): boolean {
+  const context = value.slice(0, offset + prefix.length);
+  if (/\bhttps?:\/\/\[[^\]\s]+\]$/iu.test(context)) return true;
   if (SLASH_COMMANDS.has(path)) return true;
   if (!API_ROUTE_RE.test(path)) return false;
   if (allowApiRoute || (offset === 0 && /[?#]/u.test(value[path.length] ?? ''))) return true;
-  const context = value.slice(0, offset + prefix.length);
   return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check)\s+["']?$/iu.test(context)
     || /\/(?:api|v\d+|comms|webhooks)(?:\/[^\s"'`]+)?\s+(?:and|or)\s+["']?$/iu.test(context)
     || /\/(?:plan|run|status|diff|approve|reject|session|quit)\s+(?:and|with)\s+["']?$/iu.test(context);

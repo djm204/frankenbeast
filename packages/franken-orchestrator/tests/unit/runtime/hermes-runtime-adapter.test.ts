@@ -814,6 +814,24 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('preserves paths in bracketed-host absolute URLs', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run('See http://[::1]/api/status', 't_parent');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'See http://[::1]/api/status',
+      })]),
+    }));
+  });
+
   it('redacts unquoted single-component POSIX paths for direct consumers', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');

@@ -856,6 +856,30 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('ends the stream after repeated periodic runtime poll failures', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      vi.mocked(adapter.getEvents)
+        .mockResolvedValueOnce(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }))
+        .mockRejectedValue(new Error('permanent schema failure'));
+      const stream = { pipe: vi.fn().mockResolvedValue(undefined), onAbort: vi.fn() };
+      let settled = false;
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 1_000,
+        pollIntervalMs: 20,
+      }).finally(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(60);
+
+      expect(adapter.getEvents).toHaveBeenCalledTimes(4);
+      expect(settled).toBe(true);
+      await streamDone;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('starts heartbeats while the initial runtime poll is pending', async () => {
     vi.useFakeTimers();
     try {
@@ -1096,5 +1120,20 @@ describe('smart-swarm runtime routes', () => {
       headers: authHeaders(),
     });
     expect(response.status).toBe(200);
+  });
+
+  it('rejects cursors too large for a replay-safe SSE id before writing', async () => {
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+      events: [],
+      nextCursor: 'x'.repeat(5_000),
+    }));
+    const stream = { pipe: vi.fn(), onAbort: vi.fn() };
+
+    await expect(runRuntimeEventStream(adapter, stream as never, {
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1_000,
+    })).rejects.toThrow('transport-safe');
+    expect(stream.pipe).not.toHaveBeenCalled();
   });
 });
