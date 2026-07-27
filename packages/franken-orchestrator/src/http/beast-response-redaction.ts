@@ -15,7 +15,7 @@ function isAbsoluteHostPath(value: string): boolean {
 }
 
 const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
-const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
+const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:[^/\s"']+\/)*[^/\s"']+)/gu;
 const QUOTED_POSIX_HOST_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const API_ROUTE_KEYS = new Set(['route', 'endpoint', 'requestPath', 'pathname']);
@@ -37,6 +37,7 @@ function hasApplicationRouteContext(
   prefix: string,
   allowApiRoute: boolean,
 ): boolean {
+  if (SLASH_COMMANDS.has(path)) return true;
   if (!API_ROUTE_RE.test(path)) return false;
   if (allowApiRoute || (offset === 0 && /[?#]/u.test(path))) return true;
   const context = value.slice(0, offset + prefix.length);

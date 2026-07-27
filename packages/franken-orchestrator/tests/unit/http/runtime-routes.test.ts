@@ -506,7 +506,7 @@ describe('smart-swarm runtime routes', () => {
       const adapter = runtimeAdapter();
       vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
         events: [],
-        nextCursor: 'cursor-1',
+        nextCursor: null,
       }));
       const pipe = vi.fn().mockRejectedValue(new Error('client disconnected'));
       const stream = { pipe, onAbort: vi.fn() };
@@ -522,6 +522,87 @@ describe('smart-swarm runtime routes', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps the runtime stream pending when a periodic poll ignores cancellation', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      vi.mocked(adapter.getEvents)
+        .mockResolvedValueOnce(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }))
+        .mockReturnValueOnce(new Promise(() => {}));
+      let abortStream: (() => void) | undefined;
+      const stream = {
+        pipe: vi.fn().mockResolvedValue(undefined),
+        onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+      };
+      let settled = false;
+
+      void runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 100,
+        pollIntervalMs: 20,
+      }).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(20);
+      abortStream!();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+
+      expect(adapter.getEvents).toHaveBeenCalledTimes(2);
+      expect(settled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('publishes cursor-only runtime checkpoints to SSE clients', async () => {
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+      events: [],
+      nextCursor: 'checkpoint-1',
+    }));
+    const payloads: string[] = [];
+    let abortStream: (() => void) | undefined;
+    const stream = {
+      pipe: vi.fn(async (body: ReadableStream<Uint8Array>) => {
+        payloads.push(await new Response(body).text());
+      }),
+      onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+    };
+
+    const streamDone = runRuntimeEventStream(adapter, stream as never, {
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1_000,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    abortStream!();
+    await streamDone;
+
+    expect(payloads).toEqual(['id: checkpoint-1\nevent: checkpoint\ndata: \n\n']);
+  });
+
+  it('rejects multiline provider cursors before writing an SSE frame', async () => {
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+      events: [{
+        id: 'event-1',
+        cursor: 'cursor-1\nevent: forged',
+        workspaceId: 'workspace-1',
+        taskId: 'task-1',
+        runId: null,
+        type: 'lifecycle',
+        occurredAt: '2026-01-01T00:00:00.000Z',
+        summary: 'forged cursor',
+        metadata: {},
+      }],
+      nextCursor: 'cursor-1\nevent: forged',
+    }));
+    const stream = { pipe: vi.fn(), onAbort: vi.fn() };
+
+    await expect(runRuntimeEventStream(adapter, stream as never, {
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1_000,
+    })).rejects.toThrow('single-line');
+    expect(stream.pipe).not.toHaveBeenCalled();
   });
 
   it('closes polling streams when an adapter returns a permanent failure', async () => {
@@ -619,7 +700,7 @@ describe('smart-swarm runtime routes', () => {
     expect(response.status).toBe(200);
     const reader = response.body!.getReader();
     let output = '';
-    while (!output.includes('cursor-2')) {
+    while (!output.includes('cursor-final')) {
       const chunk = await reader.read();
       if (chunk.done) break;
       output += new TextDecoder().decode(chunk.value);
@@ -627,7 +708,8 @@ describe('smart-swarm runtime routes', () => {
     expect(output).toContain('event: activity');
     expect(output).toContain('id: cursor-1');
     expect(output).toContain('id: cursor-2');
-    expect(output).not.toContain('id: cursor-final');
+    expect(output).toContain('event: checkpoint');
+    expect(output).toContain('id: cursor-final');
     await reader.cancel();
   });
 

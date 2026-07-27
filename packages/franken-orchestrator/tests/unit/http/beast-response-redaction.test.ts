@@ -51,6 +51,13 @@ describe('Beast response redaction', () => {
       .toBe('cwd=[REDACTED_HOST_PATH]');
   });
 
+  it('redacts embedded single-component absolute paths', () => {
+    expect(redactAbsoluteHostPathValues('failed reading /root'))
+      .toBe('failed reading [REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('loaded /.env'))
+      .toBe('loaded [REDACTED_HOST_PATH]');
+  });
+
   it('redacts embedded host paths after punctuation boundaries', () => {
     expect(redactAbsoluteHostPathValues('failed,/home/alice/private/file'))
       .toBe('failed,[REDACTED_HOST_PATH]');

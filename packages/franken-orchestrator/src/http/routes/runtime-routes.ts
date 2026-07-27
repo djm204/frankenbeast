@@ -146,6 +146,9 @@ interface RuntimeEventStreamOptions {
 }
 
 function runtimeSseBody(message: RuntimeSseMessage): ReadableStream<Uint8Array> {
+  if (message.id && /[\r\n]/u.test(message.id)) {
+    throw new Error('Runtime SSE cursor IDs must be single-line values');
+  }
   const dataLines = message.data.split(/\r\n|\r|\n/u).map((line) => `data: ${line}`).join('\n');
   const payload = [
     message.id && `id: ${message.id}`,
@@ -168,7 +171,7 @@ export async function runRuntimeEventStream(
 ): Promise<void> {
   const pollController = new AbortController();
   let cursor = options.initialCursor;
-  let polling = false;
+  let activePublish: Promise<void> | undefined;
   let closed = false;
   let resolveAbort!: () => void;
   const aborted = new Promise<void>((resolve) => {
@@ -188,10 +191,10 @@ export async function runRuntimeEventStream(
     writeChain = write.catch(() => undefined);
     return write;
   };
-  const publish = async () => {
-    if (polling || closed) return;
-    polling = true;
-    try {
+  const publish = (): Promise<void> => {
+    if (activePublish) return activePublish;
+    if (closed) return Promise.resolve();
+    const pending = (async () => {
       const page = RuntimeEventPageSchema.parse(await adapter.getEvents({
         ...(cursor ? { cursor } : {}),
         ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
@@ -207,10 +210,17 @@ export async function runRuntimeEventStream(
         });
         cursor = event.cursor;
       }
-      if (page.nextCursor) cursor = page.nextCursor;
-    } finally {
-      polling = false;
-    }
+      if (page.nextCursor && page.nextCursor !== cursor) {
+        await writeSse({ id: page.nextCursor, event: 'checkpoint', data: '' });
+        cursor = page.nextCursor;
+      }
+    })();
+    activePublish = pending;
+    void pending.then(
+      () => { if (activePublish === pending) activePublish = undefined; },
+      () => { if (activePublish === pending) activePublish = undefined; },
+    );
+    return pending;
   };
 
   let poll: ReturnType<typeof setInterval> | undefined;
@@ -231,6 +241,14 @@ export async function runRuntimeEventStream(
       options.heartbeatIntervalMs,
     );
     await aborted;
+    const pending = activePublish;
+    if (pending) {
+      try {
+        await pending;
+      } catch (error) {
+        if (!pollController.signal.aborted) throw error;
+      }
+    }
   } finally {
     pollController.abort();
     if (poll) clearInterval(poll);
