@@ -510,6 +510,38 @@ describe('HermesRuntimeAdapter', () => {
     expect(second.events).toEqual([]);
   });
 
+  it('retains a legacy cursor through one missing database observation', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(alphaDir, { recursive: true });
+    const alphaPath = join(alphaDir, 'kanban.db');
+    createCurrentKanban(alphaPath);
+    const legacy = Buffer.from(JSON.stringify({
+      occurredAt: new Date(1_785_081_650 * 1000).toISOString(),
+      workspaceId: 'hermes:alpha',
+      source: 'event',
+      sourceId: 10,
+    })).toString('base64url');
+    await rm(alphaPath);
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
+
+    const missing = await adapter.getEvents({ cursor: legacy, limit: 1 });
+
+    createCurrentKanban(alphaPath);
+    const db = new Database(alphaPath);
+    db.exec('DELETE FROM task_comments; DELETE FROM task_events;');
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    insert.run(11, 't_parent', 1, 'first-after-outage', '{}', 1_785_081_660);
+    insert.run(12, 't_parent', 1, 'second-after-outage', '{}', 1_785_081_670);
+    insert.run(13, 't_parent', 1, 'third-after-outage', '{}', 1_785_081_680);
+    db.close();
+    const recovered = await adapter.getEvents({ cursor: missing.nextCursor!, limit: 1 });
+
+    expect(recovered.events.map((event) => event.id)).toEqual(['hermes:alpha:event:11']);
+  });
+
   it('seeds represented workspaces before their first event in an intermediate cursor', async () => {
     const home = await createHome();
     const alphaDir = join(home, 'kanban', 'boards', 'alpha');
@@ -645,6 +677,24 @@ describe('HermesRuntimeAdapter', () => {
         title: 'workspace=[REDACTED_HOST_PATH]',
       })]),
     }));
+  });
+
+  it('redacts host paths encoded as file URLs in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'Open file:///home/alice/private-repo/report.txt',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    const serialized = JSON.stringify(snapshot.tasks);
+
+    expect(serialized).not.toContain('/home/alice/private-repo');
+    expect(serialized).toContain('[REDACTED_HOST_PATH]');
   });
 
   it('redacts host paths after punctuation in normalized runtime text', async () => {
@@ -1004,6 +1054,23 @@ describe('HermesRuntimeAdapter', () => {
     const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
     expect(snapshot.agents).toEqual(expect.objectContaining({
       data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:worker-a', state: 'idle' })]),
+    }));
+  });
+
+  it('includes a running profile when its nonterminal task has no current-run pointer', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET assignee = NULL, current_run_id = NULL WHERE id = ?').run('t_parent');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.agents).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
+      ]),
     }));
   });
 

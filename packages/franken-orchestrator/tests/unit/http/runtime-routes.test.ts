@@ -131,6 +131,30 @@ describe('smart-swarm runtime routes', () => {
     expect(text).toContain('[REDACTED_HOST_PATH]');
   });
 
+  it('redacts file URL host paths embedded in provider-neutral response strings', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({
+      providerId: 'hermes',
+      state: 'degraded',
+      capturedAt: '2026-07-26T12:00:00.000Z',
+      message: 'failed under file:///home/alice/private-repo during discovery',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'unsupported', reason: 'No source' },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/snapshot', { headers: authHeaders() });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).not.toContain('/home/alice/private-repo');
+    expect(text).toContain('[REDACTED_HOST_PATH]');
+  });
+
   it('rejects snapshots whose provider id differs from the selected adapter', async () => {
     const { app, adapter } = createRoutes();
     vi.mocked(adapter.getSnapshot).mockResolvedValueOnce(RuntimeSnapshotSchema.parse({

@@ -79,6 +79,7 @@ const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
+const FILE_URL_RE = /\bfile:\/\/[^\s"']+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 
 function nowIso(now: () => Date): string {
@@ -135,6 +136,7 @@ function latestTimestamp(...values: unknown[]): string | null {
 function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
   const redacted = redactSensitiveText(value)
+    .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
     .replace(POSIX_PATH_RE, (_match, prefix: string, path: string) => (
       API_ROUTE_RE.test(path) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
@@ -527,6 +529,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
     if (cursorState.legacy) {
       for (const source of inspected) positions.set(source.workspaceId, cursorState.legacy);
+      if (
+        !positions.has(cursorState.legacy.workspaceId)
+        && (
+          selectedWorkspaceIds.has(cursorState.legacy.workspaceId)
+          || request.workspaceId === undefined
+        )
+      ) {
+        positions.set(cursorState.legacy.workspaceId, {
+          ...cursorState.legacy,
+          missingPolls: selectedWorkspaceIds.has(cursorState.legacy.workspaceId) ? undefined : 1,
+        });
+      }
     }
     if (!request.cursor) {
       const pageWorkspaces = new Set(page.map((entry) => entry.cursor.workspaceId));
@@ -845,7 +859,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     });
     const sessionByRunId = new Map<string, string>();
     const activeRunIds = new Set<string>();
+    const activeTaskIds = new Set<string>();
     for (const task of taskRows) {
+      if (!isTerminalTaskStatus(task['status'])) activeTaskIds.add(String(task['id']));
       if (task['current_run_id'] == null) continue;
       const currentRunId = String(task['current_run_id']);
       if (!isTerminalTaskStatus(task['status'])) activeRunIds.add(currentRunId);
@@ -883,7 +899,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       agentInputs.set(task['assignee'], current);
     }
     for (const run of runRows) {
-      if (!activeRunIds.has(String(run['id']))) continue;
+      const runState = mapRunState(run['status'], run['outcome']);
+      const activeWithoutPointer = activeTaskIds.has(String(run['task_id']))
+        && ['queued', 'running', 'blocked'].includes(runState);
+      if (!activeRunIds.has(String(run['id'])) && !activeWithoutPointer) continue;
       if (typeof run['profile'] !== 'string' || !run['profile']) continue;
       const current = agentInputs.get(run['profile']) ?? { states: [], timestamps: [] };
       current.states.push(String(run['status']));

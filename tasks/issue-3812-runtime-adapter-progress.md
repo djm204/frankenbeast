@@ -35,6 +35,14 @@
 - [x] Commit and push the existing PR #3821 branch; reply to and resolve all five current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
+## Exact-head round 20 follow-up
+
+- [x] Inspect the three current-head Codex findings on `15e913442fefe40d1796502de1f1dc733dc794d4`.
+- [x] Reproduce and remediate legacy-cursor outage retention, file-URL host-path redaction, and active profile discovery without current-run pointers.
+- [x] Run focused and package test, lint, typecheck, and build gates.
+- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -56,3 +64,4 @@
 - The exact-head `b88b10449` Codex round found four further issues; each was reproduced RED and fixed GREEN: capacity accounting for stalled periodic polls, single-component absolute-path redaction, cursor-only SSE checkpoint publication, and multiline cursor rejection before SSE framing.
 - Expanded focused runtime verification passes 90/90 tests; root tests pass 766/766 with one skip; root typecheck, lint (zero errors), and build pass. The orchestrator package suite remains at the same unrelated three-failure baseline, now 4,662/4,665 passing after the added regression tests.
 - Exact-head round 19 reproduced all five findings RED and passes 100/100 focused runtime, route, and ticket-store tests GREEN. Package/root typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,667/4,670 passing, while all non-orchestrator root package tests pass.
+- Exact-head round 20 reproduced all three findings RED and passes 90/90 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,671/4,674 passing.
