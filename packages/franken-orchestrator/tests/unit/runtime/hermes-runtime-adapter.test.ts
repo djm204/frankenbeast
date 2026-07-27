@@ -2168,7 +2168,11 @@ if (args.includes('show')) {
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
     createCurrentKanban(join(home, 'kanban.db'));
     createCurrentKanban(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'));
-    const adapter = new HermesRuntimeAdapter({ hermesHome: home, now: () => new Date('2026-07-26T12:00:00.000Z') });
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      now: () => new Date('2026-07-26T12:00:00.000Z'),
+      runCommand: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    });
 
     const provider = await adapter.describe();
     const snapshot = RuntimeSnapshotSchema.parse(await adapter.getSnapshot({ workspaceId: 'hermes:alpha', activityLimit: 10 }));
