@@ -7,10 +7,13 @@ import { createDefaultRuntimeAdapterRegistry } from '../../../src/runtime/index.
 
 const dirs: string[] = [];
 
-afterEach(() => dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+afterEach(() => {
+  dirs.splice(0).forEach((dir) => rmSync(dir, { recursive: true, force: true }));
+  vi.unstubAllEnvs();
+});
 
 describe('smart-swarm route composition', () => {
-  it('mounts the default Hermes runtime registry behind operator authentication', async () => {
+  it('mounts the default runtime registry behind operator authentication', async () => {
     const sessionStoreDir = mkdtempSync(join(tmpdir(), 'runtime-route-mount-'));
     dirs.push(sessionStoreDir);
     const app = createChatApp({
@@ -27,7 +30,68 @@ describe('smart-swarm route composition', () => {
     });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      data: [expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) })],
+      data: [
+        expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
+        expect.objectContaining({ id: 'ollama', health: expect.objectContaining({ state: 'unavailable' }) }),
+      ],
     });
+  });
+
+  it('forwards the configured network egress policy to the default Ollama adapter', async () => {
+    vi.stubEnv('OLLAMA_HOST', 'https://ollama.invalid');
+    const sessionStoreDir = mkdtempSync(join(tmpdir(), 'runtime-route-egress-'));
+    dirs.push(sessionStoreDir);
+    const app = createChatApp({
+      sessionStoreDir,
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'runtime-route-test',
+      operatorToken: 'operator-secret',
+      networkControl: {
+        root: sessionStoreDir,
+        frankenbeastDir: sessionStoreDir,
+        configFile: join(sessionStoreDir, 'config.json'),
+        getConfig: () => ({ network: { egressPolicy: { enabled: false } } }) as never,
+        setConfig: vi.fn(),
+      },
+    });
+
+    const response = await app.request('/v1/smart-swarm/providers/ollama/snapshot', {
+      headers: { authorization: 'Bearer operator-secret' },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      data: { workspaces: { data: Array<{ metadata: { diagnostic: string } }> } };
+    };
+    expect(body.data.workspaces.data[0]?.metadata.diagnostic).toBe('Ollama endpoint request failed');
+  });
+
+  it('reads the current network egress policy when the default Ollama adapter polls', async () => {
+    vi.stubEnv('OLLAMA_HOST', 'https://ollama.invalid');
+    const sessionStoreDir = mkdtempSync(join(tmpdir(), 'runtime-route-live-egress-'));
+    dirs.push(sessionStoreDir);
+    let egressPolicy = { enabled: false };
+    const app = createChatApp({
+      sessionStoreDir,
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'runtime-route-test',
+      operatorToken: 'operator-secret',
+      networkControl: {
+        root: sessionStoreDir,
+        frankenbeastDir: sessionStoreDir,
+        configFile: join(sessionStoreDir, 'config.json'),
+        getConfig: () => ({ network: { egressPolicy } }) as never,
+        setConfig: vi.fn(),
+      },
+    });
+    egressPolicy = { enabled: true };
+
+    const response = await app.request('/v1/smart-swarm/providers/ollama/snapshot', {
+      headers: { authorization: 'Bearer operator-secret' },
+    });
+    const body = await response.json() as {
+      data: { workspaces: { data: Array<{ metadata: { diagnostic: string } }> } };
+    };
+
+    expect(body.data.workspaces.data[0]?.metadata.diagnostic).toBe('Ollama endpoint blocked by egress policy');
   });
 });

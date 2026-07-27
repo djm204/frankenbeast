@@ -125,6 +125,19 @@ describe('network-registry', () => {
     }
   });
 
+  it('preserves Ollama endpoint and referenced credentials for the managed chat server', () => {
+    vi.stubEnv('OLLAMA_API_KEY_REF', 'OLLAMA_CLOUD_TOKEN');
+
+    const chat = resolveNetworkServices(defaultConfig(), context)
+      .find((service) => service.id === 'chat-server');
+
+    expect(chat?.runtimeConfig.process?.inheritedEnvKeys).toEqual(expect.arrayContaining([
+      'OLLAMA_HOST',
+      'OLLAMA_API_KEY_REF',
+      'OLLAMA_CLOUD_TOKEN',
+    ]));
+  });
+
   it('preserves the dashboard project-id build override', () => {
     const dashboard = resolveNetworkServices(defaultConfig(), context)
       .find((service) => service.id === 'dashboard-web');
