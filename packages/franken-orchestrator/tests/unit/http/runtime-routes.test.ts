@@ -512,6 +512,41 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('contains transient consumed-ticket refresh failures', async () => {
+    vi.useFakeTimers();
+    let stream: Response | undefined;
+    try {
+      const ticketStore = new SseConnectionTicketStore({ consumedRetentionMs: 1_000 });
+      stores.push(ticketStore);
+      const refresh = vi.spyOn(ticketStore, 'refreshConsumed').mockImplementation(() => {
+        throw new Error('SQLITE_BUSY');
+      });
+      const app = createRuntimeRoutes({
+        registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+        operatorToken: 'operator-secret',
+        security: new TransportSecurityService(),
+        ticketStore,
+        pollIntervalMs: 60_000,
+        heartbeatIntervalMs: 60_000,
+      });
+      const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const { connectionId } = await ticketResponse.json() as { connectionId: string };
+      stream = await app.request(`/v1/smart-swarm/providers/hermes/events/${connectionId}`, {
+        headers: { cookie },
+      });
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(refresh).toHaveBeenCalled();
+    } finally {
+      await stream?.body?.cancel().catch(() => {});
+      vi.useRealTimers();
+    }
+  });
+
   it('rate limits authenticated requests by the verified operator identity', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);

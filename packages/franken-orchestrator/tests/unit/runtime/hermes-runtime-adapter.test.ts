@@ -353,6 +353,24 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot.tasks.data.filter((task) => task.id.endsWith(':t_parent'))).toHaveLength(1);
   });
 
+  it('does not expose an explicitly configured board database under a scoped board identity', async () => {
+    const home = await createHome();
+    const boardDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(boardDir, { recursive: true });
+    const dbPath = join(boardDir, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, kanbanDbPath: dbPath });
+
+    const unscoped = await adapter.getSnapshot();
+    const scoped = await adapter.getSnapshot({ workspaceId: 'hermes:alpha' });
+
+    expect(unscoped.workspaces).toEqual(expect.objectContaining({
+      data: [expect.objectContaining({ id: 'hermes:global' })],
+    }));
+    expect(scoped.workspaces).toEqual({ status: 'available', data: [] });
+    expect(scoped.state).toBe('empty');
+  });
+
   it('continues returning healthy workspace events when another workspace read fails', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
@@ -774,6 +792,27 @@ describe('HermesRuntimeAdapter', () => {
 
     expect(serialized).not.toContain('/home/alice/private-repo');
     expect(serialized).toContain('[REDACTED_HOST_PATH]');
+  });
+
+  it('redacts complete quoted file URL host paths containing spaces', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'Open "file:///Users/alice/Secret Project/config.env"',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'Open "file://[REDACTED_HOST_PATH]"',
+      })]),
+    }));
   });
 
   it('redacts route-shaped host paths after storage-key delimiters', async () => {
@@ -1272,6 +1311,58 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot.runs.data).toHaveLength(2);
     expect(snapshot.runs.data.map((run) => run.id)).toContain('hermes:global:run:1');
     expect(snapshot.runs.data.map((run) => run.id)).toContain('hermes:global:run:8');
+  });
+
+  it('retains the latest active pointerless run outside the bounded global history', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET assignee = NULL, current_run_id = NULL WHERE id = ?').run('t_parent');
+    for (let id = 2; id <= 8; id += 1) {
+      db.prepare(`INSERT INTO task_runs
+        (id,task_id,profile,status,started_at,summary,metadata,last_heartbeat_at)
+        VALUES (?,?,?,?,?,?,?,?)`).run(
+        id, 't_child', `historical-${id}`, 'done', 1_785_081_700 + id, null, '{}', 1_785_081_700 + id,
+      );
+    }
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({ activityLimit: 2 });
+    if (snapshot.runs.status !== 'available' || snapshot.agents.status !== 'available') throw new Error('Expected data');
+
+    expect(snapshot.runs.data.map((run) => run.id)).toContain('hermes:global:run:1');
+    expect(snapshot.agents.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
+    ]));
+  });
+
+  it('does not retain stale current runs for terminal tasks outside the bounded history', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    for (let id = 2; id <= 6; id += 1) {
+      const task = `done-${id}`;
+      db.prepare(`INSERT INTO tasks
+        (id,title,status,created_at,workspace_kind,current_run_id)
+        VALUES (?,?,?,?,?,?)`).run(task, task, 'done', 1_785_081_600 + id, 'scratch', id);
+      db.prepare(`INSERT INTO task_runs
+        (id,task_id,profile,status,started_at,ended_at,outcome,metadata,last_heartbeat_at)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(
+        id, task, `historical-${id}`, 'done', 1_785_081_700 + id, 1_785_081_800 + id,
+        'completed', '{}', 1_785_081_800 + id,
+      );
+    }
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({ activityLimit: 1 });
+    if (snapshot.runs.status !== 'available') throw new Error('Expected runs');
+
+    expect(snapshot.runs.data.map((run) => run.id).sort()).toEqual([
+      'hermes:global:run:1',
+      'hermes:global:run:6',
+    ]);
   });
 
   it('excludes a stale running profile when a nonterminal task has a different current run', async () => {

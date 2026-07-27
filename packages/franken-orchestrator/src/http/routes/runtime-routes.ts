@@ -131,6 +131,14 @@ function runtimeCursorMessage(error: Error): string {
   return typeof redacted === 'string' ? redacted : 'Invalid runtime event cursor';
 }
 
+function refreshConsumedTicket(ticketStore: SseConnectionTicketStore, ticket: string): void {
+  try {
+    ticketStore.refreshConsumed(ticket);
+  } catch {
+    // Retention refresh is best-effort and must never escape stream lifecycle callbacks.
+  }
+}
+
 function validateAdapterCursor(adapter: RuntimeAdapter, cursor: string | undefined): void {
   if (!cursor) return;
   try {
@@ -414,7 +422,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     try {
       return streamSSE(c, async (stream) => {
         const retentionRefresh = setInterval(() => {
-          deps.ticketStore.refreshConsumed(ticket);
+          refreshConsumedTicket(deps.ticketStore, ticket);
         }, Math.min(60_000, Math.max(1, Math.floor(deps.ticketStore.consumedRetentionWindowMs / 2))));
         retentionRefresh.unref?.();
         try {
@@ -426,12 +434,12 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           });
         } finally {
           clearInterval(retentionRefresh);
-          deps.ticketStore.refreshConsumed(ticket);
+          refreshConsumedTicket(deps.ticketStore, ticket);
           activeStreams -= 1;
         }
       });
     } catch (error) {
-      deps.ticketStore.refreshConsumed(ticket);
+      refreshConsumedTicket(deps.ticketStore, ticket);
       activeStreams -= 1;
       throw error;
     }

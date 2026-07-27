@@ -21,6 +21,7 @@ const QUOTED_HOST_PATH_RES = [
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
   /(")(\/[^"]+|[A-Za-z]:[\\/][^"]+|\\\\[^"]+)(?=")/gu,
 ];
+const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const API_ROUTE_KEYS = new Set(['route', 'endpoint', 'requestPath', 'pathname']);
@@ -50,7 +51,10 @@ function hasApplicationRouteContext(
 }
 
 function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean): string {
-  const redacted = value.replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]').replace(
+  const redactedFileUrls = value
+    .replace(QUOTED_FILE_URL_RE, '$1file://[REDACTED_HOST_PATH]$1')
+    .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]');
+  const redacted = redactedFileUrls.replace(
     EMBEDDED_HOST_PATH_RE,
     (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
   ).replace(

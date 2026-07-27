@@ -105,7 +105,16 @@
 - [x] Inspect the four current-head Codex findings on `faaf1b252848be8b07a70d0d3e0e27a6bca76bc5` plus the two carried round-27 threads.
 - [x] Reproduce and remediate latest pointerless-run selection, blank-outcome fallback, direct workspace discovery, session-lifetime reconnect cookies, and retention-aware consumed-ticket refresh scheduling.
 - [x] Verify 124/124 focused adapter, route, and ticket-store tests plus package/root typecheck, lint, and build.
-- [ ] Commit/push the fixes; reply to and resolve all applicable Codex threads; trigger the next exact-head review within the authorized tier-50 policy.
+- [x] Commit/push the fixes as `936eb20ae0672226f92a8b47ec18009146548437`; reply to and resolve all applicable Codex threads; trigger the next exact-head review within the authorized tier-50 policy.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
+## Exact-head round 29 follow-up
+
+- [x] Trigger the fresh exact-head review at `2026-07-27T08:07:42Z`; verify `936eb20ae0672226f92a8b47ec18009146548437` completed 4/4 CI checks green.
+- [x] Reproduce and remediate complete quoted `file://` URL redaction, best-effort retention-refresh exception containment, bounded pointerless/current run selection, and configured-path scoped identity deduplication.
+- [x] Verify the cursor-sensitive-text finding was already covered by the global `errorHandler`: the route response returned `token=<redacted>` and never exposed `secret-value`; avoid redundant route-local behavior.
+- [x] Verify 146/146 focused tests, package/root typecheck-lint-build, and `git diff --check`; full package suite remains at the established unrelated three-failure baseline (4,700/4,703 passing).
+- [ ] Commit/push round 29, reply to and resolve all six threads, and trigger the next exact-head review within the authorized tier-50 policy.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes

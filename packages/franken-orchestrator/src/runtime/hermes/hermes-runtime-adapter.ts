@@ -83,6 +83,7 @@ const QUOTED_POSIX_PATH_RES = [
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
   /(")(\/[^"]+|[A-Za-z]:[\\/][^"]+|\\\\[^"]+)(?=")/gu,
 ];
+const QUOTED_FILE_URL_RE = /(["'`])file:\/\/.*?\1/giu;
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const SLASH_COMMANDS = new Set([
@@ -151,6 +152,7 @@ function hasApiRouteContext(value: string, path: string, offset: number, prefix:
 function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
   let redacted = redactSensitiveText(value)
+    .replace(QUOTED_FILE_URL_RE, '$1file://[REDACTED_HOST_PATH]$1')
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
     .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => (
@@ -601,6 +603,14 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const discoveredPaths = new Set<string>();
     let discoveryMessage: string | undefined;
     const globalPath = this.kanbanDbPath ? resolve(this.kanbanDbPath) : resolve(home!, 'kanban.db');
+    let configuredResolvedPath: string | undefined;
+    if (this.kanbanDbPath && workspaceId !== undefined && workspaceId !== 'hermes:global') {
+      try {
+        configuredResolvedPath = await realpath(globalPath);
+      } catch {
+        configuredResolvedPath = globalPath;
+      }
+    }
     if (workspaceId === undefined || workspaceId === 'hermes:global') {
       try {
         throwIfAborted(signal);
@@ -636,7 +646,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           throwIfAborted(signal);
           const resolvedPath = await realpath(path);
           throwIfAborted(signal);
-          if (!discoveredPaths.has(resolvedPath)) {
+          if (resolvedPath !== configuredResolvedPath && !discoveredPaths.has(resolvedPath)) {
             sources.push({ workspaceId, name: boardName, kind: 'board', path: resolvedPath });
           }
         }
@@ -782,15 +792,45 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         const linkRows = this.hasColumns(db, 'task_links', ['parent_id', 'child_id'])
           ? db.prepare('SELECT parent_id, child_id FROM task_links ORDER BY parent_id, child_id').all() as RuntimeRow[]
           : [];
-        const currentRunClause = this.hasColumns(db, 'tasks', ['current_run_id'])
-          ? 'OR id IN (SELECT current_run_id FROM tasks WHERE current_run_id IS NOT NULL)'
-          : '';
+        const hasCurrentRunPointer = this.hasColumns(db, 'tasks', ['current_run_id']);
+        const hasRunOutcome = this.hasColumns(db, 'task_runs', ['outcome']);
+        const activeRunState = (alias: string) => hasRunOutcome
+          ? `COALESCE(NULLIF(TRIM(CAST(${alias}.outcome AS TEXT)), ''), ${alias}.status)`
+          : `${alias}.status`;
+        const currentRunPredicate = hasCurrentRunPointer ? 'task.current_run_id = run.id' : '0';
+        const pointerlessTaskPredicate = hasCurrentRunPointer ? 'task.current_run_id IS NULL' : '1';
         const runRows = db.prepare(`
-          SELECT * FROM task_runs
-          WHERE id IN (
+          SELECT run.* FROM task_runs run
+          WHERE run.id IN (
             SELECT id FROM task_runs ORDER BY started_at DESC, id DESC LIMIT ?
-          ) ${currentRunClause}
-          ORDER BY started_at, id
+          ) OR EXISTS (
+            SELECT 1
+            FROM tasks task
+            WHERE task.id = run.task_id
+              AND task.status NOT IN (
+                'done', 'completed', 'complete', 'success', 'failed', 'gave_up', 'crashed',
+                'timed_out', 'timeout', 'error', 'spawn_failed', 'cancelled', 'canceled', 'stopped',
+                'archived', 'deleted'
+              )
+              AND (
+                ${currentRunPredicate}
+                OR (
+                  ${pointerlessTaskPredicate}
+                  AND ${activeRunState('run')} IN ('scheduled', 'pending', 'ready', 'running', 'blocked')
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM task_runs newer
+                    WHERE newer.task_id = run.task_id
+                      AND ${activeRunState('newer')} IN ('scheduled', 'pending', 'ready', 'running', 'blocked')
+                      AND (
+                        newer.started_at > run.started_at
+                        OR (newer.started_at = run.started_at AND newer.id > run.id)
+                      )
+                  )
+                )
+              )
+          )
+          ORDER BY run.started_at, run.id
         `).all(activityLimit) as RuntimeRow[];
         const eventRows = db.prepare('SELECT * FROM task_events ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[];
         const blockerEventRows = db.prepare(`

@@ -112,6 +112,11 @@ describe('Beast response redaction', () => {
       .toBe('open "[REDACTED_HOST_PATH]"');
   });
 
+  it('redacts complete quoted file URL host paths containing spaces', () => {
+    expect(redactAbsoluteHostPathValues('open "file:///Users/alice/Secret Project/config.env"'))
+      .toBe('open "file://[REDACTED_HOST_PATH]"');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',
