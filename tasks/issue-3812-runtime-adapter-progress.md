@@ -32,7 +32,7 @@
 - [x] Recover PR #3821 exact head `4086791b0468d62c047d798fe74f337e89d12c65` and inspect all five current-head Codex findings.
 - [x] Reproduce and remediate legacy workspace cursor ordering, valid-stream admission isolation, all-source event failures, missing explicit databases, and workspace-scoped inspection.
 - [x] Run focused and package/root test, lint, typecheck, and build gates.
-- [ ] Commit and push the existing PR #3821 branch; reply to and resolve all five current-head threads.
+- [x] Commit and push the existing PR #3821 branch; reply to and resolve all five current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
