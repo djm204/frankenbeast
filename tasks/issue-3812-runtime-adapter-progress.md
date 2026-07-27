@@ -40,7 +40,7 @@
 - [x] Inspect the three current-head Codex findings on `15e913442fefe40d1796502de1f1dc733dc794d4`.
 - [x] Reproduce and remediate legacy-cursor outage retention, file-URL host-path redaction, and active profile discovery without current-run pointers.
 - [x] Run focused and package test, lint, typecheck, and build gates.
-- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
