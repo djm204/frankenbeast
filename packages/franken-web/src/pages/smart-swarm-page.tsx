@@ -123,6 +123,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [providerRefreshNonce, setProviderRefreshNonce] = useState(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
+  const snapshotRequestGeneration = useRef(0);
+  const snapshotScope = useRef('');
   const refreshPending = useRef(false);
   const lastTopologyRefreshAt = useRef(0);
   const currentProviderId = useRef(providerId);
@@ -185,6 +187,16 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   useEffect(() => {
     if (!providerId) return;
     let cancelled = false;
+    const nextScope = `${providerId}\0${workspaceId}`;
+    if (snapshotScope.current !== nextScope) {
+      snapshotScope.current = nextScope;
+      snapshotRequestGeneration.current += 1;
+      snapshotRequestsInFlight.current = 0;
+      refreshPending.current = false;
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+      refreshTimer.current = null;
+    }
+    const requestGeneration = snapshotRequestGeneration.current;
     setLoading(true);
     snapshotRequestsInFlight.current += 1;
     void client.fetchSnapshot(providerId, {
@@ -216,6 +228,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         }
       })
       .finally(() => {
+        if (snapshotRequestGeneration.current !== requestGeneration) return;
         snapshotRequestsInFlight.current -= 1;
         if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
           refreshPending.current = false;
@@ -291,27 +304,23 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     if (!providerId || loading) return;
     const requestedProviderId = providerId;
     setLoading(true);
-    snapshotRequestsInFlight.current += 1;
     try {
       const catalogSnapshot = await client.fetchSnapshot(requestedProviderId, { activityLimit: 1 });
       if (currentProviderId.current !== requestedProviderId) return;
       setWorkspaceCatalog(catalogSnapshot.workspaces);
-      const catalogWorkspaces = available(catalogSnapshot.workspaces) ?? [];
-      if (!catalogWorkspaces.some((workspace) => workspace.id === currentWorkspaceId.current)) {
-        setSnapshot(null);
-        setSelectedTaskId(null);
-        setWorkspaceId(catalogWorkspaces[0]?.id ?? '');
+      if (catalogSnapshot.workspaces.status === 'available') {
+        const catalogWorkspaces = catalogSnapshot.workspaces.data;
+        if (!catalogWorkspaces.some((workspace) => workspace.id === currentWorkspaceId.current)) {
+          setSnapshot(null);
+          setSelectedTaskId(null);
+          setWorkspaceId(catalogWorkspaces[0]?.id ?? '');
+        }
       }
       setSnapshotError(null);
     } catch (nextError) {
       if (currentProviderId.current === requestedProviderId) setSnapshotError(nextError);
     } finally {
-      snapshotRequestsInFlight.current -= 1;
       if (currentProviderId.current === requestedProviderId) setLoading(false);
-      if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
-        refreshPending.current = false;
-        scheduleTopologyRefresh();
-      }
     }
   }
 
@@ -379,6 +388,14 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             type="button"
           >
             Refresh workspaces
+          </button>
+          <button
+            className="button button--secondary button--compact"
+            disabled={loading || !providerId}
+            onClick={() => setRefreshNonce((current) => current + 1)}
+            type="button"
+          >
+            Refresh topology
           </button>
           {snapshot ? <UnsupportedSection label="Workspaces" section={workspaceCatalog ?? snapshot.workspaces} /> : null}
         </div>
@@ -451,7 +468,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                     .map((id) => ({ id, label: taskNames.get(id) ?? id }));
                   const dependencies = [...new Set(task.dependencyIds)]
                     .map((id) => ({ id, label: taskNames.get(id) ?? id }));
-                  const currentRun = runs.find((run) => run.taskId === task.id && run.finishedAt === null);
+                  const currentRun = runs
+                    .filter((run) => run.taskId === task.id && run.finishedAt === null)
+                    .sort((left, right) => Date.parse(right.lastActiveAt ?? right.startedAt) - Date.parse(left.lastActiveAt ?? left.startedAt))[0];
                   return (
                     <li key={task.id}>
                       <button
