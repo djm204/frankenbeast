@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { delimiter, isAbsolute, join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +22,18 @@ const spawnMock = vi.hoisted(() => vi.fn(() => ({
 vi.mock('node:child_process', () => ({
   spawn: spawnMock,
 }));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    existsSync: vi.fn(actual.existsSync),
+    realpathSync: vi.fn(actual.realpathSync),
+  };
+});
+
+const existsSyncMock = vi.mocked(existsSync);
+const realpathSyncMock = vi.mocked(realpathSync);
 
 const CHAT_SERVER_ARGS = [
   '--silent',
@@ -399,6 +412,30 @@ describe('startNetworkService', () => {
     expect(spawnedArgs?.[buildCommandIndex + 1]).toBe(process.execPath);
     expect(isAbsolute(spawnedArgs?.[buildArgsIndex + 1] ?? '')).toBe(true);
     expect(spawnedArgs?.[buildArgsIndex + 1]).toMatch(/npm-cli\.js$/);
+  });
+
+  it('does not resolve the dashboard npm CLI from an arbitrary inherited PATH entry', async () => {
+    const attackerDirectory = '/tmp/network-attacker';
+    const attackerNpm = join(attackerDirectory, 'npm');
+    const attackerNpmCli = join(attackerDirectory, 'npm-cli.js');
+    const originalExistsSync = existsSyncMock.getMockImplementation();
+    const originalRealpathSync = realpathSyncMock.getMockImplementation();
+    vi.stubEnv('PATH', attackerDirectory);
+    existsSyncMock.mockImplementation((candidate) => [attackerNpm, attackerNpmCli].includes(String(candidate)));
+    realpathSyncMock.mockImplementation((candidate) => (
+      String(candidate) === attackerNpm ? attackerNpmCli : String(candidate)
+    ));
+
+    try {
+      await expect(startNetworkService(makeService('node', {
+        args: DASHBOARD_ARGS,
+      }, { id: 'dashboard-web' }), {
+        detached: false,
+      })).rejects.toThrow('Unable to locate a trusted npm CLI');
+    } finally {
+      existsSyncMock.mockImplementation(originalExistsSync!);
+      realpathSyncMock.mockImplementation(originalRealpathSync!);
+    }
   });
 
   it('rejects dashboard build commands outside the nested build allowlist', async () => {

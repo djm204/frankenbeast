@@ -149,13 +149,13 @@ function validateNetworkServiceEnv(service: ResolvedNetworkService): void {
   }
 }
 
-// Resolve the `npm` binary on PATH to its real target. Distro packages that
+// Resolve the `npm` binary on the trusted managed PATH to its real target. Distro packages that
 // ship npm separately from node (e.g. Debian's /usr/bin/npm) symlink the
 // launcher to the real `npm-cli.js`, so following the link yields a trusted
 // CLI script we can run directly with node — without spawning a shell or an
 // npm shim. Returns null if npm is absent or does not resolve to an npm-cli.js.
 function resolveNpmCliFromPath(): string | null {
-  const pathDirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  const pathDirs = buildNetworkProcessPath().split(delimiter).filter(Boolean);
   for (const dir of pathDirs) {
     const candidate = join(dir, 'npm');
     if (!existsSync(candidate)) continue;
