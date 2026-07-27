@@ -23,8 +23,8 @@
 - [x] Reproduce or falsify the nine inherited findings from downstream PR #3834.
 - [x] Add RED-to-GREEN coverage for every still-real finding without touching Ollama/downstream scope.
 - [x] Run focused and package/root test, lint, typecheck, and build gates.
-- [ ] Commit and push the existing PR #3821 branch; reply to and resolve inherited review threads with evidence.
-- [ ] Hand the immutable new #3821 head to stacked owners for rebase/reverification.
+- [x] Commit and push the existing PR #3821 branch; reply to and resolve inherited review threads with evidence.
+- [x] Hand the immutable new #3821 implementation head to stacked owners for rebase/reverification.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
