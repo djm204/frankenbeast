@@ -165,7 +165,7 @@
 - [x] Count only newly started poll attempts, compact Hermes cursor timestamps/workspace IDs within the 4 KiB SSE bound, and share signaled source inspection for one-second polling windows.
 - [x] Verify `task_events.task_id` was already required by `REQUIRED_SCHEMA`; the proposed regression passed before implementation, so no production change was warranted for that finding.
 - [x] Run focused, package, and root verification.
-- [ ] Commit/push, reply to and resolve all four threads, and reconcile this ledger.
+- [x] Commit/push `438e8bd68`, reply to and resolve all four threads, and reconcile this ledger.
 - [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
 
 ## Verification notes
