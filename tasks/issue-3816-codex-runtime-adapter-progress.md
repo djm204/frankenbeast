@@ -19,6 +19,7 @@
 - [x] Publish the rebased remediation commits and reply to/resolve all four Codex threads.
 - [x] Rebase onto #3821's final exact clean head `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e`.
 - [x] Remediate fifth-round Codex findings 3653658278, 3653658281, 3653658283, and 3653658284 under RED→GREEN; focused verification passes 52/52.
-- [ ] Obtain explicit tier escalation approval before any sixth `@codex review` trigger (default five-invocation cap is exhausted).
+- [x] Obtain explicit tier escalation approval and trigger the sixth `@codex review` within the approved tier-12 cap.
+- [x] Remediate sixth-round Codex findings 3653882359, 3653882360, 3653882361, and 3653882368 under RED→GREEN; Codex adapter 30/30 and shared conformance 6/6 pass.
 - [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.

@@ -537,6 +537,32 @@ input.on('line', (line) => {
     expect(second.nextCursor).not.toBe(first.nextCursor);
   });
 
+  it('emits a blocked lifecycle event when an active thread starts waiting', async () => {
+    let activeFlags: string[] = [];
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [{
+          id: 'thread-a', sessionId: 'session-a', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai',
+          status: { type: 'active', activeFlags },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 1 });
+    activeFlags = ['waitingOnApproval'];
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 1 });
+
+    expect(second.events).toEqual([
+      expect.objectContaining({
+        id: 'codex:thread:thread-a:200:blocked',
+        summary: 'Codex thread is blocked',
+      }),
+    ]);
+  });
+
   it('preserves a lower-id thread status change behind a same-second cursor', async () => {
     let lowerStatus = 'active';
     const request = vi.fn(async () => ({
@@ -654,6 +680,31 @@ input.on('line', (line) => {
     });
   });
 
+  it('does not replay evicted same-timestamp statuses after reaching the status bound', async () => {
+    const threads = Array.from({ length: 501 }, (_, index) => ({
+      id: `thread-${String(index).padStart(3, '0')}`,
+      sessionId: `session-${index}`,
+      cliVersion: '0.145.0',
+      createdAt: 100,
+      updatedAt: 200,
+      cwd: '/workspace/project',
+      ephemeral: false,
+      modelProvider: 'openai',
+      status: { type: 'idle' },
+    }));
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({ data: threads, nextCursor: null }),
+    });
+
+    const first = await adapter.getEvents({ limit: 500 });
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 500 });
+    const third = await adapter.getEvents({ cursor: second.nextCursor!, limit: 500 });
+
+    expect(first.events).toHaveLength(500);
+    expect(second.events).toEqual([]);
+    expect(third).toEqual({ events: [], nextCursor: second.nextCursor });
+  });
+
   it('keeps a full status baseline below the HTTP header limit', async () => {
     const threads = Array.from({ length: 500 }, (_, index) => {
       const suffix = index.toString(16).padStart(12, '0');
@@ -721,6 +772,34 @@ input.on('line', (line) => {
       expect.objectContaining({ archived: true }),
       expect.any(Object),
     );
+  });
+
+  it('emits a terminal lifecycle event when a previously emitted thread disappears', async () => {
+    let disappeared = false;
+    const adapter = new CodexRuntimeAdapter({
+      now: () => new Date('2026-07-27T01:15:00.000Z'),
+      request: async () => ({
+        data: disappeared ? [] : [{
+          id: 'removed-thread', sessionId: 'session-removed', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 10 });
+    disappeared = true;
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+
+    expect(second.events).toEqual([
+      expect.objectContaining({
+        id: 'codex:thread:removed-thread:disappeared',
+        workspaceId: first.events[0]!.workspaceId,
+        summary: 'Codex thread disappeared',
+        metadata: { agentId: 'codex:thread:removed-thread' },
+      }),
+    ]);
   });
 
   it('returns the newest matching events on an initial poll', async () => {
@@ -797,6 +876,32 @@ input.on('line', (line) => {
       expect.objectContaining({ archived: true }),
       expect.any(Object),
     );
+  });
+
+  it('rejects an event cursor issued for a different workspace filter', async () => {
+    const thread = (id: string, cwd: string) => ({
+      id, sessionId: `session-${id}`, cliVersion: '0.145.0',
+      createdAt: 100, updatedAt: 200,
+      cwd, ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+    });
+    const request = vi.fn(async () => ({
+      data: [thread('workspace-a', '/workspace/a'), thread('workspace-b', '/workspace/b')],
+      nextCursor: null,
+    }));
+    const adapter = new CodexRuntimeAdapter({ request });
+    const workspaceA = `codex:workspace:${createHash('sha256')
+      .update('/workspace/a').digest('hex').slice(0, 16)}`;
+    const workspaceB = `codex:workspace:${createHash('sha256')
+      .update('/workspace/b').digest('hex').slice(0, 16)}`;
+    const first = await adapter.getEvents({ workspaceId: workspaceA, limit: 1 });
+    request.mockClear();
+
+    await expect(adapter.getEvents({
+      workspaceId: workspaceB,
+      cursor: first.nextCursor!,
+      limit: 1,
+    })).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+    expect(request).not.toHaveBeenCalled();
   });
 
   it('paginates before applying a bounded workspace snapshot filter', async () => {
