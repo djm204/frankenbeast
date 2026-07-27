@@ -274,6 +274,24 @@ describe('SmartSwarmPage', () => {
     expect(subscribe).not.toHaveBeenCalled();
   });
 
+  it('refreshes snapshot-only topology without stream activity', async () => {
+    const fetchSnapshot = vi.fn().mockResolvedValue(snapshot);
+    render(<SmartSwarmPage client={createClient({
+      listProviders: vi.fn().mockResolvedValue([{
+        ...provider,
+        capabilities: {
+          ...provider.capabilities,
+          streaming: { status: 'unsupported', reason: 'Streaming is unavailable.' },
+        },
+      }]),
+      fetchSnapshot,
+    })} />);
+
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+  });
+
   it('opens provider-wide streams when workspace discovery is unavailable', async () => {
     const subscribe = vi.fn().mockImplementation(async (_providerId, _workspaceId, handlers) => {
       handlers.connection?.('connected');
@@ -289,6 +307,22 @@ describe('SmartSwarmPage', () => {
 
     expect(await screen.findByText('Live · connected')).toBeDefined();
     expect(subscribe).toHaveBeenCalledWith('hermes', undefined, expect.any(Object));
+  });
+
+  it('preserves provider-wide data when unsupported workspace discovery is refreshed', async () => {
+    const unsupportedWorkspaceSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      workspaces: { status: 'unsupported', reason: 'Hermes does not expose workspace discovery.' },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(unsupportedWorkspaceSnapshot),
+    })} />);
+
+    expect(await screen.findByText('Live dashboard')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh workspaces' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh workspaces' }).hasAttribute('disabled')).toBe(false));
+    expect(screen.getByText('Live dashboard')).toBeDefined();
   });
 
   it('clears transient stream errors after reconnection', async () => {
@@ -487,6 +521,47 @@ describe('SmartSwarmPage', () => {
     expect(await screen.findByRole('heading', { name: 'Alternate' })).toBeDefined();
   });
 
+  it('does not let a cancelled provider snapshot block live refreshes', async () => {
+    let codexHandlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    const never = new Promise<RuntimeSnapshot>(() => undefined);
+    const codexSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      providerId: 'codex',
+      tasks: snapshot.tasks.status === 'available'
+        ? { status: 'available', data: snapshot.tasks.data.map((task, index) => index === 0 ? { ...task, title: 'Codex task' } : task) }
+        : snapshot.tasks,
+    };
+    const fetchSnapshot = vi.fn().mockImplementation((requestedProviderId: string, options?: { workspaceId?: string }) => {
+      if (requestedProviderId === 'hermes' && options?.workspaceId) return never;
+      return Promise.resolve(requestedProviderId === 'codex' ? codexSnapshot : snapshot);
+    });
+    const subscribe = vi.fn().mockImplementation(async (requestedProviderId, _workspaceId, handlers) => {
+      if (requestedProviderId === 'codex') codexHandlers = handlers;
+      handlers.connection?.('connected');
+      return vi.fn();
+    });
+    render(<SmartSwarmPage client={createClient({
+      listProviders: vi.fn().mockResolvedValue([
+        provider,
+        { ...provider, id: 'codex', displayName: 'Codex' },
+      ]),
+      fetchSnapshot,
+      subscribe,
+    })} />);
+
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledWith('hermes', { workspaceId: 'board-main', activityLimit: 100 }));
+    fireEvent.change(screen.getByLabelText('Runtime provider'), { target: { value: 'codex' } });
+    expect(await screen.findByText('Codex task')).toBeDefined();
+    await waitFor(() => expect(codexHandlers).toBeDefined());
+    const callsBeforeEvent = fetchSnapshot.mock.calls.length;
+
+    codexHandlers.event?.({
+      id: 'codex-event', cursor: 'codex-cursor', workspaceId: 'board-main', taskId: 'task-live', runId: null,
+      type: 'lifecycle', occurredAt: '2026-07-26T18:10:00Z', summary: 'Codex task changed',
+    });
+    await waitFor(() => expect(fetchSnapshot.mock.calls.length).toBeGreaterThan(callsBeforeEvent), { timeout: 1_000 });
+  });
+
   it('preserves the provider workspace catalog after scoped snapshots', async () => {
     const secondWorkspace = { id: 'board-secondary', name: 'Secondary board', kind: 'board' as const, state: 'available' as const };
     const fetchSnapshot = vi.fn()
@@ -644,6 +719,25 @@ describe('SmartSwarmPage', () => {
 
     expect(screen.getByText('newest-run')).toBeDefined();
     expect(screen.queryByText('run-0')).toBeNull();
+  });
+
+  it('shows the newest unfinished run on each task card', async () => {
+    const baseRun = snapshot.runs.status === 'available' ? snapshot.runs.data[0]! : undefined;
+    if (!baseRun) throw new Error('Expected a run fixture');
+    const runSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      runs: {
+        status: 'available',
+        data: [
+          { ...baseRun, id: 'older-open-run', state: 'running', finishedAt: null, startedAt: '2026-07-26T18:00:00Z', lastActiveAt: '2026-07-26T18:01:00Z' },
+          { ...baseRun, id: 'newer-open-run', state: 'running', finishedAt: null, startedAt: '2026-07-26T19:00:00Z', lastActiveAt: '2026-07-26T19:01:00Z' },
+        ],
+      },
+    };
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot: vi.fn().mockResolvedValue(runSnapshot) })} />);
+
+    expect(await screen.findByText('Run newer-open-run: running')).toBeDefined();
+    expect(screen.queryByText('Run older-open-run: running')).toBeNull();
   });
 
   it('bounds large live task topologies instead of freezing the operator view', async () => {
