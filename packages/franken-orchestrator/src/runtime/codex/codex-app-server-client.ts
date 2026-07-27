@@ -56,7 +56,7 @@ export function createCodexAppServerRequest(
   let initialization: Promise<void> | null = null;
   let resolveInitialization: (() => void) | null = null;
   let rejectInitialization: ((error: Error) => void) | null = null;
-  let initializationTimer: NodeJS.Timeout | null = null;
+  let initializationWaiters = 0;
   let idleTimer: NodeJS.Timeout | null = null;
   const pending = new Map<number, PendingRequest>();
 
@@ -97,8 +97,6 @@ export function createCodexAppServerRequest(
 
   const failServer = (server: ChildProcessWithoutNullStreams, error: Error): void => {
     if (child !== server) return;
-    if (initializationTimer !== null) clearTimeout(initializationTimer);
-    initializationTimer = null;
     rejectInitialization?.(error);
     for (const id of [...pending.keys()]) settlePending(id, error);
     closeCurrentServer(server);
@@ -117,8 +115,6 @@ export function createCodexAppServerRequest(
     const id = typeof record['id'] === 'number' ? record['id'] : null;
     if (id === null) return;
     if (id === initializationId) {
-      if (initializationTimer !== null) clearTimeout(initializationTimer);
-      initializationTimer = null;
       initializationId = null;
       if (record['error'] !== undefined) {
         failServer(server, protocolError(record['error'], 'Codex app-server initialization failed'));
@@ -181,7 +177,7 @@ export function createCodexAppServerRequest(
     }
   };
 
-  const ensureServer = (timeoutMs: number): Promise<void> => {
+  const ensureServer = (): Promise<void> => {
     if (child !== null && initialization !== null) return initialization;
     const server = spawn(command, ['app-server', '--stdio'], {
       env: options.env ?? process.env,
@@ -215,9 +211,6 @@ export function createCodexAppServerRequest(
       failServer(server, safeError('Codex app-server closed before responding'));
     });
 
-    initializationTimer = setTimeout(() => {
-      failServer(server, safeError('Codex app-server initialization timed out'));
-    }, timeoutMs);
     server.stdin.write(`${JSON.stringify({
       id: initializationId,
       method: 'initialize',
@@ -235,18 +228,44 @@ export function createCodexAppServerRequest(
   const awaitInitialization = async (
     promise: Promise<void>,
     signal: AbortSignal | undefined,
+    deadline: number,
   ): Promise<void> => {
-    if (!signal) return await promise;
-    if (signal.aborted) throw abortedError(signal);
-    await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        const onAbort = (): void => reject(abortedError(signal));
-        signal.addEventListener('abort', onAbort, { once: true });
-        const removeAbortListener = (): void => signal.removeEventListener('abort', onAbort);
-        void promise.then(removeAbortListener, removeAbortListener);
-      }),
-    ]);
+    if (signal?.aborted) throw abortedError(signal);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw safeError('Codex app-server initialization timed out');
+    let timer: NodeJS.Timeout | undefined;
+    let onAbort: (() => void) | undefined;
+    initializationWaiters += 1;
+    try {
+      const waits: Promise<void>[] = [
+        promise,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            reject(safeError('Codex app-server initialization timed out'));
+          }, remainingMs);
+        }),
+      ];
+      if (signal) {
+        waits.push(new Promise<never>((_resolve, reject) => {
+          onAbort = (): void => reject(abortedError(signal));
+          signal.addEventListener('abort', onAbort, { once: true });
+        }));
+      }
+      await Promise.race(waits);
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      initializationWaiters -= 1;
+      const server = child;
+      if (
+        initializationWaiters === 0
+        && initialization === promise
+        && initializationId !== null
+        && server !== null
+      ) {
+        failServer(server, safeError('Codex app-server initialization timed out'));
+      }
+    }
   };
 
   return async (
@@ -260,7 +279,7 @@ export function createCodexAppServerRequest(
     const deadline = Date.now() + requestOptions.timeoutMs;
     if (requestOptions.signal?.aborted) throw abortedError(requestOptions.signal);
     clearIdleTimer();
-    await awaitInitialization(ensureServer(requestOptions.timeoutMs), requestOptions.signal);
+    await awaitInitialization(ensureServer(), requestOptions.signal, deadline);
     clearIdleTimer();
     const server = child;
     if (server === null) throw safeError('Codex app-server is unavailable');

@@ -278,6 +278,46 @@ input.on('line', (line) => {
     await expect(request('thread/list', {}, { timeoutMs: 100 })).rejects.toThrow('timed out');
   });
 
+  it('applies independent initialization deadlines to concurrent callers', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-shared-deadline-'));
+    tempPaths.push(directory);
+    const command = join(directory, 'codex-shared-deadline.cjs');
+    await writeFile(command, `#!/usr/bin/env node
+const readline = require('node:readline');
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    setTimeout(() => process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n'), 80);
+  } else if (message.method === 'thread/list') {
+    process.stdout.write(JSON.stringify({
+      id: message.id,
+      result: { data: [], nextCursor: null }
+    }) + '\\n');
+  }
+});
+`);
+    await chmod(command, 0o700);
+    const request = createCodexAppServerRequest({
+      command,
+      env: { PATH: process.env['PATH'] ?? '' },
+    });
+
+    const short = request('thread/list', {}, { timeoutMs: 30 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const long = request('thread/list', {}, { timeoutMs: 200 });
+    const [shortResult, longResult] = await Promise.allSettled([short, long]);
+
+    expect(shortResult).toEqual(expect.objectContaining({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: expect.stringContaining('initialization timed out') }),
+    }));
+    expect(longResult).toEqual({
+      status: 'fulfilled',
+      value: { data: [], nextCursor: null },
+    });
+  });
+
   it('ignores late output from an app-server process replaced after timeout', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-replace-'));
     tempPaths.push(directory);
