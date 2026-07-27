@@ -14,7 +14,9 @@ export function createDefaultRuntimeAdapterRegistry(
 ): RuntimeAdapterRegistry {
   const codexOptions: CodexRuntimeAdapterOptions = {
     ...options.codex,
-    env: options.codex?.env ?? options.env,
+    env: options.codex?.env ?? (options.env === undefined
+      ? undefined
+      : { ...process.env, ...options.env }),
   };
   return new RuntimeAdapterRegistry([
     new HermesRuntimeAdapter(options),

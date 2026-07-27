@@ -24,7 +24,7 @@ interface PendingRequest {
   onAbort?: (() => void) | undefined;
 }
 
-const DEFAULT_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 const DEFAULT_IDLE_TIMEOUT_MS = 5_000;
 
 function abortedError(signal: AbortSignal): Error {

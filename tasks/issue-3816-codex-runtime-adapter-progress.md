@@ -28,5 +28,6 @@
 - [x] Publish replacement PR #3861 against `main` after GitHub refused to reopen superseded PR #3826.
 - [x] Remediate replacement-PR findings 3657124167, 3657124173, and 3657124178 under RED→GREEN in `b25b0a7a59e02dfa883c02c88aa76eb82ced7f1e`: exhaustive disappearance confirmation, replay-safe ≤4,096-byte SSE cursors, and complete snapshot continuation baselines.
 - [x] Verify the remediation with 84/84 focused runtime/HTTP tests, package typecheck/build, targeted ESLint, and `git diff --check`; reply to and resolve all three review threads.
+- [x] Remediate follow-up findings 3657285306, 3657285315, and 3657285323 under RED→GREEN: deterministic snapshot tie ordering, bounded 50-record pages with a 64 MiB protocol response ceiling, and safe shared-environment merging. Focused runtime/HTTP verification passes 87/87 with package typecheck/build and targeted ESLint green.
 - [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads on PR #3861; do not merge.
 - [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.

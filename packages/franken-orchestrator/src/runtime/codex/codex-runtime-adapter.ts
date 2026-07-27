@@ -47,6 +47,7 @@ const UNSUPPORTED_RUNS = 'Codex thread metadata does not expose canonical task-l
 const DEFAULT_REQUEST_TIMEOUT_MS = 2_000;
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
+const MAX_THREAD_PAGE_SIZE = 50;
 const MAX_THREAD_PAGES = 100;
 const MAX_CURSOR_JSON_BYTES = 64 * 1024;
 const MAX_EVENT_CURSOR_BYTES = 4_096;
@@ -427,7 +428,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     let cursor: string | null = null;
     for (let pageNumber = 0; pageNumber < MAX_THREAD_PAGES; pageNumber += 1) {
       const response = await this.request('thread/list', {
-        limit: options.pageSize,
+        limit: Math.min(options.pageSize, MAX_THREAD_PAGE_SIZE),
         sortKey: 'updated_at',
         sortDirection: 'desc',
         sourceKinds: THREAD_SOURCE_KINDS,
@@ -506,9 +507,9 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       parsed = await this.readThreadPages({
         pageSize: request.workspaceId === undefined ? limit : MAX_ACTIVITY_LIMIT,
         signal: request.signal,
-        stop: (threads) => request.workspaceId === undefined || threads.filter(
-          (thread) => workspaceId(thread.cwd) === request.workspaceId,
-        ).length >= limit,
+        stop: (threads) => request.workspaceId === undefined
+          ? threads.length >= limit
+          : threads.filter((thread) => workspaceId(thread.cwd) === request.workspaceId).length >= limit,
       });
     } catch (error) {
       if (request.signal?.aborted) {
@@ -590,7 +591,10 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       agents: { status: 'available', data: agents.sort((a, b) => a.id.localeCompare(b.id)) },
       tasks: { status: 'unsupported', reason: UNSUPPORTED_TASKS },
       runs: { status: 'unsupported', reason: UNSUPPORTED_RUNS },
-      events: { status: 'available', data: events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)) },
+      events: {
+        status: 'available',
+        data: events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id.localeCompare(b.id)),
+      },
       blockers: { status: 'unsupported', reason: UNSUPPORTED_BLOCKERS },
       approvals: { status: 'unsupported', reason: UNSUPPORTED_APPROVALS },
     });
@@ -601,9 +605,9 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     const after = parseCursor(request.cursor);
     if (after && after.workspaceId !== request.workspaceId) throw new RuntimeCursorError();
     const stop = (threads: CodexThread[]): boolean => after === null
-      ? request.workspaceId === undefined || threads.filter(
-          (thread) => workspaceId(thread.cwd) === request.workspaceId,
-        ).length >= limit
+      ? request.workspaceId === undefined
+        ? threads.length >= limit
+        : threads.filter((thread) => workspaceId(thread.cwd) === request.workspaceId).length >= limit
       : threads.some((thread) => timestamp(thread.updatedAt)! < after.occurredAt);
     const active = await this.readThreadPages({
       pageSize: MAX_ACTIVITY_LIMIT,

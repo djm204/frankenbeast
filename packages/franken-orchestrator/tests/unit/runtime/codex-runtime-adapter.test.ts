@@ -81,6 +81,70 @@ input.on('line', (line) => {
     ]));
   });
 
+  it('accepts bounded thread pages larger than the legacy two-megabyte response limit', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-large-page-'));
+    tempPaths.push(directory);
+    const command = join(directory, 'codex-large-page.cjs');
+    await writeFile(command, `#!/usr/bin/env node
+const readline = require('node:readline');
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');
+  } else if (message.method === 'thread/list') {
+    process.stdout.write(JSON.stringify({ id: message.id, result: {
+      data: [{ id: 'large', preview: 'x'.repeat(3 * 1024 * 1024) }],
+      nextCursor: null
+    } }) + '\\n');
+  }
+});
+`);
+    await chmod(command, 0o700);
+    const request = createCodexAppServerRequest({
+      command,
+      env: { PATH: process.env['PATH'] ?? '' },
+    });
+
+    await expect(request('thread/list', { limit: 500 }, { timeoutMs: 5_000 }))
+      .resolves.toEqual({
+        data: [expect.objectContaining({ id: 'large' })],
+        nextCursor: null,
+      });
+  });
+
+  it('merges shared runtime env overrides into the Codex child environment', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-shared-env-'));
+    tempPaths.push(directory);
+    const command = join(directory, 'codex-shared-env.cjs');
+    await writeFile(command, `#!/usr/bin/env node
+if (!process.env.PATH || process.env.REQUIRED_OVERRIDE !== 'expected') process.exit(23);
+const readline = require('node:readline');
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n');
+  } else if (message.method === 'thread/list') {
+    process.stdout.write(JSON.stringify({
+      id: message.id,
+      result: { data: [], nextCursor: null }
+    }) + '\\n');
+  }
+});
+`);
+    await chmod(command, 0o700);
+
+    const providers = await createDefaultRuntimeAdapterRegistry({
+      env: { REQUIRED_OVERRIDE: 'expected' },
+      codex: { command, requestTimeoutMs: 2_000 },
+    }).list();
+
+    expect(providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'codex', health: expect.objectContaining({ state: 'connected' }) }),
+    ]));
+  });
+
   it('reports initialization protocol schema errors as incompatible', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-incompatible-'));
     tempPaths.push(directory);
@@ -509,7 +573,7 @@ input.on('line', (line) => {
     expect(second.nextCursor).toBe(second.events[0]!.cursor);
     expect(request).toHaveBeenLastCalledWith(
       'thread/list',
-      expect.objectContaining({ limit: 500, useStateDbOnly: true }),
+      expect.objectContaining({ limit: 50, useStateDbOnly: true }),
       expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
   });
@@ -1111,6 +1175,41 @@ input.on('line', (line) => {
         summary: 'Codex thread is blocked',
       }),
     ]);
+  });
+
+  it('orders snapshot timestamp ties by the event cursor tiebreaker', async () => {
+    const threads = ['thread-b', 'thread-a'].map((id) => ({
+      id,
+      sessionId: `session-${id}`,
+      cliVersion: '0.145.0',
+      createdAt: 100,
+      updatedAt: 200,
+      cwd: '/workspace/project',
+      ephemeral: false,
+      modelProvider: 'openai',
+      status: { type: 'idle' },
+    }));
+    const adapter = new CodexRuntimeAdapter({
+      request: async (_method, params) => ({
+        data: params['archived'] === true ? [] : threads,
+        nextCursor: null,
+      }),
+    });
+
+    const snapshot = await adapter.getSnapshot({ activityLimit: 2 });
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data.map((event) => event.id)).toEqual([
+      'codex:thread:thread-a:200:idle',
+      'codex:thread:thread-b:200:idle',
+    ]);
+    await expect(adapter.getEvents({
+      cursor: snapshot.events.data.at(-1)!.cursor,
+      limit: 2,
+    })).resolves.toEqual({
+      events: [],
+      nextCursor: snapshot.events.data.at(-1)!.cursor,
+    });
   });
 
   it('paginates before applying a bounded workspace snapshot filter', async () => {
