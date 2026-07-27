@@ -551,6 +551,8 @@ describe('SmartSwarmPage', () => {
   it.each([
     ['queued', 'Resume task'],
     ['ready', 'Promote task'],
+    ['running', 'Promote task'],
+    ['unknown', 'Promote task'],
     ['archived', 'Promote task'],
     ['archived', 'Cancel task'],
   ] as const)('keeps %s tasks out of unsafe %s actions', async (state, buttonName) => {

@@ -734,8 +734,8 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
   const cancelReason = capabilityReason(provider.capabilities.cancellation);
   const policyReason = capabilityReason(provider.capabilities.policyActions);
   const blockerReason = capabilityReason(provider.capabilities.blockers);
-  const policyStateReason = ['ready', 'succeeded', 'failed', 'cancelled', 'archived'].includes(task.state)
-    ? 'Ready, terminal, and archived tasks cannot be promoted.'
+  const policyStateReason = !['blocked', 'queued'].includes(task.state)
+    ? 'Only blocked and queued tasks can be promoted.'
     : null;
 
   async function executeTaskAction(
