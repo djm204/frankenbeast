@@ -1,6 +1,10 @@
 import { createServer, type Server } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OllamaRuntimeAdapter, RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
+import {
+  OllamaRuntimeAdapter,
+  RuntimeActionRequestSchema,
+  RuntimeSnapshotSchema,
+} from '../../../src/runtime/index.js';
 
 const servers: Server[] = [];
 
@@ -122,6 +126,31 @@ async function malformedNumericServer(): Promise<string> {
 }
 
 describe('OllamaRuntimeAdapter', () => {
+  it('returns a typed unsupported result for governed mutations', async () => {
+    const adapter = new OllamaRuntimeAdapter({ endpoints: [] });
+    const request = RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:ollama-read-only',
+      action: {
+        type: 'blocker.add', workspaceId: 'ollama:default', taskId: 'ollama:default:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    });
+
+    await expect(adapter.executeAction(request)).resolves.toEqual({
+      status: 'unsupported',
+      providerId: 'ollama',
+      correlationId: request.correlationId,
+      reason: 'The Ollama adapter is read-only',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.add',
+        targetId: 'ollama:default:t_deadbeef',
+        outcome: 'unsupported',
+      },
+    });
+  });
+
   it('rejects empty endpoint identifiers during construction', () => {
     expect(() => new OllamaRuntimeAdapter({
       endpoints: [{ id: '', baseUrl: 'http://127.0.0.1:11434' }],

@@ -6,8 +6,11 @@ import type {
 import { RuntimeCursorError } from '../runtime-adapter.js';
 import {
   RuntimeEventPageSchema,
+  RuntimeActionResultSchema,
   RuntimeProviderSchema,
   RuntimeSnapshotSchema,
+  type RuntimeActionRequest,
+  type RuntimeActionResult,
   type RuntimeEventPage,
   type RuntimeProvider,
   type RuntimeSnapshot,
@@ -244,6 +247,24 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
       metadata: {
         configuredEndpointCount: inspections.length,
         connectedEndpointCount: connected,
+      },
+    });
+  }
+
+  async executeAction(request: RuntimeActionRequest): Promise<RuntimeActionResult> {
+    const targetId = request.action.type === 'approval.resolve'
+      ? request.action.approvalId
+      : request.action.taskId;
+    return RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: this.id,
+      correlationId: request.correlationId,
+      reason: 'The Ollama adapter is read-only',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: request.action.type,
+        targetId,
+        outcome: 'unsupported',
       },
     });
   }

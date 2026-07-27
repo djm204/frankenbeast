@@ -20,5 +20,7 @@
 - [x] Address the fifth Codex invocation with four red-green regressions: pin every Hermes show/mutation command to the exact inspected database path, harden only explicitly dedicated action-store directories, preserve unsupported results by bounding long capability reasons, and destroy owned durable stores when TCP startup fails.
 - [x] Rebase the nine-commit #3813 stack onto immutable merged `main` base `715da9d456d9a883aa96d85f53cbefca832da1c1`, preserve the final #3812 stream/cursor hardening through conflict resolution, and align the provider-scoping regression with the final route-safe provider contract.
 - [x] Re-run the final-base gates: governed runtime/action tests 175/175, package and root lint/typecheck/build pass, and package full tests 4759/4764 with five unrelated environmental/baseline failures outside the changed action paths.
+- [x] Replace non-reopenable PR #3827 with PR #3862, resolve seven fresh exact-head Codex findings with red-green regressions, and keep every Codex thread answered and resolved before retriggering.
+- [x] Rebase again after `main` advanced to `a372df380d529a66d1ca4a2d8abd2e7d0ef3be36`, integrate the newly merged read-only Ollama adapter with the governed action contract, and pass 213 focused tests plus root lint/typecheck/build.
 - [ ] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
 - [ ] Post the exact final handoff to root `t_25558345`, then block the task for review.
