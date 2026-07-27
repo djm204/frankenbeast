@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { createRuntimeRoutes, runRuntimeEventStream } from '../../../src/http/routes/runtime-routes.js';
@@ -527,12 +528,20 @@ describe('smart-swarm runtime routes', () => {
     expect(adapter.executeAction).toHaveBeenCalledOnce();
   });
 
-  it('retains a completed idempotency result when durable audit persistence fails', async () => {
-    const actionStore = new RuntimeActionStore();
-    const recordAudit = vi.spyOn(actionStore, 'recordAudit');
-    recordAudit.mockImplementationOnce(() => {
-      throw new Error('audit database is busy');
-    });
+  it('does not persist action completion without its durable audit event', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-atomic-audit-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const actionStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(actionStore);
+    const faultDb = new Database(databasePath);
+    faultDb.exec(`
+      CREATE TRIGGER fail_runtime_action_audit
+      BEFORE INSERT ON runtime_action_audit
+      BEGIN
+        SELECT RAISE(ABORT, 'audit database is busy');
+      END;
+    `);
     const { app, adapter } = createRoutes(actionStore);
     vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
       status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
@@ -556,10 +565,18 @@ describe('smart-swarm runtime routes', () => {
     });
 
     expect((await request()).status).toBe(500);
-    await expect((await request()).json()).resolves.toEqual({ data: expect.objectContaining({
-      status: 'applied', replayed: true,
-    }) });
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:audit-failure']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(key, fingerprint, Date.now() + 1_000, Date.now())).toEqual({ status: 'pending' });
+    expect(actionStore.listAuditEvents()).toEqual([]);
     expect(adapter.executeAction).toHaveBeenCalledOnce();
+    faultDb.close();
   });
 
   it('checks adapter action support and returns a typed unsupported response without side effects', async () => {

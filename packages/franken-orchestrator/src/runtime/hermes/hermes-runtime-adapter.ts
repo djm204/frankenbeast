@@ -739,7 +739,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         audit: this.actionAudit(request.action, 'unsupported'),
       });
     }
-    const workspace = (await this.inspectSources()).sources.find((source) => (
+    const workspace = (await this.inspectSources(undefined, request.action.workspaceId)).sources.find((source) => (
       source.workspaceId === request.action.workspaceId && source.status === 'compatible'
     ));
     if (!workspace) {

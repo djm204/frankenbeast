@@ -215,6 +215,35 @@ describe('HermesRuntimeAdapter', () => {
     expect(JSON.stringify(calls)).not.toContain('shell');
   });
 
+  it('inspects only the workspace targeted by a mutation', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    let status = 'ready';
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async (_command, args) => {
+        if (args.includes('block')) status = 'blocked';
+        return args.includes('show')
+          ? { stdout: JSON.stringify({ task: { status } }), stderr: '', exitCode: 0 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+    const inspectSources = vi.spyOn(adapter as unknown as {
+      inspectSources(signal?: AbortSignal, workspaceId?: string): Promise<unknown>;
+    }, 'inspectSources');
+
+    await adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:targeted-inspection',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Operator requested input',
+      },
+    }));
+
+    expect(inspectSources).toHaveBeenCalledWith(undefined, 'hermes:global');
+  });
+
   it('passes opaque Hermes task ids as a single argv value without inventing character restrictions', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));

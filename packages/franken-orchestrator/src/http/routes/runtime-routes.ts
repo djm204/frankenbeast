@@ -411,19 +411,21 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   const actionStore = deps.actionStore ?? new RuntimeActionStore();
   const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
 
-  const recordActionAudit = (
+  const actionAuditEvent = (
     providerId: string,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
     audit: RuntimeActionAudit,
-  ): void => {
+  ) => {
     const sanitizedAudit = RuntimeActionAuditSchema.parse(redactRuntimePaths(audit));
-    const event = {
+    return {
       ...sanitizedAudit,
       providerId,
       correlationId: request.correlationId,
       ...(request.causationId ? { causationId: request.causationId } : {}),
     };
-    actionStore.recordAudit(event);
+  };
+
+  const forwardActionAudit = (event: ReturnType<typeof actionAuditEvent>): void => {
     void Promise.resolve().then(() => deps.actionAudit?.(event)).catch(() => {});
   };
 
@@ -580,8 +582,11 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         const completed = RuntimeActionResultSchema.parse(redactRuntimePaths(
           await executeAction(adapter, request),
         ));
-        actionStore.complete(key, fingerprint, completed, Date.now() + IDEMPOTENCY_TTL_MS);
-        recordActionAudit(adapter.id, request, completed.audit);
+        const audit = actionAuditEvent(adapter.id, request, completed.audit);
+        actionStore.completeWithAudit(
+          key, fingerprint, completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
+        );
+        forwardActionAudit(audit);
         return completed;
       } finally {
         clearInterval(lease);

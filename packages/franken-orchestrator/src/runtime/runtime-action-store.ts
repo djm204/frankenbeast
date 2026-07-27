@@ -125,6 +125,39 @@ export class RuntimeActionStore {
     if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
   }
 
+  completeWithAudit(
+    key: string,
+    fingerprint: string,
+    result: RuntimeActionResult,
+    expiresAt: number,
+    event: RuntimeActionAuditEvent,
+    occurredAt = Date.now(),
+  ): void {
+    const parsed = RuntimeActionResultSchema.parse(result);
+    const audit = { ...event };
+    if (!this.db) {
+      const entry = this.entries.get(key);
+      if (!entry || entry.fingerprint !== fingerprint) throw new Error('Runtime action reservation was lost');
+      entry.result = parsed;
+      entry.expiresAt = expiresAt;
+      this.auditEvents.push(audit);
+      return;
+    }
+    const commit = this.db.transaction(() => {
+      const update = this.db!.prepare(`
+        UPDATE runtime_action_idempotency
+        SET result_json = ?, expires_at = ?
+        WHERE action_key = ? AND fingerprint = ?
+      `).run(JSON.stringify(parsed), expiresAt, key, fingerprint);
+      if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
+      this.db!.prepare(`
+        INSERT INTO runtime_action_audit (occurred_at, event_json)
+        VALUES (?, ?)
+      `).run(occurredAt, JSON.stringify(audit));
+    });
+    commit.immediate();
+  }
+
   recordAudit(event: RuntimeActionAuditEvent, occurredAt = Date.now()): void {
     const copy = { ...event };
     if (!this.db) {
