@@ -47,6 +47,7 @@ export class RuntimeActionStore {
   private readonly entries = new Map<string, MemoryEntry>();
   private readonly auditEvents: RuntimeActionAuditEvent[] = [];
   private readonly pending = new Set<Promise<unknown>>();
+  private readonly activeClaims = new Map<string, { key: string; fingerprint: string }>();
   private readonly db: Database.Database | undefined;
   private destroyed = false;
   private shuttingDown = false;
@@ -83,7 +84,13 @@ export class RuntimeActionStore {
 
   reserve(key: string, fingerprint: string, expiresAt: number, now = Date.now()): RuntimeActionReservation {
     if (this.shuttingDown) throw new Error('Runtime action store is shutting down');
-    if (!this.db) return this.reserveMemory(key, fingerprint, expiresAt, now);
+    if (!this.db) {
+      const reservation = this.reserveMemory(key, fingerprint, expiresAt, now);
+      if (reservation.status === 'claimed') {
+        this.activeClaims.set(reservation.claimToken, { key, fingerprint });
+      }
+      return reservation;
+    }
     const claimToken = randomUUID();
     const reserve = this.db.transaction((): RuntimeActionReservation => {
       this.db!.prepare('DELETE FROM runtime_action_idempotency WHERE expires_at <= ?').run(now);
@@ -99,13 +106,20 @@ export class RuntimeActionStore {
       `).run(key, fingerprint, claimToken, expiresAt);
       return { status: 'claimed', claimToken };
     });
-    return reserve.immediate();
+    const reservation = reserve.immediate();
+    if (reservation.status === 'claimed') {
+      this.activeClaims.set(reservation.claimToken, { key, fingerprint });
+    }
+    return reservation;
   }
 
   renew(key: string, fingerprint: string, claimToken: string, expiresAt: number): boolean {
     if (!this.db) {
       const entry = this.entries.get(key);
-      if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken || entry.result) return false;
+      if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken || entry.result) {
+        this.activeClaims.delete(claimToken);
+        return false;
+      }
       entry.expiresAt = expiresAt;
       return true;
     }
@@ -114,6 +128,7 @@ export class RuntimeActionStore {
       SET expires_at = ?
       WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
     `).run(expiresAt, key, fingerprint, claimToken);
+    if (update.changes !== 1) this.activeClaims.delete(claimToken);
     return update.changes === 1;
   }
 
@@ -132,6 +147,7 @@ export class RuntimeActionStore {
       }
       entry.result = parsed;
       entry.expiresAt = expiresAt;
+      this.activeClaims.delete(claimToken);
       return;
     }
     const update = this.db.prepare(`
@@ -140,6 +156,7 @@ export class RuntimeActionStore {
       WHERE action_key = ? AND fingerprint = ? AND claim_token = ?
     `).run(JSON.stringify(parsed), expiresAt, key, fingerprint, claimToken);
     if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
+    this.activeClaims.delete(claimToken);
   }
 
   completeWithAudit(
@@ -161,6 +178,7 @@ export class RuntimeActionStore {
       entry.result = parsed;
       entry.expiresAt = expiresAt;
       this.auditEvents.push(audit);
+      this.activeClaims.delete(claimToken);
       return;
     }
     const commit = this.db.transaction(() => {
@@ -176,6 +194,7 @@ export class RuntimeActionStore {
       `).run(occurredAt, JSON.stringify(audit));
     });
     commit.immediate();
+    this.activeClaims.delete(claimToken);
   }
 
   fence(key: string, fingerprint: string, claimToken: string): void {
@@ -186,6 +205,7 @@ export class RuntimeActionStore {
         throw new Error('Runtime action reservation was lost');
       }
       entry.expiresAt = expiresAt;
+      this.activeClaims.delete(claimToken);
       return;
     }
     const update = this.db.prepare(`
@@ -194,6 +214,7 @@ export class RuntimeActionStore {
       WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
     `).run(expiresAt, key, fingerprint, claimToken);
     if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
+    this.activeClaims.delete(claimToken);
   }
 
   recordAudit(event: RuntimeActionAuditEvent, occurredAt = Date.now()): void {
@@ -223,6 +244,21 @@ export class RuntimeActionStore {
 
   beginShutdown(): void {
     this.shuttingDown = true;
+    for (const [claimToken, { key, fingerprint }] of this.activeClaims) {
+      if (!this.db) {
+        const entry = this.entries.get(key);
+        if (entry && entry.fingerprint === fingerprint && entry.claimToken === claimToken && !entry.result) {
+          entry.expiresAt = Number.MAX_SAFE_INTEGER;
+        }
+      } else {
+        this.db.prepare(`
+          UPDATE runtime_action_idempotency
+          SET expires_at = ?
+          WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
+        `).run(Number.MAX_SAFE_INTEGER, key, fingerprint, claimToken);
+      }
+    }
+    this.activeClaims.clear();
   }
 
   async drain(timeoutMs?: number): Promise<void> {

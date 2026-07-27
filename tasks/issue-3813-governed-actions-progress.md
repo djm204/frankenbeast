@@ -26,5 +26,6 @@
 - [x] Address the tier-12 follow-up with red-green regressions for atomic durable completion/audit persistence and mutation-target-scoped Hermes source inspection.
 - [x] Address the next tier-12 follow-up with red-green regressions for startup cleanup on durable-store construction failure and claim-token fencing after lease ownership loss.
 - [x] Address the final tier-12 hardening round with red-green regressions for opaque governed-action identifiers, bounded runtime-action draining, and durable uncertain-completion fencing.
-- [x] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
-- [x] Prepare the exact final handoff for root `t_25558345`, then block the task for review.
+- [x] Address the next exact-head Codex round with red-green regressions for opaque audit target identifiers, pre-expiry renewal retries, shutdown-time fencing of active durable claims, and uncertainty fencing for provider exceptions after execution begins.
+- [ ] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
+- [ ] Prepare the exact final handoff for root `t_25558345`, then block the task for review.

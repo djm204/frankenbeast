@@ -55,7 +55,15 @@ const MAX_TIMER_INTERVAL_MS = 2_147_483_647;
 const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 const MAX_SSE_CURSOR_ID_CHARS = 4 * 1024;
 const IDEMPOTENCY_TTL_MS = 10 * 60_000;
+const IDEMPOTENCY_RENEW_RETRY_MS = IDEMPOTENCY_TTL_MS / 4;
 const MAX_ACTION_BODY_BYTES = 16 * 1024;
+
+class RuntimeActionExecutionUncertainError extends Error {
+  constructor() {
+    super('Runtime provider action completion is uncertain');
+    this.name = 'RuntimeActionExecutionUncertainError';
+  }
+}
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -429,6 +437,17 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     void Promise.resolve().then(() => deps.actionAudit?.(event)).catch(() => {});
   };
 
+  const executeAdapterAction = async (
+    adapter: RuntimeAdapter,
+    request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+  ) => {
+    try {
+      return await adapter.executeAction(request);
+    } catch {
+      throw new RuntimeActionExecutionUncertainError();
+    }
+  };
+
   const executeAction = async (
     adapter: RuntimeAdapter,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
@@ -454,7 +473,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             })
           : { decision: 'rejected' as const, reason: 'Runtime action governor is unavailable' };
         result = outcome.decision === 'approved'
-          ? parseAdapterActionResult(adapter, request, await adapter.executeAction(request))
+          ? parseAdapterActionResult(adapter, request, await executeAdapterAction(adapter, request))
           : RuntimeActionResultSchema.parse({
             status: 'rejected',
             providerId: adapter.id,
@@ -463,9 +482,10 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             audit: actionAudit(request.action, 'rejected'),
           });
       } else {
-        result = parseAdapterActionResult(adapter, request, await adapter.executeAction(request));
+        result = parseAdapterActionResult(adapter, request, await executeAdapterAction(adapter, request));
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof RuntimeActionExecutionUncertainError) throw error;
       result = RuntimeActionResultSchema.parse({
         status: 'failed',
         providerId: adapter.id,
@@ -569,17 +589,23 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
     let ownershipLost = false;
-    const lease = setInterval(() => {
-      try {
-        if (!actionStore.renew(
-          key, fingerprint, reservation.claimToken, Date.now() + IDEMPOTENCY_TTL_MS,
-        )) ownershipLost = true;
-      } catch {
-        // A transient store failure must not escape the timer; later ticks retry
-        // while the tracked action remains the authoritative in-process claim.
-      }
-    }, IDEMPOTENCY_TTL_MS / 2);
-    lease.unref();
+    let lease: ReturnType<typeof setTimeout> | undefined;
+    const scheduleLeaseRenewal = (delayMs: number) => {
+      lease = setTimeout(() => {
+        let nextDelayMs = IDEMPOTENCY_TTL_MS / 2;
+        if (ownershipLost) return;
+        try {
+          if (!actionStore.renew(
+            key, fingerprint, reservation.claimToken, Date.now() + IDEMPOTENCY_TTL_MS,
+          )) ownershipLost = true;
+        } catch {
+          nextDelayMs = IDEMPOTENCY_RENEW_RETRY_MS;
+        }
+        if (!ownershipLost) scheduleLeaseRenewal(nextDelayMs);
+      }, delayMs);
+      lease.unref();
+    };
+    scheduleLeaseRenewal(IDEMPOTENCY_TTL_MS / 2);
     const result = actionStore.track((async () => {
       try {
         const completed = RuntimeActionResultSchema.parse(redactRuntimePaths(
@@ -602,8 +628,13 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         }
         forwardActionAudit(audit);
         return completed;
+      } catch (error) {
+        if (error instanceof RuntimeActionExecutionUncertainError) {
+          actionStore.fence(key, fingerprint, reservation.claimToken);
+        }
+        throw error;
       } finally {
-        clearInterval(lease);
+        if (lease) clearTimeout(lease);
       }
     })());
     inFlightActions.set(key, result);

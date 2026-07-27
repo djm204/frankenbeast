@@ -125,6 +125,20 @@ describe('provider-neutral runtime contract', () => {
       ...request,
       action: { ...request.action, taskId: 'x'.repeat(201) },
     }).action).toEqual(expect.objectContaining({ taskId: 'x'.repeat(201) }));
+
+    expect(RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'test',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.add',
+        targetId: 'x'.repeat(201),
+        outcome: 'applied',
+      },
+    })).toEqual(expect.objectContaining({
+      audit: expect.objectContaining({ targetId: 'x'.repeat(201) }),
+    }));
   });
 
   it('preserves provider-owned opaque identifiers in emitted snapshots', () => {

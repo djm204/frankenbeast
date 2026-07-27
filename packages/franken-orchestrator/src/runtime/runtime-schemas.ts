@@ -67,7 +67,7 @@ export const RuntimeActionRequestSchema = z.object({
 export const RuntimeActionAuditSchema = z.object({
   requestedBy: z.literal('authenticated-operator'),
   actionType: RuntimeActionTypeSchema,
-  targetId: z.string().min(1).max(200),
+  targetId: z.string().min(1),
   outcome: z.enum(['applied', 'unsupported', 'rejected', 'failed']),
   previousState: z.string().max(100).optional(),
   currentState: z.string().max(100).optional(),

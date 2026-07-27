@@ -326,8 +326,9 @@ describe('smart-swarm runtime routes', () => {
       const first = request();
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       expect(renew).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await vi.advanceTimersByTimeAsync(2.5 * 60_000);
       expect(renew).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2.5 * 60_000);
       const retry = request();
       await vi.advanceTimersByTimeAsync(0);
       expect(adapter.executeAction).toHaveBeenCalledOnce();
@@ -426,6 +427,59 @@ describe('smart-swarm runtime routes', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('durably fences pending claims before a bounded shutdown drain can time out', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-shutdown-fence-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const firstStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(firstStore);
+    expect(firstStore.reserve('key', 'fingerprint', 1_000, 0)).toEqual(expect.objectContaining({
+      status: 'claimed',
+    }));
+
+    firstStore.beginShutdown();
+    firstStore.destroy();
+    actionStores.splice(actionStores.indexOf(firstStore), 1);
+
+    const reopenedStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(reopenedStore);
+    expect(reopenedStore.reserve(
+      'key', 'fingerprint', Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+  });
+
+  it('durably fences adapter exceptions after provider execution begins', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-provider-uncertain-'));
+    tempDirs.push(dir);
+    const actionStore = new RuntimeActionStore({ databasePath: join(dir, 'actions.sqlite') });
+    const { app, adapter } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockRejectedValue(new Error('postcondition read timed out'));
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:provider-uncertain',
+        action,
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:provider-uncertain']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
   });
 
   it('fails closed when an adapter returns a result for a different request', async () => {
@@ -722,9 +776,9 @@ describe('smart-swarm runtime routes', () => {
     expect(adapter.executeAction).not.toHaveBeenCalled();
   });
 
-  it('returns a redacted typed failure and audits failed provider mutations', async () => {
+  it('returns a redacted typed failure and audits provider discovery failures', async () => {
     const { app, adapter, actionAudit } = createRoutes();
-    vi.mocked(adapter.executeAction).mockRejectedValueOnce(new Error('secret command output API_KEY=do-not-leak'));
+    vi.mocked(adapter.describe).mockRejectedValueOnce(new Error('secret provider output API_KEY=do-not-leak'));
     const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
       method: 'POST',
       headers: { ...authHeaders(), 'content-type': 'application/json' },
@@ -744,6 +798,7 @@ describe('smart-swarm runtime routes', () => {
     }) });
     expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
     expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-leak');
+    expect(adapter.executeAction).not.toHaveBeenCalled();
   });
 
   it('requires operator auth and serves provider-neutral provider and snapshot DTOs', async () => {
