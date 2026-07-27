@@ -4,6 +4,7 @@ import { TransportSecurityService } from '../../../src/http/security/transport-s
 import { createRuntimeRoutes, runRuntimeEventStream } from '../../../src/http/routes/runtime-routes.js';
 import {
   RuntimeAdapterRegistry,
+  RuntimeCursorError,
   RuntimeEventPageSchema,
   RuntimeProviderSchema,
   RuntimeSnapshotSchema,
@@ -188,6 +189,30 @@ describe('smart-swarm runtime routes', () => {
       error: expect.objectContaining({ code: 'INVALID_CURSOR' }),
     });
     expect(adapter.getEvents).not.toHaveBeenCalled();
+  });
+
+  it('redacts adapter cursor error paths before responding', async () => {
+    const { app, adapter } = createRoutes();
+    vi.mocked(adapter.validateEventCursor!).mockImplementationOnce(() => {
+      throw new RuntimeCursorError('Invalid cursor from /home/alice/runtime.db');
+    });
+
+    const validationResponse = await app.request('/v1/smart-swarm/providers/hermes/events?cursor=bad', {
+      headers: authHeaders(),
+    });
+    vi.mocked(adapter.getEvents).mockRejectedValueOnce(
+      new RuntimeCursorError('Replay failed in /home/alice/workspace'),
+    );
+    const readResponse = await app.request('/v1/smart-swarm/providers/hermes/events', {
+      headers: authHeaders(),
+    });
+
+    const validationBody = JSON.stringify(await validationResponse.json());
+    const readBody = JSON.stringify(await readResponse.json());
+    expect(validationBody).toContain('[REDACTED_HOST_PATH]');
+    expect(readBody).toContain('[REDACTED_HOST_PATH]');
+    expect(validationBody).not.toContain('/home/alice');
+    expect(readBody).not.toContain('/home/alice');
   });
 
   it('rejects blank workspace filters across snapshot, events, and stream routes', async () => {
@@ -434,6 +459,25 @@ describe('smart-swarm runtime routes', () => {
     expect(response.headers.get('set-cookie')).toContain('Max-Age=600');
   });
 
+  it('matches stream-ticket cookie lifetime to an injected ticket store', async () => {
+    const ticketStore = new SseConnectionTicketStore({ consumedRetentionMs: 1_200_000 });
+    stores.push(ticketStore);
+    const adapter = runtimeAdapter();
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+    });
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=1200');
+  });
+
   it('rate limits authenticated requests by the verified operator identity', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
@@ -666,16 +710,17 @@ describe('smart-swarm runtime routes', () => {
         onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
       };
 
+      let settled = false;
       const streamDone = runRuntimeEventStream(adapter, stream as never, {
         heartbeatIntervalMs: 20,
         pollIntervalMs: 1_000,
-      });
+      }).finally(() => { settled = true; });
       await vi.advanceTimersByTimeAsync(120);
       expect(pipe).toHaveBeenCalledTimes(1);
-      releaseWrite();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(pipe).toHaveBeenCalledTimes(1);
       abortStream!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      releaseWrite();
       await streamDone;
     } finally {
       vi.useRealTimers();

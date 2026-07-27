@@ -123,6 +123,10 @@ export class SseConnectionTicketStore {
     this.cleanupInterval.unref?.();
   }
 
+  get browserRetentionMs(): number {
+    return Math.max(this.ttlMs, this.consumedRetentionMs);
+  }
+
   issue(token: string, scope?: string | undefined): string {
     const ticket = randomUUID();
     const tokenDigest = digestToken(token);

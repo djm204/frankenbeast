@@ -738,7 +738,7 @@ describe('HermesRuntimeAdapter', () => {
     createCurrentKanban(dbPath);
     const db = new Database(dbPath);
     db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
-      `failed '/secret' "C:\\private\\file" '\\\\server\\share'`,
+      `failed '/secret' "C:\\private\\file" '\\\\server\\share' "/Users/Alice Smith/secret"`,
       't_parent',
     );
     db.close();
@@ -748,7 +748,7 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot.tasks).toEqual(expect.objectContaining({
       data: expect.arrayContaining([expect.objectContaining({
         id: 'hermes:global:t_parent',
-        title: "failed '[REDACTED_HOST_PATH]' \"[REDACTED_HOST_PATH]\" '[REDACTED_HOST_PATH]'",
+        title: "failed '[REDACTED_HOST_PATH]' \"[REDACTED_HOST_PATH]\" '[REDACTED_HOST_PATH]' \"[REDACTED_HOST_PATH]\"",
       })]),
     }));
   });
@@ -1184,6 +1184,25 @@ describe('HermesRuntimeAdapter', () => {
       data: expect.arrayContaining([
         expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
       ]),
+    }));
+  });
+
+  it('derives agent state from the normalized run outcome', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET assignee = NULL WHERE id = ?').run('t_parent');
+    db.prepare('UPDATE task_runs SET status = ?, outcome = ? WHERE id = ?').run('running', 'blocked', 1);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.runs).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:run:1', state: 'blocked' })]),
+    }));
+    expect(snapshot.agents).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:worker-a', state: 'blocked' })]),
     }));
   });
 

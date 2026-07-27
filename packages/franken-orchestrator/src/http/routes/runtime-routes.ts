@@ -2,10 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import {
-  MIN_CONSUMED_RETENTION_MS,
-  type SseConnectionTicketStore,
-} from '../../beasts/events/sse-connection-ticket.js';
+import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
 import {
   InMemoryRateLimiter,
   requireBeastRateLimit,
@@ -129,13 +126,18 @@ function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID
     && (error as Error & { code?: unknown }).code === 'INVALID_CURSOR';
 }
 
+function runtimeCursorMessage(error: Error): string {
+  const redacted = redactAbsoluteHostPathValues(error.message);
+  return typeof redacted === 'string' ? redacted : 'Invalid runtime event cursor';
+}
+
 function validateAdapterCursor(adapter: RuntimeAdapter, cursor: string | undefined): void {
   if (!cursor) return;
   try {
     adapter.validateEventCursor(cursor);
   } catch (error) {
     if (isInvalidCursorError(error)) {
-      throw new HttpError(422, 'INVALID_CURSOR', error.message);
+      throw new HttpError(422, 'INVALID_CURSOR', runtimeCursorMessage(error));
     }
     throw error;
   }
@@ -266,6 +268,7 @@ export async function runRuntimeEventStream(
         if (!pollController.signal.aborted) throw error;
       }
     }
+    await writeChain;
   } finally {
     pollController.abort();
     if (poll) clearInterval(poll);
@@ -350,7 +353,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       return c.json({ data: runtimeResponse(RuntimeEventPageSchema.parse(await adapter.getEvents(request))) });
     } catch (error) {
       if (isInvalidCursorError(error)) {
-        throw new HttpError(422, 'INVALID_CURSOR', error.message);
+        throw new HttpError(422, 'INVALID_CURSOR', runtimeCursorMessage(error));
       }
       throw error;
     }
@@ -363,7 +366,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const ticket = deps.ticketStore.issue(deps.operatorToken, `${providerId}:${connectionId}`);
     setCookie(c, TICKET_COOKIE, ticket, {
       httpOnly: true,
-      maxAge: Math.ceil(MIN_CONSUMED_RETENTION_MS / 1_000),
+      maxAge: Math.ceil(deps.ticketStore.browserRetentionMs / 1_000),
       path: streamPath(providerId, connectionId),
       sameSite: 'Strict',
       secure: isHttpsRequest(c.req.url, c.req.header('x-forwarded-proto')),

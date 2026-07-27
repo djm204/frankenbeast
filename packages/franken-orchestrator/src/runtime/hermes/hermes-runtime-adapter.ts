@@ -78,7 +78,7 @@ const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
-const QUOTED_POSIX_PATH_RE = /([`'"])(\/(?:[^/`'"\s]+\/)*[^/`'"\s]+|[A-Za-z]:[\\/][^`'"\s]+|\\\\[^`'"\s]+)(?=\1)/gu;
+const QUOTED_POSIX_PATH_RE = /([`'"])(\/[^`'"]+|[A-Za-z]:[\\/][^`'"]+|\\\\[^`'"]+)(?=\1)/gu;
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const SLASH_COMMANDS = new Set([
@@ -919,7 +919,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       if (!activeRunIds.has(String(run['id'])) && !activeWithoutPointer) continue;
       if (typeof run['profile'] !== 'string' || !run['profile']) continue;
       const current = agentInputs.get(run['profile']) ?? { states: [], timestamps: [] };
-      current.states.push(String(run['status']));
+      current.states.push(runState);
       const active = latestTimestamp(run['last_heartbeat_at'], run['ended_at'], run['started_at']);
       if (active) current.timestamps.push(active);
       agentInputs.set(run['profile'], current);
