@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { HermesRuntimeAdapter } from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
 import { RuntimeCursorError, RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
 
@@ -147,6 +147,22 @@ describe('HermesRuntimeAdapter', () => {
       state: 'unavailable',
       tasks: expect.objectContaining({ status: 'unsupported' }),
     }));
+  });
+
+  it('reports a missing explicitly configured database when another board is healthy', async () => {
+    const home = await createHome();
+    const boardDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(boardDir, { recursive: true });
+    createCurrentKanban(join(boardDir, 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      kanbanDbPath: join(home, 'missing-configured.db'),
+    });
+
+    await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+      health: expect.objectContaining({ state: 'degraded' }),
+    }));
+    await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({ state: 'degraded' }));
   });
 
   it('returns an empty snapshot when a workspace filter matches no discovered source', async () => {
@@ -364,6 +380,35 @@ describe('HermesRuntimeAdapter', () => {
     expect(replay.events.some((event) => event.workspaceId === 'hermes:alpha')).toBe(true);
   });
 
+  it('fails event reads when every selected compatible source fails', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE task_events SET created_at = ?').run('not-a-timestamp');
+    db.close();
+
+    await expect(new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 10 }))
+      .rejects.toThrow('Every selected Hermes event source failed');
+  });
+
+  it('inspects only the selected workspace during workspace-scoped polling', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    const betaDir = join(home, 'kanban', 'boards', 'beta');
+    await mkdir(alphaDir, { recursive: true });
+    await mkdir(betaDir, { recursive: true });
+    createCurrentKanban(join(alphaDir, 'kanban.db'));
+    createCurrentKanban(join(betaDir, 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
+    const open = vi.spyOn(adapter as unknown as { open(path: string): Database.Database }, 'open');
+
+    await adapter.getEvents({ workspaceId: 'hermes:alpha', limit: 10 });
+
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls.every(([path]) => path === join(alphaDir, 'kanban.db'))).toBe(true);
+  });
+
   it('retains cursor positions for discovered workspaces that are temporarily unavailable', async () => {
     const home = await createHome();
     const alphaDir = join(home, 'kanban', 'boards', 'alpha');
@@ -436,6 +481,33 @@ describe('HermesRuntimeAdapter', () => {
 
     expect(first.events).toHaveLength(1);
     expect(replay.events).toEqual([]);
+  });
+
+  it('preserves legacy cursor workspace ordering until each source advances', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(alphaDir, { recursive: true });
+    const alphaPath = join(alphaDir, 'kanban.db');
+    createCurrentKanban(alphaPath);
+    const db = new Database(alphaPath);
+    db.exec('DELETE FROM task_comments; DELETE FROM task_events;');
+    db.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
+      10, 't_parent', 1, 'same-time-before-legacy-workspace', '{}', 1_785_081_650,
+    );
+    db.close();
+    const legacy = Buffer.from(JSON.stringify({
+      occurredAt: new Date(1_785_081_650 * 1000).toISOString(),
+      workspaceId: 'hermes:global',
+      source: 'event',
+      sourceId: 1,
+    })).toString('base64url');
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
+
+    const first = await adapter.getEvents({ cursor: legacy, limit: 10 });
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+
+    expect(first.events).toEqual([]);
+    expect(second.events).toEqual([]);
   });
 
   it('seeds represented workspaces before their first event in an intermediate cursor', async () => {

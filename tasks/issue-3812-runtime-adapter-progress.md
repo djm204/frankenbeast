@@ -27,6 +27,14 @@
 - [x] Hand the immutable new #3821 implementation head to stacked owners for rebase/reverification.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
+## Exact-head round 19 follow-up
+
+- [x] Recover PR #3821 exact head `4086791b0468d62c047d798fe74f337e89d12c65` and inspect all five current-head Codex findings.
+- [x] Reproduce and remediate legacy workspace cursor ordering, valid-stream admission isolation, all-source event failures, missing explicit databases, and workspace-scoped inspection.
+- [x] Run focused and package/root test, lint, typecheck, and build gates.
+- [ ] Commit and push the existing PR #3821 branch; reply to and resolve all five current-head threads.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -47,3 +55,4 @@
 - Expanded focused runtime verification passes 86/86 tests; root tests pass 766/766 with one skip; root typecheck, lint (zero errors), and build pass. The orchestrator package suite remains at the same unrelated three-failure baseline, now 4,658/4,661 passing after the added regression tests.
 - The exact-head `b88b10449` Codex round found four further issues; each was reproduced RED and fixed GREEN: capacity accounting for stalled periodic polls, single-component absolute-path redaction, cursor-only SSE checkpoint publication, and multiline cursor rejection before SSE framing.
 - Expanded focused runtime verification passes 90/90 tests; root tests pass 766/766 with one skip; root typecheck, lint (zero errors), and build pass. The orchestrator package suite remains at the same unrelated three-failure baseline, now 4,662/4,665 passing after the added regression tests.
+- Exact-head round 19 reproduced all five findings RED and passes 100/100 focused runtime, route, and ticket-store tests GREEN. Package/root typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,667/4,670 passing, while all non-orchestrator root package tests pass.

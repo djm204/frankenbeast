@@ -256,8 +256,8 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
     if (Array.isArray(decoded.p)) {
       const positions = new Map<string, CursorPosition>();
       for (const entry of decoded.p) {
-        if (!Array.isArray(entry) || (entry.length !== 4 && entry.length !== 5)) throw new Error('invalid');
-        const [workspaceId, occurredAt, sourceCode, sourceId, missingPolls = 0] = entry as unknown[];
+        if (!Array.isArray(entry) || entry.length < 4 || entry.length > 6) throw new Error('invalid');
+        const [workspaceId, occurredAt, sourceCode, sourceId, missingPolls = 0, cursorWorkspaceId] = entry as unknown[];
         const source = sourceCode === 0 ? 'event' : sourceCode === 1 ? 'comment' : undefined;
         if (
           typeof workspaceId !== 'string'
@@ -270,9 +270,10 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
           || !Number.isSafeInteger(missingPolls)
           || (missingPolls as number) < 0
           || (missingPolls as number) > MISSING_WORKSPACE_GRACE_POLLS
+          || (cursorWorkspaceId !== undefined && typeof cursorWorkspaceId !== 'string')
         ) throw new Error('invalid');
         positions.set(workspaceId, {
-          workspaceId,
+          workspaceId: (cursorWorkspaceId as string | undefined) ?? workspaceId,
           occurredAt,
           source,
           sourceId: sourceId as number,
@@ -305,7 +306,9 @@ function cursorForPositions(positions: Map<string, CursorPosition>): string {
       cursor.occurredAt,
       cursor.source === 'event' ? 0 : 1,
       cursor.sourceId,
-      ...(cursor.missingPolls ? [cursor.missingPolls] : []),
+      ...(cursor.workspaceId !== workspaceId
+        ? [cursor.missingPolls ?? 0, cursor.workspaceId]
+        : cursor.missingPolls ? [cursor.missingPolls] : []),
     ]),
   })).toString('base64url');
   if (cursor.length > MAX_CURSOR_CHARS) {
@@ -387,7 +390,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   async getSnapshot(request: RuntimeSnapshotRequest = {}): Promise<RuntimeSnapshot> {
     throwIfAborted(request.signal);
     const activityLimit = normalizeLimit(request.activityLimit);
-    const inspection = await this.inspectSources(request.signal);
+    const inspection = await this.inspectSources(request.signal, request.workspaceId);
     throwIfAborted(request.signal);
     const inspected = inspection.sources.filter((source) => (
       request.workspaceId === undefined || source.workspaceId === request.workspaceId
@@ -478,18 +481,18 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     throwIfAborted(request.signal);
     const limit = normalizeLimit(request.limit);
     const cursorState = parseRequestCursor(request.cursor);
-    const selectedSources = (await this.inspectSources(request.signal)).sources.filter((source) => (
-      request.workspaceId === undefined || source.workspaceId === request.workspaceId
-    ));
+    const selectedSources = (await this.inspectSources(request.signal, request.workspaceId)).sources;
     throwIfAborted(request.signal);
     const inspected = selectedSources.filter((source) => source.status === 'compatible');
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
     const sourceLatest = new Map<string, CursorValue>();
+    let successfulReads = 0;
     for (const source of inspected) {
       throwIfAborted(request.signal);
       const after = cursorState.positions.get(source.workspaceId) ?? cursorState.legacy;
       try {
         const events = this.readEvents(source, after, limit + 1);
+        successfulReads += 1;
         for (const event of events) {
           const decoded = parseCursor(event.cursor);
           if (decoded) entries.push({ event, cursor: decoded });
@@ -500,6 +503,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       } catch {
         // Preserve healthy workspace activity across transient or corrupt sibling sources.
       }
+    }
+    if (inspected.length > 0 && successfulReads === 0) {
+      throw new Error('Every selected Hermes event source failed');
     }
     entries.sort((a, b) => eventOrder(a.cursor, b.cursor));
     const filtered = entries.filter((entry) => {
@@ -571,6 +577,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         throwIfAborted(signal);
         discoveredPaths.add(resolvedPath);
         sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: resolvedPath });
+      } else if (this.kanbanDbPath) {
+        discoveryMessage = 'The explicitly configured Hermes Kanban database does not exist';
       }
     } catch (error) {
       throwIfAborted(signal);
@@ -631,10 +639,13 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private async inspectSources(signal?: AbortSignal): Promise<SourceInspection> {
+  private async inspectSources(signal?: AbortSignal, workspaceId?: string): Promise<SourceInspection> {
     const discovery = await this.discoverSources(signal);
     const sources: InspectedSource[] = [];
-    for (const source of discovery.sources) {
+    const selectedSources = workspaceId === undefined
+      ? discovery.sources
+      : discovery.sources.filter((source) => source.workspaceId === workspaceId);
+    for (const source of selectedSources) {
       throwIfAborted(signal);
       try {
         const db = this.open(source.path);

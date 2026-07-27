@@ -364,8 +364,13 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
-    if (!limiter.take('ticket:runtime-stream:candidate').allowed) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    const checkedTicketStatus = deps.ticketStore.check(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
+    if (checkedTicketStatus === 'reused') return c.body(null, 204);
+    if (checkedTicketStatus === 'invalid') {
+      if (!limiter.take('ticket:runtime-stream:invalid').allowed) {
+        throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+      }
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
     const adapter = adapterOr404(deps.registry, providerId);
     const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));

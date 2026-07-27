@@ -173,6 +173,37 @@ export class SseConnectionTicketStore {
     return 'valid';
   }
 
+  check(ticket: string, operatorToken: string, scope?: string | undefined): SseTicketStatus {
+    const now = Date.now();
+    if (this.db) {
+      const entry = this.db.prepare(`
+        SELECT token_digest, scope, state, expires_at, consumed_until
+        FROM sse_connection_tickets
+        WHERE ticket = ?
+      `).get(ticket) as PersistedTicketRow | undefined;
+      if (!entry) return 'invalid';
+      if (entry.state === 'consumed') {
+        return entry.consumed_until !== null && now <= entry.consumed_until ? 'reused' : 'invalid';
+      }
+      return now <= entry.expires_at
+        && entry.scope === (scope ?? null)
+        && constantTimeTokenEqual(digestToken(operatorToken), entry.token_digest)
+        ? 'valid'
+        : 'invalid';
+    }
+
+    const entry = this.tickets.get(ticket);
+    if (entry) {
+      return now <= entry.expiresAt
+        && entry.scope === scope
+        && constantTimeTokenEqual(digestToken(operatorToken), entry.tokenDigest)
+        ? 'valid'
+        : 'invalid';
+    }
+    const consumedExpiry = this.consumedTickets.get(ticket);
+    return consumedExpiry !== undefined && now <= consumedExpiry ? 'reused' : 'invalid';
+  }
+
   validate(ticket: string, operatorToken: string, scope?: string | undefined): boolean {
     return this.consume(ticket, operatorToken, scope) === 'valid';
   }

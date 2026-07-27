@@ -333,6 +333,35 @@ describe('smart-swarm runtime routes', () => {
     expect(second.status).toBe(429);
   });
 
+  it('does not let invalid ticket traffic exhaust valid stream admission', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 1, windowMs: 60_000 },
+    });
+    const invalid = await app.request('/v1/smart-swarm/providers/hermes/events/invalid-connection', {
+      headers: { cookie: 'frankenbeast_runtime_sse_ticket=invalid-ticket' },
+    });
+    expect(invalid.status).toBe(401);
+
+    const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+    const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
+    const { connectionId } = await ticketResponse.json() as { connectionId: string };
+    const valid = await app.request(`/v1/smart-swarm/providers/hermes/events/${connectionId}`, {
+      headers: { cookie },
+    });
+
+    expect(valid.status).toBe(200);
+    await valid.body!.cancel();
+  });
+
   it('rate limits authenticated requests by the verified operator identity', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
