@@ -20,5 +20,6 @@
 - [x] Remediate third-round Codex findings with RED→GREEN tests for remount-safe uncertain-action idempotency and archived-task cancellation guards.
 - [x] Remediate fourth-round Codex findings with snapshot-confirmed intent retirement, explicit Hermes command registry wiring, and isolated manual backend state.
 - [x] Remediate fifth-round Codex findings by retaining applied-action locks through snapshot confirmation, removing the Vite-prefixed secret alias, and isolating the E2E registry to Hermes.
+- [x] Remediate sixth-round Codex findings with typed failed outcomes, remount-safe in-flight locks, and action-specific uncertain-key postconditions.
 - [ ] Run real `@codex review` to exact-head clean, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Record machine-readable root-blackboard and card handoff.

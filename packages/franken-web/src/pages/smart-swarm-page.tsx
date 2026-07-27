@@ -23,7 +23,8 @@ interface PendingActionIntent {
   idempotencyKey: string;
   providerId: string;
   taskId: string;
-  initialTaskState: RuntimeTask['state'];
+  action: RuntimeAction['type'];
+  inFlight: boolean;
   awaitingConfirmation: boolean;
 }
 
@@ -43,6 +44,27 @@ function errorMessage(error: unknown): string {
 
 function capabilityReason(capability: RuntimeCapability): string | null {
   return capability.status === 'unsupported' ? capability.reason : null;
+}
+
+function actionPostconditionConfirmed(
+  intent: PendingActionIntent,
+  task: RuntimeTask,
+  blockers: Array<{ taskId: string }> | null,
+): boolean {
+  switch (intent.action) {
+    case 'blocker.resolve':
+      return blockers !== null && !blockers.some((blocker) => blocker.taskId === intent.taskId);
+    case 'task.cancel':
+      return task.state === 'cancelled';
+    case 'policy.apply':
+      return task.state === 'ready';
+    case 'task.pause':
+      return task.state === 'queued';
+    case 'task.resume':
+      return task.state === 'ready' || task.state === 'running';
+    default:
+      return false;
+  }
 }
 
 function taskActivityRank(state: RuntimeTask['state']): number {
@@ -223,6 +245,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     ? [...(available(snapshot.blockers) ?? [])]
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.id.localeCompare(right.id))
     : [];
+  const confirmedBlockers = snapshot?.blockers.status === 'available' ? blockers : null;
   const approvals = snapshot
     ? [...(available(snapshot.approvals) ?? [])]
       .sort((left, right) => {
@@ -233,16 +256,24 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       })
     : [];
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const selectedTaskActionPending = selectedTask
+    ? [...actionIdempotencyKeys.current.values()].some((intent) => (
+        intent.providerId === providerId
+        && intent.taskId === selectedTask.id
+        && (intent.inFlight || intent.awaitingConfirmation)
+        && !actionPostconditionConfirmed(intent, selectedTask, confirmedBlockers)
+      ))
+    : false;
 
   useEffect(() => {
     for (const [key, intent] of actionIdempotencyKeys.current) {
       if (intent.providerId !== providerId) continue;
       const currentTask = tasks.find((task) => task.id === intent.taskId);
-      if (currentTask && currentTask.state !== intent.initialTaskState) {
+      if (currentTask && actionPostconditionConfirmed(intent, currentTask, confirmedBlockers)) {
         actionIdempotencyKeys.current.delete(key);
       }
     }
-  }, [providerId, tasks]);
+  }, [confirmedBlockers, providerId, tasks]);
 
   const taskNames = useMemo(() => new Map(tasks.map((task) => [task.id, task.title])), [tasks]);
   const newestUnfinishedRunByTask = useMemo(() => {
@@ -656,6 +687,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       {selectedTask && provider ? (
         <TaskDetail
           actionIdempotencyKeys={actionIdempotencyKeys.current}
+          actionPendingFromStore={selectedTaskActionPending}
           client={client}
           onActionApplied={() => setRefreshNonce((current) => current + 1)}
           onClose={() => setSelectedTaskId(null)}
@@ -672,26 +704,23 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   );
 }
 
-function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempotencyKeys, onActionApplied, onClose }: {
+function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempotencyKeys, actionPendingFromStore, onActionApplied, onClose }: {
   task: RuntimeTask;
   provider: RuntimeProvider;
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
   client: SmartSwarmApiClient;
   returnFocus: HTMLButtonElement | null;
   actionIdempotencyKeys: Map<string, PendingActionIntent>;
+  actionPendingFromStore: boolean;
   onActionApplied(): void;
   onClose(): void;
 }) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
-  const previousTaskState = useRef(task.state);
-  const actionIntentPrefix = `${provider.id}:${task.id}:`;
-  const [actionPending, setActionPending] = useState(() => [...actionIdempotencyKeys.entries()]
-    .some(([key, intent]) => key.startsWith(actionIntentPrefix) && intent.awaitingConfirmation));
+  const [actionPending, setActionPending] = useState(actionPendingFromStore);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   useEffect(() => {
-    if (previousTaskState.current !== task.state) setActionPending(false);
-    previousTaskState.current = task.state;
-  }, [task.state]);
+    setActionPending(actionPendingFromStore);
+  }, [actionPendingFromStore]);
   useEffect(() => {
     closeButton.current?.focus();
     return () => {
@@ -734,13 +763,16 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
       const actionIntentKey = `${provider.id}:${task.id}:${action}`;
       const pendingIntent = actionIdempotencyKeys.get(actionIntentKey);
       const idempotencyKey = pendingIntent?.idempotencyKey ?? `${action}:${crypto.randomUUID()}`;
-      actionIdempotencyKeys.set(actionIntentKey, pendingIntent ?? {
+      const actionIntent = pendingIntent ?? {
         idempotencyKey,
         providerId: provider.id,
         taskId: task.id,
-        initialTaskState: task.state,
+        action,
+        inFlight: true,
         awaitingConfirmation: false,
-      });
+      };
+      actionIntent.inFlight = true;
+      actionIdempotencyKeys.set(actionIntentKey, actionIntent);
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
         idempotencyKey,
@@ -755,6 +787,9 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
       } else if (result.status === 'rejected') {
         actionIdempotencyKeys.delete(actionIntentKey);
         setActionStatus(`rejected: ${result.reason}`);
+      } else if (result.status === 'failed') {
+        actionIdempotencyKeys.delete(actionIntentKey);
+        setActionStatus(`failed: ${result.reason}`);
       } else {
         actionIdempotencyKeys.delete(actionIntentKey);
         setActionStatus(`unsupported: ${result.reason}`);
@@ -762,6 +797,8 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
     } catch (error) {
       setActionStatus(errorMessage(error));
     } finally {
+      const pendingIntent = actionIdempotencyKeys.get(`${provider.id}:${task.id}:${action}`);
+      if (pendingIntent) pendingIntent.inFlight = false;
       if (!awaitingConfirmation) setActionPending(false);
     }
   }

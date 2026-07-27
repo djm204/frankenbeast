@@ -178,6 +178,32 @@ describe('SmartSwarmPage', () => {
     await act(async () => finishAction?.());
   });
 
+  it('keeps task actions locked when an in-flight request dialog is reopened', async () => {
+    let finishAction: (() => void) | undefined;
+    const executeAction = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      finishAction = () => resolve({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    }));
+    render(<SmartSwarmPage client={createClient({ executeAction })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+
+    expect(screen.getByRole('button', { name: 'Resolve blocker' })).toHaveProperty('disabled', true);
+    await act(async () => finishAction?.());
+  });
+
   it('resolves a supported blocker through the runtime API and refreshes the live postcondition', async () => {
     const executeAction = vi.fn().mockResolvedValue({
       status: 'applied',
@@ -248,6 +274,60 @@ describe('SmartSwarmPage', () => {
     const retryKey = executeAction.mock.calls[1]?.[1].idempotencyKey;
     expect(retryKey).toBe(firstKey);
   });
+
+  it('retains an uncertain action key across unrelated task state changes', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    let currentSnapshot = snapshot;
+    const fetchSnapshot = vi.fn().mockImplementation(async () => currentSnapshot);
+    const executeAction = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network response lost'))
+      .mockResolvedValue({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await screen.findByText('network response lost');
+    const uncertainKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent || snapshot.tasks.status !== 'available') throw new Error('Expected runtime fixtures');
+    currentSnapshot = {
+      ...snapshot,
+      tasks: {
+        status: 'available',
+        data: snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'running' as const } : task),
+      },
+    };
+    act(() => handlers.event({ ...baseEvent, id: 'unrelated-state', cursor: 'unrelated-state' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+
+    currentSnapshot = snapshot;
+    act(() => handlers.event({ ...baseEvent, id: 'blocked-again', cursor: 'blocked-again' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(4), { timeout: 6_000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(2));
+
+    expect(executeAction.mock.calls[1]?.[1].idempotencyKey).toBe(uncertainKey);
+  }, 10_000);
 
   it('retires an uncertain action key after refreshed state confirms the postcondition', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
@@ -371,6 +451,28 @@ describe('SmartSwarmPage', () => {
         reason: 'Promoted from the authenticated smart-swarm dashboard',
       },
     }));
+  });
+
+  it('reports a typed failed action as failed rather than unsupported', async () => {
+    const executeAction = vi.fn().mockResolvedValue({
+      status: 'failed',
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      reason: 'Selected Hermes workspace is unavailable',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.resolve',
+        targetId: 'task-live',
+        outcome: 'failed',
+      },
+    });
+    render(<SmartSwarmPage client={createClient({ executeAction })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+
+    expect(await screen.findByText('failed: Selected Hermes workspace is unavailable')).toBeDefined();
+    expect(screen.queryByText(/unsupported: Selected Hermes workspace/)).toBeNull();
   });
 
   it.each([
