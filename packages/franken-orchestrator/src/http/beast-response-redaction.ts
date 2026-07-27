@@ -14,8 +14,8 @@ function isAbsoluteHostPath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\');
 }
 
-const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
-const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
+const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
+const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
 const QUOTED_HOST_PATH_RES = [
   /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,

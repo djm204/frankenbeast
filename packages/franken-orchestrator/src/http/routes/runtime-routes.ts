@@ -131,6 +131,12 @@ function runtimeCursorMessage(error: Error): string {
   return typeof redacted === 'string' ? redacted : 'Invalid runtime event cursor';
 }
 
+function runtimeStreamError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const redacted = redactAbsoluteHostPathValues(redactSensitiveText(message));
+  return new Error(typeof redacted === 'string' ? redacted : 'Runtime event stream failed');
+}
+
 function refreshConsumedTicket(ticketStore: SseConnectionTicketStore, ticket: string): void {
   try {
     ticketStore.refreshConsumed(ticket);
@@ -426,12 +432,16 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         }, Math.min(60_000, Math.max(1, Math.floor(deps.ticketStore.consumedRetentionWindowMs / 2))));
         retentionRefresh.unref?.();
         try {
-          await runRuntimeEventStream(adapter, stream, {
-            initialCursor,
-            workspaceId,
-            pollIntervalMs,
-            heartbeatIntervalMs,
-          });
+          try {
+            await runRuntimeEventStream(adapter, stream, {
+              initialCursor,
+              workspaceId,
+              pollIntervalMs,
+              heartbeatIntervalMs,
+            });
+          } catch (error) {
+            throw runtimeStreamError(error);
+          }
         } finally {
           clearInterval(retentionRefresh);
           refreshConsumedTicket(deps.ticketStore, ticket);

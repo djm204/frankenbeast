@@ -76,8 +76,8 @@ const MAX_ACTIVITY_LIMIT = 500;
 const MAX_CURSOR_CHARS = 12 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
-const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
-const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
+const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
+const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
 const QUOTED_POSIX_PATH_RES = [
   /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
@@ -826,7 +826,6 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
                     SELECT 1
                     FROM task_runs newer
                     WHERE newer.task_id = run.task_id
-                      AND ${activeRunState('newer')} IN ('scheduled', 'pending', 'ready', 'running', 'blocked')
                       AND (
                         newer.started_at > run.started_at
                         OR (newer.started_at = run.started_at AND newer.id > run.id)
@@ -991,14 +990,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         },
       };
     });
-    const latestPointerlessActiveRunByTask = new Map<string, string>();
+    const latestPointerlessRunByTask = new Map<string, string>();
     for (const run of runRows) {
       const rawTaskId = String(run['task_id']);
-      if (
-        pointerlessActiveTaskIds.has(rawTaskId)
-        && ['queued', 'running', 'blocked'].includes(mapRunState(run['status'], run['outcome']))
-      ) {
-        latestPointerlessActiveRunByTask.set(rawTaskId, String(run['id']));
+      if (pointerlessActiveTaskIds.has(rawTaskId)) {
+        latestPointerlessRunByTask.set(rawTaskId, String(run['id']));
       }
     }
     const agentInputs = new Map<string, { states: string[]; timestamps: string[] }>();
@@ -1012,7 +1008,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
     for (const run of runRows) {
       const runState = mapRunState(run['status'], run['outcome']);
-      const activeWithoutPointer = latestPointerlessActiveRunByTask.get(String(run['task_id'])) === String(run['id']);
+      const activeWithoutPointer = latestPointerlessRunByTask.get(String(run['task_id'])) === String(run['id'])
+        && ['queued', 'running', 'blocked'].includes(runState);
       if (!activeRunIds.has(String(run['id'])) && !activeWithoutPointer) continue;
       if (typeof run['profile'] !== 'string' || !run['profile']) continue;
       const current = agentInputs.get(run['profile']) ?? { states: [], timestamps: [] };

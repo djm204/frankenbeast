@@ -850,6 +850,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts host paths after shell redirection delimiters', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'command failed >/home/alice/private/output',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'command failed >[REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
   it('redacts route-shaped host paths after storage-key delimiters', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -1286,6 +1307,28 @@ describe('HermesRuntimeAdapter', () => {
       expect.objectContaining({ id: 'hermes:global:new-worker', state: 'running' }),
     ]));
     expect(snapshot.agents.data.some((agent) => agent.id === 'hermes:global:worker-a')).toBe(false);
+  });
+
+  it('does not retain an older active pointerless run after a newer terminal run', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET assignee = NULL, current_run_id = NULL WHERE id = ?').run('t_parent');
+    db.prepare('UPDATE task_runs SET profile = ?, status = ?, outcome = ? WHERE id = ?')
+      .run('worker-old', 'running', 'running', 1);
+    db.prepare(`INSERT INTO task_runs
+      (id,task_id,profile,status,started_at,ended_at,outcome,metadata,last_heartbeat_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(
+      2, 't_parent', 'worker-new', 'done', 1_785_081_650, 1_785_081_660,
+      'completed', '{}', 1_785_081_660,
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.agents.status !== 'available') throw new Error('Expected agents');
+
+    expect(snapshot.agents.data.map((agent) => agent.id)).not.toContain('hermes:global:worker-old');
   });
 
   it('derives agent state from the normalized run outcome', async () => {

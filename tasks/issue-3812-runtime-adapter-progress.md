@@ -121,7 +121,13 @@
 
 - [x] Push `188ee726d8560648dafe07b562143e0f19ce66c5`; reply to/resolve all six round-29 threads; verify 4/4 exact-head CI checks green; trigger Codex at `2026-07-27T08:41:10Z`.
 - [x] Reproduce and remediate stopped-run cancellation normalization, angle-bracket host-path redaction in shared/direct DTO paths, and dot-segment scoped workspace traversal.
-- [ ] Verify, commit/push, resolve all three round-30 threads, and obtain a fresh exact-head clean review with zero unresolved paginated Codex threads; do not merge.
+- [x] Verify, commit/push round 30 as `8b0c4707f263de11d5edb2f3afb2e2e690b7fd9e`, resolve all three threads, and trigger a fresh exact-head review.
+
+## Exact-head round 31 follow-up
+
+- [x] Inspect the three current-head Codex findings on `8b0c4707f263de11d5edb2f3afb2e2e690b7fd9e` and reproduce each behavior with a failing regression test.
+- [x] Exclude pointerless active runs superseded by newer terminal runs, redact host paths after shell redirection delimiters, and sanitize asynchronous SSE adapter failures before Hono logs them.
+- [ ] Run focused/package/root verification, commit/push, reply to and resolve all three threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
 ## Verification notes
 

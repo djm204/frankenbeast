@@ -122,6 +122,13 @@ describe('Beast response redaction', () => {
       .toBe('failed at <[REDACTED_HOST_PATH]>');
   });
 
+  it('redacts host paths after shell redirection delimiters', () => {
+    expect(redactAbsoluteHostPathValues('command failed >/home/alice/private/output'))
+      .toBe('command failed >[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('error)>C:\\Users\\alice\\secret'))
+      .toBe('error)>[REDACTED_HOST_PATH]');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',

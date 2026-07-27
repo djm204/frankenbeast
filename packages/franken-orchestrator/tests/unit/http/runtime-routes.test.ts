@@ -901,7 +901,7 @@ describe('smart-swarm runtime routes', () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
     const adapter = runtimeAdapter();
     vi.mocked(adapter.getEvents)
-      .mockRejectedValueOnce(new Error('invalid adapter event page'))
+      .mockRejectedValueOnce(new Error('invalid token=secret-value at /home/alice/private/prompt.txt'))
       .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
     const app = createRuntimeRoutes({
       registry: new RuntimeAdapterRegistry([adapter]),
@@ -936,6 +936,11 @@ describe('smart-swarm runtime routes', () => {
     expect(retry.status).toBe(200);
     await retry.body!.cancel();
     expect(errorLog).toHaveBeenCalled();
+    const logged = errorLog.mock.calls.flat().map(String).join('\n');
+    expect(logged).not.toContain('secret-value');
+    expect(logged).not.toContain('/home/alice/private/prompt.txt');
+    expect(logged).toContain('<redacted>');
+    expect(logged).toContain('[REDACTED_HOST_PATH]');
     errorLog.mockRestore();
   });
 
