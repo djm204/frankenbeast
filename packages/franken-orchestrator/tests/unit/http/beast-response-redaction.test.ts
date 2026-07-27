@@ -108,6 +108,8 @@ describe('Beast response redaction', () => {
       .toBe('open "[REDACTED_HOST_PATH]"');
     expect(redactAbsoluteHostPathValues("open 'C:\\Users\\Alice Smith\\secret.txt'"))
       .toBe("open '[REDACTED_HOST_PATH]'");
+    expect(redactAbsoluteHostPathValues('open "/Users/alice/John\'s Project/secret.txt"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
   });
 
   it('recursively removes host execution fields from SSE event data', () => {

@@ -16,7 +16,11 @@ function isAbsoluteHostPath(value: string): boolean {
 
 const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
 const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
-const QUOTED_HOST_PATH_RE = /([`'"])(\/[^`'"]+|[A-Za-z]:[\\/][^`'"]+|\\\\[^`'"]+)(?=\1)/gu;
+const QUOTED_HOST_PATH_RES = [
+  /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
+  /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
+  /(")(\/[^"]+|[A-Za-z]:[\\/][^"]+|\\\\[^"]+)(?=")/gu,
+];
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const API_ROUTE_KEYS = new Set(['route', 'endpoint', 'requestPath', 'pathname']);
@@ -46,7 +50,7 @@ function hasApplicationRouteContext(
 }
 
 function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean): string {
-  return value.replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]').replace(
+  const redacted = value.replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]').replace(
     EMBEDDED_HOST_PATH_RE,
     (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
   ).replace(
@@ -56,14 +60,15 @@ function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean):
         ? `${prefix}${path}`
         : `${prefix}[REDACTED_HOST_PATH]`
     ),
-  ).replace(
-    QUOTED_HOST_PATH_RE,
+  );
+  return QUOTED_HOST_PATH_RES.reduce((current, pattern) => current.replace(
+    pattern,
     (_match, quote: string, path: string, offset: number, source: string) => (
       hasApplicationRouteContext(source, path, offset, quote, allowApiRoute)
         ? `${quote}${path}`
         : `${quote}[REDACTED_HOST_PATH]`
     ),
-  );
+  ), redacted);
 }
 
 function redactAbsoluteHostPathValue(value: unknown, key?: string): unknown {

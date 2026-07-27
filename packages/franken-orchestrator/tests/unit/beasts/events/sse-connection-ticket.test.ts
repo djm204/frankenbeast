@@ -38,6 +38,24 @@ describe('SseConnectionTicketStore', () => {
     expect(store.consume(ticket, 'operator-token-123')).toBe('reused');
   });
 
+  it('extends consumed-ticket reuse retention while a stream remains active', () => {
+    vi.useFakeTimers();
+    try {
+      store.destroy();
+      store = new SseConnectionTicketStore({ consumedRetentionMs: 600_000 });
+      const ticket = store.issue('operator-token-123');
+      expect(store.consume(ticket, 'operator-token-123')).toBe('valid');
+
+      vi.advanceTimersByTime(500_000);
+      expect(store.refreshConsumed(ticket)).toBe(true);
+      vi.advanceTimersByTime(500_000);
+
+      expect(store.check(ticket, 'operator-token-123')).toBe('reused');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps an issued ticket valid after the issuing process store is recreated', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'sse-ticket-store-'));
     const databasePath = join(dir, 'beast.db');

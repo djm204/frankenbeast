@@ -738,7 +738,7 @@ describe('HermesRuntimeAdapter', () => {
     createCurrentKanban(dbPath);
     const db = new Database(dbPath);
     db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
-      `failed '/secret' "C:\\private\\file" '\\\\server\\share' "/Users/Alice Smith/secret"`,
+      `failed '/secret' "C:\\private\\file" '\\\\server\\share' "/Users/Alice Smith/John's secret"`,
       't_parent',
     );
     db.close();
@@ -1204,6 +1204,28 @@ describe('HermesRuntimeAdapter', () => {
     expect(snapshot.agents).toEqual(expect.objectContaining({
       data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:worker-a', state: 'blocked' })]),
     }));
+  });
+
+  it('bounds historical snapshot runs while retaining the current run', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    for (let id = 2; id <= 8; id += 1) {
+      db.prepare(`INSERT INTO task_runs
+        (id,task_id,profile,status,started_at,summary,metadata,last_heartbeat_at)
+        VALUES (?,?,?,?,?,?,?,?)`).run(
+        id, 't_child', `historical-${id}`, 'done', 1_785_081_600 + id, null, '{}', 1_785_081_600 + id,
+      );
+    }
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot({ activityLimit: 2 });
+    if (snapshot.runs.status !== 'available') throw new Error('Expected runs');
+
+    expect(snapshot.runs.data).toHaveLength(2);
+    expect(snapshot.runs.data.map((run) => run.id)).toContain('hermes:global:run:1');
+    expect(snapshot.runs.data.map((run) => run.id)).toContain('hermes:global:run:8');
   });
 
   it('excludes a stale running profile when a nonterminal task has a different current run', async () => {

@@ -78,7 +78,11 @@ const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
-const QUOTED_POSIX_PATH_RE = /([`'"])(\/[^`'"]+|[A-Za-z]:[\\/][^`'"]+|\\\\[^`'"]+)(?=\1)/gu;
+const QUOTED_POSIX_PATH_RES = [
+  /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
+  /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
+  /(")(\/[^"]+|[A-Za-z]:[\\/][^"]+|\\\\[^"]+)(?=")/gu,
+];
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const SLASH_COMMANDS = new Set([
@@ -146,15 +150,17 @@ function hasApiRouteContext(value: string, path: string, offset: number, prefix:
 
 function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
-  const redacted = redactSensitiveText(value)
+  let redacted = redactSensitiveText(value)
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
     .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => (
       hasApiRouteContext(source, path, offset, prefix) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
-    ))
-    .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string, path: string, offset: number, source: string) => (
+    ));
+  for (const pattern of QUOTED_POSIX_PATH_RES) {
+    redacted = redacted.replace(pattern, (_match, quote: string, path: string, offset: number, source: string) => (
       hasApiRouteContext(source, path, offset, quote) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
     ));
+  }
   return redacted.length <= MAX_SUMMARY_CHARS ? redacted : `${redacted.slice(0, MAX_SUMMARY_CHARS - 1)}…`;
 }
 
@@ -748,7 +754,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         const linkRows = this.hasColumns(db, 'task_links', ['parent_id', 'child_id'])
           ? db.prepare('SELECT parent_id, child_id FROM task_links ORDER BY parent_id, child_id').all() as RuntimeRow[]
           : [];
-        const runRows = db.prepare('SELECT * FROM task_runs ORDER BY started_at, id').all() as RuntimeRow[];
+        const currentRunClause = this.hasColumns(db, 'tasks', ['current_run_id'])
+          ? 'OR id IN (SELECT current_run_id FROM tasks WHERE current_run_id IS NOT NULL)'
+          : '';
+        const runRows = db.prepare(`
+          SELECT * FROM task_runs
+          WHERE id IN (
+            SELECT id FROM task_runs ORDER BY started_at DESC, id DESC LIMIT ?
+          ) ${currentRunClause}
+          ORDER BY started_at, id
+        `).all(activityLimit) as RuntimeRow[];
         const eventRows = db.prepare('SELECT * FROM task_events ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[];
         const blockerEventRows = db.prepare(`
           SELECT event.*

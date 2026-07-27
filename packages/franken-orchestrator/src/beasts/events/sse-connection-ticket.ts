@@ -208,6 +208,21 @@ export class SseConnectionTicketStore {
     return consumedExpiry !== undefined && now <= consumedExpiry ? 'reused' : 'invalid';
   }
 
+  refreshConsumed(ticket: string): boolean {
+    const consumedUntil = Date.now() + this.consumedRetentionMs;
+    if (this.db) {
+      const result = this.db.prepare(`
+        UPDATE sse_connection_tickets
+        SET consumed_until = ?
+        WHERE ticket = ? AND state = 'consumed'
+      `).run(consumedUntil, ticket);
+      return result.changes === 1;
+    }
+    if (!this.consumedTickets.has(ticket)) return false;
+    this.consumedTickets.set(ticket, consumedUntil);
+    return true;
+  }
+
   validate(ticket: string, operatorToken: string, scope?: string | undefined): boolean {
     return this.consume(ticket, operatorToken, scope) === 'valid';
   }

@@ -91,6 +91,15 @@
 - [x] Commit and push the PR #3821 branch; reply to and resolve all five current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
+## Exact-head round 27 follow-up
+
+- [x] Inspect the four current-head Codex findings on `3b1faa663b6b07528efdf48e44cbb023f8dc71d8` and reproduce each behavior with a failing regression test.
+- [x] Make quote-aware path redaction tolerate apostrophes within double-quoted paths in both shared response redaction and direct adapter normalization.
+- [x] Rate-limit valid-ticket stream attempts before cursor validation, refresh consumed-ticket tombstones throughout active streams, and bound snapshot run reads while retaining the current run.
+- [x] Verify all 137 affected tests plus package typecheck, lint (pre-existing warnings only), and build.
+- [ ] Commit/push the fixes; reply to and resolve all four Codex threads; trigger the next exact-head review within the authorized tier-50 policy.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -119,3 +128,4 @@
 - Exact-head round 24 reproduced direct-adapter leakage of `/secret` RED and passes the Hermes adapter suite 58/58 GREEN; package typecheck, lint (zero errors), and build pass. Review invocation 24/24 is consumed, so a fresh review of the remediation head requires an explicit tier extension.
 - Exact-head round 25 reproduced all three findings RED and passes 115/115 focused adapter, route, and ticket-store tests GREEN. Package typecheck, lint (zero errors), and build pass.
 - Exact-head round 26 reproduced all five findings RED and passes 134/134 focused adapter, route, redaction, and ticket-store tests GREEN. Package typecheck, lint (zero errors), and build pass.
+- Exact-head round 27 reproduced all four findings RED and passes 137/137 focused adapter, route, redaction, and ticket-store tests GREEN. Package typecheck, lint (zero errors; pre-existing warnings only), and build pass.

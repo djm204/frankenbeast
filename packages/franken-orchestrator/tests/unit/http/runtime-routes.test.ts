@@ -888,6 +888,27 @@ describe('smart-swarm runtime routes', () => {
     await retry.body!.cancel();
   });
 
+  it('rate limits malformed cursors presented with a valid stream ticket', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 1, windowMs: 60_000 },
+    });
+    const ticket = ticketStore.issue('operator-secret', 'hermes:malformed-rate-limit');
+    const request = () => app.request(
+      '/v1/smart-swarm/providers/hermes/events/malformed-rate-limit?cursor=malformed',
+      { headers: { cookie: `frankenbeast_runtime_sse_ticket=${ticket}` } },
+    );
+
+    expect((await request()).status).toBe(422);
+    expect((await request()).status).toBe(429);
+    expect(ticketStore.check(ticket, 'operator-secret', 'hermes:malformed-rate-limit')).toBe('valid');
+  });
+
   it('uses one-shot scoped cookies for cursor-replay SSE and emits normalized events', async () => {
     const { app, adapter } = createRoutes();
     vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({

@@ -392,15 +392,15 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
+    if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
+      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
+    }
     const adapter = adapterOr404(deps.registry, providerId);
     const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
     validateAdapterCursor(adapter, initialCursor);
     const workspaceId = workspaceIdValue(c.req.query('workspaceId'));
     if (activeStreams >= maxActiveStreams) {
       throw new HttpError(429, 'RUNTIME_STREAM_LIMIT', 'Concurrent runtime stream limit exceeded');
-    }
-    if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
-      throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
     const ticketStatus = deps.ticketStore.consume(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
     if (ticketStatus === 'reused') return c.body(null, 204);
@@ -414,6 +414,10 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
 
     try {
       return streamSSE(c, async (stream) => {
+        const retentionRefresh = setInterval(() => {
+          deps.ticketStore.refreshConsumed(ticket);
+        }, Math.min(60_000, Math.max(1, Math.floor(deps.ticketStore.browserRetentionMs / 2))));
+        retentionRefresh.unref?.();
         try {
           await runRuntimeEventStream(adapter, stream, {
             initialCursor,
@@ -422,10 +426,13 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             heartbeatIntervalMs,
           });
         } finally {
+          clearInterval(retentionRefresh);
+          deps.ticketStore.refreshConsumed(ticket);
           activeStreams -= 1;
         }
       });
     } catch (error) {
+      deps.ticketStore.refreshConsumed(ticket);
       activeStreams -= 1;
       throw error;
     }
