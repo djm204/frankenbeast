@@ -207,6 +207,35 @@ describe('OllamaRuntimeAdapter', () => {
     expect(endpoint.paths).toEqual(['/api/version', '/api/tags', '/api/ps']);
   });
 
+  it('keeps cloud-compatible endpoints available when daemon introspection routes are unsupported', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/tags') {
+        return Response.json({ models: [{ model: 'gpt-oss:120b-cloud', size: 0 }] });
+      }
+      return Response.json({ error: 'not found' }, { status: 404 });
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'cloud', baseUrl: 'https://ollama.example' }],
+      egressPolicy: { enabled: false },
+      fetchImpl,
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({
+      state: 'ready',
+      workspaces: {
+        data: [{
+          state: 'available',
+          metadata: {
+            installedModelCount: 1,
+            installedModels: 'gpt-oss:120b-cloud',
+            loadedModelCount: 0,
+          },
+        }],
+      },
+    });
+  });
+
   it('scopes snapshots to the requested normalized endpoint workspace', async () => {
     const endpoint = await ollamaServer();
     const adapter = new OllamaRuntimeAdapter({
@@ -404,6 +433,28 @@ describe('OllamaRuntimeAdapter', () => {
     });
   });
 
+  it('uses the first nonblank model identity field', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/version') return Response.json({ version: '0.11.4' });
+      if (path === '/api/tags') {
+        return Response.json({ models: [{ name: '   ', model: 'qwen3:8b', size: 42 }] });
+      }
+      return Response.json({ models: [] });
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({
+      state: 'ready',
+      workspaces: {
+        data: [{ metadata: { installedModelCount: 1, installedModels: 'qwen3:8b' } }],
+      },
+    });
+  });
+
   it('coalesces concurrent polls and rate-limits repeated endpoint reads', async () => {
     const endpoint = await ollamaServer();
     const adapter = new OllamaRuntimeAdapter({
@@ -521,6 +572,41 @@ describe('OllamaRuntimeAdapter', () => {
     await expect(cancelled).resolves.toMatchObject({ state: 'unavailable' });
     await expect(adapter.getSnapshot()).resolves.toMatchObject({ state: 'ready' });
     expect(fetchImpl).toHaveBeenCalledTimes(6);
+  });
+
+  it('does not restart an aborted shared poll after the final replacement waiter cancels', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls += 1;
+      if (calls <= 3) {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            setTimeout(() => reject(new DOMException('aborted', 'AbortError')), 50);
+          }, { once: true });
+        });
+      }
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/version') return Response.json({ version: '0.11.4' });
+      return Response.json({ models: [] });
+    });
+    const firstController = new AbortController();
+    const replacementController = new AbortController();
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+      minimumPollIntervalMs: 0,
+    });
+
+    const first = adapter.getSnapshot({ signal: firstController.signal });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    firstController.abort();
+    const replacement = adapter.getSnapshot({ signal: replacementController.signal });
+    replacementController.abort();
+
+    await expect(first).resolves.toMatchObject({ state: 'unavailable' });
+    await expect(replacement).resolves.toMatchObject({ state: 'unavailable' });
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it('bounds stalled endpoint requests with a configurable timeout', async () => {

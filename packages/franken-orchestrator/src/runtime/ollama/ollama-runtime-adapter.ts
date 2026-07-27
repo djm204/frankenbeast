@@ -75,9 +75,9 @@ function modelList(value: unknown, includeVram: boolean): OllamaModel[] {
   return (value as { models: unknown[] }).models.flatMap((entry) => {
     if (!entry || typeof entry !== 'object') return [];
     const row = entry as Record<string, unknown>;
-    const name = typeof row['name'] === 'string'
-      ? row['name']
-      : typeof row['model'] === 'string' ? row['model'] : '';
+    const name = typeof row['name'] === 'string' && row['name'].trim().length > 0
+      ? row['name'].trim()
+      : typeof row['model'] === 'string' ? row['model'].trim() : '';
     if (!name) return [];
     const expiresAt = typeof row['expires_at'] === 'string' && !Number.isNaN(Date.parse(row['expires_at']))
       ? new Date(row['expires_at']).toISOString()
@@ -365,6 +365,7 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
     if (this.pollInFlight) {
       if (this.pollController?.signal.aborted) {
         await this.pollInFlight;
+        if (this.pollWaiterCount === 0) return this.cancelledInspections();
         return await this.inspectEndpointsShared();
       }
       return await this.pollInFlight;
@@ -421,19 +422,29 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
         const versionResponse = responses[0]!;
         const tagsResponse = responses[1]!;
         const psResponse = responses[2]!;
-        const failedResponse = responses.find((response) => !response.ok);
+        const versionUnsupported = versionResponse.status === 404 || versionResponse.status === 405;
+        const psUnsupported = psResponse.status === 404 || psResponse.status === 405;
+        const failedResponse = !tagsResponse.ok
+          ? tagsResponse
+          : !versionResponse.ok && !versionUnsupported
+            ? versionResponse
+            : !psResponse.ok && !psUnsupported ? psResponse : undefined;
         if (failedResponse) {
           await Promise.allSettled(responses.map(async (response) => await response.body?.cancel()));
           throw new OllamaEndpointError(`Ollama endpoint returned HTTP ${failedResponse.status}`);
         }
+        await Promise.allSettled([
+          versionUnsupported ? versionResponse.body?.cancel() : undefined,
+          psUnsupported ? psResponse.body?.cancel() : undefined,
+        ]);
         let versionValue: unknown;
         let tagsValue: unknown;
         let psValue: unknown;
         try {
           [versionValue, tagsValue, psValue] = await Promise.all([
-            readBoundedJson(versionResponse, this.maxResponseBytes),
+            versionUnsupported ? undefined : readBoundedJson(versionResponse, this.maxResponseBytes),
             readBoundedJson(tagsResponse, this.maxResponseBytes),
-            readBoundedJson(psResponse, this.maxResponseBytes),
+            psUnsupported ? { models: [] } : readBoundedJson(psResponse, this.maxResponseBytes),
           ]);
         } catch (error) {
           normalizationController.abort();
@@ -447,7 +458,7 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
           : undefined;
         const tagsValid = hasValidModelEntries(tagsValue);
         const psValid = hasValidModelEntries(psValue);
-        if (!version || !tagsValid || !psValid) {
+        if ((!versionUnsupported && !version) || !tagsValid || !psValid) {
           throw new OllamaEndpointError('Ollama endpoint returned an invalid API payload');
         }
         return {

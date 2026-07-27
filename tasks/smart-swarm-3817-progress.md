@@ -9,7 +9,7 @@
 - [x] RED→GREEN: read bounded health, version, installed-model, and loaded-model data from a controlled HTTP server and expose only honest normalized metadata.
 - [x] RED→GREEN: keep task/agent/run/event/blocker/approval sections unsupported when Ollama exposes no canonical upstream concepts; do not synthesize activity.
 - [x] RED→GREEN: enforce bounded timeout, cancellation propagation, response-size limits, request rate limiting, failure isolation, credential-reference resolution, and redacted diagnostics.
-- [x] Run focused adapter/contract/route tests (81/81 passing after the final-base rebase).
+- [x] Run focused adapter/contract/route tests (84/84 passing after the final-base rebase and round-11 remediation).
 - [x] Run package and root tests plus root lint, typecheck, build, `git diff --check`, and self-review; focused tests, lint, typecheck, build, root restore-rehearsal retry, direct secret scan, and diff checks pass. The package suite retains three unrelated environment/order-dependent baseline failures, while root tests exposed a pre-existing 60-second scanner timeout even though the same scanner passes directly in 77.62 seconds.
 - [x] Commit with Conventional Commits using David Mendez <me@davidmendez.dev>.
 - [x] Push `feat/ollama-runtime-adapter-3817` and open PR #3834 with `Closes #3817`.
@@ -43,6 +43,7 @@ The canonical worktree was clean on `feat/ollama-runtime-adapter-3817` at `7b98d
 - Round 5 fixed scheme-less `OLLAMA_HOST` normalization and cached health-check timestamps; three more inherited #3812 findings were routed upstream.
 - Round 6 found missing managed-chat Ollama environment inheritance, uncancelled sibling bodies after JSON normalization failure, and permissive malformed model-entry handling. Regression tests failed for each behavior before implementation; 72/72 focused tests plus root lint, typecheck, and build pass after the fixes. The inherited Hermes workspace-preservation finding was routed to `t_3828faf1`.
 - Rounds 7-8 produced only inherited provider-neutral/Hermes findings, all routed to `t_3828faf1`. Round 9 found one Ollama issue: `.localhost` aliases were inconsistently rejected as remote plaintext endpoints. Its regression test failed before implementation and the 27-test adapter suite passes after the fix; six inherited findings were routed upstream.
+- Round 11 found three Ollama issues. Test-first fixes keep Cloud-compatible endpoints available when `/api/version` and `/api/ps` return unsupported-route responses, select the first nonblank `name`/`model` identity, and prevent a cancelled replacement waiter from restarting an already-aborted shared poll. Each regression test failed for the reported behavior before implementation; the 30-test adapter suite and 84/84 focused runtime/HTTP tests pass after remediation, as do root lint, typecheck, and build.
 - Ollama adapter suite: 24/24 passed after round 5; the focused runtime/HTTP set is 47/47 and root lint, typecheck, and build pass.
 - Every Codex thread through round 5 was replied to and resolved; the next exact-head review requires explicit approval to raise the invocation cap from 5 to 12.
 - Four inherited round-2 findings were posted to root card `t_25558345`, and the three additional inherited #3812 findings were posted directly to canonical upstream card `t_3828faf1`.
