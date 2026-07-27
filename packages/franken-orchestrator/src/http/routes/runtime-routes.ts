@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
-import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
+import {
+  MIN_CONSUMED_RETENTION_MS,
+  type SseConnectionTicketStore,
+} from '../../beasts/events/sse-connection-ticket.js';
 import {
   InMemoryRateLimiter,
   requireBeastRateLimit,
@@ -154,8 +157,8 @@ interface RuntimeEventStreamOptions {
 }
 
 function runtimeSseBody(message: RuntimeSseMessage): ReadableStream<Uint8Array> {
-  if (message.id && /[\r\n]/u.test(message.id)) {
-    throw new Error('Runtime SSE cursor IDs must be single-line values');
+  if (message.id && /[\0\r\n]/u.test(message.id)) {
+    throw new Error('Runtime SSE cursor IDs must be single-line values without NUL');
   }
   const dataLines = message.data.split(/\r\n|\r|\n/u).map((line) => `data: ${line}`).join('\n');
   const payload = [
@@ -360,7 +363,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const ticket = deps.ticketStore.issue(deps.operatorToken, `${providerId}:${connectionId}`);
     setCookie(c, TICKET_COOKIE, ticket, {
       httpOnly: true,
-      maxAge: 30,
+      maxAge: Math.ceil(MIN_CONSUMED_RETENTION_MS / 1_000),
       path: streamPath(providerId, connectionId),
       sameSite: 'Strict',
       secure: isHttpsRequest(c.req.url, c.req.header('x-forwarded-proto')),

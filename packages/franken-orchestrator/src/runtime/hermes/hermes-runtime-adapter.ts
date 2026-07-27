@@ -78,7 +78,7 @@ const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
-const QUOTED_POSIX_PATH_RE = /([`'"])(\/(?:[^/`'"\s]+\/)+[^`'"\s]+)(?=\1)/gu;
+const QUOTED_POSIX_PATH_RE = /([`'"])(\/(?:[^/`'"\s]+\/)*[^/`'"\s]+|[A-Za-z]:[\\/][^`'"\s]+|\\\\[^`'"\s]+)(?=\1)/gu;
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 const SLASH_COMMANDS = new Set([

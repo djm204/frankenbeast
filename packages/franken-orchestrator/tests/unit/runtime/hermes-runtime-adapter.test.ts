@@ -732,6 +732,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts quoted single-component POSIX, Windows, and UNC paths for direct consumers', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      `failed '/secret' "C:\\private\\file" '\\\\server\\share'`,
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: "failed '[REDACTED_HOST_PATH]' \"[REDACTED_HOST_PATH]\" '[REDACTED_HOST_PATH]'",
+      })]),
+    }));
+  });
+
   it('redacts host paths encoded as file URLs in normalized runtime text', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');

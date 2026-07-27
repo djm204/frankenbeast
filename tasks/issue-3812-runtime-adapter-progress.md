@@ -75,6 +75,14 @@
 - [x] Commit and push the PR #3821 branch; reply to and resolve the current-head thread.
 - [ ] Obtain exact-head green CI and fresh Codex clean; authorized review tier 24 is exhausted and requires explicit extension.
 
+## Exact-head round 25 follow-up
+
+- [x] Extend the bounded review tier from 24 to 50 as authorized by the PM handoff and trigger exact-head review on `6d55562fe9896133e6e134e0f6676605e61c5165`.
+- [x] Reproduce and remediate quoted direct-adapter host paths, NUL SSE cursor IDs, and short-lived stream-ticket cookies.
+- [x] Run 115/115 focused adapter, route, and ticket-store tests plus package lint, typecheck, and build gates.
+- [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -101,3 +109,4 @@
 - Exact-head round 22 reproduced all three findings RED and passes 96/96 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,677/4,680 passing.
 - Exact-head round 23 reproduced quoted-path leakage, dynamic-path rate-limit bypass, and blank workspace filter widening RED. The three cases pass GREEN with 42/42 focused HTTP/redaction tests; package/root typecheck, lint (zero errors), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,680/4,683 passing.
 - Exact-head round 24 reproduced direct-adapter leakage of `/secret` RED and passes the Hermes adapter suite 58/58 GREEN; package typecheck, lint (zero errors), and build pass. Review invocation 24/24 is consumed, so a fresh review of the remediation head requires an explicit tier extension.
+- Exact-head round 25 reproduced all three findings RED and passes 115/115 focused adapter, route, and ticket-store tests GREEN. Package typecheck, lint (zero errors), and build pass.

@@ -423,6 +423,17 @@ describe('smart-swarm runtime routes', () => {
     await valid.body!.cancel();
   });
 
+  it('keeps issued stream-ticket cookies through the consumed-ticket retention window', async () => {
+    const { app } = createRoutes();
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+      method: 'POST',
+      headers: authHeaders(),
+    });
+
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=600');
+  });
+
   it('rate limits authenticated requests by the verified operator identity', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
@@ -749,6 +760,24 @@ describe('smart-swarm runtime routes', () => {
       heartbeatIntervalMs: 1_000,
       pollIntervalMs: 1_000,
     })).rejects.toThrow('single-line');
+    expect(stream.pipe).not.toHaveBeenCalled();
+  });
+
+  it('rejects NUL provider cursors before writing an SSE frame', async () => {
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+      events: [],
+      nextCursor: 'cursor-1\0ignored',
+    }));
+    const stream = {
+      pipe: vi.fn().mockRejectedValue(new Error('unexpected stream write')),
+      onAbort: vi.fn(),
+    };
+
+    await expect(runRuntimeEventStream(adapter, stream as never, {
+      heartbeatIntervalMs: 1_000,
+      pollIntervalMs: 1_000,
+    })).rejects.toThrow('NUL');
     expect(stream.pipe).not.toHaveBeenCalled();
   });
 

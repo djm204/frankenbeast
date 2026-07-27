@@ -38,7 +38,7 @@ export type SseTicketStatus = 'valid' | 'invalid' | 'reused';
 const DEFAULT_TICKET_TTL_MS = 30_000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
 const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
-const MIN_CONSUMED_RETENTION_MS = 600_000;
+export const MIN_CONSUMED_RETENTION_MS = 600_000;
 
 function resolvePositiveDurationMs(
   name: string,
