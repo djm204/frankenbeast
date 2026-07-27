@@ -157,6 +157,19 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText(/No demo data has been substituted/)).toBeDefined();
   });
 
+  it('identifies an empty snapshot as workspace-scoped', async () => {
+    const emptyWorkspaceSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      state: 'empty',
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+    };
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot: vi.fn().mockResolvedValue(emptyWorkspaceSnapshot) })} />);
+
+    expect(await screen.findByText('No runtime work in Main board')).toBeDefined();
+    expect(screen.getByText(/selected workspace reported no tasks/)).toBeDefined();
+  });
+
   it('shows degraded runtime evidence without hiding available sections', async () => {
     render(<SmartSwarmPage client={createClient({
       fetchSnapshot: vi.fn().mockResolvedValue({ ...snapshot, state: 'degraded', message: 'Approvals are temporarily unreadable.' }),
@@ -376,7 +389,7 @@ describe('SmartSwarmPage', () => {
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
   });
 
-  it('serializes streamed refreshes while a snapshot request is in flight', async () => {
+  it('serializes and rate-limits streamed topology refreshes', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     let resolveRefresh!: (value: RuntimeSnapshot) => void;
     const pendingRefresh = new Promise<RuntimeSnapshot>((resolve) => { resolveRefresh = resolve; });
@@ -403,7 +416,8 @@ describe('SmartSwarmPage', () => {
     expect(fetchSnapshot).toHaveBeenCalledTimes(3);
 
     resolveRefresh(snapshot);
-    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(4), { timeout: 1_000 });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(fetchSnapshot).toHaveBeenCalledTimes(3);
   });
 
   it('keeps newest activity first before and after snapshot refreshes', async () => {
@@ -517,6 +531,31 @@ describe('SmartSwarmPage', () => {
 
     await waitFor(() => expect((screen.getByLabelText('Workspace') as HTMLSelectElement).options).toHaveLength(2));
     expect(fetchSnapshot).toHaveBeenLastCalledWith('hermes', { activityLimit: 1 });
+  });
+
+  it('reconciles the selected workspace when a catalog refresh removes it', async () => {
+    const secondWorkspace = { id: 'board-secondary', name: 'Secondary board', kind: 'board' as const, state: 'available' as const };
+    const expandedSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      workspaces: { status: 'available', data: [snapshot.workspaces.status === 'available' ? snapshot.workspaces.data[0]! : secondWorkspace, secondWorkspace] },
+    };
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(expandedSnapshot)
+      .mockResolvedValueOnce(expandedSnapshot)
+      .mockResolvedValueOnce(expandedSnapshot)
+      .mockResolvedValue(snapshot);
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: 'board-secondary' } });
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh workspaces' }));
+
+    await waitFor(() => expect(screen.getByLabelText('Workspace')).toHaveProperty('value', 'board-main'));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenLastCalledWith('hermes', {
+      workspaceId: 'board-main',
+      activityLimit: 100,
+    }));
   });
 
   it('discards a workspace catalog refresh after the provider changes', async () => {
@@ -667,5 +706,27 @@ describe('SmartSwarmPage', () => {
     expect(await screen.findByRole('button', { name: 'Inspect Child task' })).toBeDefined();
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining('same key'), expect.anything());
     consoleError.mockRestore();
+  });
+
+  it('renders hierarchy separately from execution dependencies', async () => {
+    const baseTask = snapshot.tasks.status === 'available' ? snapshot.tasks.data[0]! : undefined;
+    if (!baseTask) throw new Error('Expected a task fixture');
+    const relationshipSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: {
+        status: 'available',
+        data: [
+          { ...baseTask, id: 'parent', title: 'Planning parent' },
+          { ...baseTask, id: 'dependency', title: 'Runtime dependency' },
+          { ...baseTask, id: 'child', title: 'Child task', parentIds: ['parent'], dependencyIds: ['dependency'] },
+        ],
+      },
+    };
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot: vi.fn().mockResolvedValue(relationshipSnapshot) })} />);
+
+    const child = await screen.findByRole('button', { name: 'Inspect Child task' });
+    expect(child.textContent).toContain('Parent Planning parent');
+    expect(child.textContent).toContain('Depends on Runtime dependency');
+    expect(child.textContent).not.toContain('Depends on Planning parent');
   });
 });

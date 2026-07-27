@@ -143,6 +143,31 @@ describe('SmartSwarmApiClient', () => {
     vi.useRealTimers();
   });
 
+  it('marks a reconnect unavailable after permanent authentication failure', async () => {
+    vi.useFakeTimers();
+    const listeners: Record<string, (event: MessageEvent) => void> = {};
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-1' }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 })));
+    const connection = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn(), connection });
+
+    listeners.error!(new MessageEvent('error'));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(connection).toHaveBeenLastCalledWith('unavailable');
+    unsubscribe();
+    vi.useRealTimers();
+  });
+
   it('retries when the initial stream ticket request fails', async () => {
     vi.useFakeTimers();
     const EventSourceMock = vi.fn(function (this: EventSource) {
@@ -187,6 +212,7 @@ describe('SmartSwarmApiClient', () => {
 
     expect(error).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }));
     expect(connection).not.toHaveBeenCalledWith('reconnecting');
+    expect(connection).toHaveBeenCalledWith('unavailable');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     unsubscribe();
     vi.useRealTimers();

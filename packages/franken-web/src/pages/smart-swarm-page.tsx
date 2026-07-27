@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SmartSwarmApiError,
   type RuntimeCapability,
@@ -17,6 +17,8 @@ interface SmartSwarmPageProps {
 
 const MAX_VISIBLE_TASKS = 200;
 const MAX_VISIBLE_EVIDENCE = 100;
+const STREAM_REFRESH_DEBOUNCE_MS = 250;
+const TOPOLOGY_REFRESH_INTERVAL_MS = 5_000;
 
 function available<T>(section: RuntimeSection<T>): T | null {
   return section.status === 'available' ? section.data : null;
@@ -34,9 +36,10 @@ function taskActivityRank(state: string): number {
   return ['succeeded', 'failed', 'cancelled', 'archived'].includes(state) ? 1 : 0;
 }
 
-function StateNotice({ provider, snapshot, error, onRetry }: {
+function StateNotice({ provider, snapshot, workspaceName, error, onRetry }: {
   provider: RuntimeProvider | undefined;
   snapshot: RuntimeSnapshot | null;
+  workspaceName: string | undefined;
   error: unknown;
   onRetry(): void;
 }) {
@@ -62,8 +65,10 @@ function StateNotice({ provider, snapshot, error, onRetry }: {
   if (snapshot.state === 'empty') {
     return (
       <section className="smart-swarm-state">
-        <h2>No runtime work in {provider?.displayName ?? snapshot.providerId}</h2>
-        <p>The selected provider reported no workspaces or tasks. No demo data has been substituted.</p>
+        <h2>No runtime work in {workspaceName ?? provider?.displayName ?? snapshot.providerId}</h2>
+        <p>{workspaceName
+          ? 'The selected workspace reported no tasks. No demo data has been substituted.'
+          : 'The selected provider reported no workspaces or tasks. No demo data has been substituted.'}</p>
       </section>
     );
   }
@@ -119,8 +124,11 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
   const refreshPending = useRef(false);
+  const lastTopologyRefreshAt = useRef(0);
   const currentProviderId = useRef(providerId);
   currentProviderId.current = providerId;
+  const currentWorkspaceId = useRef(workspaceId);
+  currentWorkspaceId.current = workspaceId;
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const error = snapshotError ?? streamError;
@@ -134,6 +142,21 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
 
   const taskNames = useMemo(() => new Map(tasks.map((task) => [task.id, task.title])), [tasks]);
+
+  const scheduleTopologyRefresh = useCallback(() => {
+    if (refreshTimer.current) return;
+    const elapsed = Date.now() - lastTopologyRefreshAt.current;
+    const delay = Math.max(STREAM_REFRESH_DEBOUNCE_MS, TOPOLOGY_REFRESH_INTERVAL_MS - elapsed);
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null;
+      if (snapshotRequestsInFlight.current > 0) {
+        refreshPending.current = true;
+        return;
+      }
+      lastTopologyRefreshAt.current = Date.now();
+      setRefreshNonce((current) => current + 1);
+    }, delay);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,11 +219,11 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         snapshotRequestsInFlight.current -= 1;
         if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
           refreshPending.current = false;
-          setRefreshNonce((current) => current + 1);
+          scheduleTopologyRefresh();
         }
       });
     return () => { cancelled = true; };
-  }, [client, providerId, workspaceId, refreshNonce]);
+  }, [client, providerId, workspaceId, refreshNonce, scheduleTopologyRefresh]);
 
   useEffect(() => {
     if (!provider || provider.capabilities.streaming.status !== 'supported') {
@@ -209,6 +232,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     }
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
+    lastTopologyRefreshAt.current = 0;
     setConnection('connecting');
     void client.subscribe(provider.id, workspaceId || undefined, {
       connection: (state) => {
@@ -230,16 +254,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             events: { status: 'available', data: [event, ...withoutDuplicate].slice(0, 100) },
           };
         });
-        if (!refreshTimer.current) {
-          refreshTimer.current = setTimeout(() => {
-            refreshTimer.current = null;
-            if (snapshotRequestsInFlight.current > 0) {
-              refreshPending.current = true;
-            } else {
-              setRefreshNonce((current) => current + 1);
-            }
-          }, 250);
-        }
+        scheduleTopologyRefresh();
       },
     }).then((stop) => {
       if (cancelled) stop();
@@ -255,7 +270,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       }
       unsubscribe?.();
     };
-  }, [client, provider, workspaceId]);
+  }, [client, provider, workspaceId, scheduleTopologyRefresh]);
 
   const filteredAgents = agents.filter((agent) => !workspaceId || agent.workspaceId === workspaceId);
   const visibleAgents = filteredAgents.slice(0, MAX_VISIBLE_EVIDENCE);
@@ -281,6 +296,12 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       const catalogSnapshot = await client.fetchSnapshot(requestedProviderId, { activityLimit: 1 });
       if (currentProviderId.current !== requestedProviderId) return;
       setWorkspaceCatalog(catalogSnapshot.workspaces);
+      const catalogWorkspaces = available(catalogSnapshot.workspaces) ?? [];
+      if (!catalogWorkspaces.some((workspace) => workspace.id === currentWorkspaceId.current)) {
+        setSnapshot(null);
+        setSelectedTaskId(null);
+        setWorkspaceId(catalogWorkspaces[0]?.id ?? '');
+      }
       setSnapshotError(null);
     } catch (nextError) {
       if (currentProviderId.current === requestedProviderId) setSnapshotError(nextError);
@@ -289,7 +310,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       if (currentProviderId.current === requestedProviderId) setLoading(false);
       if (snapshotRequestsInFlight.current === 0 && refreshPending.current) {
         refreshPending.current = false;
-        setRefreshNonce((current) => current + 1);
+        scheduleTopologyRefresh();
       }
     }
   }
@@ -380,6 +401,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         }}
         provider={provider}
         snapshot={snapshot}
+        workspaceName={workspaces.find((workspace) => workspace.id === workspaceId)?.name}
       />
       {loading ? <p className="smart-swarm-refresh" role="status">Refreshing normalized state…</p> : null}
 
@@ -425,7 +447,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               </div>
               <ol className="smart-swarm-tasks">
                 {visibleTasks.map((task) => {
-                  const parents = [...new Set([...task.parentIds, ...task.dependencyIds])]
+                  const parents = [...new Set(task.parentIds)]
+                    .map((id) => ({ id, label: taskNames.get(id) ?? id }));
+                  const dependencies = [...new Set(task.dependencyIds)]
                     .map((id) => ({ id, label: taskNames.get(id) ?? id }));
                   const currentRun = runs.find((run) => run.taskId === task.id && run.finishedAt === null);
                   return (
@@ -438,7 +462,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                       >
                         <span><strong>{task.title}</strong><small>{task.state} · priority {task.priority ?? 'unset'}</small></span>
                         <span>{currentRun ? `Run ${currentRun.id}: ${currentRun.state}` : 'No current run'}</span>
-                        {parents.map((parent) => <small key={parent.id}>Depends on {parent.label}</small>)}
+                        {parents.map((parent) => <small key={`parent:${parent.id}`}>Parent {parent.label}</small>)}
+                        {dependencies.map((dependency) => <small key={`dependency:${dependency.id}`}>Depends on {dependency.label}</small>)}
                       </button>
                     </li>
                   );
