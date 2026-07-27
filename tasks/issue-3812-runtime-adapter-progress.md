@@ -17,6 +17,16 @@
 - [ ] Verify exact-current-head clean Codex and green CI; do not merge.
 - [ ] Record structured handoff on the task/root blackboard and block for review.
 
+## Inherited contract follow-up
+
+- [x] Recover exact PR #3821 head `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e` in the authorized clean worktree.
+- [x] Reproduce or falsify the nine inherited findings from downstream PR #3834.
+- [x] Add RED-to-GREEN coverage for every still-real finding without touching Ollama/downstream scope.
+- [x] Run focused and package/root test, lint, typecheck, and build gates.
+- [ ] Commit and push the existing PR #3821 branch; reply to and resolve inherited review threads with evidence.
+- [ ] Hand the immutable new #3821 head to stacked owners for rebase/reverification.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -27,3 +37,5 @@
 - Tier-12 round 12 findings reproduced RED then remediated: opaque contract fields now bypass generic secret rewriting, disappeared workspace positions compact even on empty pages, configured databases deduplicate by canonical path, intermediate cursors seed represented workspaces before their first page event, missing workspace filters return an honest empty snapshot, and the package root exports the complete runtime schema surface.
 - Current remediation verification: focused runtime/HTTP contract suite 56/56 passed; package typecheck, build, and lint-with-errors-only passed; root typecheck, lint, and build passed. The package full suite remains at the established unrelated baseline of 4,637/4,640 passing (one network health partial-state test and two order-dependent CLI run tests).
 - Independent pre-commit review passed after two additional TDD hardening cases: quiet-poll cursor compaction, retention for temporarily unavailable discovered workspaces, and plural identifier-array redaction boundaries.
+- Inherited follow-up RED-to-GREEN coverage now enforces a bounded active-stream pool with early-abort release, honest empty snapshots for every missing workspace filter, leading slash-command arguments, one-observation cursor grace for transiently missing databases, request cancellation, legacy cursor workspace binding, punctuation-boundary host-path redaction, stable verified-operator rate-limit identity, and public `RuntimeApproval` type exports.
+- Current follow-up verification: focused runtime/HTTP contract suite 75/75 passed; package and root typecheck, lint (zero errors; pre-existing warnings), and build passed; `git diff --check` passed. The package full suite reached 4,646/4,649, with only the established unrelated `cli/network-run.test.ts` partial-state failure and two order-dependent `cli/run.test.ts` failures, each reproduced independently and outside the runtime-adapter diff.

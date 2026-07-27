@@ -29,6 +29,10 @@ describe('Beast response redaction', () => {
     expect(redactAbsoluteHostPathValues('/v1/users')).toBe('/v1/users');
   });
 
+  it('preserves a leading slash command with arguments', () => {
+    expect(redactAbsoluteHostPathValues('/plan --design-doc')).toBe('/plan --design-doc');
+  });
+
   it('redacts host paths embedded after a leading application route', () => {
     expect(redactAbsoluteHostPathValues('/api/tasks?root=/home/alice/project'))
       .toBe('/api/tasks?root=[REDACTED_HOST_PATH]');
@@ -37,6 +41,15 @@ describe('Beast response redaction', () => {
   it('redacts embedded host paths after key-value delimiters', () => {
     expect(redactAbsoluteHostPathValues('workspace=/home/alice/private-repo'))
       .toBe('workspace=[REDACTED_HOST_PATH]');
+  });
+
+  it('redacts embedded host paths after punctuation boundaries', () => {
+    expect(redactAbsoluteHostPathValues('failed,/home/alice/private/file'))
+      .toBe('failed,[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('failed|/workspace/private/repo'))
+      .toBe('failed|[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('failed;C:\\Users\\alice\\file'))
+      .toBe('failed;[REDACTED_HOST_PATH]');
   });
 
   it('preserves quoted API routes', () => {

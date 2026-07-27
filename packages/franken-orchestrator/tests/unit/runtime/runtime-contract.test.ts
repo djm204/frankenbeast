@@ -14,7 +14,9 @@ import {
   RuntimeWorkspaceSchema,
   createDefaultRuntimeAdapterRegistry,
   type RuntimeAdapter,
+  type RuntimeApproval,
 } from '../../../src/runtime/index.js';
+import type { RuntimeApproval as PublicRuntimeApproval } from '../../../src/index.js';
 
 function adapter(id: string): RuntimeAdapter {
   return {
@@ -54,6 +56,21 @@ function adapter(id: string): RuntimeAdapter {
 }
 
 describe('provider-neutral runtime contract', () => {
+  it('exports the approval DTO type through both runtime entry points', () => {
+    const approval: RuntimeApproval = RuntimeApprovalSchema.parse({
+      id: 'approval-1',
+      workspaceId: 'workspace-1',
+      taskId: null,
+      state: 'pending',
+      summary: 'Approve publication',
+      createdAt: '2026-07-26T12:00:00.000Z',
+      resolvedAt: null,
+    });
+    const publicApproval: PublicRuntimeApproval = approval;
+
+    expect(publicApproval.id).toBe('approval-1');
+  });
+
   it('requires every capability to declare supported or unsupported state', async () => {
     const value = adapter('one').describe();
     await expect(value).resolves.toMatchObject({ id: 'one' });

@@ -25,6 +25,7 @@ export interface RuntimeRouteDeps {
   rateLimit?: BeastRateLimitOptions | undefined;
   pollIntervalMs?: number | undefined;
   heartbeatIntervalMs?: number | undefined;
+  maxActiveStreams?: number | undefined;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -32,6 +33,7 @@ const TICKET_COOKIE = 'frankenbeast_runtime_sse_ticket';
 const DEFAULT_RATE_LIMIT: BeastRateLimitOptions = { max: 120, windowMs: 60_000 };
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
+const DEFAULT_MAX_ACTIVE_STREAMS = 32;
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -132,6 +134,12 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     deps.heartbeatIntervalMs,
     DEFAULT_HEARTBEAT_INTERVAL_MS,
   );
+  const maxActiveStreams = validateInterval(
+    'maxActiveStreams',
+    deps.maxActiveStreams,
+    DEFAULT_MAX_ACTIVE_STREAMS,
+  );
+  let activeStreams = 0;
 
   app.onError(errorHandler);
   app.use('/v1/smart-swarm/*', async (c, next) => {
@@ -143,7 +151,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   });
   const sharedRateLimit = requireBeastRateLimit(
     limiter,
-    (authHeader, path) => authHeader ? `${authHeader}:${path}` : `ticket:${path}`,
+    (_authHeader, path) => `operator:${path}`,
   );
   app.use('/v1/smart-swarm/*', async (c, next) => {
     if (c.req.method === 'GET' && isStreamPath(new URL(c.req.url).pathname)) {
@@ -162,6 +170,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const request = {
       ...(workspaceId ? { workspaceId } : {}),
       ...(activityLimit !== undefined ? { activityLimit } : {}),
+      signal: c.req.raw.signal,
     };
     const snapshot = RuntimeSnapshotSchema.parse(await adapter.getSnapshot(request));
     if (snapshot.providerId !== adapter.id) {
@@ -180,6 +189,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       ...(cursor ? { cursor } : {}),
       ...(workspaceId ? { workspaceId } : {}),
       ...(limit !== undefined ? { limit } : {}),
+      signal: c.req.raw.signal,
     };
     try {
       return c.json({ data: runtimeResponse(RuntimeEventPageSchema.parse(await adapter.getEvents(request))) });
@@ -233,48 +243,70 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
+    if (activeStreams >= maxActiveStreams) {
+      throw new HttpError(429, 'RUNTIME_STREAM_LIMIT', 'Concurrent runtime stream limit exceeded');
+    }
     const workspaceId = c.req.query('workspaceId');
+    activeStreams += 1;
 
-    return streamSSE(c, async (stream) => {
-      let cursor = initialCursor;
-      let polling = false;
-      let closed = false;
-      const publish = async () => {
-        if (polling || closed) return;
-        polling = true;
+    try {
+      return streamSSE(c, async (stream) => {
         try {
-          const page = RuntimeEventPageSchema.parse(await adapter.getEvents({
-            ...(cursor ? { cursor } : {}),
-            ...(workspaceId ? { workspaceId } : {}),
-            limit: 100,
-          }));
-          for (const event of page.events) {
-            await stream.writeSSE({
-              id: event.cursor,
-              event: 'activity',
-              data: JSON.stringify(runtimeResponse(event)),
-            });
-            cursor = event.cursor;
-          }
-          if (page.nextCursor) cursor = page.nextCursor;
-        } catch {
-          // Keep the stream alive across transient SQLite/WAL or schema changes.
-        } finally {
-          polling = false;
-        }
-      };
+          let cursor = initialCursor;
+          let polling = false;
+          let closed = false;
+          let resolveAbort!: () => void;
+          const aborted = new Promise<void>((resolve) => {
+            resolveAbort = resolve;
+          });
+          stream.onAbort(() => {
+            closed = true;
+            resolveAbort();
+          });
+          const publish = async () => {
+            if (polling || closed) return;
+            polling = true;
+            try {
+              const page = RuntimeEventPageSchema.parse(await adapter.getEvents({
+                ...(cursor ? { cursor } : {}),
+                ...(workspaceId ? { workspaceId } : {}),
+                limit: 100,
+                signal: c.req.raw.signal,
+              }));
+              for (const event of page.events) {
+                await stream.writeSSE({
+                  id: event.cursor,
+                  event: 'activity',
+                  data: JSON.stringify(runtimeResponse(event)),
+                });
+                cursor = event.cursor;
+              }
+              if (page.nextCursor) cursor = page.nextCursor;
+            } catch {
+              // Keep the stream alive across transient SQLite/WAL or schema changes.
+            } finally {
+              polling = false;
+            }
+          };
 
-      await publish();
-      const poll = setInterval(() => void publish(), pollIntervalMs);
-      const heartbeat = setInterval(
-        () => void stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => {}),
-        heartbeatIntervalMs,
-      );
-      await new Promise<void>((resolve) => stream.onAbort(resolve));
-      closed = true;
-      clearInterval(poll);
-      clearInterval(heartbeat);
-    });
+          await publish();
+          if (closed) return;
+          const poll = setInterval(() => void publish(), pollIntervalMs);
+          const heartbeat = setInterval(
+            () => void stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => {}),
+            heartbeatIntervalMs,
+          );
+          await aborted;
+          clearInterval(poll);
+          clearInterval(heartbeat);
+        } finally {
+          activeStreams -= 1;
+        }
+      });
+    } catch (error) {
+      activeStreams -= 1;
+      throw error;
+    }
   });
 
   return app;

@@ -178,6 +178,7 @@ export type {
   HermesRuntimeAdapterOptions,
   RuntimeAdapter,
   RuntimeAgent,
+  RuntimeApproval,
   RuntimeBlocker,
   RuntimeEvent,
   RuntimeEventPage,

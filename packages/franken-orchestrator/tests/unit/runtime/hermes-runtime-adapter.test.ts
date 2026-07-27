@@ -3,11 +3,24 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { HermesRuntimeAdapter } from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
 import { RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
 
 const tempHomes: string[] = [];
+const inheritedKanbanDb = process.env['HERMES_KANBAN_DB'];
+
+beforeAll(() => {
+  delete process.env['HERMES_KANBAN_DB'];
+});
+
+afterAll(() => {
+  if (inheritedKanbanDb === undefined) {
+    delete process.env['HERMES_KANBAN_DB'];
+  } else {
+    process.env['HERMES_KANBAN_DB'] = inheritedKanbanDb;
+  }
+});
 
 afterEach(async () => {
   await Promise.all(tempHomes.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -152,6 +165,24 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('returns an empty snapshot for a missing workspace when discovered sources are schema-incompatible', async () => {
+    const home = await createHome();
+    const db = new Database(join(home, 'kanban.db'));
+    db.exec('CREATE TABLE tasks (id TEXT PRIMARY KEY);');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home, env: {} }).getSnapshot({
+      workspaceId: 'hermes:missing',
+    });
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'empty',
+      workspaces: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+    }));
+  });
+
   it('supports the canonical schema when optional newer columns and tables are absent', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -227,6 +258,35 @@ describe('HermesRuntimeAdapter', () => {
 
     await expect(new HermesRuntimeAdapter({ env: {} }).getEvents({ cursor })).rejects.toMatchObject({
       code: 'INVALID_CURSOR',
+    });
+  });
+
+  it('rejects legacy cursor positions bound to a different workspace', async () => {
+    const position = Buffer.from(JSON.stringify({
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      workspaceId: 'hermes:beta',
+      source: 'event',
+      sourceId: 1,
+    })).toString('base64url');
+    const cursor = Buffer.from(JSON.stringify({
+      positions: { 'hermes:alpha': position },
+    })).toString('base64url');
+
+    await expect(new HermesRuntimeAdapter({ env: {} }).getEvents({ cursor })).rejects.toMatchObject({
+      code: 'INVALID_CURSOR',
+    });
+  });
+
+  it('honors cancellation before starting snapshot and event discovery', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const adapter = new HermesRuntimeAdapter({ env: {} });
+
+    await expect(adapter.getSnapshot({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    await expect(adapter.getEvents({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
     });
   });
 
@@ -323,6 +383,33 @@ describe('HermesRuntimeAdapter', () => {
     expect(recovered.events).toEqual([]);
   });
 
+  it('retains a cursor position through one missing database observation', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(alphaDir, { recursive: true });
+    const alphaPath = join(alphaDir, 'kanban.db');
+    createCurrentKanban(alphaPath);
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
+    const first = await adapter.getEvents({ limit: 10 });
+
+    await rm(alphaPath);
+    const missing = await adapter.getEvents({ cursor: first.nextCursor!, limit: 1 });
+
+    createCurrentKanban(alphaPath);
+    const db = new Database(alphaPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    insert.run(11, 't_parent', 1, 'first-after-replacement', '{}', 1_785_081_670);
+    insert.run(12, 't_parent', 1, 'second-after-replacement', '{}', 1_785_081_680);
+    insert.run(13, 't_parent', 1, 'third-after-replacement', '{}', 1_785_081_690);
+    db.close();
+
+    const recovered = await adapter.getEvents({ cursor: missing.nextCursor!, limit: 1 });
+
+    expect(recovered.events.map((event) => event.id)).toEqual(['hermes:alpha:event:11']);
+  });
+
   it('seeds initial cursors for healthy workspaces whose older events fall outside the page', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
@@ -371,18 +458,19 @@ describe('HermesRuntimeAdapter', () => {
     expect(replay.events.map((event) => event.id)).toEqual(['hermes:alpha:event:40']);
   });
 
-  it('drops cursor positions for workspaces that are no longer discovered', async () => {
+  it('drops cursor positions after the missing-workspace grace observation', async () => {
     const home = await createHome();
     const boardDir = join(home, 'kanban', 'boards', 'alpha');
     await mkdir(boardDir, { recursive: true });
     const globalPath = join(home, 'kanban.db');
     createCurrentKanban(globalPath);
     createCurrentKanban(join(boardDir, 'kanban.db'));
-    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
     const first = await adapter.getEvents({ limit: 10 });
 
     await rm(boardDir, { recursive: true });
-    const compacted = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    const missing = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    const compacted = await adapter.getEvents({ cursor: missing.nextCursor!, limit: 10 });
     const compactedCursor = JSON.parse(Buffer.from(compacted.nextCursor!, 'base64url').toString('utf8')) as {
       p: Array<[string, string, number, number]>;
     };

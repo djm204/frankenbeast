@@ -149,3 +149,4 @@ export type RuntimeAgent = z.infer<typeof RuntimeAgentSchema>;
 export type RuntimeTask = z.infer<typeof RuntimeTaskSchema>;
 export type RuntimeRun = z.infer<typeof RuntimeRunSchema>;
 export type RuntimeBlocker = z.infer<typeof RuntimeBlockerSchema>;
+export type RuntimeApproval = z.infer<typeof RuntimeApprovalSchema>;
