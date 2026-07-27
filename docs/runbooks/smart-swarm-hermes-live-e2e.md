@@ -71,7 +71,6 @@ Terminal 2, also from the repository root:
 ```bash
 source /tmp/franken-smart-swarm-manual.env
 VITE_API_PROXY_TARGET=http://127.0.0.1:3737 \
-VITE_PROXY_OPERATOR_TOKEN="$FRANKENBEAST_BEAST_OPERATOR_TOKEN" \
 npm --workspace @franken/web run dev -- --host 127.0.0.1 --port 5173
 ```
 

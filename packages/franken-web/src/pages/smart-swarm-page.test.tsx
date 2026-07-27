@@ -210,10 +210,14 @@ describe('SmartSwarmPage', () => {
         reason: 'Resolved from the authenticated smart-swarm dashboard',
       },
     }));
+    expect(screen.getByRole('button', { name: 'Resolve blocker' })).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    expect(screen.getByRole('button', { name: 'Resolve blocker' })).toHaveProperty('disabled', true);
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
   });
 
-  it('reuses an action idempotency key after an uncertain response and rotates it after a definitive result', async () => {
+  it('reuses an action idempotency key after an uncertain response', async () => {
     const executeAction = vi.fn()
       .mockRejectedValueOnce(new TypeError('network response lost'))
       .mockResolvedValue({
@@ -243,10 +247,6 @@ describe('SmartSwarmPage', () => {
     const firstKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
     const retryKey = executeAction.mock.calls[1]?.[1].idempotencyKey;
     expect(retryKey).toBe(firstKey);
-
-    fireEvent.click(retriedResolveBlocker);
-    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(3));
-    expect(executeAction.mock.calls[2]?.[1].idempotencyKey).not.toBe(retryKey);
   });
 
   it('retires an uncertain action key after refreshed state confirms the postcondition', async () => {

@@ -24,6 +24,7 @@ interface PendingActionIntent {
   providerId: string;
   taskId: string;
   initialTaskState: RuntimeTask['state'];
+  awaitingConfirmation: boolean;
 }
 
 const MAX_VISIBLE_TASKS = 200;
@@ -682,8 +683,15 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
   onClose(): void;
 }) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
-  const [actionPending, setActionPending] = useState(false);
+  const previousTaskState = useRef(task.state);
+  const actionIntentPrefix = `${provider.id}:${task.id}:`;
+  const [actionPending, setActionPending] = useState(() => [...actionIdempotencyKeys.entries()]
+    .some(([key, intent]) => key.startsWith(actionIntentPrefix) && intent.awaitingConfirmation));
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  useEffect(() => {
+    if (previousTaskState.current !== task.state) setActionPending(false);
+    previousTaskState.current = task.state;
+  }, [task.state]);
   useEffect(() => {
     closeButton.current?.focus();
     return () => {
@@ -707,6 +715,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
   ): Promise<void> {
     setActionPending(true);
     setActionStatus(null);
+    let awaitingConfirmation = false;
     try {
       const runtimeAction: RuntimeAction = action === 'policy.apply'
         ? {
@@ -730,23 +739,30 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
         providerId: provider.id,
         taskId: task.id,
         initialTaskState: task.state,
+        awaitingConfirmation: false,
       });
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
         idempotencyKey,
         action: runtimeAction,
       });
-      actionIdempotencyKeys.delete(actionIntentKey);
       if (result.status === 'applied') {
+        const appliedIntent = actionIdempotencyKeys.get(actionIntentKey);
+        if (appliedIntent) appliedIntent.awaitingConfirmation = true;
+        awaitingConfirmation = true;
         setActionStatus(successMessage);
         onActionApplied();
+      } else if (result.status === 'rejected') {
+        actionIdempotencyKeys.delete(actionIntentKey);
+        setActionStatus(`rejected: ${result.reason}`);
       } else {
-        setActionStatus(`${result.status}: ${result.reason}`);
+        actionIdempotencyKeys.delete(actionIntentKey);
+        setActionStatus(`unsupported: ${result.reason}`);
       }
     } catch (error) {
       setActionStatus(errorMessage(error));
     } finally {
-      setActionPending(false);
+      if (!awaitingConfirmation) setActionPending(false);
     }
   }
   return (

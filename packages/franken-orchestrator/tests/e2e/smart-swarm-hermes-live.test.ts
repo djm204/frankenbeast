@@ -9,7 +9,7 @@ import { chromium, expect as expectBrowser, type Browser, type BrowserContext } 
 import { createServer as createViteServer, type ViteDevServer } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { startChatServer, type ChatServerHandle } from '../../src/http/chat-server.js';
-import { createDefaultRuntimeAdapterRegistry } from '../../src/runtime/index.js';
+import { HermesRuntimeAdapter, RuntimeAdapterRegistry } from '../../src/runtime/index.js';
 
 const execFileAsync = promisify(execFile);
 const enabled = process.env['LIVE_SMART_SWARM_E2E'] === '1';
@@ -151,16 +151,18 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
         llm: { complete: async () => 'unused in smart-swarm E2E' },
         projectName: 'smart-swarm-e2e',
         operatorToken,
-        runtimeRegistry: createDefaultRuntimeAdapterRegistry({
-          command: hermesCommand,
-          hermesHome,
-          kanbanDbPath: join(hermesHome, 'kanban.db'),
-          env: {
-            ...process.env,
-            HERMES_HOME: hermesHome,
-            HERMES_KANBAN_DB: join(hermesHome, 'kanban.db'),
-          },
-        }),
+        runtimeRegistry: new RuntimeAdapterRegistry([
+          new HermesRuntimeAdapter({
+            command: hermesCommand,
+            hermesHome,
+            kanbanDbPath: join(hermesHome, 'kanban.db'),
+            env: {
+              ...process.env,
+              HERMES_HOME: hermesHome,
+              HERMES_KANBAN_DB: join(hermesHome, 'kanban.db'),
+            },
+          }),
+        ]),
       });
       process.env['VITE_API_PROXY_TARGET'] = backend.url;
 
