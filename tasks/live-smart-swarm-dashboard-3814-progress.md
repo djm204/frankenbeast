@@ -11,7 +11,7 @@
 - [x] Perform browser/live verification against real Hermes-backed endpoints where available.
 - [x] Rebase onto the final exact clean #3821 head `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e` and re-run relevant gates.
 - [x] Commit with David Mendez identity, push, and open one linked PR without merging.
-- [ ] Run the real GitHub @codex review loop to exact-head clean with zero unresolved threads; round seven returned four findings, all fixed locally under RED→GREEN, and the next exact-head review remains outstanding.
+- [ ] Run the real GitHub @codex review loop to exact-head clean with zero unresolved threads; round eight returned six findings, all fixed locally under RED→GREEN, and the next exact-head review remains outstanding.
 - [ ] Verify exact-head CI is green and record evidence on the PM/root cards.
 - [ ] Request human review through the Kanban lifecycle with a structured handoff.
 
@@ -26,3 +26,5 @@ Round-five verification note: findings now preserve provider-wide snapshots when
 Round-six verification note: findings now preserve a selected workspace through unsupported scoped discovery, rank blocked/running/ready work before truncating dense nonterminal topologies with priority/recency tie-breakers, and apply bounded exponential backoff with jitter to repeated stream-ticket failures. Focused tests pass 41/41, the full web suite passes 808/808, and root lint (zero errors), typecheck, build, and `git diff --check` pass. Publication, thread replies/resolution, and the next exact-head Codex result remain outstanding; GitHub CI still does not attach to this non-`main` stacked base.
 
 Round-seven verification note: findings now keep provider-discovery errors separate from snapshot failures, move task-detail focus into the modal and restore it to the trigger, reconnect after malformed activity payloads, and discard stale replay cursors after repeated pre-open failures. Focused tests pass 45/45, the full web suite passes 812/812, and root lint (zero errors), typecheck, build, and `git diff --check` pass. Publication, thread replies/resolution, and the next exact-head Codex result remain outstanding; GitHub CI still does not attach to this non-`main` stacked base.
+
+Round-eight verification note: findings now clear provider-scoped state when provider discovery replaces the active runtime, ignore callbacks from superseded EventSource instances, index active task runs in one pass, rank recent blockers and pending approvals before evidence caps, trap focus and support Escape in the task-detail modal, and sort activity before its live cap. Focused tests pass 49/49, the full web suite passes 816/816, and root lint (zero errors), typecheck, build, and `git diff --check` pass. Publication, thread replies/resolution, and the next exact-head Codex result remain outstanding; GitHub CI still does not attach to this non-`main` stacked base.
