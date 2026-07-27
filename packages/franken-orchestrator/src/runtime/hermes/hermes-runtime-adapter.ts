@@ -417,12 +417,20 @@ function runtimeEventOrder(a: RuntimeEvent, b: RuntimeEvent): number {
   return left && right ? eventOrder(left, right) : a.id.localeCompare(b.id);
 }
 
+export function hermesCommandRequiresShell(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === 'win32' && /\.(?:bat|cmd)$/iu.test(command);
+}
+
 const defaultCommandRunner: HermesCommandRunner = (command, args, options) => new Promise((resolveCommand, reject) => {
   execFile(command, [...args], {
     encoding: 'utf8',
     env: options.env,
     timeout: options.timeoutMs,
     maxBuffer: options.maxOutputBytes,
+    shell: hermesCommandRequiresShell(command),
   }, (error, stdout, stderr) => {
     if (error && typeof error.code !== 'number') {
       reject(error);

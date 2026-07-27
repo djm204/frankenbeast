@@ -279,21 +279,37 @@ export class RuntimeActionStore {
 
   beginShutdown(): void {
     this.shuttingDown = true;
+    const errors: unknown[] = [];
     for (const [claimToken, { key, fingerprint }] of this.activeClaims) {
-      if (!this.db) {
-        const entry = this.entries.get(key);
-        if (entry && entry.fingerprint === fingerprint && entry.claimToken === claimToken && !entry.result) {
-          entry.expiresAt = Number.MAX_SAFE_INTEGER;
+      try {
+        if (!this.db) {
+          const entry = this.entries.get(key);
+          if (entry && entry.fingerprint === fingerprint && entry.claimToken === claimToken && !entry.result) {
+            entry.expiresAt = Number.MAX_SAFE_INTEGER;
+          }
+        } else {
+          let lastError: unknown;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            try {
+              this.db.prepare(`
+                UPDATE runtime_action_idempotency
+                SET expires_at = ?
+                WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
+              `).run(Number.MAX_SAFE_INTEGER, key, fingerprint, claimToken);
+              lastError = undefined;
+              break;
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          if (lastError !== undefined) throw lastError;
         }
-      } else {
-        this.db.prepare(`
-          UPDATE runtime_action_idempotency
-          SET expires_at = ?
-          WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
-        `).run(Number.MAX_SAFE_INTEGER, key, fingerprint, claimToken);
+        this.activeClaims.delete(claimToken);
+      } catch (error) {
+        errors.push(error);
       }
     }
-    this.activeClaims.clear();
+    if (errors.length > 0) throw new AggregateError(errors, 'Failed to fence runtime action claims');
   }
 
   async drain(timeoutMs?: number): Promise<boolean> {

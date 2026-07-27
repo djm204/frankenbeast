@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { HermesRuntimeAdapter } from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
+import {
+  HermesRuntimeAdapter,
+  hermesCommandRequiresShell,
+} from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
 import {
   RuntimeActionRequestSchema,
   RuntimeCursorError,
@@ -180,6 +183,13 @@ describe('HermesRuntimeAdapter', () => {
     } finally {
       platform.mockRestore();
     }
+  });
+
+  it('routes Windows command shims through the command processor', () => {
+    expect(hermesCommandRequiresShell('C:\\tools\\hermes.CMD', 'win32')).toBe(true);
+    expect(hermesCommandRequiresShell('C:\\tools\\hermes.BAT', 'win32')).toBe(true);
+    expect(hermesCommandRequiresShell('C:\\tools\\hermes.EXE', 'win32')).toBe(false);
+    expect(hermesCommandRequiresShell('/tools/hermes.cmd', 'linux')).toBe(false);
   });
 
   it('uses the standard Hermes home beneath HOME by default', async () => {

@@ -487,6 +487,35 @@ describe('smart-swarm runtime routes', () => {
     )).toEqual({ status: 'pending' });
   });
 
+  it('retries a transient shutdown fence write before fencing later claims', () => {
+    const actionStore = new RuntimeActionStore({ databasePath: ':memory:' });
+    actionStores.push(actionStore);
+    const first = actionStore.reserve('first', 'first-fingerprint', 100, 0);
+    const second = actionStore.reserve('second', 'second-fingerprint', 100, 0);
+    expect(first.status).toBe('claimed');
+    expect(second.status).toBe('claimed');
+    if (first.status !== 'claimed' || second.status !== 'claimed') throw new Error('expected claims');
+    const db = (actionStore as unknown as { db: InstanceType<typeof Database> }).db;
+    const prepare = db.prepare.bind(db);
+    let interrupted = false;
+    vi.spyOn(db, 'prepare').mockImplementation((source: string) => {
+      const statement = prepare(source);
+      if (!interrupted && source.includes('SET expires_at')) {
+        interrupted = true;
+        vi.spyOn(statement, 'run').mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); });
+      }
+      return statement;
+    });
+
+    expect(() => actionStore.beginShutdown()).not.toThrow();
+    expect(db.prepare(`
+      SELECT action_key, expires_at FROM runtime_action_idempotency ORDER BY action_key
+    `).all()).toEqual([
+      { action_key: 'first', expires_at: Number.MAX_SAFE_INTEGER },
+      { action_key: 'second', expires_at: Number.MAX_SAFE_INTEGER },
+    ]);
+  });
+
   it('durably fences and audits adapter exceptions after provider execution begins', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-provider-uncertain-'));
     tempDirs.push(dir);
@@ -816,6 +845,51 @@ describe('smart-swarm runtime routes', () => {
       currentState: 'uncertain',
     }));
     expect(adapter.executeAction).toHaveBeenCalledOnce();
+    faultDb.close();
+  });
+
+  it('retains an uncertainty fence and external audit when atomic uncertainty auditing fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-uncertain-audit-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const actionStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(actionStore);
+    const faultDb = new Database(databasePath);
+    faultDb.exec(`
+      CREATE TRIGGER fail_runtime_action_uncertain_audit
+      BEFORE INSERT ON runtime_action_audit
+      BEGIN
+        SELECT RAISE(ABORT, 'uncertain audit database is busy');
+      END;
+    `);
+    const { app, adapter, actionAudit } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockRejectedValue(new RuntimeActionUncertainError());
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:uncertain-audit-failure',
+        action,
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:uncertain-audit-failure']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+    expect(actionStore.listAuditEvents()).toEqual([]);
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'hermes', outcome: 'failed', currentState: 'uncertain',
+    }));
     faultDb.close();
   });
 

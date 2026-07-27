@@ -646,7 +646,23 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             ...actionAudit(request.action, 'failed'),
             currentState: 'uncertain',
           });
-          actionStore.fenceWithAudit(key, fingerprint, reservation.claimToken, audit);
+          try {
+            actionStore.fenceWithAudit(key, fingerprint, reservation.claimToken, audit);
+          } catch (storageError) {
+            let fenceError: unknown;
+            try {
+              actionStore.fence(key, fingerprint, reservation.claimToken);
+            } catch (caught) {
+              fenceError = caught;
+            }
+            try {
+              actionStore.recordAudit(audit);
+            } catch {
+              // The external audit sink remains available when durable audit storage is not.
+            }
+            forwardActionAudit(audit);
+            throw fenceError ?? storageError;
+          }
           forwardActionAudit(audit);
         }
         throw error;

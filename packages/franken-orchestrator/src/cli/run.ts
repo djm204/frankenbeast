@@ -1317,6 +1317,54 @@ async function runNonSessionCommandIfRequested(options: {
   return false;
 }
 
+type ChatServerTerminationSignal = 'SIGINT' | 'SIGTERM';
+type ChatServerTerminationHandler = () => Promise<void>;
+interface ChatServerTerminationTarget {
+  exitCode?: string | number | null | undefined;
+  once(signal: ChatServerTerminationSignal, handler: ChatServerTerminationHandler): unknown;
+  off(signal: ChatServerTerminationSignal, handler: ChatServerTerminationHandler): unknown;
+}
+
+let removeActiveChatServerTerminationHandlers = (): void => {};
+
+export function installChatServerTerminationHandlers(
+  server: { close(): Promise<void> },
+  finalize: () => Promise<void>,
+  target: ChatServerTerminationTarget = process,
+): () => void {
+  removeActiveChatServerTerminationHandlers();
+  let closing: Promise<void> | undefined;
+  const handlers = {} as Record<ChatServerTerminationSignal, ChatServerTerminationHandler>;
+  const remove = (): void => {
+    target.off('SIGINT', handlers.SIGINT);
+    target.off('SIGTERM', handlers.SIGTERM);
+    if (removeActiveChatServerTerminationHandlers === remove) {
+      removeActiveChatServerTerminationHandlers = (): void => {};
+    }
+  };
+  const closeForSignal = (signal: ChatServerTerminationSignal): Promise<void> => {
+    target.exitCode = signal === 'SIGINT' ? 130 : 143;
+    remove();
+    closing ??= (async () => {
+      try {
+        await server.close();
+      } finally {
+        await finalize();
+      }
+    })().catch((error: unknown) => {
+      target.exitCode = 1;
+      console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+    });
+    return closing;
+  };
+  handlers.SIGINT = () => closeForSignal('SIGINT');
+  handlers.SIGTERM = () => closeForSignal('SIGTERM');
+  target.once('SIGINT', handlers.SIGINT);
+  target.once('SIGTERM', handlers.SIGTERM);
+  removeActiveChatServerTerminationHandlers = remove;
+  return remove;
+}
+
 async function runChatCommandIfRequested(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -1510,6 +1558,7 @@ async function runChatCommandIfRequested(
         : {}),
       analyticsDeps: { analytics },
     });
+    installChatServerTerminationHandlers(server, finalize);
     printLine(`Chat server listening on ${server.url}`);
     return true;
   }

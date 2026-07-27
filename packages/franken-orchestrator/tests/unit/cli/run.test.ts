@@ -272,7 +272,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, createChatSurfaceDeps, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, createChatSurfaceDeps, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown, installChatServerTerminationHandlers } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -1128,6 +1128,33 @@ describe('createStdinIO', () => {
     expect(readline.close).toHaveBeenCalled();
     expect(pauseSpy).toHaveBeenCalled();
     pauseSpy.mockRestore();
+  });
+});
+
+describe('chat-server termination', () => {
+  it('awaits the server close fence before finalizing CLI dependencies on SIGTERM', async () => {
+    const listeners = new Map<NodeJS.Signals, () => Promise<void>>();
+    const target = {
+      exitCode: undefined as number | undefined,
+      once: vi.fn((signal: NodeJS.Signals, listener: () => Promise<void>) => {
+        listeners.set(signal, listener);
+        return target;
+      }),
+      off: vi.fn((signal: NodeJS.Signals) => {
+        listeners.delete(signal);
+        return target;
+      }),
+    };
+    const order: string[] = [];
+    const close = vi.fn(async () => { order.push('close'); });
+    const finalize = vi.fn(async () => { order.push('finalize'); });
+
+    installChatServerTerminationHandlers({ close }, finalize, target);
+    await listeners.get('SIGTERM')?.();
+
+    expect(order).toEqual(['close', 'finalize']);
+    expect(target.exitCode).toBe(143);
+    expect(target.off).toHaveBeenCalledWith('SIGINT', expect.any(Function));
   });
 });
 
@@ -2093,6 +2120,7 @@ describe('main() execution', () => {
   });
 
   it('does not open the lazy chat terminal owner when dependency creation fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('chat server unavailable'); }));
     mockParseArgs.mockReturnValue({
       ...(mockParseArgs() as Record<string, unknown>),
       subcommand: 'chat',
