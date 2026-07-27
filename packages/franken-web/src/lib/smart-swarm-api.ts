@@ -255,6 +255,8 @@ export class SmartSwarmApiClient {
           cursor = event.cursor;
           handlers.event(event);
         } catch (error) {
+          const lastEventId = (rawEvent as MessageEvent<string>).lastEventId;
+          if (lastEventId) cursor = lastEventId;
           handlers.error?.(error instanceof Error ? error : new Error('Unable to parse smart-swarm activity.'));
           scheduleReconnect();
         }

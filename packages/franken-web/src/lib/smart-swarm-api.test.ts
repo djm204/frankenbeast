@@ -187,6 +187,40 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
   });
 
+  it('reconnects after a malformed activity event from the malformed frame cursor', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      sources.push(listeners);
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-1' }))
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-2' })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn() });
+    sources[0]!.open!(new MessageEvent('open'));
+
+    sources[0]!.activity!(new MessageEvent('activity', {
+      data: '{bad json',
+      lastEventId: 'poisonous-cursor',
+    }));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(EventSourceMock).toHaveBeenNthCalledWith(
+      2,
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-2?cursor=poisonous-cursor`,
+      { withCredentials: true },
+    );
+    unsubscribe();
+  });
+
   it('drops a replay cursor after repeated failures before the stream opens', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
