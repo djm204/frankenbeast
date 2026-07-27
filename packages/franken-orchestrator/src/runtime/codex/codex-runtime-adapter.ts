@@ -574,6 +574,9 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     if (active.truncated || archived.truncated) {
       throw new CodexSchemaError('Codex event pagination exceeded the bounded page limit');
     }
+    if (active.rejected > 0 || archived.rejected > 0) {
+      throw new CodexSchemaError('Codex app-server returned incompatible thread metadata');
+    }
     const activeIds = new Set(active.threads.map((thread) => thread.id));
     const matchingThreads = [...active.threads, ...archived.threads.filter(
       (thread) => !activeIds.has(thread.id),
