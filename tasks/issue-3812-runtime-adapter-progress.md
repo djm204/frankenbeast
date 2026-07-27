@@ -176,7 +176,7 @@
 - [x] Enforce replay-safe SSE cursor limits in UTF-8 bytes and remove untrusted provider IDs from mismatch logs.
 - [x] Stop heartbeat timers immediately while cancellation-ignoring polls settle.
 - [x] Run focused, package, and root verification.
-- [ ] Commit/push, reply to and resolve all five threads, and reconcile this ledger.
+- [x] Commit/push `3b8b8053c`, reply to and resolve all five threads, and reconcile this ledger.
 - [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
 
 ## Verification notes
