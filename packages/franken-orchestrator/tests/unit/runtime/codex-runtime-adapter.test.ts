@@ -802,6 +802,27 @@ input.on('line', (line) => {
     ]);
   });
 
+  it('fails closed instead of emitting disappearance when a thread record is incompatible', async () => {
+    let incompatible = false;
+    const adapter = new CodexRuntimeAdapter({
+      request: async (_method, params) => ({
+        data: params['archived'] === true ? [] : [{
+          id: 'tracked-thread', sessionId: 'session-tracked', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai',
+          status: { type: incompatible ? 'future-status' : 'idle' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 10 });
+    incompatible = true;
+
+    await expect(adapter.getEvents({ cursor: first.nextCursor!, limit: 10 }))
+      .rejects.toThrow('incompatible thread metadata');
+  });
+
   it('returns the newest matching events on an initial poll', async () => {
     const thread = (id: string, updatedAt: number) => ({
       id, sessionId: `session-${id}`, cliVersion: '0.145.0',
