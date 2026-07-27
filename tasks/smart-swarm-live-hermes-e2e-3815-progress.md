@@ -23,5 +23,6 @@
 - [x] Remediate sixth-round Codex findings with typed failed outcomes, remount-safe in-flight locks, and action-specific uncertain-key postconditions.
 - [x] Remediate seventh-round Codex findings with running promotion confirmation, task-keyed dialog state, and strict network-404 failure exemption.
 - [x] Remediate eighth-round Codex finding by allowlisting only blocked and queued tasks for promotion.
+- [x] Remediate ninth-round Codex findings with blocked-state confirmation and fail-closed cancellation eligibility.
 - [ ] Run real `@codex review` to exact-head clean, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Record machine-readable root-blackboard and card handoff.

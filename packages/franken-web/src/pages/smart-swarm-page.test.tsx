@@ -302,6 +302,51 @@ describe('SmartSwarmPage', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('retains an uncertain blocker key while the task remains blocked without blocker evidence', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    const blockerlessSnapshot = {
+      ...snapshot,
+      blockers: { status: 'available' as const, data: [] },
+    };
+    const fetchSnapshot = vi.fn().mockResolvedValue(blockerlessSnapshot);
+    const executeAction = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network response lost'))
+      .mockResolvedValue({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot,
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await screen.findByText('network response lost');
+    const firstKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+    act(() => handlers.event({ ...baseEvent, id: 'still-blocked', cursor: 'still-blocked' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(2));
+
+    expect(executeAction.mock.calls[1]?.[1].idempotencyKey).toBe(firstKey);
+  });
+
   it('retains an uncertain action key across unrelated task state changes', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     let currentSnapshot = snapshot;
@@ -554,6 +599,7 @@ describe('SmartSwarmPage', () => {
     ['running', 'Promote task'],
     ['unknown', 'Promote task'],
     ['archived', 'Promote task'],
+    ['unknown', 'Cancel task'],
     ['archived', 'Cancel task'],
   ] as const)('keeps %s tasks out of unsafe %s actions', async (state, buttonName) => {
     render(<SmartSwarmPage client={createClient({

@@ -53,7 +53,9 @@ function actionPostconditionConfirmed(
 ): boolean {
   switch (intent.action) {
     case 'blocker.resolve':
-      return blockers !== null && !blockers.some((blocker) => blocker.taskId === intent.taskId);
+      return task.state !== 'blocked'
+        && blockers !== null
+        && !blockers.some((blocker) => blocker.taskId === intent.taskId);
     case 'task.cancel':
       return task.state === 'cancelled';
     case 'policy.apply':
@@ -889,7 +891,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
         >Resume task</button>
         {resumeReason ? <p>{resumeReason}</p> : null}
         <button
-          disabled={actionPending || cancelReason !== null || task.state === 'succeeded' || task.state === 'failed' || task.state === 'cancelled' || task.state === 'archived'}
+          disabled={actionPending || cancelReason !== null || !['queued', 'ready', 'running', 'blocked'].includes(task.state)}
           onClick={() => {
             void executeTaskAction(
               'task.cancel',
