@@ -67,6 +67,14 @@ function cursorValue(value: string | undefined): string | undefined {
   return value;
 }
 
+function workspaceIdValue(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (value.length < 1) {
+    throw new HttpError(422, 'INVALID_QUERY', 'workspaceId must not be empty');
+  }
+  return value;
+}
+
 function adapterOr404(registry: RuntimeAdapterRegistry, providerId: string) {
   try {
     return registry.get(providerId);
@@ -295,7 +303,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   });
   const sharedRateLimit = requireBeastRateLimit(
     limiter,
-    (_authHeader, path) => `operator:${path}`,
+    () => 'operator:smart-swarm',
   );
   app.use('/v1/smart-swarm/*', async (c, next) => {
     if (c.req.method === 'GET' && isStreamPath(new URL(c.req.url).pathname)) {
@@ -310,9 +318,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   app.get(`${BASE_PATH}/:providerId/snapshot`, async (c) => {
     const adapter = adapterOr404(deps.registry, c.req.param('providerId'));
     const activityLimit = positiveInteger(c.req.query('activityLimit'), 'activityLimit', 500);
-    const workspaceId = c.req.query('workspaceId');
+    const workspaceId = workspaceIdValue(c.req.query('workspaceId'));
     const request = {
-      ...(workspaceId ? { workspaceId } : {}),
+      ...(workspaceId !== undefined ? { workspaceId } : {}),
       ...(activityLimit !== undefined ? { activityLimit } : {}),
       signal: c.req.raw.signal,
     };
@@ -328,10 +336,10 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const limit = positiveInteger(c.req.query('limit'), 'limit', 500);
     const cursor = cursorValue(c.req.query('cursor'));
     validateAdapterCursor(adapter, cursor);
-    const workspaceId = c.req.query('workspaceId');
+    const workspaceId = workspaceIdValue(c.req.query('workspaceId'));
     const request = {
       ...(cursor ? { cursor } : {}),
-      ...(workspaceId ? { workspaceId } : {}),
+      ...(workspaceId !== undefined ? { workspaceId } : {}),
       ...(limit !== undefined ? { limit } : {}),
       signal: c.req.raw.signal,
     };
@@ -381,6 +389,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const adapter = adapterOr404(deps.registry, providerId);
     const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
     validateAdapterCursor(adapter, initialCursor);
+    const workspaceId = workspaceIdValue(c.req.query('workspaceId'));
     if (activeStreams >= maxActiveStreams) {
       throw new HttpError(429, 'RUNTIME_STREAM_LIMIT', 'Concurrent runtime stream limit exceeded');
     }
@@ -395,7 +404,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       }
       return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired ticket' } }, 401);
     }
-    const workspaceId = c.req.query('workspaceId');
     activeStreams += 1;
 
     try {

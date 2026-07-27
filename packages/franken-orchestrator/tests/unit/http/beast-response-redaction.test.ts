@@ -94,6 +94,15 @@ describe('Beast response redaction', () => {
       .toBe('read `[REDACTED_HOST_PATH]`');
   });
 
+  it('redacts quoted single-component and Windows host paths', () => {
+    expect(redactAbsoluteHostPathValues("failed reading '/root' and loaded '/.env'"))
+      .toBe("failed reading '[REDACTED_HOST_PATH]' and loaded '[REDACTED_HOST_PATH]'");
+    expect(redactAbsoluteHostPathValues('open "C:\\Users\\alice\\secret"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
+    expect(redactAbsoluteHostPathValues('open "\\\\server\\share\\secret"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',

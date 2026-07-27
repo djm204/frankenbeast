@@ -59,6 +59,14 @@
 - [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
+## Exact-head round 23 follow-up
+
+- [x] Inspect the three current-head Codex findings on `0d91974d61aecfc49e33f39070097d7dbb098268`.
+- [x] Reproduce and remediate quoted single-component/Windows path redaction, stable operator rate-limit bucketing, and blank workspace-filter rejection.
+- [x] Run focused tests plus package/root lint, typecheck, build, and full package test gates.
+- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -83,3 +91,4 @@
 - Exact-head round 20 reproduced all three findings RED and passes 90/90 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the same unrelated three-failure baseline with 4,671/4,674 passing.
 - Exact-head round 21 reproduced all three findings RED and passes 93/93 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass.
 - Exact-head round 22 reproduced all three findings RED and passes 96/96 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,677/4,680 passing.
+- Exact-head round 23 reproduced quoted-path leakage, dynamic-path rate-limit bypass, and blank workspace filter widening RED. The three cases pass GREEN with 42/42 focused HTTP/redaction tests; package/root typecheck, lint (zero errors), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,680/4,683 passing.

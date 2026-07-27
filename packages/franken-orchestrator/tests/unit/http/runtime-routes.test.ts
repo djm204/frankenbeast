@@ -190,6 +190,38 @@ describe('smart-swarm runtime routes', () => {
     expect(adapter.getEvents).not.toHaveBeenCalled();
   });
 
+  it('rejects blank workspace filters across snapshot, events, and stream routes', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const adapter = runtimeAdapter();
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+    });
+
+    const snapshot = await app.request('/v1/smart-swarm/providers/hermes/snapshot?workspaceId=', {
+      headers: authHeaders(),
+    });
+    const events = await app.request('/v1/smart-swarm/providers/hermes/events?workspaceId=', {
+      headers: authHeaders(),
+    });
+    const connectionId = 'blank-workspace';
+    const ticket = ticketStore.issue('operator-secret', `hermes:${connectionId}`);
+    const stream = await app.request(
+      `/v1/smart-swarm/providers/hermes/events/${connectionId}?workspaceId=`,
+      { headers: { cookie: `frankenbeast_runtime_sse_ticket=${ticket}` } },
+    );
+
+    expect(snapshot.status).toBe(422);
+    expect(events.status).toBe(422);
+    expect(stream.status).toBe(422);
+    expect(adapter.getSnapshot).not.toHaveBeenCalled();
+    expect(adapter.getEvents).not.toHaveBeenCalled();
+    expect(ticketStore.check(ticket, 'operator-secret', `hermes:${connectionId}`)).toBe('valid');
+  });
+
   it('preserves opaque runtime cursors and identifiers in event responses', async () => {
     const { app, adapter } = createRoutes();
     vi.mocked(adapter.getEvents).mockResolvedValueOnce(RuntimeEventPageSchema.parse({
@@ -416,6 +448,28 @@ describe('smart-swarm runtime routes', () => {
     });
 
     expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+  });
+
+  it('shares an operator rate-limit bucket across dynamic provider paths', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 1, windowMs: 60_000 },
+    });
+
+    const first = await app.request('/v1/smart-swarm/providers/unknown-one/snapshot', {
+      headers: authHeaders(),
+    });
+    const second = await app.request('/v1/smart-swarm/providers/unknown-two/snapshot', {
+      headers: authHeaders(),
+    });
+
+    expect(first.status).toBe(404);
     expect(second.status).toBe(429);
   });
 
