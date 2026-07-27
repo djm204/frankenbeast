@@ -118,6 +118,19 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText('Pause is not supported by Hermes.')).toBeDefined();
   });
 
+  it('moves focus into task details and restores it to the inspect trigger', async () => {
+    render(<SmartSwarmPage client={createClient()} />);
+    const inspect = await screen.findByRole('button', { name: 'Inspect Live dashboard' });
+    inspect.focus();
+
+    fireEvent.click(inspect);
+
+    const close = screen.getByRole('button', { name: 'Close' });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    fireEvent.click(close);
+    await waitFor(() => expect(document.activeElement).toBe(inspect));
+  });
+
   it('keeps advertised lifecycle controls disabled until mutations are wired', async () => {
     render(<SmartSwarmPage client={createClient({
       listProviders: vi.fn().mockResolvedValue([{
@@ -250,6 +263,28 @@ describe('SmartSwarmPage', () => {
 
     expect(await screen.findByText('Live dashboard')).toBeDefined();
     expect(fetchSnapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it('preserves a retry snapshot failure when provider discovery finishes later', async () => {
+    let resolveProviders!: (value: RuntimeProvider[]) => void;
+    const delayedProviders = new Promise<RuntimeProvider[]>((resolve) => { resolveProviders = resolve; });
+    const listProviders = vi.fn()
+      .mockResolvedValueOnce([provider])
+      .mockReturnValueOnce(delayedProviders);
+    const fetchSnapshot = vi.fn()
+      .mockRejectedValueOnce(new Error('Initial snapshot outage'))
+      .mockRejectedValue(new Error('Retry snapshot outage'));
+    render(<SmartSwarmPage client={createClient({ listProviders, fetchSnapshot })} />);
+    await screen.findByText('Initial snapshot outage');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry smart-swarm' }));
+    await screen.findByText('Retry snapshot outage');
+    await act(async () => {
+      resolveProviders([provider]);
+      await delayedProviders;
+    });
+
+    expect(screen.getByText('Retry snapshot outage')).toBeDefined();
   });
 
   it('shows an unavailable configuration state when no providers are returned', async () => {

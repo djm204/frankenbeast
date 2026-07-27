@@ -136,6 +136,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [providerError, setProviderError] = useState<unknown>(null);
   const [snapshotError, setSnapshotError] = useState<unknown>(null);
   const [streamError, setStreamError] = useState<unknown>(null);
   const [connection, setConnection] = useState<RuntimeConnectionState>('connecting');
@@ -151,9 +152,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   currentProviderId.current = providerId;
   const currentWorkspaceId = useRef(workspaceId);
   currentWorkspaceId.current = workspaceId;
+  const taskDetailTrigger = useRef<HTMLButtonElement | null>(null);
 
   const provider = providers.find((candidate) => candidate.id === providerId);
-  const error = snapshotError ?? streamError;
+  const error = snapshotError ?? providerError ?? streamError;
   const workspaces = available(workspaceCatalog ?? snapshot?.workspaces ?? { status: 'available', data: [] }) ?? [];
   const agents = snapshot ? available(snapshot.agents) ?? [] : [];
   const tasks = snapshot ? available(snapshot.tasks) ?? [] : [];
@@ -192,12 +194,12 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             ? current
             : nextProviders[0]?.id ?? ''
         ));
-        setSnapshotError(null);
+        setProviderError(null);
         if (nextProviders.length === 0) setLoading(false);
       })
       .catch((nextError: unknown) => {
         if (!cancelled) {
-          setSnapshotError(nextError);
+          setProviderError(nextError);
           setLoading(false);
         }
       });
@@ -498,7 +500,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                       <button
                         aria-label={`Inspect ${task.title}`}
                         className="smart-swarm-task"
-                        onClick={() => setSelectedTaskId(task.id)}
+                        onClick={(event) => {
+                          taskDetailTrigger.current = event.currentTarget;
+                          setSelectedTaskId(task.id);
+                        }}
                         type="button"
                       >
                         <span><strong>{task.title}</strong><small>{task.state} · priority {task.priority ?? 'unset'}</small></span>
@@ -547,6 +552,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         <TaskDetail
           onClose={() => setSelectedTaskId(null)}
           provider={provider}
+          returnFocus={taskDetailTrigger.current}
           runs={runs
             .filter((run) => run.taskId === selectedTask.id)
             .sort((left, right) => Date.parse(right.lastActiveAt ?? right.startedAt) - Date.parse(left.lastActiveAt ?? left.startedAt))
@@ -558,21 +564,29 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   );
 }
 
-function TaskDetail({ task, provider, runs, onClose }: {
+function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
   task: RuntimeTask;
   provider: RuntimeProvider;
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
+  returnFocus: HTMLButtonElement | null;
   onClose(): void;
 }) {
+  const closeButton = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeButton.current?.focus();
+    return () => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+    };
+  }, [returnFocus]);
   const unwiredReason = 'This control is not wired to a runtime mutation yet.';
   const pauseReason = capabilityReason(provider.capabilities.pause) ?? unwiredReason;
   const resumeReason = capabilityReason(provider.capabilities.resume) ?? unwiredReason;
   const cancelReason = capabilityReason(provider.capabilities.cancellation) ?? unwiredReason;
   return (
-    <section aria-label={`${task.title} details`} aria-modal="false" className="smart-swarm-detail" role="dialog">
+    <section aria-label={`${task.title} details`} aria-modal="true" className="smart-swarm-detail" role="dialog">
       <header>
         <div><p className="eyebrow">Task detail</p><h3>{task.title}</h3></div>
-        <button className="button button--secondary button--compact" onClick={onClose} type="button">Close</button>
+        <button className="button button--secondary button--compact" onClick={onClose} ref={closeButton} type="button">Close</button>
       </header>
       <dl>
         <div><dt>Status</dt><dd>{task.state}</dd></div>
