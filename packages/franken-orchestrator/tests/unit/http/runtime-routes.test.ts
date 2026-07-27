@@ -410,6 +410,24 @@ describe('smart-swarm runtime routes', () => {
     )).not.toThrow();
   });
 
+  it('bounds draining when a tracked runtime action never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      void actionStore.track(new Promise(() => {}));
+      let settled = false;
+      const drain = actionStore.drain(100).then(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(99);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await drain;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fails closed when an adapter returns a result for a different request', async () => {
     const { app, adapter, actionAudit } = createRoutes();
     vi.mocked(adapter.executeAction).mockResolvedValue(RuntimeActionResultSchema.parse({
@@ -642,7 +660,9 @@ describe('smart-swarm runtime routes', () => {
       .update(JSON.stringify(['hermes', 'block:t_deadbeef:audit-failure']))
       .digest('base64url');
     const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
-    expect(actionStore.reserve(key, fingerprint, Date.now() + 1_000, Date.now())).toEqual({ status: 'pending' });
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
     expect(actionStore.listAuditEvents()).toEqual([]);
     expect(adapter.executeAction).toHaveBeenCalledOnce();
     faultDb.close();

@@ -178,6 +178,24 @@ export class RuntimeActionStore {
     commit.immediate();
   }
 
+  fence(key: string, fingerprint: string, claimToken: string): void {
+    const expiresAt = Number.MAX_SAFE_INTEGER;
+    if (!this.db) {
+      const entry = this.entries.get(key);
+      if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken || entry.result) {
+        throw new Error('Runtime action reservation was lost');
+      }
+      entry.expiresAt = expiresAt;
+      return;
+    }
+    const update = this.db.prepare(`
+      UPDATE runtime_action_idempotency
+      SET expires_at = ?
+      WHERE action_key = ? AND fingerprint = ? AND claim_token = ? AND result_json IS NULL
+    `).run(expiresAt, key, fingerprint, claimToken);
+    if (update.changes !== 1) throw new Error('Runtime action reservation was lost');
+  }
+
   recordAudit(event: RuntimeActionAuditEvent, occurredAt = Date.now()): void {
     const copy = { ...event };
     if (!this.db) {
@@ -207,8 +225,21 @@ export class RuntimeActionStore {
     this.shuttingDown = true;
   }
 
-  async drain(): Promise<void> {
-    await Promise.allSettled([...this.pending]);
+  async drain(timeoutMs?: number): Promise<void> {
+    const pending = Promise.allSettled([...this.pending]).then(() => undefined);
+    if (timeoutMs === undefined) {
+      await pending;
+      return;
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        pending,
+        new Promise<void>((resolve) => { timeout = setTimeout(resolve, Math.max(0, timeoutMs)); }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   destroy(): void {

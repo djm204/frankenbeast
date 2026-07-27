@@ -591,10 +591,15 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           );
         }
         const audit = actionAuditEvent(adapter.id, request, completed.audit);
-        actionStore.completeWithAudit(
-          key, fingerprint, reservation.claimToken,
-          completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
-        );
+        try {
+          actionStore.completeWithAudit(
+            key, fingerprint, reservation.claimToken,
+            completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
+          );
+        } catch (error) {
+          actionStore.fence(key, fingerprint, reservation.claimToken);
+          throw error;
+        }
         forwardActionAudit(audit);
         return completed;
       } finally {

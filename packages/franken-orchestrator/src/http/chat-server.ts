@@ -41,6 +41,8 @@ import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, 
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { isoNow } from '@franken/types';
 
+const RUNTIME_ACTION_DRAIN_TIMEOUT_MS = 10_000;
+
 export interface StartChatServerOptions {
   host?: string;
   port?: number;
@@ -488,7 +490,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ownedRuntimeActionStore?.beginShutdown();
       server.closeAllConnections();
       webSocketServer.close();
-      await ownedRuntimeActionStore?.drain();
+      await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       chatStreamTicketStore?.destroy();

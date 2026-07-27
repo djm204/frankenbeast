@@ -6,10 +6,10 @@ export const RuntimeMetadataSchema = z.record(z.string(), SafeMetadataValueSchem
 
 const CorrelationIdSchema = z.string().uuid();
 const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
-const RuntimeActionWorkspaceIdSchema = z.string().min(1).max(200);
-const RuntimeActionTaskIdSchema = z.string().min(1).max(200);
 const RuntimeWorkspaceIdSchema = z.string().min(1);
 const RuntimeTaskIdSchema = z.string().min(1);
+const RuntimeActionWorkspaceIdSchema = RuntimeWorkspaceIdSchema;
+const RuntimeActionTaskIdSchema = RuntimeTaskIdSchema;
 const BoundedReasonSchema = z.string().trim().min(1).max(1000);
 const RuntimeActionTypeSchema = z.enum([
   'approval.resolve',

@@ -121,10 +121,10 @@ describe('provider-neutral runtime contract', () => {
       action: { ...request.action, workspaceId: 'provider/workspace @ shard 1' },
     }).action).toEqual(expect.objectContaining({ workspaceId: 'provider/workspace @ shard 1' }));
 
-    expect(() => RuntimeActionRequestSchema.parse({
+    expect(RuntimeActionRequestSchema.parse({
       ...request,
       action: { ...request.action, taskId: 'x'.repeat(201) },
-    })).toThrow();
+    }).action).toEqual(expect.objectContaining({ taskId: 'x'.repeat(201) }));
   });
 
   it('preserves provider-owned opaque identifiers in emitted snapshots', () => {
