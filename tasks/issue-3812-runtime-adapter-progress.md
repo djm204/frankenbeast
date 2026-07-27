@@ -64,7 +64,7 @@
 - [x] Inspect the three current-head Codex findings on `0d91974d61aecfc49e33f39070097d7dbb098268`.
 - [x] Reproduce and remediate quoted single-component/Windows path redaction, stable operator rate-limit bucketing, and blank workspace-filter rejection.
 - [x] Run focused tests plus package/root lint, typecheck, build, and full package test gates.
-- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
