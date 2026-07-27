@@ -133,16 +133,23 @@ function latestTimestamp(...values: unknown[]): string | null {
   return normalized.sort().at(-1) ?? null;
 }
 
+function hasApiRouteContext(value: string, path: string, offset: number, prefix: string): boolean {
+  if (!API_ROUTE_RE.test(path)) return false;
+  if (offset === 0 && /[?#]/u.test(path)) return true;
+  const context = value.slice(0, offset + prefix.length);
+  return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check|and|with)\s+["']?$/iu.test(context);
+}
+
 function boundedText(value: unknown): string {
   if (typeof value !== 'string') return '';
   const redacted = redactSensitiveText(value)
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
-    .replace(POSIX_PATH_RE, (_match, prefix: string, path: string) => (
-      API_ROUTE_RE.test(path) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
+    .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => (
+      hasApiRouteContext(source, path, offset, prefix) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
     ))
-    .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string, path: string) => (
-      API_ROUTE_RE.test(path) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
+    .replace(QUOTED_POSIX_PATH_RE, (_match, quote: string, path: string, offset: number, source: string) => (
+      hasApiRouteContext(source, path, offset, quote) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
     ));
   return redacted.length <= MAX_SUMMARY_CHARS ? redacted : `${redacted.slice(0, MAX_SUMMARY_CHARS - 1)}…`;
 }
@@ -521,7 +528,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       if (selectedWorkspaceIds.has(workspaceId)) {
         positions.set(workspaceId, { ...position, missingPolls: undefined });
       } else if (
-        request.workspaceId === undefined
+        (request.workspaceId === undefined || request.workspaceId === workspaceId)
         && (position.missingPolls ?? 0) < MISSING_WORKSPACE_GRACE_POLLS
       ) {
         positions.set(workspaceId, { ...position, missingPolls: (position.missingPolls ?? 0) + 1 });
@@ -534,6 +541,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         && (
           selectedWorkspaceIds.has(cursorState.legacy.workspaceId)
           || request.workspaceId === undefined
+          || request.workspaceId === cursorState.legacy.workspaceId
         )
       ) {
         positions.set(cursorState.legacy.workspaceId, {
@@ -859,10 +867,12 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     });
     const sessionByRunId = new Map<string, string>();
     const activeRunIds = new Set<string>();
-    const activeTaskIds = new Set<string>();
+    const pointerlessActiveTaskIds = new Set<string>();
     for (const task of taskRows) {
-      if (!isTerminalTaskStatus(task['status'])) activeTaskIds.add(String(task['id']));
-      if (task['current_run_id'] == null) continue;
+      if (task['current_run_id'] == null) {
+        if (!isTerminalTaskStatus(task['status'])) pointerlessActiveTaskIds.add(String(task['id']));
+        continue;
+      }
       const currentRunId = String(task['current_run_id']);
       if (!isTerminalTaskStatus(task['status'])) activeRunIds.add(currentRunId);
       if (typeof task['session_id'] === 'string' && task['session_id']) {
@@ -900,7 +910,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
     for (const run of runRows) {
       const runState = mapRunState(run['status'], run['outcome']);
-      const activeWithoutPointer = activeTaskIds.has(String(run['task_id']))
+      const activeWithoutPointer = pointerlessActiveTaskIds.has(String(run['task_id']))
         && ['queued', 'running', 'blocked'].includes(runState);
       if (!activeRunIds.has(String(run['id'])) && !activeWithoutPointer) continue;
       if (typeof run['profile'] !== 'string' || !run['profile']) continue;

@@ -469,6 +469,41 @@ describe('HermesRuntimeAdapter', () => {
     expect(recovered.events.map((event) => event.id)).toEqual(['hermes:alpha:event:11']);
   });
 
+  it('retains a scoped cursor position through one missing database observation', async () => {
+    const home = await createHome();
+    const alphaDir = join(home, 'kanban', 'boards', 'alpha');
+    await mkdir(alphaDir, { recursive: true });
+    const alphaPath = join(alphaDir, 'kanban.db');
+    createCurrentKanban(alphaPath);
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
+    const first = await adapter.getEvents({ workspaceId: 'hermes:alpha', limit: 10 });
+
+    await rm(alphaPath);
+    const missing = await adapter.getEvents({
+      workspaceId: 'hermes:alpha',
+      cursor: first.nextCursor!,
+      limit: 1,
+    });
+
+    createCurrentKanban(alphaPath);
+    const db = new Database(alphaPath);
+    db.exec('DELETE FROM task_comments; DELETE FROM task_events;');
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    insert.run(11, 't_parent', 1, 'first-after-scoped-outage', '{}', 1_785_081_670);
+    insert.run(12, 't_parent', 1, 'second-after-scoped-outage', '{}', 1_785_081_680);
+    insert.run(13, 't_parent', 1, 'third-after-scoped-outage', '{}', 1_785_081_690);
+    db.close();
+    const recovered = await adapter.getEvents({
+      workspaceId: 'hermes:alpha',
+      cursor: missing.nextCursor!,
+      limit: 1,
+    });
+
+    expect(recovered.events.map((event) => event.id)).toEqual(['hermes:alpha:event:11']);
+  });
+
   it('seeds initial cursors for healthy workspaces whose older events fall outside the page', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
@@ -695,6 +730,24 @@ describe('HermesRuntimeAdapter', () => {
 
     expect(serialized).not.toContain('/home/alice/private-repo');
     expect(serialized).toContain('[REDACTED_HOST_PATH]');
+  });
+
+  it('redacts route-shaped host paths after storage-key delimiters', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run('cwd=/api/private/repo', 't_parent');
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'cwd=[REDACTED_HOST_PATH]',
+      })]),
+    }));
   });
 
   it('redacts host paths after punctuation in normalized runtime text', async () => {
@@ -1072,6 +1125,27 @@ describe('HermesRuntimeAdapter', () => {
         expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
       ]),
     }));
+  });
+
+  it('excludes a stale running profile when a nonterminal task has a different current run', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare(`INSERT INTO task_runs
+      (id,task_id,profile,status,started_at,summary,metadata,last_heartbeat_at)
+      VALUES (?,?,?,?,?,?,?,?)`).run(
+      2, 't_parent', 'stale-worker', 'running', 1_785_081_600, null, '{}', 1_785_081_605,
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.agents.status !== 'available') throw new Error('Expected agents');
+
+    expect(snapshot.agents.data.some((agent) => agent.id === 'hermes:global:stale-worker')).toBe(false);
+    expect(snapshot.agents.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
+    ]));
   });
 
   it('discovers configured databases read-only and normalizes live task topology without leaking storage fields', async () => {
