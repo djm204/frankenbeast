@@ -56,7 +56,7 @@
 - [x] Inspect the three current-head Codex findings on `1ffdbce6e37b572c0097ca07642157e37a7bb019`.
 - [x] Reproduce and remediate Markdown-code host-path leakage, valid-ticket rate-limit consumption, and unbounded heartbeat write queuing.
 - [x] Run focused tests plus package lint, typecheck, build, and full-suite gates.
-- [ ] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
+- [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
