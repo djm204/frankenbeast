@@ -49,6 +49,7 @@ const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
 const MAX_THREAD_PAGES = 100;
 const MAX_CURSOR_JSON_BYTES = 64 * 1024;
+const MAX_EVENT_CURSOR_BYTES = 4_096;
 const THREAD_STATUS_TYPES = new Set(['active', 'idle', 'notLoaded', 'systemError']);
 const THREAD_SOURCE_KINDS = [
   'cli', 'vscode', 'exec', 'appServer', 'subAgent',
@@ -187,22 +188,44 @@ function eventCursor(
   watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
   scopeWorkspaceId?: string,
 ): string {
-  const payload = Buffer.from(JSON.stringify({
-    version: 3,
-    occurredAt: watermark?.occurredAt,
-    threadId: watermark?.threadId,
-    status,
-    ...(scopeWorkspaceId !== undefined ? { workspaceId: scopeWorkspaceId } : {}),
-    ...(boundaryThreads ? {
-      boundaryThreads: Object.values(boundaryThreads).map((thread) => [
+  const serializedThreads = boundaryThreads
+    ? Object.values(boundaryThreads).map((thread) => [
         thread.threadId,
         thread.workspaceId,
         thread.status,
         thread.transitionSequence,
-      ]),
-    } : {}),
-  }));
-  return `z.${deflateRawSync(payload).toString('base64url')}`;
+      ])
+    : undefined;
+  let boundarySaturated = false;
+  const encode = (): string => {
+    const payload = Buffer.from(JSON.stringify({
+      version: 3,
+      occurredAt: watermark?.occurredAt,
+      threadId: watermark?.threadId,
+      status,
+      ...(scopeWorkspaceId !== undefined ? { workspaceId: scopeWorkspaceId } : {}),
+      ...(serializedThreads ? { boundaryThreads: serializedThreads } : {}),
+      ...(boundarySaturated ? { boundarySaturated: true } : {}),
+    }));
+    return `z.${deflateRawSync(payload).toString('base64url')}`;
+  };
+  let encoded = encode();
+  if (Buffer.byteLength(encoded) > MAX_EVENT_CURSOR_BYTES && serializedThreads?.length) {
+    boundarySaturated = true;
+    let lowerBound = 1;
+    let upperBound = serializedThreads.length;
+    while (lowerBound < upperBound) {
+      const midpoint = Math.floor((lowerBound + upperBound) / 2);
+      const retained = serializedThreads.splice(0, midpoint);
+      const candidate = encode();
+      serializedThreads.unshift(...retained);
+      if (Buffer.byteLength(candidate) <= MAX_EVENT_CURSOR_BYTES) upperBound = midpoint;
+      else lowerBound = midpoint + 1;
+    }
+    serializedThreads.splice(0, lowerBound);
+    encoded = encode();
+  }
+  return encoded;
 }
 
 interface CodexCursor {
@@ -212,6 +235,7 @@ interface CodexCursor {
   workspaceId?: string | undefined;
   boundaryStatuses?: Record<string, string> | undefined;
   boundaryThreads?: Record<string, CodexBoundaryThread> | undefined;
+  boundarySaturated?: boolean | undefined;
 }
 
 function parseCursor(value: string | undefined): CodexCursor | null {
@@ -237,6 +261,9 @@ function parseCursor(value: string | undefined): CodexCursor | null {
       || (decoded.workspaceId !== undefined && (
         typeof decoded.workspaceId !== 'string'
         || !/^codex:workspace:[a-f0-9]{16}$/.test(decoded.workspaceId)
+      ))
+      || (decoded.boundarySaturated !== undefined && (
+        decoded['version'] !== 3 || typeof decoded.boundarySaturated !== 'boolean'
       ))
       || (boundaryStatuses !== undefined && (
         boundaryStatuses === null
@@ -300,6 +327,7 @@ function parseCursor(value: string | undefined): CodexCursor | null {
       ...(normalizedBoundaryThreads !== undefined
         ? { boundaryThreads: normalizedBoundaryThreads }
         : {}),
+      ...(decoded['boundarySaturated'] === true ? { boundarySaturated: true } : {}),
     };
   } catch {
     throw new RuntimeCursorError();
@@ -512,6 +540,15 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     const workspacesById = new Map<string, RuntimeWorkspace>();
     const agents: RuntimeAgent[] = [];
     const events: RuntimeEvent[] = [];
+    const snapshotBoundaryThreads: Record<string, CodexBoundaryThread> = {};
+    for (const thread of selected) {
+      rememberThread(snapshotBoundaryThreads, {
+        threadId: thread.id,
+        workspaceId: workspaceId(thread.cwd),
+        status: eventStatus(thread),
+        transitionSequence: 0,
+      });
+    }
     for (const thread of selected) {
       const key = workspaceKey(thread.cwd);
       const currentWorkspaceId = workspaceId(thread.cwd);
@@ -535,7 +572,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           sessionId: thread.sessionId,
         },
       });
-      events.push(eventForThread(thread, {}, undefined, request.workspaceId));
+      events.push(eventForThread(thread, snapshotBoundaryThreads, undefined, request.workspaceId));
     }
 
     const state = parsed.rejected > 0 || parsed.truncated
@@ -592,20 +629,27 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     )]
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId);
     const observedKeys = new Set(matchingThreads.map((thread) => threadKey(thread.id)));
-    const needsAbsenceConfirmation = after?.boundaryThreads !== undefined
-      && Object.keys(after.boundaryThreads).some((key) => !observedKeys.has(key));
+    const trackedBoundaryThreads = after?.boundaryThreads;
+    const needsAbsenceConfirmation = trackedBoundaryThreads !== undefined
+      && Object.keys(trackedBoundaryThreads).some((key) => !observedKeys.has(key));
     if (needsAbsenceConfirmation) {
       const confirmedActive = await this.readThreadPages({
         pageSize: MAX_ACTIVITY_LIMIT,
         signal: request.signal,
         archived: false,
-        stop,
+        stop: () => false,
       });
+      const confirmedActiveKeys = new Set(confirmedActive.threads.map((thread) => threadKey(thread.id)));
+      const trackedKeysMissingFromActive = new Set(Object.keys(trackedBoundaryThreads).filter(
+        (key) => !confirmedActiveKeys.has(key),
+      ));
       const confirmedArchived = await this.readThreadPages({
         pageSize: MAX_ACTIVITY_LIMIT,
         signal: request.signal,
         archived: true,
-        stop,
+        stop: (threads) => [...trackedKeysMissingFromActive].every((key) => (
+          threads.some((thread) => threadKey(thread.id) === key)
+        )),
       });
       if (confirmedActive.truncated || confirmedArchived.truncated) {
         throw new CodexSchemaError('Codex event pagination exceeded the bounded page limit');
@@ -641,6 +685,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           }
           if (
             entry.cursor.occurredAt === after.occurredAt
+            && after.boundarySaturated !== true
             && Object.keys(after.boundaryStatuses).length < MAX_ACTIVITY_LIMIT
           ) return true;
         }

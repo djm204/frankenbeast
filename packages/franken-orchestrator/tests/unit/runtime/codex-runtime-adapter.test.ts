@@ -768,11 +768,12 @@ input.on('line', (line) => {
     expect(fourth.events.map((event) => event.summary)).toEqual(['Codex thread is idle']);
   });
 
-  it('keeps a full status baseline below the HTTP header limit', async () => {
+  it('keeps a bounded status baseline within the replay-safe SSE id limit', async () => {
     const threads = Array.from({ length: 500 }, (_, index) => {
-      const suffix = index.toString(16).padStart(12, '0');
+      const digest = createHash('sha256').update(String(index)).digest('hex');
       return {
-        id: `00000000-0000-4000-8000-${suffix}`,
+        id: `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}`
+          + `-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`,
         sessionId: `session-${index}`,
         cliVersion: '0.145.0',
         createdAt: 100,
@@ -790,7 +791,7 @@ input.on('line', (line) => {
     const page = await adapter.getEvents({ limit: 500 });
 
     expect(page.events).toHaveLength(500);
-    expect(Buffer.byteLength(page.nextCursor!)).toBeLessThan(16 * 1024);
+    expect(Buffer.byteLength(page.nextCursor!)).toBeLessThanOrEqual(4_096);
     expect(() => adapter.validateEventCursor?.(page.nextCursor!)).not.toThrow();
   });
 
@@ -905,6 +906,46 @@ input.on('line', (line) => {
 
     expect(second).toEqual({ events: [], nextCursor: first.nextCursor });
     expect(call).toBe(6);
+  });
+
+  it('scans later pages for every tracked thread before confirming disappearance', async () => {
+    const thread = (index: number, updatedAt: number) => ({
+      id: `thread-${String(index).padStart(3, '0')}`,
+      sessionId: `session-${index}`,
+      cliVersion: '0.145.0',
+      createdAt: 100,
+      updatedAt,
+      cwd: '/workspace/project',
+      ephemeral: false,
+      modelProvider: 'openai',
+      status: { type: 'idle' },
+    });
+    const baseline = Array.from({ length: 500 }, (_, index) => thread(index, 1_000 - index));
+    const firstPage = [thread(500, 1_001), ...baseline.slice(0, 499)];
+    let activeFirstPageReads = 0;
+    const request = vi.fn(async (_method: string, params: Record<string, unknown>) => {
+      if (params['archived'] === true) return { data: [], nextCursor: null };
+      if (params['cursor'] === 'active-page-2') {
+        return { data: [baseline[499]], nextCursor: null };
+      }
+      activeFirstPageReads += 1;
+      return activeFirstPageReads === 1
+        ? { data: baseline, nextCursor: null }
+        : { data: firstPage, nextCursor: 'active-page-2' };
+    });
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    const first = await adapter.getEvents({ limit: 500 });
+    const second = await adapter.getEvents({ cursor: first.nextCursor!, limit: 500 });
+
+    expect(second.events).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'codex:thread:thread-499:disappeared' }),
+    ]));
+    expect(request).toHaveBeenCalledWith(
+      'thread/list',
+      expect.objectContaining({ cursor: 'active-page-2', archived: false }),
+      expect.any(Object),
+    );
   });
 
   it('returns the newest matching events on an initial poll', async () => {
@@ -1033,6 +1074,43 @@ input.on('line', (line) => {
       workspaceId,
       limit: 10,
     })).resolves.toMatchObject({ events: expect.any(Array) });
+  });
+
+  it('carries the full snapshot status baseline into its continuation cursor', async () => {
+    const threads = [
+      {
+        id: 'newer', sessionId: 'session-newer', cliVersion: '0.145.0',
+        createdAt: 100, updatedAt: 300, cwd: '/workspace/project', ephemeral: false,
+        modelProvider: 'openai', status: { type: 'idle', activeFlags: [] as string[] },
+      },
+      {
+        id: 'older', sessionId: 'session-older', cliVersion: '0.145.0',
+        createdAt: 100, updatedAt: 200, cwd: '/workspace/project', ephemeral: false,
+        modelProvider: 'openai', status: { type: 'active', activeFlags: [] as string[] },
+      },
+    ];
+    const adapter = new CodexRuntimeAdapter({
+      request: async (_method, params) => ({
+        data: params['archived'] === true ? [] : threads,
+        nextCursor: null,
+      }),
+    });
+
+    const snapshot = await adapter.getSnapshot({ activityLimit: 2 });
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    threads[1]!.status.activeFlags = ['waitingOnApproval'];
+    const continuation = await adapter.getEvents({
+      cursor: snapshot.events.data.at(-1)!.cursor,
+      limit: 2,
+    });
+
+    expect(continuation.events).toEqual([
+      expect.objectContaining({
+        id: 'codex:thread:older:200:blocked:transition-1',
+        summary: 'Codex thread is blocked',
+      }),
+    ]);
   });
 
   it('paginates before applying a bounded workspace snapshot filter', async () => {
