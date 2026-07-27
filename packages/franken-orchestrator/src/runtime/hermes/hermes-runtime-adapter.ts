@@ -77,10 +77,13 @@ const MAX_CURSOR_CHARS = 12 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
-const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)+[^\s"'`]+)/gu;
+const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?`])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
 const QUOTED_POSIX_PATH_RE = /([`'"])(\/(?:[^/`'"\s]+\/)+[^`'"\s]+)(?=\1)/gu;
 const FILE_URL_RE = /\bfile:\/\/[^\s"'`]+/giu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
+const SLASH_COMMANDS = new Set([
+  '/plan', '/run', '/status', '/diff', '/approve', '/reject', '/session', '/quit',
+]);
 
 function nowIso(now: () => Date): string {
   return now().toISOString();
@@ -134,6 +137,7 @@ function latestTimestamp(...values: unknown[]): string | null {
 }
 
 function hasApiRouteContext(value: string, path: string, offset: number, prefix: string): boolean {
+  if (SLASH_COMMANDS.has(path)) return true;
   if (!API_ROUTE_RE.test(path)) return false;
   if (offset === 0 && /[?#]/u.test(path)) return true;
   const context = value.slice(0, offset + prefix.length);

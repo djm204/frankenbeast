@@ -67,6 +67,14 @@
 - [x] Commit and push the PR #3821 branch; reply to and resolve all three current-head threads.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
+## Exact-head round 24 follow-up
+
+- [x] Inspect the current-head Codex finding on `770dd1369dee06c019cbd14b25389dd540138007`.
+- [x] Reproduce and remediate direct-adapter leakage of unquoted single-component POSIX paths.
+- [x] Run the 58-test Hermes adapter suite plus package lint, typecheck, and build gates.
+- [x] Commit and push the PR #3821 branch; reply to and resolve the current-head thread.
+- [ ] Obtain exact-head green CI and fresh Codex clean; authorized review tier 24 is exhausted and requires explicit extension.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.
@@ -92,3 +100,4 @@
 - Exact-head round 21 reproduced all three findings RED and passes 93/93 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass.
 - Exact-head round 22 reproduced all three findings RED and passes 96/96 focused adapter, route, and shared-redaction tests GREEN. Package typecheck, lint (zero errors), and build pass; the standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,677/4,680 passing.
 - Exact-head round 23 reproduced quoted-path leakage, dynamic-path rate-limit bypass, and blank workspace filter widening RED. The three cases pass GREEN with 42/42 focused HTTP/redaction tests; package/root typecheck, lint (zero errors), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,680/4,683 passing.
+- Exact-head round 24 reproduced direct-adapter leakage of `/secret` RED and passes the Hermes adapter suite 58/58 GREEN; package typecheck, lint (zero errors), and build pass. Review invocation 24/24 is consumed, so a fresh review of the remediation head requires an explicit tier extension.
