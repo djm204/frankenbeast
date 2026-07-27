@@ -82,6 +82,13 @@ describe('Beast response redaction', () => {
       .toBe('Check /comms/health and /webhooks/slack/events');
   });
 
+  it('redacts host paths in unquoted application route queries and fragments', () => {
+    expect(redactAbsoluteHostPathValues('/api/tasks?root=/data/private&next=ok'))
+      .toBe('/api/tasks?root=[REDACTED_HOST_PATH]&next=ok');
+    expect(redactAbsoluteHostPathValues('/v1/tasks#/srv/private'))
+      .toBe('/v1/tasks#[REDACTED_HOST_PATH]');
+  });
+
   it('redacts quoted host paths rooted outside the common host allowlist', () => {
     expect(redactAbsoluteHostPathValues("ENOTDIR: scandir '/data/hermes/kanban/boards'"))
       .toBe("ENOTDIR: scandir '[REDACTED_HOST_PATH]'");

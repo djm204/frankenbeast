@@ -135,6 +135,12 @@
 - [x] Reproduce and remediate unquoted file-URL delimiter loss, conjunction-based API-route path leakage, and empty compact/legacy cursor workspace IDs.
 - [ ] Run focused/package/root verification, commit/push, reply to and resolve all three threads, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
 
+## Exact-head round 33 follow-up
+
+- [x] Push round 32 as `d24af159a3a853bcfd6997f32888537a7a583902`, resolve all three threads, verify zero paginated unresolved threads, and trigger Codex at `2026-07-27T09:45:59Z`.
+- [x] Reproduce and remediate host-path leakage inside unquoted API-route query and fragment values in shared and direct-adapter redaction.
+- [ ] Run focused/package/root verification, commit/push, reply to and resolve the thread, and obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads; do not merge.
+
 ## Verification notes
 
 - Focused runtime/HTTP tests: 14 passed.

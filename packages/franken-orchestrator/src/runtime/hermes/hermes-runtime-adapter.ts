@@ -76,8 +76,8 @@ const MAX_ACTIVITY_LIMIT = 500;
 const MAX_CURSOR_CHARS = 12 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
-const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
-const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
+const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
+const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
 const QUOTED_POSIX_PATH_RES = [
   /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
@@ -145,7 +145,7 @@ function latestTimestamp(...values: unknown[]): string | null {
 function hasApiRouteContext(value: string, path: string, offset: number, prefix: string): boolean {
   if (SLASH_COMMANDS.has(path)) return true;
   if (!API_ROUTE_RE.test(path)) return false;
-  if (offset === 0 && /[?#]/u.test(path)) return true;
+  if (offset === 0 && /[?#]/u.test(value[path.length] ?? '')) return true;
   const context = value.slice(0, offset + prefix.length);
   return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check)\s+["']?$/iu.test(context)
     || /\/(?:api|v\d+|comms|webhooks)(?:\/[^\s"'`]+)?\s+(?:and|or)\s+["']?$/iu.test(context)
@@ -159,13 +159,21 @@ function boundedText(value: unknown): string {
     .replace(FILE_URL_RE, 'file://[REDACTED_HOST_PATH]')
     .replace(ANGLE_BRACKET_HOST_PATH_RE, '$1[REDACTED_HOST_PATH]')
     .replace(ABSOLUTE_PATH_RE, (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`)
-    .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => (
-      hasApiRouteContext(source, path, offset, prefix) ? `${prefix}${path}` : `${prefix}[REDACTED_HOST_PATH]`
-    ));
+    .replace(POSIX_PATH_RE, (_match, prefix: string, path: string, offset: number, source: string) => {
+      if (!hasApiRouteContext(source, path, offset, prefix)) return `${prefix}[REDACTED_HOST_PATH]`;
+      const suffixOffset = path.search(/[?#]/u);
+      return suffixOffset < 0
+        ? `${prefix}${path}`
+        : `${prefix}${path.slice(0, suffixOffset)}${boundedText(path.slice(suffixOffset))}`;
+    });
   for (const pattern of QUOTED_POSIX_PATH_RES) {
-    redacted = redacted.replace(pattern, (_match, quote: string, path: string, offset: number, source: string) => (
-      hasApiRouteContext(source, path, offset, quote) ? `${quote}${path}` : `${quote}[REDACTED_HOST_PATH]`
-    ));
+    redacted = redacted.replace(pattern, (_match, quote: string, path: string, offset: number, source: string) => {
+      if (!hasApiRouteContext(source, path, offset, quote)) return `${quote}[REDACTED_HOST_PATH]`;
+      const suffixOffset = path.search(/[?#]/u);
+      return suffixOffset < 0
+        ? `${quote}${path}`
+        : `${quote}${path.slice(0, suffixOffset)}${boundedText(path.slice(suffixOffset))}`;
+    });
   }
   return redacted.length <= MAX_SUMMARY_CHARS ? redacted : `${redacted.slice(0, MAX_SUMMARY_CHARS - 1)}…`;
 }

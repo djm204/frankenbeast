@@ -765,6 +765,34 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts host paths in unquoted application route queries and fragments', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      '/api/tasks?root=/data/private&next=ok',
+      't_parent',
+    );
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      '/v1/tasks#/srv/private',
+      't_child',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: '/api/tasks?root=[REDACTED_HOST_PATH]&next=ok',
+      }), expect.objectContaining({
+        id: 'hermes:global:t_child',
+        title: '/v1/tasks#[REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
   it('redacts unquoted single-component POSIX paths for direct consumers', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');

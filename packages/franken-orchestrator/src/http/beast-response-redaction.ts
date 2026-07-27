@@ -14,8 +14,8 @@ function isAbsoluteHostPath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value) || value.startsWith('\\\\');
 }
 
-const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`]+)|\\\\(?:[^\s"'`]+))/gu;
-const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?`>])(\/(?:[^/\s"'`]+\/)*[^/\s"'`]+)/gu;
+const EMBEDDED_HOST_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
+const EMBEDDED_POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
 const QUOTED_HOST_PATH_RES = [
   /(`)(\/[^`]+|[A-Za-z]:[\\/][^`]+|\\\\[^`]+)(?=`)/gu,
   /(')(\/[^']+|[A-Za-z]:[\\/][^']+|\\\\[^']+)(?=')/gu,
@@ -46,7 +46,7 @@ function hasApplicationRouteContext(
 ): boolean {
   if (SLASH_COMMANDS.has(path)) return true;
   if (!API_ROUTE_RE.test(path)) return false;
-  if (allowApiRoute || (offset === 0 && /[?#]/u.test(path))) return true;
+  if (allowApiRoute || (offset === 0 && /[?#]/u.test(value[path.length] ?? ''))) return true;
   const context = value.slice(0, offset + prefix.length);
   return /(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Call|Check)\s+["']?$/iu.test(context)
     || /\/(?:api|v\d+|comms|webhooks)(?:\/[^\s"'`]+)?\s+(?:and|or)\s+["']?$/iu.test(context)
@@ -63,19 +63,27 @@ function redactEmbeddedAbsoluteHostPaths(value: string, allowApiRoute: boolean):
     (_match, prefix: string) => `${prefix}[REDACTED_HOST_PATH]`,
   ).replace(
     EMBEDDED_POSIX_PATH_RE,
-    (_match, prefix: string, path: string, offset: number, source: string) => (
-      hasApplicationRouteContext(source, path, offset, prefix, allowApiRoute)
+    (_match, prefix: string, path: string, offset: number, source: string) => {
+      if (!hasApplicationRouteContext(source, path, offset, prefix, allowApiRoute)) {
+        return `${prefix}[REDACTED_HOST_PATH]`;
+      }
+      const suffixOffset = path.search(/[?#]/u);
+      return suffixOffset < 0
         ? `${prefix}${path}`
-        : `${prefix}[REDACTED_HOST_PATH]`
-    ),
+        : `${prefix}${path.slice(0, suffixOffset)}${redactEmbeddedAbsoluteHostPaths(path.slice(suffixOffset), false)}`;
+    },
   );
   return QUOTED_HOST_PATH_RES.reduce((current, pattern) => current.replace(
     pattern,
-    (_match, quote: string, path: string, offset: number, source: string) => (
-      hasApplicationRouteContext(source, path, offset, quote, allowApiRoute)
+    (_match, quote: string, path: string, offset: number, source: string) => {
+      if (!hasApplicationRouteContext(source, path, offset, quote, allowApiRoute)) {
+        return `${quote}[REDACTED_HOST_PATH]`;
+      }
+      const suffixOffset = path.search(/[?#]/u);
+      return suffixOffset < 0
         ? `${quote}${path}`
-        : `${quote}[REDACTED_HOST_PATH]`
-    ),
+        : `${quote}${path.slice(0, suffixOffset)}${redactEmbeddedAbsoluteHostPaths(path.slice(suffixOffset), false)}`;
+    },
   ), redacted);
 }
 
