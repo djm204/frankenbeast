@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -229,6 +230,18 @@ describe('smart-swarm runtime routes', () => {
     expect(durableAudit).not.toContain('adapter-secret');
     expect(durableAudit).not.toContain('/home/private/runtime-state');
     expect(durableAudit).toContain('[REDACTED');
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:redacted-audit']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    const reservation = actionStore.reserve(key, fingerprint, Date.now() + 1_000, Date.now());
+    expect(reservation.status).toBe('completed');
+    expect(JSON.stringify(reservation)).not.toContain('adapter-secret');
+    expect(JSON.stringify(reservation)).not.toContain('/home/private/runtime-state');
   });
 
   it('keeps a slow in-flight action leased beyond the replay TTL', async () => {
@@ -272,6 +285,56 @@ describe('smart-swarm runtime routes', () => {
       await expect((await retry).json()).resolves.toEqual({
         data: expect.objectContaining({ status: 'applied', replayed: true }),
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('contains transient lease renewal failures and retries the lease', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      const renew = vi.spyOn(actionStore, 'renew')
+        .mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); });
+      const { app, adapter } = createRoutes(actionStore);
+      let finish!: () => void;
+      const blocked = new Promise<void>((resolve) => { finish = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const body = JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:renew-retry',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Slow provider',
+        },
+      });
+      const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+      });
+
+      const first = request();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(renew).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(renew).toHaveBeenCalledTimes(2);
+      const retry = request();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(adapter.executeAction).toHaveBeenCalledOnce();
+
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await first).status).toBe(200);
+      expect((await retry).status).toBe(200);
     } finally {
       vi.useRealTimers();
     }

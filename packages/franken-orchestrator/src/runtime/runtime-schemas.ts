@@ -6,8 +6,10 @@ export const RuntimeMetadataSchema = z.record(z.string(), SafeMetadataValueSchem
 
 const CorrelationIdSchema = z.string().uuid();
 const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
-const RuntimeWorkspaceIdSchema = z.string().min(1).max(200);
-const RuntimeTaskIdSchema = z.string().min(1).max(200);
+const RuntimeActionWorkspaceIdSchema = z.string().min(1).max(200);
+const RuntimeActionTaskIdSchema = z.string().min(1).max(200);
+const RuntimeWorkspaceIdSchema = z.string().min(1);
+const RuntimeTaskIdSchema = z.string().min(1);
 const BoundedReasonSchema = z.string().trim().min(1).max(1000);
 const RuntimeActionTypeSchema = z.enum([
   'approval.resolve',
@@ -22,34 +24,34 @@ const RuntimeActionTypeSchema = z.enum([
 export const RuntimeActionSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('approval.resolve'),
-    workspaceId: RuntimeWorkspaceIdSchema,
+    workspaceId: RuntimeActionWorkspaceIdSchema,
     approvalId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u),
     decision: z.enum(['approve', 'reject']),
     reason: BoundedReasonSchema.optional(),
   }).strict(),
   z.object({
     type: z.literal('blocker.add'),
-    workspaceId: RuntimeWorkspaceIdSchema,
-    taskId: RuntimeTaskIdSchema,
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
     category: z.enum(['dependency', 'needs-input', 'capability', 'transient']),
     reason: BoundedReasonSchema,
   }).strict(),
   z.object({
     type: z.literal('blocker.resolve'),
-    workspaceId: RuntimeWorkspaceIdSchema,
-    taskId: RuntimeTaskIdSchema,
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
     reason: BoundedReasonSchema.optional(),
   }).strict(),
   z.object({
     type: z.enum(['task.pause', 'task.resume', 'task.cancel']),
-    workspaceId: RuntimeWorkspaceIdSchema,
-    taskId: RuntimeTaskIdSchema,
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
     reason: BoundedReasonSchema.optional(),
   }).strict(),
   z.object({
     type: z.literal('policy.apply'),
-    workspaceId: RuntimeWorkspaceIdSchema,
-    taskId: RuntimeTaskIdSchema,
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
     policy: z.literal('promote-task'),
     reason: BoundedReasonSchema,
   }).strict(),

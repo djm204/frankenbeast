@@ -566,14 +566,20 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
-    const lease = setInterval(
-      () => actionStore.renew(key, fingerprint, Date.now() + IDEMPOTENCY_TTL_MS),
-      IDEMPOTENCY_TTL_MS / 2,
-    );
+    const lease = setInterval(() => {
+      try {
+        actionStore.renew(key, fingerprint, Date.now() + IDEMPOTENCY_TTL_MS);
+      } catch {
+        // A transient store failure must not escape the timer; later ticks retry
+        // while the tracked action remains the authoritative in-process claim.
+      }
+    }, IDEMPOTENCY_TTL_MS / 2);
     lease.unref();
     const result = actionStore.track((async () => {
       try {
-        const completed = await executeAction(adapter, request);
+        const completed = RuntimeActionResultSchema.parse(redactRuntimePaths(
+          await executeAction(adapter, request),
+        ));
         actionStore.complete(key, fingerprint, completed, Date.now() + IDEMPOTENCY_TTL_MS);
         recordActionAudit(adapter.id, request, completed.audit);
         return completed;

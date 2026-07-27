@@ -127,15 +127,15 @@ describe('provider-neutral runtime contract', () => {
     })).toThrow();
   });
 
-  it('applies governed action identifier bounds to emitted snapshot identifiers', () => {
-    expect(() => RuntimeWorkspaceSchema.parse({
+  it('preserves provider-owned opaque identifiers in emitted snapshots', () => {
+    expect(RuntimeWorkspaceSchema.parse({
       id: 'w'.repeat(201),
       name: 'workspace',
       kind: 'workspace',
       state: 'available',
-    })).toThrow();
+    })).toEqual(expect.objectContaining({ id: 'w'.repeat(201) }));
 
-    expect(() => RuntimeTaskSchema.parse({
+    expect(RuntimeTaskSchema.parse({
       id: 't'.repeat(201),
       workspaceId: 'workspace',
       title: 'task',
@@ -146,7 +146,7 @@ describe('provider-neutral runtime contract', () => {
       priority: null,
       createdAt: '2026-07-26T12:00:00.000Z',
       updatedAt: null,
-    })).toThrow();
+    })).toEqual(expect.objectContaining({ id: 't'.repeat(201) }));
   });
 
   it('requires every capability to declare supported or unsupported state', async () => {
