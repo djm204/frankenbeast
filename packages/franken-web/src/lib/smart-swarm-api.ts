@@ -195,7 +195,8 @@ export class SmartSwarmApiClient {
         void connect().catch((error: unknown) => {
           if (closed) return;
           handlers.error?.(error instanceof Error ? error : new Error('Unable to reconnect smart-swarm activity.'));
-          if (!isPermanentAuthenticationError(error)) scheduleReconnect();
+          if (isPermanentAuthenticationError(error)) handlers.connection?.('unavailable');
+          else scheduleReconnect();
         });
       }, 1_000);
     };
@@ -238,7 +239,8 @@ export class SmartSwarmApiClient {
       await connect();
     } catch (error) {
       handlers.error?.(error instanceof Error ? error : new Error('Unable to connect smart-swarm activity.'));
-      if (!isPermanentAuthenticationError(error)) scheduleReconnect();
+      if (isPermanentAuthenticationError(error)) handlers.connection?.('unavailable');
+      else scheduleReconnect();
     }
     return () => {
       closed = true;
