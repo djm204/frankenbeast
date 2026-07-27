@@ -155,25 +155,32 @@ describe('smart-swarm runtime routes', () => {
         outcome: 'applied', previousState: 'ready', currentState: 'blocked',
       },
     }));
-    const body = JSON.stringify({
-      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+    const actionBody = {
       causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
       idempotencyKey: 'block:t_deadbeef:one',
       action: {
         type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
         category: 'needs-input', reason: 'token=do-not-log',
       },
-    });
-    const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
-      method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+    };
+    const request = (correlationId: string) => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({ ...actionBody, correlationId }),
     });
 
-    const [first, replay] = await Promise.all([request(), request()]);
+    const [first, replay] = await Promise.all([
+      request('018f6f2d-c734-7cc9-b1b6-112233445566'),
+      request('018f6f2d-c734-7cc9-b1b6-001122334455'),
+    ]);
 
     expect(first.status).toBe(200);
     expect(replay.status).toBe(200);
     expect(adapter.executeAction).toHaveBeenCalledOnce();
-    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({ replayed: true }) });
+    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({
+      replayed: true,
+      correlationId: '018f6f2d-c734-7cc9-b1b6-001122334455',
+    }) });
     expect(actionAudit).toHaveBeenCalledOnce();
     expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
       correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
@@ -361,28 +368,33 @@ describe('smart-swarm runtime routes', () => {
         outcome: 'applied', previousState: 'ready', currentState: 'blocked',
       },
     }));
-    const body = JSON.stringify({
-      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
-      idempotencyKey: 'block:t_deadbeef:durable',
-      action: {
-        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
-        category: 'transient', reason: 'Retry later',
-      },
-    });
-    const request = (app: ReturnType<typeof createRuntimeRoutes>) => app.request(
+    const request = (app: ReturnType<typeof createRuntimeRoutes>, correlationId: string) => app.request(
       '/v1/smart-swarm/providers/hermes/actions',
-      { method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body },
+      {
+        method: 'POST',
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId,
+          idempotencyKey: 'block:t_deadbeef:durable',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Retry later',
+          },
+        }),
+      },
     );
 
-    expect((await request(first.app)).status).toBe(200);
+    expect((await request(first.app, '018f6f2d-c734-7cc9-b1b6-112233445566')).status).toBe(200);
     firstStore.destroy();
     actionStores.splice(actionStores.indexOf(firstStore), 1);
 
     const secondStore = new RuntimeActionStore({ databasePath });
     const second = createRoutes(secondStore);
-    const replay = await request(second.app);
+    const replay = await request(second.app, '018f6f2d-c734-7cc9-b1b6-665544332211');
 
-    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({ status: 'applied', replayed: true }) });
+    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({
+      status: 'applied', replayed: true, correlationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+    }) });
     expect(second.adapter.executeAction).not.toHaveBeenCalled();
     expect(secondStore.listAuditEvents()).toEqual([
       expect.objectContaining({ correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566', outcome: 'applied' }),
@@ -449,6 +461,41 @@ describe('smart-swarm runtime routes', () => {
     await expect((await request()).json()).resolves.toEqual({
       data: expect.objectContaining({ status: 'applied', replayed: true }),
     });
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+  });
+
+  it('retains a completed idempotency result when durable audit persistence fails', async () => {
+    const actionStore = new RuntimeActionStore();
+    const recordAudit = vi.spyOn(actionStore, 'recordAudit');
+    recordAudit.mockImplementationOnce(() => {
+      throw new Error('audit database is busy');
+    });
+    const { app, adapter } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied',
+      },
+    }));
+    const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:audit-failure',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect((await request()).status).toBe(500);
+    await expect((await request()).json()).resolves.toEqual({ data: expect.objectContaining({
+      status: 'applied', replayed: true,
+    }) });
     expect(adapter.executeAction).toHaveBeenCalledOnce();
   });
 

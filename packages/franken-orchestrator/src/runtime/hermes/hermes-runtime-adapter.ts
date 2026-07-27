@@ -470,13 +470,17 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   constructor(options: HermesRuntimeAdapterOptions = {}) {
     this.home = optionalHome(options);
     this.kanbanDbPath = optionalKanbanDbPath(options);
-    this.env = { ...options.env };
+    const commandPath = options.env === undefined ? process.env['PATH'] : options.env['PATH'];
+    this.env = {
+      ...options.env,
+      ...(options.env === undefined && commandPath ? { PATH: commandPath } : {}),
+    };
     this.now = options.now ?? (() => new Date());
     this.busyTimeoutMs = options.busyTimeoutMs ?? 2000;
     const command = options.command ?? 'hermes';
     const resolvedCommand = options.runCommand
       ? undefined
-      : resolveCommandPath(command, options.env?.['PATH'] ?? process.env['PATH']);
+      : resolveCommandPath(command, commandPath);
     this.command = resolvedCommand ?? command;
     this.commandAvailable = options.runCommand !== undefined || resolvedCommand !== undefined;
     this.runCommand = options.runCommand ?? defaultCommandRunner;

@@ -472,7 +472,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         audit: actionAudit(request.action, 'failed'),
       });
     }
-    recordActionAudit(adapter.id, request, result.audit);
     return result;
   };
 
@@ -554,7 +553,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       throw new HttpError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'Idempotency key was already used for a different action');
     }
     if (reservation.status === 'completed') {
-      const result = reservation.result;
+      const result = { ...reservation.result, correlationId: request.correlationId };
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
@@ -563,7 +562,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       if (!pending) {
         throw new HttpError(409, 'IDEMPOTENCY_KEY_IN_PROGRESS', 'Idempotent runtime action is still in progress');
       }
-      const result = await pending;
+      const result = { ...(await pending), correlationId: request.correlationId };
       const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
       return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
     }
@@ -576,6 +575,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       try {
         const completed = await executeAction(adapter, request);
         actionStore.complete(key, fingerprint, completed, Date.now() + IDEMPOTENCY_TTL_MS);
+        recordActionAudit(adapter.id, request, completed.audit);
         return completed;
       } finally {
         clearInterval(lease);

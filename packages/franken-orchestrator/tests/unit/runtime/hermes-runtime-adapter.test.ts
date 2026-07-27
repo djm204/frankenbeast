@@ -381,6 +381,40 @@ if (args.includes('show')) {
     }
   });
 
+  it('preserves the discovery PATH for env-based Hermes launchers', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const binDir = join(home, 'bin');
+    const statePath = join(home, 'command-state');
+    await mkdir(binDir);
+    await symlink(process.execPath, join(binDir, 'custom-node'));
+    await writeFile(join(binDir, 'fake-hermes'), `#!/usr/bin/env custom-node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args.includes('block')) fs.writeFileSync(${JSON.stringify(statePath)}, 'blocked');
+if (args.includes('show')) {
+  const status = fs.existsSync(${JSON.stringify(statePath)}) ? fs.readFileSync(${JSON.stringify(statePath)}, 'utf8') : 'ready';
+  process.stdout.write(JSON.stringify({ task: { status } }));
+}
+`, { mode: 0o755 });
+    const previousPath = process.env['PATH'];
+    process.env['PATH'] = binDir;
+    try {
+      const adapter = new HermesRuntimeAdapter({ hermesHome: home, command: 'fake-hermes' });
+      await expect(adapter.executeAction(RuntimeActionRequestSchema.parse({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:env-launcher',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }))).resolves.toEqual(expect.objectContaining({ status: 'applied' }));
+    } finally {
+      if (previousPath === undefined) delete process.env['PATH'];
+      else process.env['PATH'] = previousPath;
+    }
+  });
+
   it('resolves blockers through Hermes unblock and verifies the task is no longer blocked', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
