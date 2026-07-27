@@ -195,6 +195,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const currentWorkspaceId = useRef(workspaceId);
   currentWorkspaceId.current = workspaceId;
   const taskDetailTrigger = useRef<HTMLButtonElement | null>(null);
+  const actionIdempotencyKeys = useRef(new Map<string, string>());
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const error = snapshotError ?? providerError ?? workspaceCatalogError ?? streamError;
@@ -636,6 +637,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
       {selectedTask && provider ? (
         <TaskDetail
+          actionIdempotencyKeys={actionIdempotencyKeys.current}
           client={client}
           onActionApplied={() => setRefreshNonce((current) => current + 1)}
           onClose={() => setSelectedTaskId(null)}
@@ -652,17 +654,17 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   );
 }
 
-function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied, onClose }: {
+function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempotencyKeys, onActionApplied, onClose }: {
   task: RuntimeTask;
   provider: RuntimeProvider;
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
   client: SmartSwarmApiClient;
   returnFocus: HTMLButtonElement | null;
+  actionIdempotencyKeys: Map<string, string>;
   onActionApplied(): void;
   onClose(): void;
 }) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
-  const actionIdempotencyKeys = useRef(new Map<string, string>());
   const [actionPending, setActionPending] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   useEffect(() => {
@@ -703,15 +705,16 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
             taskId: task.id,
             reason,
           };
-      const idempotencyKey = actionIdempotencyKeys.current.get(action)
+      const actionIntentKey = `${provider.id}:${task.id}:${action}`;
+      const idempotencyKey = actionIdempotencyKeys.get(actionIntentKey)
         ?? `${action}:${crypto.randomUUID()}`;
-      actionIdempotencyKeys.current.set(action, idempotencyKey);
+      actionIdempotencyKeys.set(actionIntentKey, idempotencyKey);
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
         idempotencyKey,
         action: runtimeAction,
       });
-      actionIdempotencyKeys.current.delete(action);
+      actionIdempotencyKeys.delete(actionIntentKey);
       if (result.status === 'applied') {
         setActionStatus(successMessage);
         onActionApplied();
@@ -810,7 +813,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
         >Resume task</button>
         {resumeReason ? <p>{resumeReason}</p> : null}
         <button
-          disabled={actionPending || cancelReason !== null || task.state === 'succeeded' || task.state === 'failed' || task.state === 'cancelled'}
+          disabled={actionPending || cancelReason !== null || task.state === 'succeeded' || task.state === 'failed' || task.state === 'cancelled' || task.state === 'archived'}
           onClick={() => {
             void executeTaskAction(
               'task.cancel',

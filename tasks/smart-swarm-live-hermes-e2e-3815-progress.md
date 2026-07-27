@@ -17,5 +17,6 @@
 - [x] Commit with David Mendez identity, push, and open one issue-scoped PR (#3869).
 - [x] Remediate first-round Codex findings with RED→GREEN tests, isolated Vite credentials, truthful refresh-pending copy, and terminal-state action guards.
 - [x] Remediate second-round Codex findings with RED→GREEN tests for uncertain-action idempotency, pending-action focus trapping, and ready-task promotion guards.
+- [x] Remediate third-round Codex findings with RED→GREEN tests for remount-safe uncertain-action idempotency and archived-task cancellation guards.
 - [ ] Run real `@codex review` to exact-head clean, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Record machine-readable root-blackboard and card handoff.

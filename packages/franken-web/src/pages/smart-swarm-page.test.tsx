@@ -234,14 +234,17 @@ describe('SmartSwarmPage', () => {
 
     fireEvent.click(resolveBlocker);
     await screen.findByText('network response lost');
-    fireEvent.click(resolveBlocker);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    const retriedResolveBlocker = screen.getByRole('button', { name: 'Resolve blocker' });
+    fireEvent.click(retriedResolveBlocker);
     await screen.findByText('Blocker resolved; refreshing live state.');
 
     const firstKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
     const retryKey = executeAction.mock.calls[1]?.[1].idempotencyKey;
     expect(retryKey).toBe(firstKey);
 
-    fireEvent.click(resolveBlocker);
+    fireEvent.click(retriedResolveBlocker);
     await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(3));
     expect(executeAction.mock.calls[2]?.[1].idempotencyKey).not.toBe(retryKey);
   });
@@ -308,6 +311,7 @@ describe('SmartSwarmPage', () => {
     ['queued', 'Resume task'],
     ['ready', 'Promote task'],
     ['archived', 'Promote task'],
+    ['archived', 'Cancel task'],
   ] as const)('keeps %s tasks out of unsafe %s actions', async (state, buttonName) => {
     render(<SmartSwarmPage client={createClient({
       fetchSnapshot: vi.fn().mockResolvedValue({
@@ -323,6 +327,7 @@ describe('SmartSwarmPage', () => {
         ...provider,
         capabilities: {
           ...provider.capabilities,
+          cancellation: { status: 'supported' },
           resume: { status: 'supported' },
           policyActions: { status: 'supported' },
         },
