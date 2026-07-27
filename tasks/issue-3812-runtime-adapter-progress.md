@@ -156,7 +156,7 @@
 - [x] Inspect the four current-head Codex findings on `4804feb758b13841eeea52c255d14b74bf145a7f` and reproduce the three behavior findings with failing regression tests.
 - [x] Bound repeated periodic polling failures, preserve bracketed-host URL paths, bound replay-safe SSE cursor IDs, and reconcile stale progress-ledger items.
 - [x] Run focused/package/root verification.
-- [ ] Commit/push and reply to and resolve all four threads.
+- [x] Commit/push implementation commit `94b9c9394`; reply to and resolve all four threads.
 - [ ] Obtain fresh exact-head green CI and Codex clean with zero unresolved paginated threads within the authorized tier-50 cap; do not merge.
 
 ## Verification notes
