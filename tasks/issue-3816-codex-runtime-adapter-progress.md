@@ -22,5 +22,6 @@
 - [x] Obtain explicit tier escalation approval and trigger the sixth `@codex review` within the approved tier-12 cap.
 - [x] Remediate sixth-round Codex findings 3653882359, 3653882360, 3653882361, and 3653882368 under RED→GREEN; Codex adapter 30/30 and shared conformance 6/6 pass.
 - [x] Remediate seventh-round Codex finding 3653950577 fail-closed under RED→GREEN; Codex adapter 31/31 and shared conformance 6/6 pass.
+- [x] Remediate eighth-round Codex findings 3653993487, 3653993494, 3653993497, and 3653993499 under RED→GREEN; Codex adapter 35/35 and shared conformance 6/6 pass.
 - [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads; do not merge.
 - [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.
