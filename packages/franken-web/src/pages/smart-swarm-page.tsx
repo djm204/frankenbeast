@@ -662,6 +662,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
   onClose(): void;
 }) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
+  const actionIdempotencyKeys = useRef(new Map<string, string>());
   const [actionPending, setActionPending] = useState(false);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   useEffect(() => {
@@ -676,8 +677,8 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
   const cancelReason = capabilityReason(provider.capabilities.cancellation);
   const policyReason = capabilityReason(provider.capabilities.policyActions);
   const blockerReason = capabilityReason(provider.capabilities.blockers);
-  const policyStateReason = ['succeeded', 'failed', 'cancelled', 'archived'].includes(task.state)
-    ? 'Terminal and archived tasks cannot be promoted.'
+  const policyStateReason = ['ready', 'succeeded', 'failed', 'cancelled', 'archived'].includes(task.state)
+    ? 'Ready, terminal, and archived tasks cannot be promoted.'
     : null;
 
   async function executeTaskAction(
@@ -702,11 +703,15 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
             taskId: task.id,
             reason,
           };
+      const idempotencyKey = actionIdempotencyKeys.current.get(action)
+        ?? `${action}:${crypto.randomUUID()}`;
+      actionIdempotencyKeys.current.set(action, idempotencyKey);
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
-        idempotencyKey: `${action}:${crypto.randomUUID()}`,
+        idempotencyKey,
         action: runtimeAction,
       });
+      actionIdempotencyKeys.current.delete(action);
       if (result.status === 'applied') {
         setActionStatus(successMessage);
         onActionApplied();
@@ -732,7 +737,10 @@ function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied
           const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
           const first = focusable[0];
           const last = focusable.at(-1);
-          if (event.shiftKey && document.activeElement === first) {
+          if (!focusable.some((element) => element === document.activeElement)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first)?.focus();
+          } else if (event.shiftKey && document.activeElement === first) {
             event.preventDefault();
             last?.focus();
           } else if (!event.shiftKey && document.activeElement === last) {

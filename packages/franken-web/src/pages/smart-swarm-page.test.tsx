@@ -149,6 +149,35 @@ describe('SmartSwarmPage', () => {
     await waitFor(() => expect(document.activeElement).toBe(inspect));
   });
 
+  it('keeps focus trapped when a pending action disables the focused control', async () => {
+    let finishAction: (() => void) | undefined;
+    const executeAction = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      finishAction = () => resolve({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    }));
+    render(<SmartSwarmPage client={createClient({ executeAction })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    const resolveBlocker = screen.getByRole('button', { name: 'Resolve blocker' });
+    resolveBlocker.focus();
+
+    fireEvent.click(resolveBlocker);
+    expect(resolveBlocker).toHaveProperty('disabled', true);
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Tab' });
+
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }));
+    await act(async () => finishAction?.());
+  });
+
   it('resolves a supported blocker through the runtime API and refreshes the live postcondition', async () => {
     const executeAction = vi.fn().mockResolvedValue({
       status: 'applied',
@@ -184,6 +213,39 @@ describe('SmartSwarmPage', () => {
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
   });
 
+  it('reuses an action idempotency key after an uncertain response and rotates it after a definitive result', async () => {
+    const executeAction = vi.fn()
+      .mockRejectedValueOnce(new TypeError('network response lost'))
+      .mockResolvedValue({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    render(<SmartSwarmPage client={createClient({ executeAction })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    const resolveBlocker = screen.getByRole('button', { name: 'Resolve blocker' });
+
+    fireEvent.click(resolveBlocker);
+    await screen.findByText('network response lost');
+    fireEvent.click(resolveBlocker);
+    await screen.findByText('Blocker resolved; refreshing live state.');
+
+    const firstKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
+    const retryKey = executeAction.mock.calls[1]?.[1].idempotencyKey;
+    expect(retryKey).toBe(firstKey);
+
+    fireEvent.click(resolveBlocker);
+    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(3));
+    expect(executeAction.mock.calls[2]?.[1].idempotencyKey).not.toBe(retryKey);
+  });
+
   it('submits a governed promotion and reports a typed rejection without claiming state changed', async () => {
     const executeAction = vi.fn().mockResolvedValue({
       status: 'rejected',
@@ -204,7 +266,7 @@ describe('SmartSwarmPage', () => {
         tasks: {
           status: 'available',
           data: snapshot.tasks.status === 'available'
-            ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'ready' as const } : task)
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'blocked' as const } : task)
             : [],
         },
         blockers: { status: 'available', data: [] },
@@ -224,7 +286,7 @@ describe('SmartSwarmPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
 
     const pause = screen.getByRole('button', { name: 'Pause task' });
-    expect(pause).toHaveProperty('disabled', false);
+    expect(pause).toHaveProperty('disabled', true);
     expect(screen.getByRole('button', { name: 'Resume task' })).toHaveProperty('disabled', true);
     const cancel = screen.getByRole('button', { name: 'Cancel task' });
     expect(cancel).toHaveProperty('disabled', false);
@@ -244,6 +306,7 @@ describe('SmartSwarmPage', () => {
 
   it.each([
     ['queued', 'Resume task'],
+    ['ready', 'Promote task'],
     ['archived', 'Promote task'],
   ] as const)('keeps %s tasks out of unsafe %s actions', async (state, buttonName) => {
     render(<SmartSwarmPage client={createClient({

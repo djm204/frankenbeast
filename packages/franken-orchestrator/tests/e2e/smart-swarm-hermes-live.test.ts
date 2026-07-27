@@ -239,14 +239,15 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       await expectBrowser(page.getByText('Live · connected')).toBeVisible({ timeout: 20_000 });
 
       await page.getByRole('button', { name: new RegExp(`Inspect ${marker} Worker`) }).click();
-      await page.getByRole('button', { name: 'Resolve blocker' }).click();
-      await expectBrowser(page.getByText('Blocker resolved; refreshing live state.')).toBeVisible({ timeout: 15_000 });
-      await expect.poll(async () => (await readTask(hermesHome, worker.id)).status).toBe('ready');
-
       await expectBrowser(page.getByRole('button', { name: 'Promote task' })).toBeEnabled();
       await page.getByRole('button', { name: 'Promote task' }).click();
       await expectBrowser(page.getByText('rejected: Runtime action was not approved by the governor')).toBeVisible();
-      expect((await readTask(hermesHome, worker.id)).status).toBe('ready');
+      expect((await readTask(hermesHome, worker.id)).status).toBe('blocked');
+
+      await page.getByRole('button', { name: 'Resolve blocker' }).click();
+      await expectBrowser(page.getByText('Blocker resolved; refreshing live state.')).toBeVisible({ timeout: 15_000 });
+      await expect.poll(async () => (await readTask(hermesHome, worker.id)).status).toBe('ready');
+      await expectBrowser(page.getByRole('button', { name: 'Promote task' })).toBeDisabled();
 
       const approvalResult = await page.evaluate(async ({ workerId }) => {
         const response = await fetch('/v1/smart-swarm/providers/hermes/actions', {
