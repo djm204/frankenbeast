@@ -261,10 +261,10 @@ describe('smart-swarm runtime routes', () => {
     }));
   });
 
-  it('keeps idempotency keys distinct across ambiguous provider and key components', async () => {
+  it('keeps idempotency keys scoped to distinct route-safe providers', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
-    const adapters = ['a:b', 'a'].map((id) => {
+    const adapters = ['a-b', 'a'].map((id) => {
       const base = runtimeAdapter();
       const adapter: RuntimeAdapter = {
         ...base,
@@ -300,8 +300,8 @@ describe('smart-swarm runtime routes', () => {
       },
     );
 
-    expect((await request('a:b', 'c', '018f6f2d-c734-7cc9-b1b6-112233445566')).status).toBe(200);
-    expect((await request('a', 'b:c', '018f6f2d-c734-7cc9-b1b6-665544332211')).status).toBe(200);
+    expect((await request('a-b', 'shared:key', '018f6f2d-c734-7cc9-b1b6-112233445566')).status).toBe(200);
+    expect((await request('a', 'shared:key', '018f6f2d-c734-7cc9-b1b6-665544332211')).status).toBe(200);
     expect(adapters[0]!.executeAction).toHaveBeenCalledOnce();
     expect(adapters[1]!.executeAction).toHaveBeenCalledOnce();
   });
