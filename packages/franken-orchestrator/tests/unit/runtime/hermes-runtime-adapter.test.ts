@@ -483,8 +483,8 @@ describe('HermesRuntimeAdapter', () => {
     };
 
     expect(degradedCursor.p.map(([workspaceId]) => workspaceId)).toEqual([
-      'hermes:alpha',
-      'hermes:global',
+      '~alpha',
+      '~global',
     ]);
 
     await rm(alphaPath);
@@ -680,7 +680,7 @@ describe('HermesRuntimeAdapter', () => {
     };
 
     expect(compacted.events).toEqual([]);
-    expect(compactedCursor.p.map(([workspaceId]) => workspaceId)).toEqual(['hermes:global']);
+    expect(compactedCursor.p.map(([workspaceId]) => workspaceId)).toEqual(['~global']);
 
     const db = new Database(globalPath);
     db.prepare('INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)').run(
@@ -693,10 +693,10 @@ describe('HermesRuntimeAdapter', () => {
     };
 
     expect(replay.events).toHaveLength(1);
-    expect(decoded.p.map(([workspaceId]) => workspaceId)).toEqual(['hermes:global']);
+    expect(decoded.p.map(([workspaceId]) => workspaceId)).toEqual(['~global']);
   });
 
-  it('keeps multi-workspace replay cursors below the default HTTP header limit', async () => {
+  it('keeps multi-workspace replay cursors within the SSE transport limit', async () => {
     const home = await createHome();
     for (let index = 0; index < 75; index += 1) {
       const boardDir = join(home, 'kanban', 'boards', `workspace-${String(index).padStart(3, '0')}`);
@@ -707,7 +707,31 @@ describe('HermesRuntimeAdapter', () => {
     const page = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 });
 
     expect(page.nextCursor).not.toBeNull();
-    expect(page.nextCursor!.length).toBeLessThan(16 * 1024);
+    expect(page.nextCursor!.length).toBeLessThanOrEqual(4 * 1024);
+  });
+
+  it('reuses source inspection during rapid polling with the same request signal', async () => {
+    vi.useFakeTimers();
+    try {
+      const home = await createHome();
+      createCurrentKanban(join(home, 'kanban.db'));
+      const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+      const signal = new AbortController().signal;
+
+      await adapter.getEvents({ signal });
+      const boardDir = join(home, 'kanban', 'boards', 'alpha');
+      await mkdir(boardDir, { recursive: true });
+      createCurrentKanban(join(boardDir, 'kanban.db'));
+
+      const cached = await adapter.getEvents({ signal });
+      expect(cached.events.some((event) => event.workspaceId === 'hermes:alpha')).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_001);
+      const refreshed = await adapter.getEvents({ signal });
+      expect(refreshed.events.some((event) => event.workspaceId === 'hermes:alpha')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects workspace sets that cannot fit in a bounded replay cursor', async () => {

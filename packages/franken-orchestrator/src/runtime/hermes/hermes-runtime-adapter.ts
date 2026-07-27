@@ -73,9 +73,10 @@ const REQUIRED_SCHEMA: Record<string, string[]> = {
 };
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
-const MAX_CURSOR_CHARS = 12 * 1024;
+const MAX_CURSOR_CHARS = 4 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
+const SOURCE_INSPECTION_CACHE_TTL_MS = 1_000;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
 const QUOTED_POSIX_PATH_RES = [
@@ -263,6 +264,14 @@ function cursorFor(value: CursorValue): string {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
 }
 
+function compactWorkspaceId(workspaceId: string): string {
+  return workspaceId.startsWith('hermes:') ? `~${workspaceId.slice('hermes:'.length)}` : workspaceId;
+}
+
+function expandWorkspaceId(workspaceId: string): string {
+  return workspaceId.startsWith('~') ? `hermes:${workspaceId.slice(1)}` : workspaceId;
+}
+
 function parseCursor(value: string | undefined): CursorValue | undefined {
   if (!value) return undefined;
   try {
@@ -295,11 +304,22 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
       const positions = new Map<string, CursorPosition>();
       for (const entry of decoded.p) {
         if (!Array.isArray(entry) || entry.length < 4 || entry.length > 6) throw new Error('invalid');
-        const [workspaceId, occurredAt, sourceCode, sourceId, missingPolls = 0, cursorWorkspaceId] = entry as unknown[];
+        const [encodedWorkspaceId, occurredAtValue, sourceCode, sourceId, missingPolls = 0, encodedCursorWorkspaceId] = entry as unknown[];
         const source = sourceCode === 0 ? 'event' : sourceCode === 1 ? 'comment' : undefined;
+        const workspaceId = typeof encodedWorkspaceId === 'string' ? expandWorkspaceId(encodedWorkspaceId) : undefined;
+        const cursorWorkspaceId = typeof encodedCursorWorkspaceId === 'string'
+          ? expandWorkspaceId(encodedCursorWorkspaceId)
+          : encodedCursorWorkspaceId;
+        const occurredAt = typeof occurredAtValue === 'number'
+          && Number.isSafeInteger(occurredAtValue)
+          && occurredAtValue >= 0
+          ? new Date(occurredAtValue).toISOString()
+          : occurredAtValue;
         if (
-          typeof workspaceId !== 'string'
-          || workspaceId.length < 1
+          typeof encodedWorkspaceId !== 'string'
+          || encodedWorkspaceId.length < 1
+          || encodedWorkspaceId === '~'
+          || workspaceId === undefined
           || typeof occurredAt !== 'string'
           || Number.isNaN(Date.parse(occurredAt))
           || new Date(Date.parse(occurredAt)).toISOString() !== occurredAt
@@ -343,12 +363,12 @@ function parseRequestCursor(value: string | undefined): RequestCursorState {
 function cursorForPositions(positions: Map<string, CursorPosition>): string {
   const cursor = Buffer.from(JSON.stringify({
     p: [...positions].map(([workspaceId, cursor]) => [
-      workspaceId,
-      cursor.occurredAt,
+      compactWorkspaceId(workspaceId),
+      Date.parse(cursor.occurredAt),
       cursor.source === 'event' ? 0 : 1,
       cursor.sourceId,
       ...(cursor.workspaceId !== workspaceId
-        ? [cursor.missingPolls ?? 0, cursor.workspaceId]
+        ? [cursor.missingPolls ?? 0, compactWorkspaceId(cursor.workspaceId)]
         : cursor.missingPolls ? [cursor.missingPolls] : []),
     ]),
   })).toString('base64url');
@@ -377,6 +397,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   private readonly kanbanDbPath: string | undefined;
   private readonly now: () => Date;
   private readonly busyTimeoutMs: number;
+  private readonly sourceInspectionCache = new Map<string, {
+    expiresAt: number;
+    inspection: Promise<SourceInspection>;
+  }>();
 
   constructor(options: HermesRuntimeAdapterOptions = {}) {
     this.home = optionalHome(options);
@@ -732,6 +756,27 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   private async inspectSources(signal?: AbortSignal, workspaceId?: string): Promise<SourceInspection> {
+    throwIfAborted(signal);
+    if (!signal) return this.inspectSourcesFresh(undefined, workspaceId);
+    const cacheKey = workspaceId ?? '*';
+    const now = Date.now();
+    let cached = this.sourceInspectionCache.get(cacheKey);
+    if (!cached || cached.expiresAt <= now) {
+      cached = {
+        expiresAt: now + SOURCE_INSPECTION_CACHE_TTL_MS,
+        inspection: this.inspectSourcesFresh(undefined, workspaceId),
+      };
+      this.sourceInspectionCache.set(cacheKey, cached);
+      void cached.inspection.catch(() => {
+        if (this.sourceInspectionCache.get(cacheKey) === cached) this.sourceInspectionCache.delete(cacheKey);
+      });
+    }
+    const inspection = await cached.inspection;
+    throwIfAborted(signal);
+    return inspection;
+  }
+
+  private async inspectSourcesFresh(signal?: AbortSignal, workspaceId?: string): Promise<SourceInspection> {
     const discovery = await this.discoverSources(signal, workspaceId);
     const sources: InspectedSource[] = [];
     const selectedSources = workspaceId === undefined

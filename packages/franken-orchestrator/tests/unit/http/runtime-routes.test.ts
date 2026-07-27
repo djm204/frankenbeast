@@ -856,6 +856,38 @@ describe('smart-swarm runtime routes', () => {
     }
   });
 
+  it('counts one stalled periodic request as one failure when it rejects', async () => {
+    vi.useFakeTimers();
+    try {
+      const adapter = runtimeAdapter();
+      let rejectPoll!: (error: Error) => void;
+      vi.mocked(adapter.getEvents)
+        .mockResolvedValueOnce(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }))
+        .mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPoll = reject; }));
+      let abortStream: (() => void) | undefined;
+      const stream = {
+        pipe: vi.fn().mockResolvedValue(undefined),
+        onAbort: vi.fn((callback: () => void) => { abortStream = callback; }),
+      };
+      let settled = false;
+      const streamDone = runRuntimeEventStream(adapter, stream as never, {
+        heartbeatIntervalMs: 1_000,
+        pollIntervalMs: 20,
+      }).finally(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(60);
+      expect(adapter.getEvents).toHaveBeenCalledTimes(2);
+      rejectPoll(new Error('one slow failure'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(settled).toBe(false);
+      abortStream!();
+      await streamDone;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ends the stream after repeated periodic runtime poll failures', async () => {
     vi.useFakeTimers();
     try {

@@ -279,6 +279,7 @@ export async function runRuntimeEventStream(
       return;
     }
     poll = setInterval(() => {
+      if (activePublish) return;
       void publish().then(
         () => { consecutivePollFailures = 0; },
         () => {
