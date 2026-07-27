@@ -241,6 +241,7 @@ interface CodexCursor {
 
 function parseCursor(value: string | undefined): CodexCursor | null {
   if (!value) return null;
+  if (Buffer.byteLength(value) > MAX_EVENT_CURSOR_BYTES) throw new RuntimeCursorError();
   try {
     const serialized = value.startsWith('z.')
       ? inflateRawSync(Buffer.from(value.slice(2), 'base64url'), {
@@ -384,9 +385,11 @@ function eventForDisappearedThread(
   boundaryThreads: Record<string, CodexBoundaryThread>,
   watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
   scopeWorkspaceId?: string,
+  transitionSequence?: number,
 ): RuntimeEvent {
   return {
-    id: `codex:thread:${thread.threadId}:disappeared`,
+    id: `codex:thread:${thread.threadId}:disappeared`
+      + (transitionSequence ? `:transition-${transitionSequence}` : ''),
     cursor: eventCursor('disappeared', boundaryThreads, watermark, scopeWorkspaceId),
     workspaceId: thread.workspaceId,
     taskId: null,
@@ -426,7 +429,10 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
     const threads: CodexThread[] = [];
     let rejected = 0;
     let cursor: string | null = null;
+    const deadline = Date.now() + this.requestTimeoutMs;
     for (let pageNumber = 0; pageNumber < MAX_THREAD_PAGES; pageNumber += 1) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw new Error('Codex thread metadata scan timed out');
       const response = await this.request('thread/list', {
         limit: Math.min(options.pageSize, MAX_THREAD_PAGE_SIZE),
         sortKey: 'updated_at',
@@ -435,7 +441,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
         useStateDbOnly: true,
         ...(options.archived !== undefined ? { archived: options.archived } : {}),
         ...(cursor ? { cursor } : {}),
-      }, { signal: options.signal, timeoutMs: this.requestTimeoutMs });
+      }, { signal: options.signal, timeoutMs: remainingMs });
       const page = parseThreadList(response);
       threads.push(...page.threads.map((thread) => (
         options.archived ? { ...thread, archived: true } : thread
@@ -755,22 +761,24 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           transitionSequence,
         );
       } else {
+        const transitionSequence = entry.thread.transitionSequence + 1;
         rememberThread(emittedThreads, {
           ...entry.thread,
           status: 'disappeared',
-          transitionSequence: entry.thread.transitionSequence + 1,
+          transitionSequence,
         });
+        if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
+          watermark = entry.cursor;
+        }
+        return eventForDisappearedThread(
+          entry.thread,
+          entry.cursor.occurredAt,
+          emittedThreads,
+          watermark,
+          request.workspaceId,
+          transitionSequence,
+        );
       }
-      if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
-        watermark = entry.cursor;
-      }
-      return eventForDisappearedThread(
-        entry.thread,
-        entry.cursor.occurredAt,
-        emittedThreads,
-        watermark,
-        request.workspaceId,
-      );
     });
     return RuntimeEventPageSchema.parse({
       events,

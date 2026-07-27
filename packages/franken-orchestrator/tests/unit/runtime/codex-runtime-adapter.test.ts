@@ -777,12 +777,12 @@ input.on('line', (line) => {
       `thread-${String(index).padStart(3, '0')}`,
       'idle',
     ]));
-    const cursor = Buffer.from(JSON.stringify({
+    const cursor = `z.${deflateRawSync(Buffer.from(JSON.stringify({
       occurredAt: '1970-01-01T00:03:20.000Z',
       threadId: 'thread-499',
       status: 'idle',
       boundaryStatuses,
-    })).toString('base64url');
+    }))).toString('base64url')}`;
     const adapter = new CodexRuntimeAdapter({
       request: async () => ({
         data: [{
@@ -902,6 +902,20 @@ input.on('line', (line) => {
     }));
   });
 
+  it('rejects encoded cursors larger than the SSE transport limit', () => {
+    const cursor = Buffer.from(JSON.stringify({
+      occurredAt: '1970-01-01T00:03:20.000Z',
+      threadId: 'thread-1',
+      padding: 'x'.repeat(4_096),
+    })).toString('base64url');
+    const adapter = new CodexRuntimeAdapter({ request: async () => ({ data: [] }) });
+
+    expect(Buffer.byteLength(cursor)).toBeGreaterThan(4_096);
+    expect(() => adapter.validateEventCursor?.(cursor)).toThrow(expect.objectContaining({
+      code: 'INVALID_CURSOR',
+    }));
+  });
+
   it('emits a terminal lifecycle event for archived threads', async () => {
     const request = vi.fn(async (_method: string, params: Record<string, unknown>) => ({
       data: params['archived'] === true
@@ -950,7 +964,7 @@ input.on('line', (line) => {
 
     expect(second.events).toEqual([
       expect.objectContaining({
-        id: 'codex:thread:removed-thread:disappeared',
+        id: 'codex:thread:removed-thread:disappeared:transition-1',
         workspaceId: first.events[0]!.workspaceId,
         summary: 'Codex thread disappeared',
         metadata: { agentId: 'codex:thread:removed-thread' },
@@ -984,6 +998,34 @@ input.on('line', (line) => {
         summary: 'Codex thread is idle',
       }),
     ]);
+  });
+
+  it('assigns a unique event id when a reappeared thread disappears again', async () => {
+    let visible = true;
+    const adapter = new CodexRuntimeAdapter({
+      now: () => new Date('2026-07-27T01:15:00.000Z'),
+      request: async () => ({
+        data: visible ? [{
+          id: 'transient-thread', sessionId: 'session-transient', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+        }] : [],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 10 });
+    visible = false;
+    const firstDisappearance = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    visible = true;
+    const reappearance = await adapter.getEvents({ cursor: firstDisappearance.nextCursor!, limit: 10 });
+    visible = false;
+    const secondDisappearance = await adapter.getEvents({ cursor: reappearance.nextCursor!, limit: 10 });
+
+    expect(firstDisappearance.events[0]!.id).not.toBe(secondDisappearance.events[0]!.id);
+    expect(secondDisappearance.events[0]!.id).toBe(
+      'codex:thread:transient-thread:disappeared:transition-3',
+    );
   });
 
   it('does not reconfirm a retained disappearance tombstone', async () => {
@@ -1176,6 +1218,35 @@ input.on('line', (line) => {
     expect(request).toHaveBeenNthCalledWith(2, 'thread/list', expect.objectContaining({
       cursor: 'page-2',
     }), expect.any(Object));
+  });
+
+  it('uses one timeout deadline across each paginated metadata scan', async () => {
+    let currentTime = 1_000;
+    const dateNow = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
+    const activeTimeouts: number[] = [];
+    const thread = (id: string) => ({
+      id, sessionId: `session-${id}`, cliVersion: '0.145.0',
+      createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+      ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+    });
+    const adapter = new CodexRuntimeAdapter({
+      requestTimeoutMs: 1_000,
+      request: async (_method, params, options) => {
+        if (params['archived'] !== true) activeTimeouts.push(options.timeoutMs);
+        currentTime += 400;
+        if (params['archived'] === true) return { data: [], nextCursor: null };
+        return params['cursor'] === 'page-2'
+          ? { data: [thread('second')], nextCursor: null }
+          : { data: [thread('first')], nextCursor: 'page-2' };
+      },
+    });
+
+    try {
+      await adapter.getEvents({ limit: 10 });
+      expect(activeTimeouts.slice(0, 2)).toEqual([1_000, 600]);
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it('paginates initial event reads before applying a workspace filter', async () => {
