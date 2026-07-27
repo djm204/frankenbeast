@@ -45,6 +45,9 @@ import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analyti
 import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { DEFAULT_TRACKED_AGENT_PAGE_LIMIT } from '../beasts/repository/sqlite-beast-repository.js';
+import { createDefaultRuntimeAdapterRegistry } from '../runtime/runtime-defaults.js';
+import type { RuntimeAdapterRegistry } from '../runtime/runtime-adapter-registry.js';
+import { createRuntimeRoutes } from './routes/runtime-routes.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -87,6 +90,10 @@ export interface ChatAppOptions {
   analyticsDeps?: AnalyticsRouteDeps;
   /** Optional owner-managed ticket store for browser EventSource chat streams. */
   chatStreamTicketStore?: SseConnectionTicketStore;
+  /** Provider-neutral smart-swarm runtime adapters. Hermes is registered by default. */
+  runtimeRegistry?: RuntimeAdapterRegistry;
+  /** Explicit Hermes home for the default runtime adapter; HERMES_HOME is used otherwise. */
+  hermesHome?: string;
   /** Rate/concurrency guard shared by chat REST, websocket, and comms mutations. */
   chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
@@ -170,6 +177,9 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
   const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
+  const runtimeRegistry = opts.runtimeRegistry ?? createDefaultRuntimeAdapterRegistry({
+    ...(opts.hermesHome ? { hermesHome: opts.hermesHome } : {}),
+  });
   const chatRateLimiter = opts.chatRateLimiter
     ?? createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   const chatMutationAdmission = opts.chatMutationAdmission ?? new ChatMutationAdmission(chatRateLimiter);
@@ -384,6 +394,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
   if (opts.analyticsDeps) {
     app.route('/api/analytics', createAnalyticsRoutes(opts.analyticsDeps));
+  }
+  if (effectiveOperatorToken && chatStreamTicketStore) {
+    app.route('/', createRuntimeRoutes({
+      registry: runtimeRegistry,
+      operatorToken: effectiveOperatorToken,
+      security: operatorSecurity,
+      ticketStore: chatStreamTicketStore,
+      ...(opts.beastControl?.rateLimit ? { rateLimit: opts.beastControl.rateLimit } : {}),
+    }));
   }
 
   return app;

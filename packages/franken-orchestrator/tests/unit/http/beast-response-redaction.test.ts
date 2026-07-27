@@ -16,6 +16,155 @@ describe('Beast response redaction', () => {
     });
   });
 
+  it('preserves slash commands and API routes while redacting embedded filesystem paths', () => {
+    expect(redactAbsoluteHostPathValues(
+      'Sent /plan --design-doc through GET /v1/smart-swarm after reading /home/alice/private-repo/config.json',
+    )).toBe(
+      'Sent /plan --design-doc through GET /v1/smart-swarm after reading [REDACTED_HOST_PATH]',
+    );
+    expect(redactAbsoluteHostPathValues(
+      'Read /home/alice/private-repo/config.json before GET /v1/smart-swarm',
+    )).toBe(
+      'Read [REDACTED_HOST_PATH] before GET /v1/smart-swarm',
+    );
+  });
+
+  it('preserves standalone slash commands and explicit API route fields', () => {
+    expect(redactAbsoluteHostPathValues('/plan')).toBe('/plan');
+    expect(redactAbsoluteHostPathValues('/v1/users')).toBe('[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues({ route: '/v1/users' })).toEqual({ route: '/v1/users' });
+  });
+
+  it('preserves a leading slash command with arguments', () => {
+    expect(redactAbsoluteHostPathValues('/plan --design-doc')).toBe('/plan --design-doc');
+  });
+
+  it('redacts host paths embedded after a leading application route', () => {
+    expect(redactAbsoluteHostPathValues('/api/tasks?root=/home/alice/project'))
+      .toBe('/api/tasks?root=[REDACTED_HOST_PATH]');
+  });
+
+  it('redacts embedded host paths after key-value delimiters', () => {
+    expect(redactAbsoluteHostPathValues('workspace=/home/alice/private-repo'))
+      .toBe('workspace=[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('cwd=/api/private/repo'))
+      .toBe('cwd=[REDACTED_HOST_PATH]');
+  });
+
+  it('redacts embedded single-component absolute paths', () => {
+    expect(redactAbsoluteHostPathValues('failed reading /root'))
+      .toBe('failed reading [REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('loaded /.env'))
+      .toBe('loaded [REDACTED_HOST_PATH]');
+  });
+
+  it('redacts embedded host paths after punctuation boundaries', () => {
+    expect(redactAbsoluteHostPathValues('failed,/home/alice/private/file'))
+      .toBe('failed,[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('failed|/workspace/private/repo'))
+      .toBe('failed|[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('failed;C:\\Users\\alice\\file'))
+      .toBe('failed;[REDACTED_HOST_PATH]');
+  });
+
+  it('preserves absolute URLs with path segments', () => {
+    expect(redactAbsoluteHostPathValues('See https://example.com/docs/setup for details'))
+      .toBe('See https://example.com/docs/setup for details');
+    expect(redactAbsoluteHostPathValues('See http://[::1]/api/status'))
+      .toBe('See http://[::1]/api/status');
+  });
+
+  it('redacts forward-slash UNC paths without corrupting absolute URLs', () => {
+    expect(redactAbsoluteHostPathValues('failed //server/share/secret but kept https://server/share/public'))
+      .toBe('failed [REDACTED_HOST_PATH] but kept https://server/share/public');
+  });
+
+  it('preserves quoted API routes', () => {
+    expect(redactAbsoluteHostPathValues('Call "/v1/users" after setup'))
+      .toBe('Call "/v1/users" after setup');
+  });
+
+  it('preserves known non-versioned application routes', () => {
+    expect(redactAbsoluteHostPathValues('Check /comms/health and /webhooks/slack/events'))
+      .toBe('Check /comms/health and /webhooks/slack/events');
+  });
+
+  it('redacts host paths in unquoted application route queries and fragments', () => {
+    expect(redactAbsoluteHostPathValues('/api/tasks?root=/data/private&next=ok'))
+      .toBe('/api/tasks?root=[REDACTED_HOST_PATH]&next=ok');
+    expect(redactAbsoluteHostPathValues('/v1/tasks#/srv/private'))
+      .toBe('/v1/tasks#[REDACTED_HOST_PATH]');
+  });
+
+  it('redacts URL-encoded absolute host paths in application route values', () => {
+    expect(redactAbsoluteHostPathValues('GET /api/run?cwd=%2Fhome%2Falice%2Fsecret&mode=safe'))
+      .toBe('GET /api/run?cwd=[REDACTED_HOST_PATH]&mode=safe');
+  });
+
+  it('redacts quoted host paths rooted outside the common host allowlist', () => {
+    expect(redactAbsoluteHostPathValues("ENOTDIR: scandir '/data/hermes/kanban/boards'"))
+      .toBe("ENOTDIR: scandir '[REDACTED_HOST_PATH]'");
+    expect(redactAbsoluteHostPathValues('failed under /data/hermes/kanban/boards'))
+      .toBe('failed under [REDACTED_HOST_PATH]');
+  });
+
+  it('redacts host paths wrapped in Markdown backticks', () => {
+    expect(redactAbsoluteHostPathValues('read `/home/alice/repo/config.json`'))
+      .toBe('read `[REDACTED_HOST_PATH]`');
+  });
+
+  it('redacts quoted single-component and Windows host paths', () => {
+    expect(redactAbsoluteHostPathValues("failed reading '/root' and loaded '/.env'"))
+      .toBe("failed reading '[REDACTED_HOST_PATH]' and loaded '[REDACTED_HOST_PATH]'");
+    expect(redactAbsoluteHostPathValues('open "C:\\Users\\alice\\secret"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
+    expect(redactAbsoluteHostPathValues('open "\\\\server\\share\\secret"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
+  });
+
+  it('redacts quoted host paths containing spaces', () => {
+    expect(redactAbsoluteHostPathValues('open "/Users/alice/My Project/secret.txt"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
+    expect(redactAbsoluteHostPathValues("open 'C:\\Users\\Alice Smith\\secret.txt'"))
+      .toBe("open '[REDACTED_HOST_PATH]'");
+    expect(redactAbsoluteHostPathValues('open "/Users/alice/John\'s Project/secret.txt"'))
+      .toBe('open "[REDACTED_HOST_PATH]"');
+  });
+
+  it('redacts complete quoted file URL host paths containing spaces', () => {
+    expect(redactAbsoluteHostPathValues('open "file:///Users/alice/Secret Project/config.env"'))
+      .toBe('open "file://[REDACTED_HOST_PATH]"');
+  });
+
+  it('preserves delimiters after unquoted file URL host paths', () => {
+    expect(redactAbsoluteHostPathValues('See <file:///home/alice/a.txt> now'))
+      .toBe('See <file://[REDACTED_HOST_PATH]> now');
+    expect(redactAbsoluteHostPathValues('See file:///home/alice/a.txt, then continue.'))
+      .toBe('See file://[REDACTED_HOST_PATH], then continue.');
+  });
+
+  it('redacts host paths enclosed by angle brackets', () => {
+    expect(redactAbsoluteHostPathValues('failed at </home/alice/private/config>'))
+      .toBe('failed at <[REDACTED_HOST_PATH]>');
+  });
+
+  it('preserves ordinary closing markup tags', () => {
+    expect(redactAbsoluteHostPathValues('Use <div>text</div> and <status>ok</status>.'))
+      .toBe('Use <div>text</div> and <status>ok</status>.');
+  });
+
+  it('redacts host paths after shell redirection delimiters', () => {
+    expect(redactAbsoluteHostPathValues('command failed >/home/alice/private/output'))
+      .toBe('command failed >[REDACTED_HOST_PATH]');
+    expect(redactAbsoluteHostPathValues('error)>C:\\Users\\alice\\secret'))
+      .toBe('error)>[REDACTED_HOST_PATH]');
+  });
+
+  it('does not treat conjunctions as proof of an API route', () => {
+    expect(redactAbsoluteHostPathValues('failed under /home/alice and /api/private/config'))
+      .toBe('failed under [REDACTED_HOST_PATH] and [REDACTED_HOST_PATH]');
+  });
+
   it('recursively removes host execution fields from SSE event data', () => {
     expect(redactHostExecutionData({
       runId: 'run-1',

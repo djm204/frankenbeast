@@ -38,7 +38,7 @@ export type SseTicketStatus = 'valid' | 'invalid' | 'reused';
 const DEFAULT_TICKET_TTL_MS = 30_000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60_000;
 const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
-const MIN_CONSUMED_RETENTION_MS = 600_000;
+export const MIN_CONSUMED_RETENTION_MS = 600_000;
 
 function resolvePositiveDurationMs(
   name: string,
@@ -123,6 +123,14 @@ export class SseConnectionTicketStore {
     this.cleanupInterval.unref?.();
   }
 
+  get browserRetentionMs(): number {
+    return Math.max(this.ttlMs, this.consumedRetentionMs);
+  }
+
+  get consumedRetentionWindowMs(): number {
+    return this.consumedRetentionMs;
+  }
+
   issue(token: string, scope?: string | undefined): string {
     const ticket = randomUUID();
     const tokenDigest = digestToken(token);
@@ -171,6 +179,52 @@ export class SseConnectionTicketStore {
 
     this.consumedTickets.set(ticket, Date.now() + this.consumedRetentionMs);
     return 'valid';
+  }
+
+  check(ticket: string, operatorToken: string, scope?: string | undefined): SseTicketStatus {
+    const now = Date.now();
+    if (this.db) {
+      const entry = this.db.prepare(`
+        SELECT token_digest, scope, state, expires_at, consumed_until
+        FROM sse_connection_tickets
+        WHERE ticket = ?
+      `).get(ticket) as PersistedTicketRow | undefined;
+      if (!entry) return 'invalid';
+      if (entry.state === 'consumed') {
+        return entry.consumed_until !== null && now <= entry.consumed_until ? 'reused' : 'invalid';
+      }
+      return now <= entry.expires_at
+        && entry.scope === (scope ?? null)
+        && constantTimeTokenEqual(digestToken(operatorToken), entry.token_digest)
+        ? 'valid'
+        : 'invalid';
+    }
+
+    const entry = this.tickets.get(ticket);
+    if (entry) {
+      return now <= entry.expiresAt
+        && entry.scope === scope
+        && constantTimeTokenEqual(digestToken(operatorToken), entry.tokenDigest)
+        ? 'valid'
+        : 'invalid';
+    }
+    const consumedExpiry = this.consumedTickets.get(ticket);
+    return consumedExpiry !== undefined && now <= consumedExpiry ? 'reused' : 'invalid';
+  }
+
+  refreshConsumed(ticket: string): boolean {
+    const consumedUntil = Date.now() + this.consumedRetentionMs;
+    if (this.db) {
+      const result = this.db.prepare(`
+        UPDATE sse_connection_tickets
+        SET consumed_until = ?
+        WHERE ticket = ? AND state = 'consumed'
+      `).run(consumedUntil, ticket);
+      return result.changes === 1;
+    }
+    if (!this.consumedTickets.has(ticket)) return false;
+    this.consumedTickets.set(ticket, consumedUntil);
+    return true;
   }
 
   validate(ticket: string, operatorToken: string, scope?: string | undefined): boolean {
