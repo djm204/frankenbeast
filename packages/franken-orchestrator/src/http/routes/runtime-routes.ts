@@ -10,7 +10,10 @@ import {
   type BeastRateLimitOptions,
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
-import type { RuntimeAdapter } from '../../runtime/runtime-adapter.js';
+import {
+  RuntimeActionUncertainError,
+  type RuntimeAdapter,
+} from '../../runtime/runtime-adapter.js';
 import {
   RuntimeActionStore,
   type RuntimeActionAuditEvent,
@@ -58,12 +61,6 @@ const IDEMPOTENCY_TTL_MS = 10 * 60_000;
 const IDEMPOTENCY_RENEW_RETRY_MS = IDEMPOTENCY_TTL_MS / 4;
 const MAX_ACTION_BODY_BYTES = 16 * 1024;
 
-class RuntimeActionExecutionUncertainError extends Error {
-  constructor() {
-    super('Runtime provider action completion is uncertain');
-    this.name = 'RuntimeActionExecutionUncertainError';
-  }
-}
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -437,17 +434,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     void Promise.resolve().then(() => deps.actionAudit?.(event)).catch(() => {});
   };
 
-  const executeAdapterAction = async (
-    adapter: RuntimeAdapter,
-    request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
-  ) => {
-    try {
-      return await adapter.executeAction(request);
-    } catch {
-      throw new RuntimeActionExecutionUncertainError();
-    }
-  };
-
   const executeAction = async (
     adapter: RuntimeAdapter,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
@@ -468,12 +454,12 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         const outcome = deps.actionGovernor
           ? await deps.actionGovernor.requestApproval({
               taskId: actionTarget(request.action),
-              summary: `Governed runtime action ${request.action.type}`,
+              summary: `Governed runtime action ${request.action.type} on provider ${adapter.id} in workspace ${request.action.workspaceId}`,
               requiresHitl: true,
             })
           : { decision: 'rejected' as const, reason: 'Runtime action governor is unavailable' };
         result = outcome.decision === 'approved'
-          ? parseAdapterActionResult(adapter, request, await executeAdapterAction(adapter, request))
+          ? parseAdapterActionResult(adapter, request, await adapter.executeAction(request))
           : RuntimeActionResultSchema.parse({
             status: 'rejected',
             providerId: adapter.id,
@@ -482,10 +468,10 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             audit: actionAudit(request.action, 'rejected'),
           });
       } else {
-        result = parseAdapterActionResult(adapter, request, await executeAdapterAction(adapter, request));
+        result = parseAdapterActionResult(adapter, request, await adapter.executeAction(request));
       }
     } catch (error) {
-      if (error instanceof RuntimeActionExecutionUncertainError) throw error;
+      if (error instanceof RuntimeActionUncertainError) throw error;
       result = RuntimeActionResultSchema.parse({
         status: 'failed',
         providerId: adapter.id,
@@ -629,8 +615,13 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         forwardActionAudit(audit);
         return completed;
       } catch (error) {
-        if (error instanceof RuntimeActionExecutionUncertainError) {
-          actionStore.fence(key, fingerprint, reservation.claimToken);
+        if (error instanceof RuntimeActionUncertainError) {
+          const audit = actionAuditEvent(adapter.id, request, {
+            ...actionAudit(request.action, 'failed'),
+            currentState: 'uncertain',
+          });
+          actionStore.fenceWithAudit(key, fingerprint, reservation.claimToken, audit);
+          forwardActionAudit(audit);
         }
         throw error;
       } finally {

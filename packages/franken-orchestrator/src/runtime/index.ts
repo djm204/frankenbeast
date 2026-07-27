@@ -1,5 +1,5 @@
 export type { RuntimeAdapter, RuntimeEventRequest, RuntimeSnapshotRequest } from './runtime-adapter.js';
-export { RuntimeCursorError } from './runtime-adapter.js';
+export { RuntimeActionUncertainError, RuntimeCursorError } from './runtime-adapter.js';
 export { RuntimeAdapterRegistry } from './runtime-adapter-registry.js';
 export { createDefaultRuntimeAdapterRegistry } from './runtime-defaults.js';
 export type { DefaultRuntimeAdapterOptions, RuntimeAdapterDefaultsOptions } from './runtime-defaults.js';

@@ -490,11 +490,17 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ownedRuntimeActionStore?.beginShutdown();
       server.closeAllConnections();
       webSocketServer.close();
-      await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
+      const actionsDrained = await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       chatStreamTicketStore?.destroy();
-      ownedRuntimeActionStore?.destroy();
+      if (ownedRuntimeActionStore) {
+        if (actionsDrained) {
+          ownedRuntimeActionStore.destroy();
+        } else {
+          void ownedRuntimeActionStore.drain().then(() => ownedRuntimeActionStore?.destroy());
+        }
+      }
       await options.disposeBeastControl?.();
       await closedServer;
       ownedBrainRegistry?.close();

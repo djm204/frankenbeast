@@ -215,6 +215,35 @@ describe('HermesRuntimeAdapter', () => {
     expect(JSON.stringify(calls)).not.toContain('shell');
   });
 
+  it('marks failures after Hermes mutation dispatch as uncertain', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    let call = 0;
+    const adapter = new HermesRuntimeAdapter({
+      hermesHome: home,
+      runCommand: async () => {
+        call += 1;
+        if (call === 1) {
+          return { stdout: JSON.stringify({ task: { status: 'ready' } }), stderr: '', exitCode: 0 };
+        }
+        if (call === 2) throw new Error('mutation dispatch connection closed');
+        throw new Error('unexpected command');
+      },
+    });
+
+    await expect(adapter.executeAction(RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:dispatch-uncertain',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    }))).rejects.toMatchObject({
+      name: 'RuntimeActionUncertainError',
+      message: 'Runtime provider action completion is uncertain',
+    });
+  });
+
   it('inspects only the workspace targeted by a mutation', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
@@ -548,7 +577,7 @@ if (args.includes('show')) {
     expect(calls).toContainEqual(['kanban', 'promote', '--json', 't_deadbeef', 'Dependencies satisfied']);
   });
 
-  it('rejects a promotion that Hermes reports as ineffective', async () => {
+  it('marks a promotion that Hermes reports as ineffective as uncertain', async () => {
     const home = await createHome();
     createCurrentKanban(join(home, 'kanban.db'));
     const adapter = new HermesRuntimeAdapter({
@@ -565,7 +594,10 @@ if (args.includes('show')) {
         type: 'policy.apply', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
         policy: 'promote-task', reason: 'Dependencies satisfied',
       },
-    }))).rejects.toThrow('did not reach its expected postcondition');
+    }))).rejects.toMatchObject({
+      name: 'RuntimeActionUncertainError',
+      cause: expect.objectContaining({ message: expect.stringContaining('did not reach its expected postcondition') }),
+    });
   });
 
   it('advertises cancellation as unsupported when Hermes has no cancellation operation', async () => {

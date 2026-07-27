@@ -28,6 +28,15 @@ export class RuntimeCursorError extends Error {
   }
 }
 
+export class RuntimeActionUncertainError extends Error {
+  readonly code = 'RUNTIME_ACTION_UNCERTAIN';
+
+  constructor(options?: ErrorOptions) {
+    super('Runtime provider action completion is uncertain', options);
+    this.name = 'RuntimeActionUncertainError';
+  }
+}
+
 export interface RuntimeAdapter {
   readonly id: string;
   describe(): Promise<RuntimeProvider>;

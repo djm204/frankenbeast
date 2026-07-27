@@ -9,6 +9,7 @@ import { TransportSecurityService } from '../../../src/http/security/transport-s
 import { createRuntimeRoutes, runRuntimeEventStream } from '../../../src/http/routes/runtime-routes.js';
 import {
   RuntimeAdapterRegistry,
+  RuntimeActionUncertainError,
   RuntimeCursorError,
   RuntimeEventPageSchema,
   RuntimeActionResultSchema,
@@ -94,6 +95,7 @@ function createRoutes(actionStore = new RuntimeActionStore()) {
     adapter,
     actionAudit,
     actionGovernor,
+    actionStore,
     app: createRuntimeRoutes({
       registry: new RuntimeAdapterRegistry([adapter]),
       operatorToken: 'operator-secret',
@@ -138,7 +140,9 @@ describe('smart-swarm runtime routes', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ data: expect.objectContaining({ status: 'rejected' }) });
     expect(actionGovernor.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
-      taskId: 'hermes:global:t_deadbeef', requiresHitl: true,
+      taskId: 'hermes:global:t_deadbeef',
+      summary: 'Governed runtime action task.cancel on provider hermes in workspace hermes:global',
+      requiresHitl: true,
     }));
     expect(JSON.stringify(actionGovernor.requestApproval.mock.calls)).not.toContain('must-not-enter-governor');
     expect(adapter.executeAction).not.toHaveBeenCalled();
@@ -450,12 +454,14 @@ describe('smart-swarm runtime routes', () => {
     )).toEqual({ status: 'pending' });
   });
 
-  it('durably fences adapter exceptions after provider execution begins', async () => {
+  it('durably fences and audits adapter exceptions after provider execution begins', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-provider-uncertain-'));
     tempDirs.push(dir);
     const actionStore = new RuntimeActionStore({ databasePath: join(dir, 'actions.sqlite') });
     const { app, adapter } = createRoutes(actionStore);
-    vi.mocked(adapter.executeAction).mockRejectedValue(new Error('postcondition read timed out'));
+    vi.mocked(adapter.executeAction).mockRejectedValue(new RuntimeActionUncertainError({
+      cause: new Error('postcondition read timed out'),
+    }));
     const action = {
       type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
       category: 'transient', reason: 'Retry later',
@@ -472,6 +478,16 @@ describe('smart-swarm runtime routes', () => {
     });
 
     expect(response.status).toBe(500);
+    expect(actionStore.listAuditEvents()).toEqual([
+      expect.objectContaining({
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        actionType: 'blocker.add',
+        targetId: 'hermes:global:t_deadbeef',
+        outcome: 'failed',
+        currentState: 'uncertain',
+      }),
+    ]);
     const key = createHash('sha256')
       .update(JSON.stringify(['hermes', 'block:t_deadbeef:provider-uncertain']))
       .digest('base64url');
@@ -480,6 +496,39 @@ describe('smart-swarm runtime routes', () => {
       key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
     )).toEqual({ status: 'pending' });
     expect(adapter.executeAction).toHaveBeenCalledOnce();
+  });
+
+  it('completes pre-mutation adapter failures so the idempotency key is retryable', async () => {
+    const { app, adapter, actionAudit, actionStore } = createRoutes();
+    vi.mocked(adapter.executeAction).mockRejectedValueOnce(new Error('task does not exist'));
+    const payload = {
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:preflight-failure',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    };
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({ status: 'failed', reason: 'Runtime provider action failed' }),
+    });
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', payload.idempotencyKey]))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(payload.action)).digest('base64url');
+    expect(actionStore.reserve(key, fingerprint, Date.now() + 1_000)).toEqual(expect.objectContaining({
+      status: 'completed',
+      result: expect.objectContaining({ status: 'failed' }),
+    }));
   });
 
   it('fails closed when an adapter returns a result for a different request', async () => {

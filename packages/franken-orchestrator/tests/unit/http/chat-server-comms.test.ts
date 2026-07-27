@@ -143,6 +143,39 @@ describe('startChatServer comms pass-through', () => {
     expect(drain.mock.invocationCallOrder[0]).toBeLessThan(destroy.mock.invocationCallOrder[0]!);
   });
 
+  it('keeps the owned action store open until actions outlive the bounded shutdown drain', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-runtime-action-drain-'));
+    tempDirs.push(projectDir);
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(projectDir, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    });
+    const actionStore = mockedCreateChatApp.mock.calls[0]![0].runtimeActionStore!;
+    let settleAction!: () => void;
+    const action = new Promise<void>((resolve) => { settleAction = resolve; });
+    void actionStore.track(action);
+    const destroy = vi.spyOn(actionStore, 'destroy');
+
+    vi.useFakeTimers();
+    try {
+      const closing = handle.close();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await closing;
+      handle = undefined;
+
+      expect(destroy).not.toHaveBeenCalled();
+      settleAction();
+      await action;
+      await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('leaves caller-owned runtime action store lifecycle with the caller', async () => {
     const runtimeActionStore = new RuntimeActionStore();
     const beginShutdown = vi.spyOn(runtimeActionStore, 'beginShutdown');

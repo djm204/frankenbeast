@@ -5,6 +5,7 @@ import { delimiter, isAbsolute, resolve, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { redactSensitiveText } from '../../logging/redaction.js';
 import {
+  RuntimeActionUncertainError,
   RuntimeCursorError,
   type RuntimeAdapter,
   type RuntimeEventRequest,
@@ -753,13 +754,19 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
 
     const previousState = await this.readTaskStatus(request.action, workspace.path);
-    const mutation = await this.runHermes(this.mutationArgs(request.action), workspace.path);
-    const currentState = await this.readTaskStatus(request.action, workspace.path);
-    if (
-      !this.postconditionSatisfied(request.action, currentState)
-      || (request.action.type === 'policy.apply' && !this.promotionSucceeded(mutation))
-    ) {
-      throw new Error(`Hermes action ${request.action.type} did not reach its expected postcondition`);
+    let mutation;
+    let currentState;
+    try {
+      mutation = await this.runHermes(this.mutationArgs(request.action), workspace.path);
+      currentState = await this.readTaskStatus(request.action, workspace.path);
+      if (
+        !this.postconditionSatisfied(request.action, currentState)
+        || (request.action.type === 'policy.apply' && !this.promotionSucceeded(mutation))
+      ) {
+        throw new Error(`Hermes action ${request.action.type} did not reach its expected postcondition`);
+      }
+    } catch (error) {
+      throw new RuntimeActionUncertainError({ cause: error });
     }
     return RuntimeActionResultSchema.parse({
       status: 'applied',
