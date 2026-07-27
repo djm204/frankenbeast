@@ -366,7 +366,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const ticket = deps.ticketStore.issue(deps.operatorToken, `${providerId}:${connectionId}`);
     setCookie(c, TICKET_COOKIE, ticket, {
       httpOnly: true,
-      maxAge: Math.ceil(deps.ticketStore.browserRetentionMs / 1_000),
       path: streamPath(providerId, connectionId),
       sameSite: 'Strict',
       secure: isHttpsRequest(c.req.url, c.req.header('x-forwarded-proto')),
@@ -416,7 +415,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
       return streamSSE(c, async (stream) => {
         const retentionRefresh = setInterval(() => {
           deps.ticketStore.refreshConsumed(ticket);
-        }, Math.min(60_000, Math.max(1, Math.floor(deps.ticketStore.browserRetentionMs / 2))));
+        }, Math.min(60_000, Math.max(1, Math.floor(deps.ticketStore.consumedRetentionWindowMs / 2))));
         retentionRefresh.unref?.();
         try {
           await runRuntimeEventStream(adapter, stream, {

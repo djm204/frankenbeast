@@ -448,7 +448,7 @@ describe('smart-swarm runtime routes', () => {
     await valid.body!.cancel();
   });
 
-  it('keeps issued stream-ticket cookies through the consumed-ticket retention window', async () => {
+  it('keeps issued stream-ticket cookies for the browser session', async () => {
     const { app } = createRoutes();
 
     const response = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
@@ -456,10 +456,10 @@ describe('smart-swarm runtime routes', () => {
       headers: authHeaders(),
     });
 
-    expect(response.headers.get('set-cookie')).toContain('Max-Age=600');
+    expect(response.headers.get('set-cookie')).not.toContain('Max-Age');
   });
 
-  it('matches stream-ticket cookie lifetime to an injected ticket store', async () => {
+  it('does not cap an injected stream-ticket cookie at the retention window', async () => {
     const ticketStore = new SseConnectionTicketStore({ consumedRetentionMs: 1_200_000 });
     stores.push(ticketStore);
     const adapter = runtimeAdapter();
@@ -475,7 +475,41 @@ describe('smart-swarm runtime routes', () => {
       headers: authHeaders(),
     });
 
-    expect(response.headers.get('set-cookie')).toContain('Max-Age=1200');
+    expect(response.headers.get('set-cookie')).not.toContain('Max-Age');
+  });
+
+  it('refreshes consumed tickets before an injected short retention window expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const ticketStore = new SseConnectionTicketStore({ ttlMs: 30_000, consumedRetentionMs: 1_000 });
+      stores.push(ticketStore);
+      const refresh = vi.spyOn(ticketStore, 'refreshConsumed');
+      const app = createRuntimeRoutes({
+        registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+        operatorToken: 'operator-secret',
+        security: new TransportSecurityService(),
+        ticketStore,
+        pollIntervalMs: 60_000,
+        heartbeatIntervalMs: 60_000,
+      });
+      const ticketResponse = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const { connectionId } = await ticketResponse.json() as { connectionId: string };
+      const stream = await app.request(`/v1/smart-swarm/providers/hermes/events/${connectionId}`, {
+        headers: { cookie },
+      });
+
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(refresh).toHaveBeenCalled();
+      await stream.body!.cancel();
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rate limits authenticated requests by the verified operator identity', async () => {

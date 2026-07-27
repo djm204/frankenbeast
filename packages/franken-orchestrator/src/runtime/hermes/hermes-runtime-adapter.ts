@@ -196,7 +196,7 @@ function isTerminalTaskStatus(status: unknown): boolean {
 }
 
 function mapRunState(status: unknown, outcome: unknown): 'queued' | 'running' | 'blocked' | 'succeeded' | 'failed' | 'cancelled' | 'unknown' {
-  const value = outcome ?? status;
+  const value = typeof outcome === 'string' && outcome.trim() === '' ? status : outcome ?? status;
   switch (value) {
     case 'scheduled':
     case 'pending':
@@ -590,7 +590,10 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     parseRequestCursor(cursor);
   }
 
-  private async discoverSources(signal?: AbortSignal): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
+  private async discoverSources(
+    signal?: AbortSignal,
+    workspaceId?: string,
+  ): Promise<{ sources: DatabaseSource[]; discoveryMessage?: string | undefined }> {
     throwIfAborted(signal);
     if (!this.home && !this.kanbanDbPath) return { sources: [] };
     const home = this.home ? resolve(this.home) : undefined;
@@ -598,26 +601,51 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const discoveredPaths = new Set<string>();
     let discoveryMessage: string | undefined;
     const globalPath = this.kanbanDbPath ? resolve(this.kanbanDbPath) : resolve(home!, 'kanban.db');
-    try {
-      throwIfAborted(signal);
-      const safe = this.kanbanDbPath
-        ? await this.isDatabase(globalPath)
-        : await this.isSafeDatabase(home!, globalPath);
-      throwIfAborted(signal);
-      if (safe) {
-        const resolvedPath = await realpath(globalPath);
+    if (workspaceId === undefined || workspaceId === 'hermes:global') {
+      try {
         throwIfAborted(signal);
-        discoveredPaths.add(resolvedPath);
-        sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: resolvedPath });
-      } else if (this.kanbanDbPath) {
-        discoveryMessage = 'The explicitly configured Hermes Kanban database does not exist';
+        const safe = this.kanbanDbPath
+          ? await this.isDatabase(globalPath)
+          : await this.isSafeDatabase(home!, globalPath);
+        throwIfAborted(signal);
+        if (safe) {
+          const resolvedPath = await realpath(globalPath);
+          throwIfAborted(signal);
+          discoveredPaths.add(resolvedPath);
+          sources.push({ workspaceId: 'hermes:global', name: 'global', kind: 'workspace', path: resolvedPath });
+        } else if (this.kanbanDbPath) {
+          discoveryMessage = 'The explicitly configured Hermes Kanban database does not exist';
+        }
+      } catch (error) {
+        throwIfAborted(signal);
+        discoveryMessage = error instanceof Error ? error.message : 'Hermes database discovery failed';
       }
-    } catch (error) {
-      throwIfAborted(signal);
-      discoveryMessage = error instanceof Error ? error.message : 'Hermes database discovery failed';
     }
-    if (!home) return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
+    if (!home || workspaceId === 'hermes:global') {
+      return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
+    }
     const boardsRoot = resolve(home, 'kanban', 'boards');
+    if (workspaceId !== undefined) {
+      const boardName = workspaceId === 'hermes:board:global'
+        ? 'global'
+        : /^hermes:([A-Za-z0-9._-]+)$/u.exec(workspaceId)?.[1];
+      if (!boardName) return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
+      const path = resolve(boardsRoot, boardName, 'kanban.db');
+      try {
+        if (await this.isSafeDatabase(home, path)) {
+          throwIfAborted(signal);
+          const resolvedPath = await realpath(path);
+          throwIfAborted(signal);
+          if (!discoveredPaths.has(resolvedPath)) {
+            sources.push({ workspaceId, name: boardName, kind: 'board', path: resolvedPath });
+          }
+        }
+      } catch (error) {
+        throwIfAborted(signal);
+        discoveryMessage ??= error instanceof Error ? error.message : 'Hermes board discovery failed';
+      }
+      return { sources, ...(discoveryMessage ? { discoveryMessage } : {}) };
+    }
     let entries;
     try {
       throwIfAborted(signal);
@@ -672,7 +700,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
   }
 
   private async inspectSources(signal?: AbortSignal, workspaceId?: string): Promise<SourceInspection> {
-    const discovery = await this.discoverSources(signal);
+    const discovery = await this.discoverSources(signal, workspaceId);
     const sources: InspectedSource[] = [];
     const selectedSources = workspaceId === undefined
       ? discovery.sources
@@ -918,6 +946,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         },
       };
     });
+    const latestPointerlessActiveRunByTask = new Map<string, string>();
+    for (const run of runRows) {
+      const rawTaskId = String(run['task_id']);
+      if (
+        pointerlessActiveTaskIds.has(rawTaskId)
+        && ['queued', 'running', 'blocked'].includes(mapRunState(run['status'], run['outcome']))
+      ) {
+        latestPointerlessActiveRunByTask.set(rawTaskId, String(run['id']));
+      }
+    }
     const agentInputs = new Map<string, { states: string[]; timestamps: string[] }>();
     for (const task of taskRows) {
       if (typeof task['assignee'] !== 'string' || !task['assignee']) continue;
@@ -929,8 +967,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
     for (const run of runRows) {
       const runState = mapRunState(run['status'], run['outcome']);
-      const activeWithoutPointer = pointerlessActiveTaskIds.has(String(run['task_id']))
-        && ['queued', 'running', 'blocked'].includes(runState);
+      const activeWithoutPointer = latestPointerlessActiveRunByTask.get(String(run['task_id'])) === String(run['id']);
       if (!activeRunIds.has(String(run['id'])) && !activeWithoutPointer) continue;
       if (typeof run['profile'] !== 'string' || !run['profile']) continue;
       const current = agentInputs.get(run['profile']) ?? { states: [], timestamps: [] };

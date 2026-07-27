@@ -402,11 +402,16 @@ describe('HermesRuntimeAdapter', () => {
     createCurrentKanban(join(betaDir, 'kanban.db'));
     const adapter = new HermesRuntimeAdapter({ hermesHome: home, env: {} });
     const open = vi.spyOn(adapter as unknown as { open(path: string): Database.Database }, 'open');
+    const safe = vi.spyOn(
+      adapter as unknown as { isSafeDatabase(home: string, path: string): Promise<boolean> },
+      'isSafeDatabase',
+    );
 
     await adapter.getEvents({ workspaceId: 'hermes:alpha', limit: 10 });
 
     expect(open).toHaveBeenCalledTimes(2);
     expect(open.mock.calls.every(([path]) => path === join(alphaDir, 'kanban.db'))).toBe(true);
+    expect(safe.mock.calls.map(([, path]) => path)).toEqual([join(alphaDir, 'kanban.db')]);
   });
 
   it('retains cursor positions for discovered workspaces that are temporarily unavailable', async () => {
@@ -1187,6 +1192,28 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('selects only the latest active run for a nonterminal task without a current-run pointer', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET assignee = NULL, current_run_id = NULL WHERE id = ?').run('t_parent');
+    db.prepare(`INSERT INTO task_runs
+      (id,task_id,profile,status,started_at,summary,metadata,last_heartbeat_at)
+      VALUES (?,?,?,?,?,?,?,?)`).run(
+      2, 't_parent', 'new-worker', 'running', 1_785_081_630, null, '{}', 1_785_081_640,
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.agents.status !== 'available') throw new Error('Expected agents');
+
+    expect(snapshot.agents.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:new-worker', state: 'running' }),
+    ]));
+    expect(snapshot.agents.data.some((agent) => agent.id === 'hermes:global:worker-a')).toBe(false);
+  });
+
   it('derives agent state from the normalized run outcome', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -1203,6 +1230,25 @@ describe('HermesRuntimeAdapter', () => {
     }));
     expect(snapshot.agents).toEqual(expect.objectContaining({
       data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:worker-a', state: 'blocked' })]),
+    }));
+  });
+
+  it('falls back to run status when the stored outcome is blank', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET assignee = NULL WHERE id = ?').run('t_parent');
+    db.prepare('UPDATE task_runs SET status = ?, outcome = ? WHERE id = ?').run('running', '', 1);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.runs).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:run:1', state: 'running' })]),
+    }));
+    expect(snapshot.agents).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' })]),
     }));
   });
 

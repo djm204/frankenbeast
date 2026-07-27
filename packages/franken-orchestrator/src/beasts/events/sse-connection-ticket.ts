@@ -127,6 +127,10 @@ export class SseConnectionTicketStore {
     return Math.max(this.ttlMs, this.consumedRetentionMs);
   }
 
+  get consumedRetentionWindowMs(): number {
+    return this.consumedRetentionMs;
+  }
+
   issue(token: string, scope?: string | undefined): string {
     const ticket = randomUUID();
     const tokenDigest = digestToken(token);

@@ -97,7 +97,15 @@
 - [x] Make quote-aware path redaction tolerate apostrophes within double-quoted paths in both shared response redaction and direct adapter normalization.
 - [x] Rate-limit valid-ticket stream attempts before cursor validation, refresh consumed-ticket tombstones throughout active streams, and bound snapshot run reads while retaining the current run.
 - [x] Verify all 137 affected tests plus package typecheck, lint (pre-existing warnings only), and build.
-- [ ] Commit/push the fixes; reply to and resolve all four Codex threads; trigger the next exact-head review within the authorized tier-50 policy.
+- [x] Commit/push the fixes; reply to and resolve all four Codex threads; trigger the next exact-head review within the authorized tier-50 policy.
+- [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
+
+## Exact-head round 28 follow-up
+
+- [x] Inspect the four current-head Codex findings on `faaf1b252848be8b07a70d0d3e0e27a6bca76bc5` plus the two carried round-27 threads.
+- [x] Reproduce and remediate latest pointerless-run selection, blank-outcome fallback, direct workspace discovery, session-lifetime reconnect cookies, and retention-aware consumed-ticket refresh scheduling.
+- [x] Verify 124/124 focused adapter, route, and ticket-store tests plus package/root typecheck, lint, and build.
+- [ ] Commit/push the fixes; reply to and resolve all applicable Codex threads; trigger the next exact-head review within the authorized tier-50 policy.
 - [ ] Obtain exact-head green CI, fresh Codex clean, and zero unresolved paginated Codex threads; do not merge.
 
 ## Verification notes
@@ -129,3 +137,4 @@
 - Exact-head round 25 reproduced all three findings RED and passes 115/115 focused adapter, route, and ticket-store tests GREEN. Package typecheck, lint (zero errors), and build pass.
 - Exact-head round 26 reproduced all five findings RED and passes 134/134 focused adapter, route, redaction, and ticket-store tests GREEN. Package typecheck, lint (zero errors), and build pass.
 - Exact-head round 27 reproduced all four findings RED and passes 137/137 focused adapter, route, redaction, and ticket-store tests GREEN. Package typecheck, lint (zero errors; pre-existing warnings only), and build pass.
+- Exact-head round 28 reproduced all four new findings RED and passes 124/124 focused adapter, route, and ticket-store tests GREEN. Package/root typecheck, lint (zero errors; pre-existing warnings only), and build pass. The standalone orchestrator suite remains at the established unrelated three-failure baseline with 4,694/4,697 passing.
