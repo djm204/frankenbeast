@@ -487,7 +487,12 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     wsUrl,
     close: async () => {
       const closedServer = closeHttpServer(server);
-      ownedRuntimeActionStore?.beginShutdown();
+      let shutdownFenceError: unknown;
+      try {
+        ownedRuntimeActionStore?.beginShutdown();
+      } catch (error) {
+        shutdownFenceError = error;
+      }
       server.closeAllConnections();
       webSocketServer.close();
       const actionsDrained = await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
@@ -505,6 +510,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       await closedServer;
       ownedBrainRegistry?.close();
       options.analyticsDeps?.analytics.close?.();
+      if (shutdownFenceError) throw shutdownFenceError;
     },
   };
 }

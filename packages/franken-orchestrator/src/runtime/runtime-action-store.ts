@@ -114,6 +114,7 @@ export class RuntimeActionStore {
   }
 
   renew(key: string, fingerprint: string, claimToken: string, expiresAt: number): boolean {
+    if (this.shuttingDown) return false;
     if (!this.db) {
       const entry = this.entries.get(key);
       if (!entry || entry.fingerprint !== fingerprint || entry.claimToken !== claimToken || entry.result) {

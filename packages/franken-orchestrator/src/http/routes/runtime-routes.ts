@@ -438,6 +438,14 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     adapter: RuntimeAdapter,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
   ) => {
+    const executeAndValidate = async () => {
+      const adapterResult = await adapter.executeAction(request);
+      try {
+        return parseAdapterActionResult(adapter, request, adapterResult);
+      } catch (cause) {
+        throw new RuntimeActionUncertainError({ cause });
+      }
+    };
     let result;
     try {
       const provider = await adapter.describe();
@@ -459,7 +467,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             })
           : { decision: 'rejected' as const, reason: 'Runtime action governor is unavailable' };
         result = outcome.decision === 'approved'
-          ? parseAdapterActionResult(adapter, request, await adapter.executeAction(request))
+          ? await executeAndValidate()
           : RuntimeActionResultSchema.parse({
             status: 'rejected',
             providerId: adapter.id,
@@ -468,7 +476,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             audit: actionAudit(request.action, 'rejected'),
           });
       } else {
-        result = parseAdapterActionResult(adapter, request, await adapter.executeAction(request));
+        result = await executeAndValidate();
       }
     } catch (error) {
       if (error instanceof RuntimeActionUncertainError) throw error;
@@ -598,6 +606,12 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           await executeAction(adapter, request),
         ));
         if (ownershipLost) {
+          const audit = actionAuditEvent(adapter.id, request, {
+            ...completed.audit,
+            currentState: 'uncertain',
+          });
+          actionStore.recordAudit(audit);
+          forwardActionAudit(audit);
           throw new HttpError(
             409, 'RUNTIME_ACTION_CLAIM_LOST', 'Runtime action claim expired while the provider operation was in progress',
           );

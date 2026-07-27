@@ -159,6 +159,7 @@ export {
   HermesRuntimeAdapter,
   OllamaRuntimeAdapter,
   RuntimeAdapterRegistry,
+  RuntimeActionUncertainError,
   RuntimeCursorError,
   RuntimeAgentSchema,
   RuntimeApprovalSchema,

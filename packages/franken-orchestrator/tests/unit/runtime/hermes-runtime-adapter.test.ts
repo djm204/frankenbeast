@@ -163,6 +163,25 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('discovers bare Hermes commands through Windows PATHEXT', async () => {
+    const home = await createHome();
+    createCurrentKanban(join(home, 'kanban.db'));
+    const binDir = join(home, 'bin');
+    await mkdir(binDir);
+    await writeFile(join(binDir, 'hermes.CMD'), '@echo off\r\n', { mode: 0o755 });
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    try {
+      const provider = await new HermesRuntimeAdapter({
+        hermesHome: home,
+        env: { PATH: binDir, PATHEXT: '.COM;.EXE;.CMD' },
+      }).describe();
+
+      expect(provider.capabilities.blockers).toEqual({ status: 'supported' });
+    } finally {
+      platform.mockRestore();
+    }
+  });
+
   it('uses the standard Hermes home beneath HOME by default', async () => {
     const home = await createHome();
     await mkdir(join(home, '.hermes'), { recursive: true });

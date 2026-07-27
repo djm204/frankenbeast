@@ -385,6 +385,14 @@ describe('smart-swarm runtime routes', () => {
 
       expect((await response).status).toBe(409);
       expect(completeWithAudit).not.toHaveBeenCalled();
+      expect(actionStore.listAuditEvents()).toEqual([
+        expect.objectContaining({
+          providerId: 'hermes',
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          outcome: 'applied',
+          currentState: 'uncertain',
+        }),
+      ]);
     } finally {
       vi.useRealTimers();
     }
@@ -447,6 +455,28 @@ describe('smart-swarm runtime routes', () => {
     firstStore.destroy();
     actionStores.splice(actionStores.indexOf(firstStore), 1);
 
+    const reopenedStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(reopenedStore);
+    expect(reopenedStore.reserve(
+      'key', 'fingerprint', Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+  });
+
+  it('does not let lease renewal shorten a shutdown fence', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-shutdown-renewal-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const actionStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(actionStore);
+    const reservation = actionStore.reserve('key', 'fingerprint', 1_000, 0);
+    expect(reservation).toEqual(expect.objectContaining({ status: 'claimed' }));
+    if (reservation.status !== 'claimed') throw new Error('Expected claimed action');
+
+    actionStore.beginShutdown();
+
+    expect(actionStore.renew('key', 'fingerprint', reservation.claimToken, 2_000)).toBe(false);
+    actionStore.destroy();
+    actionStores.splice(actionStores.indexOf(actionStore), 1);
     const reopenedStore = new RuntimeActionStore({ databasePath });
     actionStores.push(reopenedStore);
     expect(reopenedStore.reserve(
@@ -532,7 +562,7 @@ describe('smart-swarm runtime routes', () => {
   });
 
   it('fails closed when an adapter returns a result for a different request', async () => {
-    const { app, adapter, actionAudit } = createRoutes();
+    const { app, adapter, actionAudit, actionStore } = createRoutes();
     vi.mocked(adapter.executeAction).mockResolvedValue(RuntimeActionResultSchema.parse({
       status: 'applied', providerId: 'other-provider',
       correlationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
@@ -554,13 +584,22 @@ describe('smart-swarm runtime routes', () => {
       }),
     });
 
-    await expect(response.json()).resolves.toEqual({ data: expect.objectContaining({
-      status: 'failed', providerId: 'hermes', correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
-      audit: expect.objectContaining({ actionType: 'blocker.add', targetId: 'hermes:global:t_deadbeef', outcome: 'failed' }),
-    }) });
+    expect(response.status).toBe(500);
     expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
-      providerId: 'hermes', actionType: 'blocker.add', targetId: 'hermes:global:t_deadbeef', outcome: 'failed',
+      providerId: 'hermes', actionType: 'blocker.add', targetId: 'hermes:global:t_deadbeef',
+      outcome: 'failed', currentState: 'uncertain',
     }));
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'mismatched-result']))
+      .digest('base64url');
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    };
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
   });
 
   it('keeps idempotency keys scoped to distinct route-safe providers', async () => {

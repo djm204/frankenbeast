@@ -436,15 +436,23 @@ const defaultCommandRunner: HermesCommandRunner = (command, args, options) => ne
   });
 });
 
-function resolveCommandPath(command: string, pathValue: string | undefined): string | undefined {
-  const candidates = isAbsolute(command) || command.includes(sep)
-    ? [command]
-    : (pathValue?.split(delimiter) ?? [])
+function resolveCommandPath(command: string, env: NodeJS.ProcessEnv): string | undefined {
+  const windows = process.platform === 'win32';
+  const extensions = windows
+    ? (env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [''];
+  const names = windows && !extensions.some((extension) => command.toLowerCase().endsWith(extension.toLowerCase()))
+    ? extensions.map((extension) => `${command}${extension}`)
+    : [command];
+  const hasPath = isAbsolute(command) || command.includes('/') || command.includes('\\');
+  const candidates = hasPath
+    ? names
+    : (env['PATH']?.split(windows ? ';' : delimiter) ?? [])
         .filter((directory) => directory.length > 0)
-        .map((directory) => resolve(directory, command));
+        .flatMap((directory) => names.map((name) => resolve(directory, name)));
   for (const candidate of candidates) {
     try {
-      accessSync(candidate, constants.X_OK);
+      accessSync(candidate, windows ? constants.F_OK : constants.X_OK);
       return candidate;
     } catch {
       // Continue searching the executable path without passing it to the child.
@@ -481,7 +489,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const command = options.command ?? 'hermes';
     const resolvedCommand = options.runCommand
       ? undefined
-      : resolveCommandPath(command, commandPath);
+      : resolveCommandPath(command, this.env);
     this.command = resolvedCommand ?? command;
     this.commandAvailable = options.runCommand !== undefined || resolvedCommand !== undefined;
     this.runCommand = options.runCommand ?? defaultCommandRunner;

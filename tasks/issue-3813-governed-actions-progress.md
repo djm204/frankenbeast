@@ -31,3 +31,10 @@
 - [x] Address bounded Codex round 12/12 with red-green regressions for atomic uncertain-action audit fencing, explicit post-dispatch uncertainty classification, deferred store destruction after bounded drains, and provider/workspace-bound governor prompts.
 - [ ] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
 - [ ] Prepare the exact final handoff for root `t_25558345`, then block the task for review.
+- [x] Prevent lease renewals from undoing shutdown fences under a failing regression test.
+- [x] Persist independent uncertain audit evidence when an executed action loses its claim under a failing regression test.
+- [x] Export `RuntimeActionUncertainError` from the package root under a failing public-contract test.
+- [x] Fence malformed or request-mismatched post-mutation adapter results under a failing regression test.
+- [x] Resolve Windows Hermes executables with `PATHEXT` and portable path separators under a failing regression test.
+- [x] Continue all server cleanup when shutdown claim fencing fails under a failing regression test.
+- [ ] Run focused/package/root verification, publish one immutable head, resolve all six threads, and pass exact-head Codex/CI gates without merging.

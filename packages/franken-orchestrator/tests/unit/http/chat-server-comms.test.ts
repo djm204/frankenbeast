@@ -29,6 +29,7 @@ vi.mock('../../../src/http/ws-chat-server.js', () => ({
 
 import { startChatServer } from '../../../src/http/chat-server.js';
 import { createChatApp } from '../../../src/http/chat-app.js';
+import { attachChatWebSocketServer } from '../../../src/http/ws-chat-server.js';
 import { hashChatRateLimitPrincipal } from '../../../src/http/chat-rate-limit.js';
 import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
@@ -37,6 +38,7 @@ import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-por
 import type { ChatServerHandle } from '../../../src/http/chat-server.js';
 
 const mockedCreateChatApp = vi.mocked(createChatApp);
+const mockedAttachChatWebSocketServer = vi.mocked(attachChatWebSocketServer);
 
 describe('startChatServer comms pass-through', () => {
   let handle: ChatServerHandle | undefined;
@@ -174,6 +176,35 @@ describe('startChatServer comms pass-through', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('continues owned server cleanup when shutdown claim fencing fails', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-runtime-action-fence-failure-'));
+    tempDirs.push(projectDir);
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(projectDir, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    });
+    const actionStore = mockedCreateChatApp.mock.calls[0]![0].runtimeActionStore!;
+    const drain = vi.spyOn(actionStore, 'drain');
+    const destroy = vi.spyOn(actionStore, 'destroy');
+    vi.spyOn(actionStore, 'beginShutdown').mockImplementation(() => {
+      throw new Error('SQLITE_BUSY while fencing claims');
+    });
+    const webSocketClose = vi.mocked(mockedAttachChatWebSocketServer.mock.results.at(-1)!.value.close);
+    const ticketDestroy = vi.spyOn(mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore!, 'destroy');
+
+    await expect(handle.close()).rejects.toThrow('SQLITE_BUSY while fencing claims');
+    handle = undefined;
+
+    expect(webSocketClose).toHaveBeenCalledOnce();
+    expect(ticketDestroy).toHaveBeenCalledOnce();
+    expect(drain).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
   it('leaves caller-owned runtime action store lifecycle with the caller', async () => {

@@ -20,7 +20,10 @@ import {
   type RuntimeAdapter,
   type RuntimeApproval,
 } from '../../../src/runtime/index.js';
-import type { RuntimeApproval as PublicRuntimeApproval } from '../../../src/index.js';
+import {
+  RuntimeActionUncertainError as PublicRuntimeActionUncertainError,
+  type RuntimeApproval as PublicRuntimeApproval,
+} from '../../../src/index.js';
 
 function adapter(id: string): RuntimeAdapter {
   return {
@@ -81,6 +84,12 @@ describe('provider-neutral runtime contract', () => {
     const publicApproval: PublicRuntimeApproval = approval;
 
     expect(publicApproval.id).toBe('approval-1');
+  });
+
+  it('exports the runtime action uncertainty error from the package entry point', () => {
+    expect(new PublicRuntimeActionUncertainError()).toMatchObject({
+      name: 'RuntimeActionUncertainError',
+    });
   });
 
   it('validates normalized governed action requests and typed unsupported results', () => {
