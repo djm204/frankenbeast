@@ -1,17 +1,24 @@
+import { execFile } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { delimiter, isAbsolute, resolve, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { redactSensitiveText } from '../../logging/redaction.js';
 import {
+  RuntimeActionUncertainError,
   RuntimeCursorError,
   type RuntimeAdapter,
   type RuntimeEventRequest,
   type RuntimeSnapshotRequest,
 } from '../runtime-adapter.js';
 import {
+  RuntimeActionResultSchema,
   RuntimeEventPageSchema,
   RuntimeProviderSchema,
   RuntimeSnapshotSchema,
+  type RuntimeAction,
+  type RuntimeActionRequest,
+  type RuntimeActionResult,
   type RuntimeAgent,
   type RuntimeBlocker,
   type RuntimeEvent,
@@ -29,7 +36,21 @@ export interface HermesRuntimeAdapterOptions {
   env?: NodeJS.ProcessEnv | undefined;
   now?: (() => Date) | undefined;
   busyTimeoutMs?: number | undefined;
+  command?: string | undefined;
+  runCommand?: HermesCommandRunner | undefined;
 }
+
+export interface HermesCommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+export type HermesCommandRunner = (
+  command: string,
+  args: readonly string[],
+  options: { env: NodeJS.ProcessEnv; timeoutMs: number; maxOutputBytes: number },
+) => Promise<HermesCommandResult>;
 
 interface DatabaseSource {
   workspaceId: string;
@@ -78,6 +99,8 @@ const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
 const SOURCE_INSPECTION_CACHE_TTL_MS = 1_000;
 const MAX_SOURCE_INSPECTION_CACHE_ENTRIES = 64;
+const COMMAND_TIMEOUT_MS = 10_000;
+const COMMAND_MAX_OUTPUT_BYTES = 64 * 1024;
 const ABSOLUTE_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"'`?#&]+\/?)+|[A-Za-z]:[\\/](?:[^\s"'`?#&]+)|\\\\(?:[^\s"'`?#&]+))/gu;
 const FORWARD_SLASH_UNC_RE = /(^|[\s=\[\]({}),;|!?#`>])(\/\/(?:[^/\s"'`?#&]+\/)+[^/\s"'`?#&]+)/gu;
 const POSIX_PATH_RE = /(^|[\s=:\[\]({}),;|!?#`>])(\/(?:[^/\s"'`?#&]+\/)*[^/\s"'`?#&]+)/gu;
@@ -394,22 +417,83 @@ function runtimeEventOrder(a: RuntimeEvent, b: RuntimeEvent): number {
   return left && right ? eventOrder(left, right) : a.id.localeCompare(b.id);
 }
 
+const defaultCommandRunner: HermesCommandRunner = (command, args, options) => new Promise((resolveCommand, reject) => {
+  execFile(command, [...args], {
+    encoding: 'utf8',
+    env: options.env,
+    timeout: options.timeoutMs,
+    maxBuffer: options.maxOutputBytes,
+  }, (error, stdout, stderr) => {
+    if (error && typeof error.code !== 'number') {
+      reject(error);
+      return;
+    }
+    resolveCommand({
+      stdout: stdout ?? '',
+      stderr: stderr ?? '',
+      exitCode: typeof error?.code === 'number' ? error.code : 0,
+    });
+  });
+});
+
+function resolveCommandPath(command: string, env: NodeJS.ProcessEnv): string | undefined {
+  const windows = process.platform === 'win32';
+  const extensions = windows
+    ? (env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [''];
+  const names = windows && !extensions.some((extension) => command.toLowerCase().endsWith(extension.toLowerCase()))
+    ? extensions.map((extension) => `${command}${extension}`)
+    : [command];
+  const hasPath = isAbsolute(command) || command.includes('/') || command.includes('\\');
+  const candidates = hasPath
+    ? names
+    : (env['PATH']?.split(windows ? ';' : delimiter) ?? [])
+        .filter((directory) => directory.length > 0)
+        .flatMap((directory) => names.map((name) => resolve(directory, name)));
+  for (const candidate of candidates) {
+    if (windows && /\.(?:bat|cmd)$/iu.test(candidate)) continue;
+    try {
+      accessSync(candidate, windows ? constants.F_OK : constants.X_OK);
+      return candidate;
+    } catch {
+      // Continue searching the executable path without passing it to the child.
+    }
+  }
+  return undefined;
+}
+
 export class HermesRuntimeAdapter implements RuntimeAdapter {
   readonly id = 'hermes';
   private readonly home: string | undefined;
   private readonly kanbanDbPath: string | undefined;
+  private readonly env: NodeJS.ProcessEnv;
   private readonly now: () => Date;
   private readonly busyTimeoutMs: number;
   private readonly sourceInspectionCache = new Map<string, {
     expiresAt: number;
     inspection: Promise<SourceInspection>;
   }>();
+  private readonly command: string;
+  private readonly commandAvailable: boolean;
+  private readonly runCommand: HermesCommandRunner;
 
   constructor(options: HermesRuntimeAdapterOptions = {}) {
     this.home = optionalHome(options);
     this.kanbanDbPath = optionalKanbanDbPath(options);
+    const commandPath = options.env === undefined ? process.env['PATH'] : options.env['PATH'];
+    this.env = {
+      ...options.env,
+      ...(options.env === undefined && commandPath ? { PATH: commandPath } : {}),
+    };
     this.now = options.now ?? (() => new Date());
     this.busyTimeoutMs = options.busyTimeoutMs ?? 2000;
+    const command = options.command ?? 'hermes';
+    const resolvedCommand = options.runCommand
+      ? undefined
+      : resolveCommandPath(command, this.env);
+    this.command = resolvedCommand ?? command;
+    this.commandAvailable = options.runCommand !== undefined || resolvedCommand !== undefined;
+    this.runCommand = options.runCommand ?? defaultCommandRunner;
   }
 
   async describe(): Promise<RuntimeProvider> {
@@ -434,6 +518,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         : inspection.discoveryMessage || compatible < inspected.length
           ? { state: 'degraded' as const, checkedAt: nowIso(this.now), message: 'One or more Hermes databases are unavailable or schema-incompatible' }
           : { state: 'connected' as const, checkedAt: nowIso(this.now) };
+    const mutationCapability = !this.home
+      ? { status: 'unsupported' as const, reason: 'Hermes home is required for supported mutation commands' }
+      : !this.commandAvailable
+        ? { status: 'unsupported' as const, reason: 'Hermes command is unavailable for runtime mutations' }
+        : { status: 'supported' as const };
 
     return RuntimeProviderSchema.parse({
       id: this.id,
@@ -444,12 +533,15 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         snapshot: { status: 'supported' },
         streaming: { status: 'supported' },
         logs: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical log-record source' },
-        blockers: { status: 'supported' },
+        blockers: mutationCapability,
         approvals: { status: 'unsupported', reason: 'The supported Hermes Kanban schema has no canonical approval-request source' },
-        pause: { status: 'unsupported', reason: 'The Hermes MVP adapter is read-only' },
-        resume: { status: 'unsupported', reason: 'The Hermes MVP adapter is read-only' },
-        cancellation: { status: 'unsupported', reason: 'The Hermes MVP adapter is read-only' },
-        policyActions: { status: 'unsupported', reason: 'The Hermes MVP adapter is read-only' },
+        pause: mutationCapability,
+        resume: mutationCapability,
+        cancellation: {
+          status: 'unsupported',
+          reason: 'Hermes Kanban has no supported operation that cancels an active task run',
+        },
+        policyActions: mutationCapability,
       },
       metadata: { discoveredWorkspaceCount: inspected.length },
     });
@@ -635,8 +727,169 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     });
   }
 
+  async executeAction(request: RuntimeActionRequest): Promise<RuntimeActionResult> {
+    if (request.action.type === 'approval.resolve' || request.action.type === 'task.cancel') {
+      const reason = request.action.type === 'approval.resolve'
+        ? 'Hermes does not expose a canonical approval-decision operation'
+        : 'Hermes Kanban has no supported operation that cancels an active task run';
+      return RuntimeActionResultSchema.parse({
+        status: 'unsupported',
+        providerId: this.id,
+        correlationId: request.correlationId,
+        reason,
+        audit: this.actionAudit(request.action, 'unsupported'),
+      });
+    }
+    if (!this.home) {
+      return RuntimeActionResultSchema.parse({
+        status: 'unsupported',
+        providerId: this.id,
+        correlationId: request.correlationId,
+        reason: 'Hermes home is not configured',
+        audit: this.actionAudit(request.action, 'unsupported'),
+      });
+    }
+    const workspace = (await this.inspectSources(undefined, request.action.workspaceId)).sources.find((source) => (
+      source.workspaceId === request.action.workspaceId && source.status === 'compatible'
+    ));
+    if (!workspace) {
+      return RuntimeActionResultSchema.parse({
+        status: 'failed',
+        providerId: this.id,
+        correlationId: request.correlationId,
+        reason: 'Hermes workspace is unavailable or incompatible',
+        audit: this.actionAudit(request.action, 'failed'),
+      });
+    }
+
+    const previousState = await this.readTaskStatus(request.action, workspace.path);
+    let mutation;
+    let currentState;
+    try {
+      mutation = await this.runHermes(this.mutationArgs(request.action), workspace.path);
+      currentState = await this.readTaskStatus(request.action, workspace.path);
+      if (
+        !this.postconditionSatisfied(request.action, currentState)
+        || (request.action.type === 'policy.apply' && !this.promotionSucceeded(mutation))
+      ) {
+        throw new Error(`Hermes action ${request.action.type} did not reach its expected postcondition`);
+      }
+    } catch (error) {
+      throw new RuntimeActionUncertainError({ cause: error });
+    }
+    return RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: this.id,
+      correlationId: request.correlationId,
+      audit: {
+        ...this.actionAudit(request.action, 'applied'),
+        previousState,
+        currentState,
+      },
+    });
+  }
+
   validateEventCursor(cursor: string): void {
     parseRequestCursor(cursor);
+  }
+
+  private actionAudit(action: RuntimeAction, outcome: 'applied' | 'unsupported' | 'failed') {
+    return {
+      requestedBy: 'authenticated-operator' as const,
+      actionType: action.type,
+      targetId: action.type === 'approval.resolve' ? action.approvalId : action.taskId,
+      outcome,
+    };
+  }
+
+  private workspaceArgs(workspaceId: string): string[] {
+    if (workspaceId === 'hermes:global') return [];
+    const board = workspaceId === 'hermes:board:global' ? 'global' : workspaceId.slice('hermes:'.length);
+    return ['--board', board];
+  }
+
+  private rawTaskId(action: Exclude<RuntimeAction, { type: 'approval.resolve' }>): string {
+    const prefix = `${action.workspaceId}:`;
+    if (!action.taskId.startsWith(prefix)) throw new Error('Runtime task does not belong to the requested workspace');
+    return action.taskId.slice(prefix.length);
+  }
+
+  private commandArgs(action: Exclude<RuntimeAction, { type: 'approval.resolve' }>, command: string, args: string[]): string[] {
+    return ['kanban', ...this.workspaceArgs(action.workspaceId), command, ...args];
+  }
+
+  private mutationArgs(action: Exclude<RuntimeAction, { type: 'approval.resolve' }>): string[] {
+    const taskId = this.rawTaskId(action);
+    switch (action.type) {
+      case 'blocker.add':
+        return this.commandArgs(action, 'block', [
+          '--kind', action.category.replace('-', '_'), taskId, action.reason,
+        ]);
+      case 'blocker.resolve':
+        return this.commandArgs(action, 'unblock', [
+          ...(action.reason ? ['--reason', action.reason] : []), taskId,
+        ]);
+      case 'task.pause':
+        return this.commandArgs(action, 'schedule', [taskId, action.reason ?? 'Paused by authenticated operator']);
+      case 'task.resume':
+        return this.commandArgs(action, 'unblock', [
+          ...(action.reason ? ['--reason', action.reason] : []), taskId,
+        ]);
+      case 'task.cancel':
+        throw new Error('Hermes task cancellation is unsupported');
+      case 'policy.apply':
+        return this.commandArgs(action, 'promote', ['--json', taskId, action.reason]);
+    }
+  }
+
+  private async readTaskStatus(
+    action: Exclude<RuntimeAction, { type: 'approval.resolve' }>,
+    databasePath: string,
+  ): Promise<string> {
+    const result = await this.runHermes(
+      this.commandArgs(action, 'show', ['--json', this.rawTaskId(action)]),
+      databasePath,
+    );
+    try {
+      const parsed = JSON.parse(result.stdout) as { task?: { status?: unknown }; status?: unknown };
+      const status = parsed.task?.status ?? parsed.status;
+      if (typeof status === 'string' && status.length > 0) return status;
+    } catch {
+      // Fall through to a stable error without exposing command output.
+    }
+    throw new Error('Hermes task status response was invalid');
+  }
+
+  private async runHermes(args: string[], databasePath: string): Promise<HermesCommandResult> {
+    const result = await this.runCommand(this.command, args, {
+      env: { ...this.env, HERMES_HOME: this.home!, HERMES_KANBAN_DB: databasePath },
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      maxOutputBytes: COMMAND_MAX_OUTPUT_BYTES,
+    });
+    if (result.exitCode !== 0) throw new Error(`Hermes command failed with exit code ${result.exitCode}`);
+    return result;
+  }
+
+  private postconditionSatisfied(
+    action: Exclude<RuntimeAction, { type: 'approval.resolve' }>,
+    status: string,
+  ): boolean {
+    switch (action.type) {
+      case 'blocker.add': return status === 'blocked';
+      case 'blocker.resolve': return status !== 'blocked';
+      case 'task.pause': return status === 'scheduled';
+      case 'task.resume': return status === 'ready' || status === 'todo';
+      case 'task.cancel': return false;
+      case 'policy.apply': return status === 'ready' || status === 'running';
+    }
+  }
+
+  private promotionSucceeded(result: HermesCommandResult): boolean {
+    try {
+      return (JSON.parse(result.stdout) as { promoted?: unknown }).promoted === true;
+    } catch {
+      return false;
+    }
   }
 
   private async discoverSources(

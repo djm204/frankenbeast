@@ -447,6 +447,35 @@ input.on('line', (line) => {
     );
   });
 
+  it('returns an explicit unsupported result for governed actions without calling Codex', async () => {
+    const request = vi.fn();
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    await expect(adapter.executeAction({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'codex:blocker:unsupported',
+      action: {
+        type: 'blocker.add',
+        workspaceId: 'codex:workspace:one',
+        taskId: 'codex:thread:one',
+        category: 'capability',
+        reason: 'Codex is read-only',
+      },
+    })).resolves.toEqual({
+      status: 'unsupported',
+      providerId: 'codex',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      reason: 'The Codex adapter is read-only',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.add',
+        targetId: 'codex:thread:one',
+        outcome: 'unsupported',
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('distinguishes incompatible app-server responses from connection failures', async () => {
     const adapter = new CodexRuntimeAdapter({
       now: () => new Date('2026-07-26T12:00:00.000Z'),

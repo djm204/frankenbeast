@@ -113,6 +113,7 @@ export interface IssueCliDeps {
 
 export interface CliDeps {
   deps: BeastLoopDeps;
+  governorActionEnabled: boolean;
   cliLlmAdapter: CliLlmAdapter;
   observerBridge: CliObserverBridge;
   logger: BeastLogger;
@@ -1254,6 +1255,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
     return {
       deps,
+      governorActionEnabled: governance.actionEnabled,
       cliLlmAdapter: llm.cliLlmAdapter,
       observerBridge: observer.observerBridge,
       logger: observer.logger,

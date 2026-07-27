@@ -1,0 +1,43 @@
+# Issue #3813 governed smart-swarm actions progress
+
+- [x] Verify the authorized isolated worktree, branch, and stacked base `a19dfb016adafe5c7f93b506035a5e59bb289b22`.
+- [x] Read issue #3813, the #3812 runtime contract, runtime routes, Hermes adapter, auth/rate-limit patterns, and supported Hermes Kanban CLI operations.
+- [x] Add provider-neutral runtime action schemas, capability mapping, typed results, correlation/idempotency/causation fields, and adapter action boundary using a failing contract test first.
+- [x] Add governed HTTP action execution with operator auth, runtime validation/body bounds, capability checks, duplicate suppression, redacted audit evidence, and fail-closed high-risk governor handling using failing route tests first.
+- [x] Implement Hermes blocker and task lifecycle actions via fixed `hermes kanban` argv calls with bounded execution/output and postcondition reads using failing isolated-home tests first.
+- [x] Add allowlisted Hermes policy actions and explicit unsupported approval responses using failing tests first.
+- [x] Run 43 focused runtime tests plus root lint/typecheck/build gates; full root tests retain unrelated baseline CLI test failures reproduced unchanged in the exact #3821 worktree.
+- [x] Self-review the full diff for shell interpolation, direct SQLite mutation, auth/governor bypasses, secret/path leakage, and unrelated/Hive Brain changes; verify all supported Hermes operations against an isolated test home.
+- [x] Re-check stacked PR #3821 and rebase onto its exact current head `ddd906550f08cb9bffdc09a22496aee0f27ea730`, preserving its runtime review fixes.
+- [x] Commit the initial implementation with David Mendez <me@davidmendez.dev>, push, and open PR #3827 linked to #3813 without merging.
+- [x] Reconstruct PR #3827 review state and remediate all seven current-head Codex findings with focused red-green tests: provider-neutral opaque task IDs, isolated Hermes command environments, honest cancellation capability, production governor wiring, and durable SQLite audit/idempotency state. Verified the unblock finding against live `hermes kanban unblock --help`; `--reason` is supported and requires no code change.
+- [x] Address the fresh exact-head Codex round with three additional red-green regressions: shutdown now rejects new reservations and drains tracked mutations before destroying SQLite state, external audit hooks cannot delay durable idempotency completion, and Hermes mutations require a freshly discovered containment-checked schema-compatible workspace.
+- [x] Run the 84 focused runtime/chat-server tests plus the focused CLI governor-wiring test, package lint/typecheck/build, and root lint/typecheck/build successfully after the final exact-base rebase. Package `npm run test` is 4658/4661 with the same three unrelated established failures (network health environment state plus two CLI mock-order failures); all changed-path focused tests pass independently.
+- [x] Commit and push the Codex remediation with David Mendez <me@davidmendez.dev>.
+- [x] Reproduce and remediate the next five exact-head Codex findings under RED→GREEN tests: non-expiring pending idempotency claims, fail-closed disabled-governor wiring, unambiguous provider/idempotency storage keys, authoritative adapter-result binding, and opaque bounded workspace IDs.
+- [x] Rebase the complete seven-commit remediation stack onto #3821's final exact-current-head clean commit `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e`, preserving a clean worktree and David Mendez commit identity throughout.
+- [x] Address the post-rebase Codex round with red-green regressions for honest database-only mutation capabilities, authoritative promotion results, caller-owned store lifecycle, private durable-store directory permissions, and bounded snapshot IDs. Verified that simultaneous `HERMES_HOME`/`HERMES_KANBAN_DB` already remain aligned because the adapter preserves the configured database variable in the fixed command environment; no production change was needed for that report.
+- [x] Address the fifth Codex invocation with four red-green regressions: pin every Hermes show/mutation command to the exact inspected database path, harden only explicitly dedicated action-store directories, preserve unsupported results by bounding long capability reasons, and destroy owned durable stores when TCP startup fails.
+- [x] Rebase the nine-commit #3813 stack onto immutable merged `main` base `715da9d456d9a883aa96d85f53cbefca832da1c1`, preserve the final #3812 stream/cursor hardening through conflict resolution, and align the provider-scoping regression with the final route-safe provider contract.
+- [x] Re-run the final-base gates: governed runtime/action tests 175/175, package and root lint/typecheck/build pass, and package full tests 4759/4764 with five unrelated environmental/baseline failures outside the changed action paths.
+- [x] Replace non-reopenable PR #3827 with PR #3862, resolve seven fresh exact-head Codex findings with red-green regressions, and keep every Codex thread answered and resolved before retriggering.
+- [x] Rebase again after `main` advanced to `a372df380d529a66d1ca4a2d8abd2e7d0ef3be36`, integrate the newly merged read-only Ollama adapter with the governed action contract, and pass 213 focused tests plus root lint/typecheck/build.
+- [x] Address the final exact-head Codex round with red-green regressions for sanitizing completed results before durable idempotency storage, preserving provider-owned opaque snapshot IDs, and containing/retrying transient lease-renewal failures.
+- [x] Address the tier-12 follow-up with red-green regressions for atomic durable completion/audit persistence and mutation-target-scoped Hermes source inspection.
+- [x] Address the next tier-12 follow-up with red-green regressions for startup cleanup on durable-store construction failure and claim-token fencing after lease ownership loss.
+- [x] Address the final tier-12 hardening round with red-green regressions for opaque governed-action identifiers, bounded runtime-action draining, and durable uncertain-completion fencing.
+- [x] Address the next exact-head Codex round with red-green regressions for opaque audit target identifiers, pre-expiry renewal retries, shutdown-time fencing of active durable claims, and uncertainty fencing for provider exceptions after execution begins.
+- [x] Rebase onto current `origin/main` `b7dedb7b53f76d7e0b8e28e090b711c7d7a992c9` after the Codex runtime adapter merged, and add its explicit read-only governed-action response under a failing adapter test so the provider-neutral contract remains buildable in PR merge refs.
+- [x] Address bounded Codex round 12/12 with red-green regressions for atomic uncertain-action audit fencing, explicit post-dispatch uncertainty classification, deferred store destruction after bounded drains, and provider/workspace-bound governor prompts.
+- [ ] Run the real GitHub `@codex review` loop to a clean exact-current-head result, green CI or an explicit no-checks state, and zero unresolved Codex threads.
+- [ ] Prepare the exact final handoff for root `t_25558345`, then block the task for review.
+- [x] Prevent lease renewals from undoing shutdown fences under a failing regression test.
+- [x] Persist independent uncertain audit evidence when an executed action loses its claim under a failing regression test.
+- [x] Export `RuntimeActionUncertainError` from the package root under a failing public-contract test.
+- [x] Fence malformed or request-mismatched post-mutation adapter results under a failing regression test.
+- [x] Resolve Windows Hermes executables with `PATHEXT` and portable path separators under a failing regression test.
+- [x] Continue all server cleanup when shutdown claim fencing fails under a failing regression test.
+- [x] Address exact-head Codex round 14 with red-green regressions for pre-expiry lease retry headroom, fallback uncertain audit forwarding after atomic completion failure, and opaque approval action IDs.
+- [x] Address exact-head Codex round 15 with red-green regressions for Windows command shims, CLI termination fencing/finalization, per-claim shutdown fence retries, and fallback uncertainty fencing/auditing.
+- [ ] Run focused/package/root verification, publish one immutable head, resolve all six threads, and pass exact-head Codex/CI gates without merging.
+- [ ] Address exact-head Codex round 16: exclude shell-only Windows Hermes shims from governed mutations, renew transient lease failures before expiry with positive headroom, and forward lost-claim uncertainty evidence even when durable audit storage fails. Test-first regressions and all local verification layers pass; publish, resolve the three threads, and rerun exact-head Codex/CI.

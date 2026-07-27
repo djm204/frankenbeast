@@ -10,6 +10,8 @@ import {
   RuntimeMetadataSchema,
   OllamaRuntimeAdapter,
   RuntimeProviderSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
   RuntimeRunSchema,
   RuntimeSnapshotSchema,
   RuntimeTaskSchema,
@@ -18,7 +20,10 @@ import {
   type RuntimeAdapter,
   type RuntimeApproval,
 } from '../../../src/runtime/index.js';
-import type { RuntimeApproval as PublicRuntimeApproval } from '../../../src/index.js';
+import {
+  RuntimeActionUncertainError as PublicRuntimeActionUncertainError,
+  type RuntimeApproval as PublicRuntimeApproval,
+} from '../../../src/index.js';
 
 function adapter(id: string): RuntimeAdapter {
   return {
@@ -54,6 +59,14 @@ function adapter(id: string): RuntimeAdapter {
     })),
     getEvents: vi.fn(async () => ({ events: [], nextCursor: null })),
     validateEventCursor: vi.fn(),
+    executeAction: vi.fn(async (request) => RuntimeActionResultSchema.parse({
+      status: 'unsupported', providerId: id, correlationId: request.correlationId, reason: 'No mutations',
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'unsupported',
+      },
+    })),
   };
 }
 
@@ -71,6 +84,100 @@ describe('provider-neutral runtime contract', () => {
     const publicApproval: PublicRuntimeApproval = approval;
 
     expect(publicApproval.id).toBe('approval-1');
+  });
+
+  it('exports the runtime action uncertainty error from the package entry point', () => {
+    expect(new PublicRuntimeActionUncertainError()).toMatchObject({
+      name: 'RuntimeActionUncertainError',
+    });
+  });
+
+  it('validates normalized governed action requests and typed unsupported results', () => {
+    const request = RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      idempotencyKey: 'ui:block:t_deadbeef:1',
+      action: {
+        type: 'blocker.add',
+        workspaceId: 'hermes:global',
+        taskId: 'hermes:global:t_deadbeef',
+        category: 'needs-input',
+        reason: 'Operator input is required',
+      },
+    });
+
+    expect(request.action.type).toBe('blocker.add');
+    expect(RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: 'test',
+      correlationId: request.correlationId,
+      reason: 'Approval decisions are unavailable',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'approval.resolve',
+        targetId: 'approval-1',
+        outcome: 'unsupported',
+      },
+    })).toEqual(expect.objectContaining({ status: 'unsupported' }));
+
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, taskId: 'provider/task @ shard 1' },
+    }).action).toEqual(expect.objectContaining({ taskId: 'provider/task @ shard 1' }));
+
+    const approvalId = `provider approval/${'x'.repeat(220)}`;
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: {
+        type: 'approval.resolve', workspaceId: 'workspace-1', approvalId, decision: 'approve',
+      },
+    }).action).toEqual(expect.objectContaining({ approvalId }));
+
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, workspaceId: 'provider/workspace @ shard 1' },
+    }).action).toEqual(expect.objectContaining({ workspaceId: 'provider/workspace @ shard 1' }));
+
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, taskId: 'x'.repeat(201) },
+    }).action).toEqual(expect.objectContaining({ taskId: 'x'.repeat(201) }));
+
+    expect(RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'test',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.add',
+        targetId: 'x'.repeat(201),
+        outcome: 'applied',
+      },
+    })).toEqual(expect.objectContaining({
+      audit: expect.objectContaining({ targetId: 'x'.repeat(201) }),
+    }));
+  });
+
+  it('preserves provider-owned opaque identifiers in emitted snapshots', () => {
+    expect(RuntimeWorkspaceSchema.parse({
+      id: 'w'.repeat(201),
+      name: 'workspace',
+      kind: 'workspace',
+      state: 'available',
+    })).toEqual(expect.objectContaining({ id: 'w'.repeat(201) }));
+
+    expect(RuntimeTaskSchema.parse({
+      id: 't'.repeat(201),
+      workspaceId: 'workspace',
+      title: 'task',
+      state: 'ready',
+      parentIds: [],
+      dependencyIds: [],
+      ownerIds: [],
+      priority: null,
+      createdAt: '2026-07-26T12:00:00.000Z',
+      updatedAt: null,
+    })).toEqual(expect.objectContaining({ id: 't'.repeat(201) }));
   });
 
   it('requires every capability to declare supported or unsupported state', async () => {

@@ -18,6 +18,9 @@ import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
+import type { RuntimeActionAuditEvent } from './routes/runtime-routes.js';
+import type { IGovernorModule } from '../deps.js';
+import { RuntimeActionStore } from '../runtime/runtime-action-store.js';
 import { attachChatWebSocketServer, type AttachChatWebSocketServerOptions, type ChatSocketMessageRateLimitOptions } from './ws-chat-server.js';
 import { createSessionTokenSecret } from './ws-chat-auth.js';
 import type { OrchestratorConfig } from '../config/orchestrator-config.js';
@@ -37,6 +40,8 @@ import { SseConnectionTicketStore } from '../beasts/events/sse-connection-ticket
 import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, hashChatRateLimitPrincipal, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { isoNow } from '@franken/types';
+
+const RUNTIME_ACTION_DRAIN_TIMEOUT_MS = 10_000;
 
 export interface StartChatServerOptions {
   host?: string;
@@ -74,6 +79,9 @@ export interface StartChatServerOptions {
   beastDaemon?: { baseUrl: string; operatorToken?: string | undefined };
   chatRateLimit?: ChatRateLimitOptions;
   chatMessageRateLimit?: ChatSocketMessageRateLimitOptions;
+  runtimeActionGovernor?: IGovernorModule;
+  runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
+  runtimeActionStore?: RuntimeActionStore;
 }
 
 export interface ChatServerHandle {
@@ -377,64 +385,94 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         });
       })()
     : undefined;
-  const app = createChatApp({
-    sessionStore,
-    engine: runtime.engine,
-    runtime: runtime.runtime,
-    turnRunner: runtime.turnRunner,
-    sessionTokenSecret: tokenSecret,
-    ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
-    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
-    ...(options.beastControl ? { beastControl: options.beastControl } : {}),
-    ...(options.networkControl ? { networkControl: options.networkControl } : {}),
-    ...(securityConfig ? { securityConfig } : {}),
-    ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
-    ...(commsRuntime ? { commsRuntime } : {}),
-    ...(options.skillManager ? { skillManager: options.skillManager } : {}),
-    ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
-    ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
-    ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
-    ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
-    ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
-    ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
-    chatRateLimiter,
-    chatMutationAdmission,
-    approvalAuditLog,
-  });
-  const server = createServer((request, response) => {
-    void handleHonoHttpRequest(app, request, response);
-  });
+  let ownedRuntimeActionStore: RuntimeActionStore | undefined;
+  let runtimeActionStore = options.runtimeActionStore;
   const chatMessageRateLimit = options.chatMessageRateLimit
     ?? options.chatRateLimit
     ?? options.beastControl?.rateLimit;
-
-  const attachOptions: AttachChatWebSocketServerOptions = {
-    server,
-    path,
-    runtime: runtime.runtime,
-    sessionStore,
-    tokenSecret,
-    chatRateLimiter,
-    chatMutationAdmission,
-    approvalAuditLog,
-    ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
-    ...(chatMessageRateLimit ? { chatMessageRateLimit } : {}),
-    ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
-    ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
-  };
-  const webSocketServer = attachChatWebSocketServer(attachOptions);
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, () => {
-      server.off('error', reject);
-      resolve();
+  let app: ReturnType<typeof createChatApp> | undefined;
+  let server: ReturnType<typeof createServer> | undefined;
+  let webSocketServer: ReturnType<typeof attachChatWebSocketServer> | undefined;
+  let address: ReturnType<ReturnType<typeof createServer>['address']>;
+  try {
+    if (effectiveOperatorToken && !options.runtimeActionStore) {
+      ownedRuntimeActionStore = new RuntimeActionStore({
+        databasePath: join(options.sessionStoreDir, 'runtime-actions', 'actions.sqlite'),
+        hardenDatabaseDirectory: true,
+      });
+      runtimeActionStore = ownedRuntimeActionStore;
+    }
+    const createdApp = createChatApp({
+      sessionStore,
+      engine: runtime.engine,
+      runtime: runtime.runtime,
+      turnRunner: runtime.turnRunner,
+      sessionTokenSecret: tokenSecret,
+      ...(options.operatorToken ? { operatorToken: options.operatorToken } : {}),
+      ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+      ...(options.beastControl ? { beastControl: options.beastControl } : {}),
+      ...(options.networkControl ? { networkControl: options.networkControl } : {}),
+      ...(securityConfig ? { securityConfig } : {}),
+      ...(options.commsConfig ? { commsConfig: options.commsConfig } : {}),
+      ...(commsRuntime ? { commsRuntime } : {}),
+      ...(options.skillManager ? { skillManager: options.skillManager } : {}),
+      ...(options.providerRegistry ? { providerRegistry: options.providerRegistry } : {}),
+      ...(options.dashboardDeps ? { dashboardDeps: options.dashboardDeps } : {}),
+      ...(options.analyticsDeps ? { analyticsDeps: options.analyticsDeps } : {}),
+      ...(chatStreamTicketStore ? { chatStreamTicketStore } : {}),
+      ...(options.beastDaemon ? { beastDaemon: options.beastDaemon } : {}),
+      ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+      ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
+      ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
+      ...(runtimeActionStore ? { runtimeActionStore } : {}),
+      chatRateLimiter,
+      chatMutationAdmission,
+      approvalAuditLog,
     });
-  });
+    app = createdApp;
+    const createdServer = createServer((request, response) => {
+      void handleHonoHttpRequest(createdApp, request, response);
+    });
+    server = createdServer;
+    const attachOptions: AttachChatWebSocketServerOptions = {
+      server: createdServer,
+      path,
+      runtime: runtime.runtime,
+      sessionStore,
+      tokenSecret,
+      chatRateLimiter,
+      chatMutationAdmission,
+      approvalAuditLog,
+      ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
+      ...(chatMessageRateLimit ? { chatMessageRateLimit } : {}),
+      ...(options.chatRateLimit ? { chatRateLimit: options.chatRateLimit } : {}),
+      ...(effectiveOperatorToken ? { operatorToken: effectiveOperatorToken } : {}),
+    };
+    webSocketServer = attachChatWebSocketServer(attachOptions);
+    await new Promise<void>((resolve, reject) => {
+      createdServer.once('error', reject);
+      createdServer.listen(port, host, () => {
+        createdServer.off('error', reject);
+        resolve();
+      });
+    });
+    address = createdServer.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Chat server did not bind to a TCP address');
+    }
+  } catch (error) {
+    server?.closeAllConnections();
+    webSocketServer?.close();
+    ownedRuntimeActionStore?.beginShutdown();
+    await ownedRuntimeActionStore?.drain();
+    chatStreamTicketStore?.destroy();
+    ownedRuntimeActionStore?.destroy();
+    ownedBrainRegistry?.close();
+    throw error;
+  }
 
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('Chat server did not bind to a TCP address');
+  if (!app || !server || !webSocketServer) {
+    throw new Error('Chat server initialization did not complete');
   }
 
   const url = localPlaintextOrSecureEndpoint(host, address.port);
@@ -448,16 +486,31 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
+      const closedServer = closeHttpServer(server);
+      let shutdownFenceError: unknown;
+      try {
+        ownedRuntimeActionStore?.beginShutdown();
+      } catch (error) {
+        shutdownFenceError = error;
+      }
+      server.closeAllConnections();
       webSocketServer.close();
+      const actionsDrained = await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
       chatStreamTicketStore?.destroy();
+      if (ownedRuntimeActionStore) {
+        if (actionsDrained) {
+          ownedRuntimeActionStore.destroy();
+        } else {
+          void ownedRuntimeActionStore.drain().then(() => ownedRuntimeActionStore?.destroy());
+        }
+      }
       await options.disposeBeastControl?.();
-      const closedServer = closeHttpServer(server);
-      server.closeAllConnections();
       await closedServer;
       ownedBrainRegistry?.close();
       options.analyticsDeps?.analytics.close?.();
+      if (shutdownFenceError) throw shutdownFenceError;
     },
   };
 }

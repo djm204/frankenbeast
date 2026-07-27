@@ -1,4 +1,10 @@
-import type { RuntimeEventPage, RuntimeProvider, RuntimeSnapshot } from './runtime-schemas.js';
+import type {
+  RuntimeActionRequest,
+  RuntimeActionResult,
+  RuntimeEventPage,
+  RuntimeProvider,
+  RuntimeSnapshot,
+} from './runtime-schemas.js';
 
 export interface RuntimeSnapshotRequest {
   workspaceId?: string | undefined;
@@ -22,10 +28,20 @@ export class RuntimeCursorError extends Error {
   }
 }
 
+export class RuntimeActionUncertainError extends Error {
+  readonly code = 'RUNTIME_ACTION_UNCERTAIN';
+
+  constructor(options?: ErrorOptions) {
+    super('Runtime provider action completion is uncertain', options);
+    this.name = 'RuntimeActionUncertainError';
+  }
+}
+
 export interface RuntimeAdapter {
   readonly id: string;
   describe(): Promise<RuntimeProvider>;
   getSnapshot(request?: RuntimeSnapshotRequest): Promise<RuntimeSnapshot>;
   getEvents(request?: RuntimeEventRequest): Promise<RuntimeEventPage>;
   validateEventCursor(cursor: string): void;
+  executeAction(request: RuntimeActionRequest): Promise<RuntimeActionResult>;
 }

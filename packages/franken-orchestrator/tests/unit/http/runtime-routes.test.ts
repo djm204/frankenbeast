@@ -1,20 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import { TransportSecurityService } from '../../../src/http/security/transport-security.js';
 import { createRuntimeRoutes, runRuntimeEventStream } from '../../../src/http/routes/runtime-routes.js';
 import {
   RuntimeAdapterRegistry,
+  RuntimeActionUncertainError,
   RuntimeCursorError,
   RuntimeEventPageSchema,
+  RuntimeActionResultSchema,
   RuntimeProviderSchema,
   RuntimeSnapshotSchema,
   type RuntimeAdapter,
 } from '../../../src/runtime/index.js';
+import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
 
 const stores: SseConnectionTicketStore[] = [];
+const actionStores: RuntimeActionStore[] = [];
+const tempDirs: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   stores.splice(0).forEach((store) => store.destroy());
+  actionStores.splice(0).forEach((store) => store.destroy());
+  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 function runtimeAdapter(): RuntimeAdapter {
@@ -52,6 +64,18 @@ function runtimeAdapter(): RuntimeAdapter {
     getEvents: vi.fn(async ({ cursor } = {}) => RuntimeEventPageSchema.parse(
       cursor ? { events: [], nextCursor: cursor } : { events: [event], nextCursor: event.cursor },
     )),
+    executeAction: vi.fn(async (request) => RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: 'hermes',
+      correlationId: request.correlationId,
+      reason: 'Approval decisions are unavailable',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'unsupported',
+      },
+    })),
     validateEventCursor: vi.fn((cursor) => {
       if (cursor === 'malformed') {
         throw Object.assign(new Error('Invalid runtime event cursor'), { code: 'INVALID_CURSOR' });
@@ -60,12 +84,18 @@ function runtimeAdapter(): RuntimeAdapter {
   };
 }
 
-function createRoutes() {
+function createRoutes(actionStore = new RuntimeActionStore()) {
   const ticketStore = new SseConnectionTicketStore();
   stores.push(ticketStore);
+  actionStores.push(actionStore);
   const adapter = runtimeAdapter();
+  const actionAudit = vi.fn();
+  const actionGovernor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
   return {
     adapter,
+    actionAudit,
+    actionGovernor,
+    actionStore,
     app: createRuntimeRoutes({
       registry: new RuntimeAdapterRegistry([adapter]),
       operatorToken: 'operator-secret',
@@ -73,6 +103,9 @@ function createRoutes() {
       ticketStore,
       pollIntervalMs: 10,
       heartbeatIntervalMs: 20,
+      actionAudit,
+      actionGovernor,
+      actionStore,
     }),
   };
 }
@@ -82,6 +115,954 @@ function authHeaders(): Record<string, string> {
 }
 
 describe('smart-swarm runtime routes', () => {
+  it('fails closed through the governor before destructive runtime actions', async () => {
+    const { app, adapter, actionGovernor, actionAudit } = createRoutes();
+    const describe = await adapter.describe();
+    vi.mocked(adapter.describe).mockResolvedValue({
+      ...describe,
+      capabilities: { ...describe.capabilities, cancellation: { status: 'supported' } },
+    });
+    actionGovernor.requestApproval.mockResolvedValueOnce({ decision: 'rejected', reason: 'Human approval denied' });
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'cancel:t_deadbeef:one',
+        action: {
+          type: 'task.cancel', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          reason: 'token=must-not-enter-governor',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: expect.objectContaining({ status: 'rejected' }) });
+    expect(actionGovernor.requestApproval).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'hermes:global:t_deadbeef',
+      summary: 'Governed runtime action task.cancel on provider hermes in workspace hermes:global',
+      requiresHitl: true,
+    }));
+    expect(JSON.stringify(actionGovernor.requestApproval.mock.calls)).not.toContain('must-not-enter-governor');
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'rejected' }));
+  });
+
+  it('deduplicates concurrent action retries and emits redacted causation-aware audit evidence', async () => {
+    const { app, adapter, actionAudit } = createRoutes();
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'hermes',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied', previousState: 'ready', currentState: 'blocked',
+      },
+    }));
+    const actionBody = {
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      idempotencyKey: 'block:t_deadbeef:one',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'needs-input', reason: 'token=do-not-log',
+      },
+    };
+    const request = (correlationId: string) => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({ ...actionBody, correlationId }),
+    });
+
+    const [first, replay] = await Promise.all([
+      request('018f6f2d-c734-7cc9-b1b6-112233445566'),
+      request('018f6f2d-c734-7cc9-b1b6-001122334455'),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({
+      replayed: true,
+      correlationId: '018f6f2d-c734-7cc9-b1b6-001122334455',
+    }) });
+    expect(actionAudit).toHaveBeenCalledOnce();
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      actionType: 'blocker.add',
+    }));
+    expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-log');
+  });
+
+  it('redacts adapter-provided state before persisting or forwarding action audits', async () => {
+    const actionStore = new RuntimeActionStore();
+    const { app, adapter, actionAudit } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'hermes',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied',
+        previousState: 'token=adapter-secret',
+        currentState: '/home/private/runtime-state',
+      },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:redacted-audit',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(actionAudit).toHaveBeenCalledOnce();
+    const durableAudit = JSON.stringify({
+      forwarded: actionAudit.mock.calls,
+      persisted: actionStore.listAuditEvents(),
+    });
+    expect(durableAudit).not.toContain('adapter-secret');
+    expect(durableAudit).not.toContain('/home/private/runtime-state');
+    expect(durableAudit).toContain('[REDACTED');
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:redacted-audit']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    const reservation = actionStore.reserve(key, fingerprint, Date.now() + 1_000, Date.now());
+    expect(reservation.status).toBe('completed');
+    expect(JSON.stringify(reservation)).not.toContain('adapter-secret');
+    expect(JSON.stringify(reservation)).not.toContain('/home/private/runtime-state');
+  });
+
+  it('keeps a slow in-flight action leased beyond the replay TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const { app, adapter } = createRoutes();
+      let finish!: () => void;
+      const blocked = new Promise<void>((resolve) => { finish = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const body = JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:slow',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Slow provider',
+        },
+      });
+      const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+      });
+
+      const first = request();
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+      const retry = request();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(adapter.executeAction).toHaveBeenCalledOnce();
+
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await first).status).toBe(200);
+      await expect((await retry).json()).resolves.toEqual({
+        data: expect.objectContaining({ status: 'applied', replayed: true }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('contains transient lease renewal failures and retries the lease', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      const renew = vi.spyOn(actionStore, 'renew')
+        .mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); })
+        .mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); });
+      const { app, adapter } = createRoutes(actionStore);
+      let finish!: () => void;
+      const blocked = new Promise<void>((resolve) => { finish = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const body = JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:renew-retry',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Slow provider',
+        },
+      });
+      const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+      });
+
+      const first = request();
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(renew).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1.25 * 60_000);
+      expect(renew).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1.25 * 60_000);
+      expect(renew).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(2.5 * 60_000);
+      const retry = request();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(adapter.executeAction).toHaveBeenCalledOnce();
+
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await first).status).toBe(200);
+      expect((await retry).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails closed before repeated renewal errors can reach the lease deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      const renew = vi.spyOn(actionStore, 'renew').mockImplementation(() => {
+        throw new Error('SQLITE_BUSY');
+      });
+      const { app, adapter } = createRoutes(actionStore);
+      let finish!: () => void;
+      const blocked = new Promise<void>((resolve) => { finish = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const response = app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          idempotencyKey: 'block:t_deadbeef:renew-deadline',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Slow provider',
+          },
+        }),
+      });
+
+      await vi.advanceTimersByTimeAsync(10 * 60_000 - 1_000);
+      expect(renew).toHaveBeenCalled();
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((await response).status).toBe(409);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not complete an action after lease renewal reports lost ownership', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      const renew = vi.spyOn(actionStore, 'renew').mockReturnValue(false);
+      const completeWithAudit = vi.spyOn(actionStore, 'completeWithAudit');
+      const { app, adapter } = createRoutes(actionStore);
+      let finishAction!: () => void;
+      const blocked = new Promise<void>((resolve) => { finishAction = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const response = app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          idempotencyKey: 'block:t_deadbeef:lost-lease',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Retry later',
+          },
+        }),
+      });
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(renew).toHaveReturnedWith(false);
+      finishAction();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((await response).status).toBe(409);
+      expect(completeWithAudit).not.toHaveBeenCalled();
+      expect(actionStore.listAuditEvents()).toEqual([
+        expect.objectContaining({
+          providerId: 'hermes',
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          outcome: 'applied',
+          currentState: 'uncertain',
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('forwards lost-claim audit evidence when durable audit storage fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      vi.spyOn(actionStore, 'renew').mockReturnValue(false);
+      vi.spyOn(actionStore, 'recordAudit').mockImplementation(() => {
+        throw new Error('SQLITE_BUSY');
+      });
+      const { app, adapter, actionAudit } = createRoutes(actionStore);
+      let finishAction!: () => void;
+      const blocked = new Promise<void>((resolve) => { finishAction = resolve; });
+      vi.mocked(adapter.executeAction).mockImplementation(async (request) => {
+        await blocked;
+        return RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        });
+      });
+      const response = app.request('/v1/smart-swarm/providers/hermes/actions', {
+        method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+          idempotencyKey: 'block:t_deadbeef:lost-lease-audit-failure',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Retry later',
+          },
+        }),
+      });
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      finishAction();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((await response).status).toBe(409);
+      expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+        providerId: 'hermes', outcome: 'applied', currentState: 'uncertain',
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fences stale action claims from completing a replacement reservation', () => {
+    const actionStore = new RuntimeActionStore();
+    const first = actionStore.reserve('key', 'fingerprint', 1_000, 0);
+    const replacement = actionStore.reserve('key', 'fingerprint', 2_001, 1_001);
+    expect(first).toEqual(expect.objectContaining({ status: 'claimed', claimToken: expect.any(String) }));
+    expect(replacement).toEqual(expect.objectContaining({ status: 'claimed', claimToken: expect.any(String) }));
+    if (first.status !== 'claimed' || replacement.status !== 'claimed') throw new Error('Expected claimed actions');
+    expect(replacement.claimToken).not.toBe(first.claimToken);
+    const result = RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: 'blocker.add',
+        targetId: 'hermes:global:t_deadbeef', outcome: 'applied',
+      },
+    });
+    const audit = { ...result.audit, providerId: 'hermes', correlationId: result.correlationId };
+
+    expect(() => actionStore.completeWithAudit(
+      'key', 'fingerprint', first.claimToken, result, 3_000, audit, 2_000,
+    )).toThrow('Runtime action reservation was lost');
+    expect(() => actionStore.completeWithAudit(
+      'key', 'fingerprint', replacement.claimToken, result, 3_000, audit, 2_000,
+    )).not.toThrow();
+  });
+
+  it('bounds draining when a tracked runtime action never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const actionStore = new RuntimeActionStore();
+      void actionStore.track(new Promise(() => {}));
+      let settled = false;
+      const drain = actionStore.drain(100).then(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(99);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await drain;
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('durably fences pending claims before a bounded shutdown drain can time out', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-shutdown-fence-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const firstStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(firstStore);
+    expect(firstStore.reserve('key', 'fingerprint', 1_000, 0)).toEqual(expect.objectContaining({
+      status: 'claimed',
+    }));
+
+    firstStore.beginShutdown();
+    firstStore.destroy();
+    actionStores.splice(actionStores.indexOf(firstStore), 1);
+
+    const reopenedStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(reopenedStore);
+    expect(reopenedStore.reserve(
+      'key', 'fingerprint', Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+  });
+
+  it('does not let lease renewal shorten a shutdown fence', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-shutdown-renewal-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const actionStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(actionStore);
+    const reservation = actionStore.reserve('key', 'fingerprint', 1_000, 0);
+    expect(reservation).toEqual(expect.objectContaining({ status: 'claimed' }));
+    if (reservation.status !== 'claimed') throw new Error('Expected claimed action');
+
+    actionStore.beginShutdown();
+
+    expect(actionStore.renew('key', 'fingerprint', reservation.claimToken, 2_000)).toBe(false);
+    actionStore.destroy();
+    actionStores.splice(actionStores.indexOf(actionStore), 1);
+    const reopenedStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(reopenedStore);
+    expect(reopenedStore.reserve(
+      'key', 'fingerprint', Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+  });
+
+  it('retries a transient shutdown fence write before fencing later claims', () => {
+    const actionStore = new RuntimeActionStore({ databasePath: ':memory:' });
+    actionStores.push(actionStore);
+    const first = actionStore.reserve('first', 'first-fingerprint', 100, 0);
+    const second = actionStore.reserve('second', 'second-fingerprint', 100, 0);
+    expect(first.status).toBe('claimed');
+    expect(second.status).toBe('claimed');
+    if (first.status !== 'claimed' || second.status !== 'claimed') throw new Error('expected claims');
+    const db = (actionStore as unknown as { db: InstanceType<typeof Database> }).db;
+    const prepare = db.prepare.bind(db);
+    let interrupted = false;
+    vi.spyOn(db, 'prepare').mockImplementation((source: string) => {
+      const statement = prepare(source);
+      if (!interrupted && source.includes('SET expires_at')) {
+        interrupted = true;
+        vi.spyOn(statement, 'run').mockImplementationOnce(() => { throw new Error('SQLITE_BUSY'); });
+      }
+      return statement;
+    });
+
+    expect(() => actionStore.beginShutdown()).not.toThrow();
+    expect(db.prepare(`
+      SELECT action_key, expires_at FROM runtime_action_idempotency ORDER BY action_key
+    `).all()).toEqual([
+      { action_key: 'first', expires_at: Number.MAX_SAFE_INTEGER },
+      { action_key: 'second', expires_at: Number.MAX_SAFE_INTEGER },
+    ]);
+  });
+
+  it('durably fences and audits adapter exceptions after provider execution begins', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-provider-uncertain-'));
+    tempDirs.push(dir);
+    const actionStore = new RuntimeActionStore({ databasePath: join(dir, 'actions.sqlite') });
+    const { app, adapter } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockRejectedValue(new RuntimeActionUncertainError({
+      cause: new Error('postcondition read timed out'),
+    }));
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:provider-uncertain',
+        action,
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(actionStore.listAuditEvents()).toEqual([
+      expect.objectContaining({
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        actionType: 'blocker.add',
+        targetId: 'hermes:global:t_deadbeef',
+        outcome: 'failed',
+        currentState: 'uncertain',
+      }),
+    ]);
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:provider-uncertain']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+  });
+
+  it('completes pre-mutation adapter failures so the idempotency key is retryable', async () => {
+    const { app, adapter, actionAudit, actionStore } = createRoutes();
+    vi.mocked(adapter.executeAction).mockRejectedValueOnce(new Error('task does not exist'));
+    const payload = {
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:preflight-failure',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    };
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({ status: 'failed', reason: 'Runtime provider action failed' }),
+    });
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', payload.idempotencyKey]))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(payload.action)).digest('base64url');
+    expect(actionStore.reserve(key, fingerprint, Date.now() + 1_000)).toEqual(expect.objectContaining({
+      status: 'completed',
+      result: expect.objectContaining({ status: 'failed' }),
+    }));
+  });
+
+  it('fails closed when an adapter returns a result for a different request', async () => {
+    const { app, adapter, actionAudit, actionStore } = createRoutes();
+    vi.mocked(adapter.executeAction).mockResolvedValue(RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'other-provider',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: 'task.resume',
+        targetId: 'other-task', outcome: 'applied',
+      },
+    }));
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'mismatched-result',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'hermes', actionType: 'blocker.add', targetId: 'hermes:global:t_deadbeef',
+      outcome: 'failed', currentState: 'uncertain',
+    }));
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'mismatched-result']))
+      .digest('base64url');
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    };
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+  });
+
+  it('keeps idempotency keys scoped to distinct route-safe providers', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const adapters = ['a-b', 'a'].map((id) => {
+      const base = runtimeAdapter();
+      const adapter: RuntimeAdapter = {
+        ...base,
+        id,
+        describe: vi.fn(async () => ({ ...(await base.describe()), id })),
+        executeAction: vi.fn(async (request) => RuntimeActionResultSchema.parse({
+          status: 'applied', providerId: id, correlationId: request.correlationId,
+          audit: {
+            requestedBy: 'authenticated-operator', actionType: request.action.type,
+            targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+            outcome: 'applied',
+          },
+        })),
+      };
+      return adapter;
+    });
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry(adapters),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+    });
+    const action = {
+      type: 'blocker.add', workspaceId: 'shared', taskId: 'task',
+      category: 'transient', reason: 'Retry later',
+    };
+    const request = (providerId: string, idempotencyKey: string, correlationId: string) => app.request(
+      `/v1/smart-swarm/providers/${providerId}/actions`,
+      {
+        method: 'POST',
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({ correlationId, idempotencyKey, action }),
+      },
+    );
+
+    expect((await request('a-b', 'shared:key', '018f6f2d-c734-7cc9-b1b6-112233445566')).status).toBe(200);
+    expect((await request('a', 'shared:key', '018f6f2d-c734-7cc9-b1b6-665544332211')).status).toBe(200);
+    expect(adapters[0]!.executeAction).toHaveBeenCalledOnce();
+    expect(adapters[1]!.executeAction).toHaveBeenCalledOnce();
+  });
+
+  it('replays completed actions and preserves audit evidence after a server restart', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const firstStore = new RuntimeActionStore({ databasePath });
+    const first = createRoutes(firstStore);
+    vi.mocked(first.adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied', previousState: 'ready', currentState: 'blocked',
+      },
+    }));
+    const request = (app: ReturnType<typeof createRuntimeRoutes>, correlationId: string) => app.request(
+      '/v1/smart-swarm/providers/hermes/actions',
+      {
+        method: 'POST',
+        headers: { ...authHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          correlationId,
+          idempotencyKey: 'block:t_deadbeef:durable',
+          action: {
+            type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+            category: 'transient', reason: 'Retry later',
+          },
+        }),
+      },
+    );
+
+    expect((await request(first.app, '018f6f2d-c734-7cc9-b1b6-112233445566')).status).toBe(200);
+    firstStore.destroy();
+    actionStores.splice(actionStores.indexOf(firstStore), 1);
+
+    const secondStore = new RuntimeActionStore({ databasePath });
+    const second = createRoutes(secondStore);
+    const replay = await request(second.app, '018f6f2d-c734-7cc9-b1b6-665544332211');
+
+    await expect(replay.json()).resolves.toEqual({ data: expect.objectContaining({
+      status: 'applied', replayed: true, correlationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+    }) });
+    expect(second.adapter.executeAction).not.toHaveBeenCalled();
+    expect(secondStore.listAuditEvents()).toEqual([
+      expect.objectContaining({ correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566', outcome: 'applied' }),
+    ]);
+  });
+
+  it('repairs private permissions on an existing runtime action directory', async () => {
+    if (process.platform === 'win32') return;
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-permissions-'));
+    tempDirs.push(dir);
+    const actionDir = join(dir, 'runtime-actions');
+    await mkdir(actionDir);
+    await chmod(actionDir, 0o755);
+
+    const store = new RuntimeActionStore({
+      databasePath: join(actionDir, 'actions.sqlite'),
+      hardenDatabaseDirectory: true,
+    });
+    actionStores.push(store);
+
+    expect((await stat(actionDir)).mode & 0o777).toBe(0o700);
+  });
+
+  it('does not change permissions on a caller-owned database parent', async () => {
+    if (process.platform === 'win32') return;
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-shared-parent-'));
+    tempDirs.push(dir);
+    await chmod(dir, 0o755);
+
+    const store = new RuntimeActionStore({ databasePath: join(dir, 'actions.sqlite') });
+    actionStores.push(store);
+
+    expect((await stat(dir)).mode & 0o777).toBe(0o755);
+  });
+
+  it('completes idempotency before an optional external audit hook settles', async () => {
+    const { app, adapter, actionAudit } = createRoutes();
+    actionAudit.mockImplementation(() => new Promise(() => {}));
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied',
+      },
+    }));
+    const body = JSON.stringify({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      idempotencyKey: 'block:t_deadbeef:nonblocking-audit',
+      action: {
+        type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        category: 'transient', reason: 'Retry later',
+      },
+    });
+    const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST', headers: { ...authHeaders(), 'content-type': 'application/json' }, body,
+    });
+
+    const first = await Promise.race([
+      request(),
+      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('audit hook blocked completion')), 100)),
+    ]);
+    expect(first.status).toBe(200);
+    await expect((await request()).json()).resolves.toEqual({
+      data: expect.objectContaining({ status: 'applied', replayed: true }),
+    });
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+  });
+
+  it('does not persist action completion without its durable audit event', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-atomic-audit-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const actionStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(actionStore);
+    const faultDb = new Database(databasePath);
+    faultDb.exec(`
+      CREATE TRIGGER fail_runtime_action_audit
+      BEFORE INSERT ON runtime_action_audit
+      BEGIN
+        SELECT RAISE(ABORT, 'audit database is busy');
+      END;
+    `);
+    const { app, adapter, actionAudit } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockImplementation(async (request) => RuntimeActionResultSchema.parse({
+      status: 'applied', providerId: 'hermes', correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'applied',
+      },
+    }));
+    const request = () => app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:audit-failure',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect((await request()).status).toBe(500);
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:audit-failure']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+    expect(actionStore.listAuditEvents()).toEqual([]);
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      outcome: 'applied',
+      currentState: 'uncertain',
+    }));
+    expect(adapter.executeAction).toHaveBeenCalledOnce();
+    faultDb.close();
+  });
+
+  it('retains an uncertainty fence and external audit when atomic uncertainty auditing fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'runtime-actions-uncertain-audit-'));
+    tempDirs.push(dir);
+    const databasePath = join(dir, 'actions.sqlite');
+    const actionStore = new RuntimeActionStore({ databasePath });
+    actionStores.push(actionStore);
+    const faultDb = new Database(databasePath);
+    faultDb.exec(`
+      CREATE TRIGGER fail_runtime_action_uncertain_audit
+      BEFORE INSERT ON runtime_action_audit
+      BEGIN
+        SELECT RAISE(ABORT, 'uncertain audit database is busy');
+      END;
+    `);
+    const { app, adapter, actionAudit } = createRoutes(actionStore);
+    vi.mocked(adapter.executeAction).mockRejectedValue(new RuntimeActionUncertainError());
+    const action = {
+      type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+      category: 'transient', reason: 'Retry later',
+    } as const;
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:uncertain-audit-failure',
+        action,
+      }),
+    });
+
+    expect(response.status).toBe(500);
+    const key = createHash('sha256')
+      .update(JSON.stringify(['hermes', 'block:t_deadbeef:uncertain-audit-failure']))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(action)).digest('base64url');
+    expect(actionStore.reserve(
+      key, fingerprint, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER - 1,
+    )).toEqual({ status: 'pending' });
+    expect(actionStore.listAuditEvents()).toEqual([]);
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'hermes', outcome: 'failed', currentState: 'uncertain',
+    }));
+    faultDb.close();
+  });
+
+  it('checks adapter action support and returns a typed unsupported response without side effects', async () => {
+    const { app, adapter } = createRoutes();
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'approval:one',
+        action: {
+          type: 'approval.resolve',
+          workspaceId: 'hermes:global',
+          approvalId: 'approval-1',
+          decision: 'approve',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({ status: 'unsupported', correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566' }),
+    });
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('preserves unsupported status when a capability reason exceeds the action-result bound', async () => {
+    const { app, adapter } = createRoutes();
+    const provider = await adapter.describe();
+    vi.mocked(adapter.describe).mockResolvedValue({
+      ...provider,
+      capabilities: {
+        ...provider.capabilities,
+        pause: { status: 'unsupported', reason: 'r'.repeat(1200) },
+      },
+    });
+
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'pause:t_deadbeef:long-capability-reason',
+        action: {
+          type: 'task.pause', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { data: { status: string; reason: string } };
+    expect(body.data.status).toBe('unsupported');
+    expect(body.data.reason).toHaveLength(1000);
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+  });
+
+  it('returns a redacted typed failure and audits provider discovery failures', async () => {
+    const { app, adapter, actionAudit } = createRoutes();
+    vi.mocked(adapter.describe).mockRejectedValueOnce(new Error('secret provider output API_KEY=do-not-leak'));
+    const response = await app.request('/v1/smart-swarm/providers/hermes/actions', {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        idempotencyKey: 'block:t_deadbeef:failed',
+        action: {
+          type: 'blocker.add', workspaceId: 'hermes:global', taskId: 'hermes:global:t_deadbeef',
+          category: 'transient', reason: 'Retry later',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ data: expect.objectContaining({
+      status: 'failed', reason: 'Runtime provider action failed',
+    }) });
+    expect(actionAudit).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'failed' }));
+    expect(JSON.stringify(actionAudit.mock.calls)).not.toContain('do-not-leak');
+    expect(adapter.executeAction).not.toHaveBeenCalled();
+  });
+
   it('requires operator auth and serves provider-neutral provider and snapshot DTOs', async () => {
     const { app, adapter } = createRoutes();
     expect((await app.request('/v1/smart-swarm/providers')).status).toBe(401);

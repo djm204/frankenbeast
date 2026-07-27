@@ -4,6 +4,107 @@ const TimestampSchema = z.string().datetime({ offset: true });
 const SafeMetadataValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
 export const RuntimeMetadataSchema = z.record(z.string(), SafeMetadataValueSchema);
 
+const CorrelationIdSchema = z.string().uuid();
+const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
+const RuntimeWorkspaceIdSchema = z.string().min(1);
+const RuntimeTaskIdSchema = z.string().min(1);
+const RuntimeApprovalIdSchema = z.string().min(1);
+const RuntimeActionWorkspaceIdSchema = RuntimeWorkspaceIdSchema;
+const RuntimeActionTaskIdSchema = RuntimeTaskIdSchema;
+const BoundedReasonSchema = z.string().trim().min(1).max(1000);
+const RuntimeActionTypeSchema = z.enum([
+  'approval.resolve',
+  'blocker.add',
+  'blocker.resolve',
+  'task.pause',
+  'task.resume',
+  'task.cancel',
+  'policy.apply',
+]);
+
+export const RuntimeActionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('approval.resolve'),
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    approvalId: RuntimeApprovalIdSchema,
+    decision: z.enum(['approve', 'reject']),
+    reason: BoundedReasonSchema.optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('blocker.add'),
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
+    category: z.enum(['dependency', 'needs-input', 'capability', 'transient']),
+    reason: BoundedReasonSchema,
+  }).strict(),
+  z.object({
+    type: z.literal('blocker.resolve'),
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
+    reason: BoundedReasonSchema.optional(),
+  }).strict(),
+  z.object({
+    type: z.enum(['task.pause', 'task.resume', 'task.cancel']),
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
+    reason: BoundedReasonSchema.optional(),
+  }).strict(),
+  z.object({
+    type: z.literal('policy.apply'),
+    workspaceId: RuntimeActionWorkspaceIdSchema,
+    taskId: RuntimeActionTaskIdSchema,
+    policy: z.literal('promote-task'),
+    reason: BoundedReasonSchema,
+  }).strict(),
+]);
+
+export const RuntimeActionRequestSchema = z.object({
+  correlationId: CorrelationIdSchema,
+  causationId: CorrelationIdSchema.optional(),
+  idempotencyKey: IdempotencyKeySchema,
+  action: RuntimeActionSchema,
+}).strict();
+
+export const RuntimeActionAuditSchema = z.object({
+  requestedBy: z.literal('authenticated-operator'),
+  actionType: RuntimeActionTypeSchema,
+  targetId: z.string().min(1),
+  outcome: z.enum(['applied', 'unsupported', 'rejected', 'failed']),
+  previousState: z.string().max(100).optional(),
+  currentState: z.string().max(100).optional(),
+}).strict();
+
+export const RuntimeActionResultSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('applied'),
+    providerId: z.string().min(1),
+    correlationId: CorrelationIdSchema,
+    replayed: z.boolean().optional(),
+    audit: RuntimeActionAuditSchema,
+  }).strict(),
+  z.object({
+    status: z.literal('unsupported'),
+    providerId: z.string().min(1),
+    correlationId: CorrelationIdSchema,
+    reason: z.string().min(1).max(1000),
+    audit: RuntimeActionAuditSchema,
+  }).strict(),
+  z.object({
+    status: z.literal('rejected'),
+    providerId: z.string().min(1),
+    correlationId: CorrelationIdSchema,
+    reason: z.string().min(1).max(1000),
+    audit: RuntimeActionAuditSchema,
+  }).strict(),
+  z.object({
+    status: z.literal('failed'),
+    providerId: z.string().min(1),
+    correlationId: CorrelationIdSchema,
+    reason: z.string().min(1).max(500),
+    audit: RuntimeActionAuditSchema,
+  }).strict(),
+]);
+
 export const RuntimeCapabilitySchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('supported') }).strict(),
   z.object({ status: z.literal('unsupported'), reason: z.string().min(1) }).strict(),
@@ -37,7 +138,7 @@ export const RuntimeProviderSchema = z.object({
 }).strict();
 
 export const RuntimeWorkspaceSchema = z.object({
-  id: z.string().min(1),
+  id: RuntimeWorkspaceIdSchema,
   name: z.string().min(1),
   kind: z.enum(['workspace', 'board', 'project']),
   state: z.enum(['available', 'degraded', 'unavailable', 'schema-incompatible']),
@@ -54,8 +155,8 @@ export const RuntimeAgentSchema = z.object({
 }).strict();
 
 export const RuntimeTaskSchema = z.object({
-  id: z.string().min(1),
-  workspaceId: z.string().min(1),
+  id: RuntimeTaskIdSchema,
+  workspaceId: RuntimeWorkspaceIdSchema,
   title: z.string(),
   state: z.enum(['queued', 'ready', 'running', 'blocked', 'succeeded', 'failed', 'cancelled', 'archived', 'unknown']),
   parentIds: z.array(z.string().min(1)),
@@ -104,7 +205,7 @@ export const RuntimeBlockerSchema = z.object({
 }).strict();
 
 export const RuntimeApprovalSchema = z.object({
-  id: z.string().min(1),
+  id: RuntimeApprovalIdSchema,
   workspaceId: z.string().min(1),
   taskId: z.string().min(1).nullable(),
   state: z.enum(['pending', 'approved', 'rejected', 'expired', 'unknown']),
@@ -141,6 +242,10 @@ export const RuntimeEventPageSchema = z.object({
 }).strict();
 
 export type RuntimeProvider = z.infer<typeof RuntimeProviderSchema>;
+export type RuntimeAction = z.infer<typeof RuntimeActionSchema>;
+export type RuntimeActionRequest = z.infer<typeof RuntimeActionRequestSchema>;
+export type RuntimeActionResult = z.infer<typeof RuntimeActionResultSchema>;
+export type RuntimeActionAudit = z.infer<typeof RuntimeActionAuditSchema>;
 export type RuntimeSnapshot = z.infer<typeof RuntimeSnapshotSchema>;
 export type RuntimeEvent = z.infer<typeof RuntimeEventSchema>;
 export type RuntimeEventPage = z.infer<typeof RuntimeEventPageSchema>;

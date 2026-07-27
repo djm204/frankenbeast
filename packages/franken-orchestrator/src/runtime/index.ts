@@ -1,5 +1,5 @@
 export type { RuntimeAdapter, RuntimeEventRequest, RuntimeSnapshotRequest } from './runtime-adapter.js';
-export { RuntimeCursorError } from './runtime-adapter.js';
+export { RuntimeActionUncertainError, RuntimeCursorError } from './runtime-adapter.js';
 export { RuntimeAdapterRegistry } from './runtime-adapter-registry.js';
 export { createDefaultRuntimeAdapterRegistry } from './runtime-defaults.js';
 export type { DefaultRuntimeAdapterOptions, RuntimeAdapterDefaultsOptions } from './runtime-defaults.js';
@@ -15,6 +15,10 @@ export type {
 } from './codex/codex-runtime-adapter.js';
 export {
   RuntimeAgentSchema,
+  RuntimeActionAuditSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
+  RuntimeActionSchema,
   RuntimeApprovalSchema,
   RuntimeBlockerSchema,
   RuntimeCapabilitiesSchema,
@@ -31,6 +35,10 @@ export {
 } from './runtime-schemas.js';
 export type {
   RuntimeEvent,
+  RuntimeAction,
+  RuntimeActionAudit,
+  RuntimeActionRequest,
+  RuntimeActionResult,
   RuntimeEventPage,
   RuntimeAgent,
   RuntimeApproval,

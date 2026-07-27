@@ -1,19 +1,36 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { streamSSE } from 'hono/streaming';
 import type { SseConnectionTicketStore } from '../../beasts/events/sse-connection-ticket.js';
+import type { IGovernorModule } from '../../deps.js';
 import {
   InMemoryRateLimiter,
   requireBeastRateLimit,
   type BeastRateLimitOptions,
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
-import type { RuntimeAdapter } from '../../runtime/runtime-adapter.js';
-import { RuntimeEventPageSchema, RuntimeSnapshotSchema } from '../../runtime/runtime-schemas.js';
+import {
+  RuntimeActionUncertainError,
+  type RuntimeAdapter,
+} from '../../runtime/runtime-adapter.js';
+import {
+  RuntimeActionStore,
+  type RuntimeActionAuditEvent,
+} from '../../runtime/runtime-action-store.js';
+export type { RuntimeActionAuditEvent } from '../../runtime/runtime-action-store.js';
+import {
+  RuntimeActionAuditSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
+  RuntimeEventPageSchema,
+  RuntimeSnapshotSchema,
+  type RuntimeAction,
+  type RuntimeActionAudit,
+} from '../../runtime/runtime-schemas.js';
 import { isSensitiveLogKey, redactSensitiveText } from '../../logging/redaction.js';
 import { redactAbsoluteHostPathValues } from '../beast-response-redaction.js';
-import { errorHandler, HttpError } from '../middleware.js';
+import { errorHandler, HttpError, requestSizeLimit } from '../middleware.js';
 import { requireOperatorAuth } from '../operator-auth.js';
 import type { TransportSecurityService } from '../security/transport-security.js';
 
@@ -26,6 +43,9 @@ export interface RuntimeRouteDeps {
   pollIntervalMs?: number | undefined;
   heartbeatIntervalMs?: number | undefined;
   maxActiveStreams?: number | undefined;
+  actionAudit?: ((event: RuntimeActionAuditEvent) => void | Promise<void>) | undefined;
+  actionGovernor?: IGovernorModule | undefined;
+  actionStore?: RuntimeActionStore | undefined;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -37,6 +57,11 @@ const DEFAULT_MAX_ACTIVE_STREAMS = 32;
 const MAX_TIMER_INTERVAL_MS = 2_147_483_647;
 const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 const MAX_SSE_CURSOR_ID_CHARS = 4 * 1024;
+const IDEMPOTENCY_TTL_MS = 10 * 60_000;
+const IDEMPOTENCY_RENEW_RETRY_MS = IDEMPOTENCY_TTL_MS / 8;
+const IDEMPOTENCY_RENEW_HEADROOM_MS = 1_000;
+const MAX_ACTION_BODY_BYTES = 16 * 1024;
+
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -120,6 +145,53 @@ function redactRuntimePaths(value: unknown, inMetadata = false): unknown {
 
 function runtimeResponse(value: unknown): unknown {
   return redactRuntimePaths(value);
+}
+
+function actionTarget(action: RuntimeAction): string {
+  return action.type === 'approval.resolve' ? action.approvalId : action.taskId;
+}
+
+function actionCapability(action: RuntimeAction): 'approvals' | 'blockers' | 'pause' | 'resume' | 'cancellation' | 'policyActions' {
+  switch (action.type) {
+    case 'approval.resolve': return 'approvals';
+    case 'blocker.add':
+    case 'blocker.resolve': return 'blockers';
+    case 'task.pause': return 'pause';
+    case 'task.resume': return 'resume';
+    case 'task.cancel': return 'cancellation';
+    case 'policy.apply': return 'policyActions';
+  }
+}
+
+function actionAudit(action: RuntimeAction, outcome: RuntimeActionAudit['outcome']): RuntimeActionAudit {
+  return {
+    requestedBy: 'authenticated-operator',
+    actionType: action.type,
+    targetId: actionTarget(action),
+    outcome,
+  };
+}
+
+function requiresGovernor(action: RuntimeAction): boolean {
+  return action.type === 'task.cancel' || action.type === 'policy.apply';
+}
+
+function parseAdapterActionResult(
+  adapter: RuntimeAdapter,
+  request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+  value: unknown,
+) {
+  const result = RuntimeActionResultSchema.parse(value);
+  if (
+    result.providerId !== adapter.id
+    || result.correlationId !== request.correlationId
+    || result.audit.actionType !== request.action.type
+    || result.audit.targetId !== actionTarget(request.action)
+    || result.audit.outcome !== result.status
+  ) {
+    throw new Error('Runtime adapter returned a result for a different action');
+  }
+  return result;
 }
 
 function isInvalidCursorError(error: unknown): error is Error & { code: 'INVALID_CURSOR' } {
@@ -342,6 +414,83 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     DEFAULT_MAX_ACTIVE_STREAMS,
   );
   let activeStreams = 0;
+  const actionStore = deps.actionStore ?? new RuntimeActionStore();
+  const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
+
+  const actionAuditEvent = (
+    providerId: string,
+    request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+    audit: RuntimeActionAudit,
+  ) => {
+    const sanitizedAudit = RuntimeActionAuditSchema.parse(redactRuntimePaths(audit));
+    return {
+      ...sanitizedAudit,
+      providerId,
+      correlationId: request.correlationId,
+      ...(request.causationId ? { causationId: request.causationId } : {}),
+    };
+  };
+
+  const forwardActionAudit = (event: ReturnType<typeof actionAuditEvent>): void => {
+    void Promise.resolve().then(() => deps.actionAudit?.(event)).catch(() => {});
+  };
+
+  const executeAction = async (
+    adapter: RuntimeAdapter,
+    request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
+  ) => {
+    const executeAndValidate = async () => {
+      const adapterResult = await adapter.executeAction(request);
+      try {
+        return parseAdapterActionResult(adapter, request, adapterResult);
+      } catch (cause) {
+        throw new RuntimeActionUncertainError({ cause });
+      }
+    };
+    let result;
+    try {
+      const provider = await adapter.describe();
+      const capability = provider.capabilities[actionCapability(request.action)];
+      if (capability.status === 'unsupported') {
+        result = RuntimeActionResultSchema.parse({
+          status: 'unsupported',
+          providerId: adapter.id,
+          correlationId: request.correlationId,
+          reason: capability.reason.slice(0, 1000),
+          audit: actionAudit(request.action, 'unsupported'),
+        });
+      } else if (requiresGovernor(request.action)) {
+        const outcome = deps.actionGovernor
+          ? await deps.actionGovernor.requestApproval({
+              taskId: actionTarget(request.action),
+              summary: `Governed runtime action ${request.action.type} on provider ${adapter.id} in workspace ${request.action.workspaceId}`,
+              requiresHitl: true,
+            })
+          : { decision: 'rejected' as const, reason: 'Runtime action governor is unavailable' };
+        result = outcome.decision === 'approved'
+          ? await executeAndValidate()
+          : RuntimeActionResultSchema.parse({
+            status: 'rejected',
+            providerId: adapter.id,
+            correlationId: request.correlationId,
+            reason: 'Runtime action was not approved by the governor',
+            audit: actionAudit(request.action, 'rejected'),
+          });
+      } else {
+        result = await executeAndValidate();
+      }
+    } catch (error) {
+      if (error instanceof RuntimeActionUncertainError) throw error;
+      result = RuntimeActionResultSchema.parse({
+        status: 'failed',
+        providerId: adapter.id,
+        correlationId: request.correlationId,
+        reason: 'Runtime provider action failed',
+        audit: actionAudit(request.action, 'failed'),
+      });
+    }
+    return result;
+  };
 
   app.onError(errorHandler);
   app.use('/v1/smart-swarm/*', async (c, next) => {
@@ -362,6 +511,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     }
     return sharedRateLimit(c, next);
   });
+  app.use(`${BASE_PATH}/:providerId/actions`, requestSizeLimit(MAX_ACTION_BODY_BYTES));
 
   app.get(BASE_PATH, async (c) => c.json({ data: runtimeResponse(await deps.registry.list()) }));
 
@@ -400,6 +550,151 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
         throw new HttpError(422, 'INVALID_CURSOR', runtimeCursorMessage(error));
       }
       throw error;
+    }
+  });
+
+  app.post(`${BASE_PATH}/:providerId/actions`, async (c) => {
+    const adapter = adapterOr404(deps.registry, c.req.param('providerId'));
+    const parsed = RuntimeActionRequestSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!parsed.success) {
+      throw new HttpError(422, 'INVALID_RUNTIME_ACTION', 'Runtime action payload is invalid');
+    }
+    const request = parsed.data;
+    const key = createHash('sha256')
+      .update(JSON.stringify([adapter.id, request.idempotencyKey]))
+      .digest('base64url');
+    const fingerprint = createHash('sha256').update(JSON.stringify(request.action)).digest('base64url');
+    const now = Date.now();
+    const reservation = actionStore.reserve(key, fingerprint, now + IDEMPOTENCY_TTL_MS, now);
+    if (reservation.status === 'conflict') {
+      throw new HttpError(409, 'IDEMPOTENCY_KEY_CONFLICT', 'Idempotency key was already used for a different action');
+    }
+    if (reservation.status === 'completed') {
+      const result = { ...reservation.result, correlationId: request.correlationId };
+      const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
+      return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
+    }
+    if (reservation.status === 'pending') {
+      const pending = inFlightActions.get(key);
+      if (!pending) {
+        throw new HttpError(409, 'IDEMPOTENCY_KEY_IN_PROGRESS', 'Idempotent runtime action is still in progress');
+      }
+      const result = { ...(await pending), correlationId: request.correlationId };
+      const replay = result.status === 'applied' ? { ...result, replayed: true } : result;
+      return c.json({ data: runtimeResponse(RuntimeActionResultSchema.parse(replay)) });
+    }
+    let ownershipLost = false;
+    let leaseDeadline = now + IDEMPOTENCY_TTL_MS;
+    let lease: ReturnType<typeof setTimeout> | undefined;
+    const scheduleLeaseRenewal = (delayMs: number) => {
+      lease = setTimeout(() => {
+        let nextDelayMs = IDEMPOTENCY_TTL_MS / 2;
+        if (ownershipLost) return;
+        try {
+          const renewedAt = Date.now();
+          if (!actionStore.renew(
+            key, fingerprint, reservation.claimToken, renewedAt + IDEMPOTENCY_TTL_MS,
+          )) {
+            ownershipLost = true;
+          } else {
+            leaseDeadline = renewedAt + IDEMPOTENCY_TTL_MS;
+          }
+        } catch {
+          const remainingMs = leaseDeadline - Date.now();
+          if (remainingMs <= IDEMPOTENCY_RENEW_HEADROOM_MS) {
+            ownershipLost = true;
+          } else {
+            nextDelayMs = Math.min(
+              IDEMPOTENCY_RENEW_RETRY_MS,
+              remainingMs - IDEMPOTENCY_RENEW_HEADROOM_MS,
+            );
+          }
+        }
+        if (!ownershipLost) scheduleLeaseRenewal(nextDelayMs);
+      }, delayMs);
+      lease.unref();
+    };
+    scheduleLeaseRenewal(IDEMPOTENCY_TTL_MS / 2);
+    const result = actionStore.track((async () => {
+      try {
+        const completed = RuntimeActionResultSchema.parse(redactRuntimePaths(
+          await executeAction(adapter, request),
+        ));
+        if (ownershipLost) {
+          const audit = actionAuditEvent(adapter.id, request, {
+            ...completed.audit,
+            currentState: 'uncertain',
+          });
+          try {
+            actionStore.recordAudit(audit);
+          } catch {
+            // The external audit sink remains available when durable audit storage is not.
+          }
+          forwardActionAudit(audit);
+          throw new HttpError(
+            409, 'RUNTIME_ACTION_CLAIM_LOST', 'Runtime action claim expired while the provider operation was in progress',
+          );
+        }
+        const audit = actionAuditEvent(adapter.id, request, completed.audit);
+        try {
+          actionStore.completeWithAudit(
+            key, fingerprint, reservation.claimToken,
+            completed, Date.now() + IDEMPOTENCY_TTL_MS, audit,
+          );
+        } catch (error) {
+          const uncertainAudit = { ...audit, currentState: 'uncertain' };
+          let fenceError: unknown;
+          try {
+            actionStore.fence(key, fingerprint, reservation.claimToken);
+          } catch (caught) {
+            fenceError = caught;
+          }
+          try {
+            actionStore.recordAudit(uncertainAudit);
+          } catch {
+            // The external audit sink remains available when durable audit storage is not.
+          }
+          forwardActionAudit(uncertainAudit);
+          throw fenceError ?? error;
+        }
+        forwardActionAudit(audit);
+        return completed;
+      } catch (error) {
+        if (error instanceof RuntimeActionUncertainError) {
+          const audit = actionAuditEvent(adapter.id, request, {
+            ...actionAudit(request.action, 'failed'),
+            currentState: 'uncertain',
+          });
+          try {
+            actionStore.fenceWithAudit(key, fingerprint, reservation.claimToken, audit);
+          } catch (storageError) {
+            let fenceError: unknown;
+            try {
+              actionStore.fence(key, fingerprint, reservation.claimToken);
+            } catch (caught) {
+              fenceError = caught;
+            }
+            try {
+              actionStore.recordAudit(audit);
+            } catch {
+              // The external audit sink remains available when durable audit storage is not.
+            }
+            forwardActionAudit(audit);
+            throw fenceError ?? storageError;
+          }
+          forwardActionAudit(audit);
+        }
+        throw error;
+      } finally {
+        if (lease) clearTimeout(lease);
+      }
+    })());
+    inFlightActions.set(key, result);
+    try {
+      const completed = await result;
+      return c.json({ data: runtimeResponse(completed) });
+    } finally {
+      if (inFlightActions.get(key) === result) inFlightActions.delete(key);
     }
   });
 
