@@ -299,7 +299,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
             }
           };
 
-          await publish();
+          await Promise.race([publish(), aborted]);
           if (closed) return;
           const poll = setInterval(() => void publish().catch(() => stream.abort()), pollIntervalMs);
           const heartbeat = setInterval(

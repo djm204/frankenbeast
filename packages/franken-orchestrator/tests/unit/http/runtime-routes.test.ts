@@ -417,14 +417,11 @@ describe('smart-swarm runtime routes', () => {
     await admittedRetry.body!.cancel();
   });
 
-  it('releases stream capacity when the client disconnects during the initial poll', async () => {
+  it('releases stream capacity when the client disconnects during a stalled initial poll', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
     const adapter = runtimeAdapter();
-    let resolveInitialPoll!: (page: ReturnType<typeof RuntimeEventPageSchema.parse>) => void;
-    const initialPoll = new Promise<ReturnType<typeof RuntimeEventPageSchema.parse>>((resolve) => {
-      resolveInitialPoll = resolve;
-    });
+    const initialPoll = new Promise<ReturnType<typeof RuntimeEventPageSchema.parse>>(() => {});
     vi.mocked(adapter.getEvents)
       .mockReturnValueOnce(initialPoll)
       .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
@@ -454,8 +451,6 @@ describe('smart-swarm runtime routes', () => {
       headers: { cookie: firstTicket.cookie },
     });
     await first.body!.cancel();
-    resolveInitialPoll(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
-    await initialPoll;
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     const secondTicket = await issue();

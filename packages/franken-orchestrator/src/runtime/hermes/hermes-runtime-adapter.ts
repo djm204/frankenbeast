@@ -76,8 +76,8 @@ const MAX_ACTIVITY_LIMIT = 500;
 const MAX_CURSOR_CHARS = 12 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
-const ABSOLUTE_PATH_RE = /(^|[\s=:\[({])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
-const POSIX_PATH_RE = /(^|[\s=:\[({])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
+const ABSOLUTE_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:home|Users|private|var|tmp|srv|opt|etc|root|mnt|workspace|workspaces)\/(?:[^\s"']+\/?)+|[A-Za-z]:[\\/](?:[^\s"']+)|\\\\(?:[^\s"']+))/gu;
+const POSIX_PATH_RE = /(^|[\s=:\[({,;|!?])(\/(?:[^/\s"']+\/)+[^\s"']+)/gu;
 const QUOTED_POSIX_PATH_RE = /(['"])(\/(?:[^/'"\s]+\/)+[^'"\s]+)(?=\1)/gu;
 const API_ROUTE_RE = /^\/(?:api|v\d+|comms|webhooks)(?:\/|$)/u;
 
@@ -247,6 +247,7 @@ function parseCursor(value: string | undefined): CursorValue | undefined {
 
 function parseRequestCursor(value: string | undefined): RequestCursorState {
   if (!value) return { positions: new Map() };
+  if (value.length > MAX_CURSOR_CHARS) throw new RuntimeCursorError();
   try {
     const decoded = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as {
       p?: unknown;
@@ -679,6 +680,22 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1").get(table) !== undefined;
   }
 
+  private hasColumns(db: Database.Database, table: string, requiredColumns: string[]): boolean {
+    if (!this.hasTable(db, table)) return false;
+    const columns = new Set(
+      (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    return requiredColumns.every((column) => columns.has(column));
+  }
+
+  private commentTable(db: Database.Database): 'comments' | 'task_comments' | undefined {
+    if (this.hasColumns(db, 'comments', ['id', 'task_id', 'body', 'created_at'])) return 'comments';
+    if (this.hasColumns(db, 'task_comments', ['id', 'task_id', 'author', 'body', 'created_at'])) {
+      return 'task_comments';
+    }
+    return undefined;
+  }
+
   private readSource(source: DatabaseSource, activityLimit: number): {
     tasks: RuntimeTask[];
     runs: RuntimeRun[];
@@ -689,6 +706,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const db = this.open(source.path);
     try {
       return db.transaction(() => {
+        const commentTable = this.commentTable(db);
         const taskRows = db.prepare('SELECT * FROM tasks ORDER BY created_at, id').all() as RuntimeRow[];
         const linkRows = this.hasTable(db, 'task_links')
           ? db.prepare('SELECT parent_id, child_id FROM task_links ORDER BY parent_id, child_id').all() as RuntimeRow[]
@@ -709,9 +727,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
               LIMIT 1
             )
         `).all() as RuntimeRow[];
-        const commentRows = this.hasTable(db, 'comments')
+        const commentRows = commentTable === 'comments'
           ? db.prepare('SELECT id, task_id, NULL AS author, body, created_at FROM comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
-          : this.hasTable(db, 'task_comments')
+          : commentTable === 'task_comments'
             ? db.prepare('SELECT id, task_id, author, body, created_at FROM task_comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
             : [];
         return this.normalizeRows(
@@ -727,10 +745,11 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const db = this.open(source.path);
     try {
       return db.transaction(() => {
+        const commentTable = this.commentTable(db);
         const eventRows = this.readActivityRows(db, 'task_events', 'event', source.workspaceId, after, limit);
-        const commentRows = this.hasTable(db, 'comments')
+        const commentRows = commentTable === 'comments'
           ? this.readActivityRows(db, 'comments', 'comment', source.workspaceId, after, limit)
-          : this.hasTable(db, 'task_comments')
+          : commentTable === 'task_comments'
             ? this.readActivityRows(db, 'task_comments', 'comment', source.workspaceId, after, limit)
             : [];
         return this.normalizeRows(source, [], [], [], eventRows, commentRows, limit * 2).events;

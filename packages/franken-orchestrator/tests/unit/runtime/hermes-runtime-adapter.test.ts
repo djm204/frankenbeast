@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { HermesRuntimeAdapter } from '../../../src/runtime/hermes/hermes-runtime-adapter.js';
-import { RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
+import { RuntimeCursorError, RuntimeSnapshotSchema } from '../../../src/runtime/index.js';
 
 const tempHomes: string[] = [];
 const inheritedKanbanDb = process.env['HERMES_KANBAN_DB'];
@@ -275,6 +275,20 @@ describe('HermesRuntimeAdapter', () => {
     await expect(new HermesRuntimeAdapter({ env: {} }).getEvents({ cursor })).rejects.toMatchObject({
       code: 'INVALID_CURSOR',
     });
+  });
+
+  it('rejects oversized event cursors before decoding them', () => {
+    const cursor = Buffer.from(JSON.stringify({
+      p: [[
+        `hermes:${'x'.repeat(13_000)}`,
+        '2026-07-26T12:00:00.000Z',
+        0,
+        1,
+      ]],
+    })).toString('base64url');
+
+    expect(() => new HermesRuntimeAdapter({ env: {} }).validateEventCursor(cursor))
+      .toThrow(RuntimeCursorError);
   });
 
   it('honors cancellation before starting snapshot and event discovery', async () => {
@@ -561,6 +575,27 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('redacts host paths after punctuation in normalized runtime text', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET title = ? WHERE id = ?').run(
+      'failed,/home/alice/private/file',
+      't_parent',
+    );
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+
+    expect(snapshot.tasks).toEqual(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({
+        id: 'hermes:global:t_parent',
+        title: 'failed,[REDACTED_HOST_PATH]',
+      })]),
+    }));
+  });
+
   it('preserves quoted API routes in normalized runtime text', async () => {
     const home = await createHome();
     const dbPath = join(home, 'kanban.db');
@@ -803,6 +838,34 @@ describe('HermesRuntimeAdapter', () => {
         summary: 'Established replay activity',
       }),
     ]));
+  });
+
+  it('ignores optional comment tables that lack required activity columns', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec(`
+      DROP TABLE task_comments;
+      CREATE TABLE comments (
+        id INTEGER PRIMARY KEY, task_id TEXT NOT NULL, body TEXT NOT NULL
+      );
+      INSERT INTO comments (id, task_id, body)
+      VALUES (21, 't_child', 'Legacy partial comment');
+    `);
+    db.close();
+
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+    const snapshot = await adapter.getSnapshot();
+    const page = await adapter.getEvents({ limit: 10 });
+
+    expect(snapshot).toEqual(expect.objectContaining({
+      state: 'ready',
+      tasks: expect.objectContaining({
+        data: expect.arrayContaining([expect.objectContaining({ id: 'hermes:global:t_parent' })]),
+      }),
+    }));
+    expect(page.events.some((event) => event.id.includes(':comment:'))).toBe(false);
   });
 
   it('degrades a workspace with corrupt required timestamps instead of fabricating epoch activity', async () => {
