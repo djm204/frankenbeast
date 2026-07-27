@@ -361,6 +361,19 @@ describe('smart-swarm runtime routes', () => {
     expect(second.status).toBe(429);
   });
 
+  it('rejects polling intervals above the Node timer maximum', () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+
+    expect(() => createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      pollIntervalMs: 2_147_483_648,
+    })).toThrow(/pollIntervalMs/);
+  });
+
   it('caps concurrent runtime polling streams', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
@@ -382,17 +395,26 @@ describe('smart-swarm runtime routes', () => {
       });
       const cookie = ticketResponse.headers.get('set-cookie')!.split(';', 1)[0]!;
       const { connectionId } = await ticketResponse.json() as { connectionId: string };
-      return app.request(`/v1/smart-swarm/providers/hermes/events/${connectionId}`, {
+      const path = `/v1/smart-swarm/providers/hermes/events/${connectionId}`;
+      const response = await app.request(path, {
         headers: { cookie },
       });
+      return { cookie, path, response };
     };
 
     const first = await openStream();
     const second = await openStream();
 
-    expect(first.status).toBe(200);
-    expect(second.status).toBe(429);
-    await first.body!.cancel();
+    expect(first.response.status).toBe(200);
+    expect(second.response.status).toBe(429);
+    await first.response.body!.cancel();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const admittedRetry = await app.request(second.path, {
+      headers: { cookie: second.cookie },
+    });
+    expect(admittedRetry.status).toBe(200);
+    await admittedRetry.body!.cancel();
   });
 
   it('releases stream capacity when the client disconnects during the initial poll', async () => {
@@ -443,6 +465,50 @@ describe('smart-swarm runtime routes', () => {
 
     expect(second.status).toBe(200);
     await second.body!.cancel();
+  });
+
+  it('closes polling streams when an adapter returns a permanent failure', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const adapter = runtimeAdapter();
+    vi.mocked(adapter.getEvents)
+      .mockRejectedValueOnce(new Error('invalid adapter event page'))
+      .mockResolvedValue(RuntimeEventPageSchema.parse({ events: [], nextCursor: 'cursor-1' }));
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([adapter]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      rateLimit: { max: 10, windowMs: 60_000 },
+      maxActiveStreams: 1,
+      pollIntervalMs: 60_000,
+      heartbeatIntervalMs: 60_000,
+    });
+    const issue = async () => {
+      const response = await app.request('/v1/smart-swarm/providers/hermes/events/ticket', {
+        method: 'POST',
+        headers: authHeaders(),
+      });
+      const cookie = response.headers.get('set-cookie')!.split(';', 1)[0]!;
+      const { connectionId } = await response.json() as { connectionId: string };
+      return { cookie, connectionId };
+    };
+
+    const failedTicket = await issue();
+    await app.request(`/v1/smart-swarm/providers/hermes/events/${failedTicket.connectionId}`, {
+      headers: { cookie: failedTicket.cookie },
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const retryTicket = await issue();
+    const retry = await app.request(`/v1/smart-swarm/providers/hermes/events/${retryTicket.connectionId}`, {
+      headers: { cookie: retryTicket.cookie },
+    });
+    expect(retry.status).toBe(200);
+    await retry.body!.cancel();
+    expect(errorLog).toHaveBeenCalled();
+    errorLog.mockRestore();
   });
 
   it('rejects a malformed SSE cursor before consuming its one-shot ticket', async () => {

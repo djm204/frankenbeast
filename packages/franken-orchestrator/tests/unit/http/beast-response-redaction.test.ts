@@ -52,6 +52,11 @@ describe('Beast response redaction', () => {
       .toBe('failed;[REDACTED_HOST_PATH]');
   });
 
+  it('preserves absolute URLs with path segments', () => {
+    expect(redactAbsoluteHostPathValues('See https://example.com/docs/setup for details'))
+      .toBe('See https://example.com/docs/setup for details');
+  });
+
   it('preserves quoted API routes', () => {
     expect(redactAbsoluteHostPathValues('Call "/v1/users" after setup'))
       .toBe('Call "/v1/users" after setup');

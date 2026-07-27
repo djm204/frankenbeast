@@ -28,7 +28,7 @@ export const RuntimeHealthSchema = z.object({
 }).strict();
 
 export const RuntimeProviderSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).regex(/^(?!\.{1,2}$)[A-Za-z0-9._~-]+$/u, 'Provider id must be a route-safe path segment'),
   runtime: z.string().min(1),
   displayName: z.string().min(1),
   health: RuntimeHealthSchema,

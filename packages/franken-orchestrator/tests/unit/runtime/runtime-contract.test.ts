@@ -84,6 +84,13 @@ describe('provider-neutral runtime contract', () => {
     })).toThrow();
   });
 
+  it('rejects provider ids that are not route-safe path segments', async () => {
+    const provider = await adapter('valid-provider').describe();
+
+    expect(RuntimeProviderSchema.safeParse({ ...provider, id: '..' }).success).toBe(false);
+    expect(() => new RuntimeAdapterRegistry([adapter('..')])).toThrow(/route-safe path segment/);
+  });
+
   it('rejects provider storage fields from normalized task DTOs', () => {
     expect(() => RuntimeSnapshotSchema.parse({
       providerId: 'test',

@@ -34,6 +34,7 @@ const DEFAULT_RATE_LIMIT: BeastRateLimitOptions = { max: 120, windowMs: 60_000 }
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_MAX_ACTIVE_STREAMS = 32;
+const MAX_TIMER_INTERVAL_MS = 2_147_483_647;
 
 function streamPath(providerId: string, connectionId: string): string {
   return `${BASE_PATH}/${encodeURIComponent(providerId)}/events/${encodeURIComponent(connectionId)}`;
@@ -74,10 +75,15 @@ function adapterOr404(registry: RuntimeAdapterRegistry, providerId: string) {
   }
 }
 
-function validateInterval(name: string, value: number | undefined, fallback: number): number {
+function validateInterval(
+  name: string,
+  value: number | undefined,
+  fallback: number,
+  max = Number.MAX_SAFE_INTEGER,
+): number {
   const resolved = value ?? fallback;
-  if (!Number.isSafeInteger(resolved) || resolved < 1) {
-    throw new RangeError(`${name} must be a positive safe integer`);
+  if (!Number.isSafeInteger(resolved) || resolved < 1 || resolved > max) {
+    throw new RangeError(`${name} must be a positive safe integer no greater than ${max}`);
   }
   return resolved;
 }
@@ -128,11 +134,17 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   const app = new Hono();
   const auth = requireOperatorAuth({ operatorToken: deps.operatorToken, security: deps.security });
   const limiter = new InMemoryRateLimiter(deps.rateLimit ?? DEFAULT_RATE_LIMIT);
-  const pollIntervalMs = validateInterval('pollIntervalMs', deps.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS);
+  const pollIntervalMs = validateInterval(
+    'pollIntervalMs',
+    deps.pollIntervalMs,
+    DEFAULT_POLL_INTERVAL_MS,
+    MAX_TIMER_INTERVAL_MS,
+  );
   const heartbeatIntervalMs = validateInterval(
     'heartbeatIntervalMs',
     deps.heartbeatIntervalMs,
     DEFAULT_HEARTBEAT_INTERVAL_MS,
+    MAX_TIMER_INTERVAL_MS,
   );
   const maxActiveStreams = validateInterval(
     'maxActiveStreams',
@@ -232,6 +244,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     const adapter = adapterOr404(deps.registry, providerId);
     const initialCursor = cursorValue(c.req.header('Last-Event-ID') ?? c.req.query('cursor'));
     validateAdapterCursor(adapter, initialCursor);
+    if (activeStreams >= maxActiveStreams) {
+      throw new HttpError(429, 'RUNTIME_STREAM_LIMIT', 'Concurrent runtime stream limit exceeded');
+    }
     const ticketStatus = deps.ticketStore.consume(ticket, deps.operatorToken, `${providerId}:${connectionId}`);
     if (ticketStatus === 'reused') return c.body(null, 204);
     if (ticketStatus === 'invalid') {
@@ -242,9 +257,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
     }
     if (!limiter.take(`ticket:runtime-stream:valid:${providerId}`).allowed) {
       throw new HttpError(429, 'RATE_LIMITED', 'Rate limit exceeded');
-    }
-    if (activeStreams >= maxActiveStreams) {
-      throw new HttpError(429, 'RUNTIME_STREAM_LIMIT', 'Concurrent runtime stream limit exceeded');
     }
     const workspaceId = c.req.query('workspaceId');
     activeStreams += 1;
@@ -282,8 +294,6 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
                 cursor = event.cursor;
               }
               if (page.nextCursor) cursor = page.nextCursor;
-            } catch {
-              // Keep the stream alive across transient SQLite/WAL or schema changes.
             } finally {
               polling = false;
             }
@@ -291,9 +301,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
 
           await publish();
           if (closed) return;
-          const poll = setInterval(() => void publish(), pollIntervalMs);
+          const poll = setInterval(() => void publish().catch(() => stream.abort()), pollIntervalMs);
           const heartbeat = setInterval(
-            () => void stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => {}),
+            () => void stream.writeSSE({ event: 'heartbeat', data: '' }).catch(() => stream.abort()),
             heartbeatIntervalMs,
           );
           await aborted;

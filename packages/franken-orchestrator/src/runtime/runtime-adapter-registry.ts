@@ -9,6 +9,7 @@ export class RuntimeAdapterRegistry {
   }
 
   register(adapter: RuntimeAdapter): void {
+    RuntimeProviderSchema.shape.id.parse(adapter.id);
     if (this.adapters.has(adapter.id)) {
       throw new Error(`Runtime adapter '${adapter.id}' is already registered`);
     }

@@ -424,7 +424,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const compatibleCount = inspected.filter((source) => source.status === 'compatible').length;
     const unavailableCount = inspected.filter((source) => source.status === 'unavailable').length;
     const incompatibleCount = inspected.filter((source) => source.status === 'schema-incompatible').length;
-    const workspaceFilterMiss = request.workspaceId !== undefined && inspected.length === 0;
+    const workspaceFilterMiss = request.workspaceId !== undefined
+      && inspected.length === 0
+      && inspection.discoveryMessage === undefined;
     const state = workspaceFilterMiss
       ? 'empty' as const
       : inspected.length === 0

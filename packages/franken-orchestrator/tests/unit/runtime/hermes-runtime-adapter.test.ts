@@ -714,6 +714,8 @@ describe('HermesRuntimeAdapter', () => {
     }));
     expect(provider.health.message).not.toContain(home);
     await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({ state: 'unavailable' }));
+    await expect(adapter.getSnapshot({ workspaceId: 'hermes:missing' }))
+      .resolves.toEqual(expect.objectContaining({ state: 'unavailable' }));
   });
 
   it('maps approval and HITL blockers to needs-input', async () => {
