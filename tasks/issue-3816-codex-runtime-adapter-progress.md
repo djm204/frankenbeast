@@ -23,5 +23,10 @@
 - [x] Remediate sixth-round Codex findings 3653882359, 3653882360, 3653882361, and 3653882368 under RED→GREEN; Codex adapter 30/30 and shared conformance 6/6 pass.
 - [x] Remediate seventh-round Codex finding 3653950577 fail-closed under RED→GREEN; Codex adapter 31/31 and shared conformance 6/6 pass.
 - [x] Remediate eighth-round Codex findings 3653993487, 3653993494, 3653993497, and 3653993499 under RED→GREEN; Codex adapter 35/35 and shared conformance 6/6 pass.
-- [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads; do not merge.
+- [x] Rebase the implementation directly onto merged `origin/main` (canonical #3812 merge `715da9d456d9a883aa96d85f53cbefca832da1c1`), preserving only scoped runtime changes.
+- [x] Run focused runtime verification (pre-review 71/71), root lint/typecheck/build, and document unrelated full-orchestrator execution/CLI failures.
+- [x] Publish replacement PR #3861 against `main` after GitHub refused to reopen superseded PR #3826.
+- [x] Remediate replacement-PR findings 3657124167, 3657124173, and 3657124178 under RED→GREEN in `b25b0a7a59e02dfa883c02c88aa76eb82ced7f1e`: exhaustive disappearance confirmation, replay-safe ≤4,096-byte SSE cursors, and complete snapshot continuation baselines.
+- [x] Verify the remediation with 84/84 focused runtime/HTTP tests, package typecheck/build, targeted ESLint, and `git diff --check`; reply to and resolve all three review threads.
+- [ ] Verify exact-current-head clean Codex, green CI, and zero unresolved Codex threads on PR #3861; do not merge.
 - [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.
