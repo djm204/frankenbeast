@@ -12,7 +12,7 @@
 - [x] Verify the actual managed-service dependency snapshot without exposing credentials.
 - [x] Record reusable findings in `tasks/resolve-issues-shared-lessons.md`.
 - [x] Inspect the staged diff and commit with the configured David Mendez identity.
-- [ ] Push one issue branch and open one linked pull request.
+- [x] Push one issue branch and open one linked pull request (#3868).
 - [ ] Run the bounded exact-current-head GitHub Codex review/remediation loop.
 - [ ] Verify green CI and zero unresolved review threads.
 - [ ] Leave an immutable merge-ready Kanban handoff without merging.
