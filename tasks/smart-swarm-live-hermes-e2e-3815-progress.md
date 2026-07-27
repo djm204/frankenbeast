@@ -1,0 +1,19 @@
+# Smart-swarm live Hermes E2E (#3815) progress
+
+- [x] Verify #3812, #3813, and #3814 are available together on exact `origin/main`.
+- [x] Create and verify isolated worktree/branch from exact base.
+- [x] Read issue acceptance criteria and trace runtime HTTP/SSE, Hermes adapter, dashboard, and existing tests.
+- [x] Add a browser-facing runtime action client test and observe the intended RED failure.
+- [x] Implement the minimal provider-neutral browser action client and observe GREEN.
+- [x] Add dashboard mutation controls with RED→GREEN tests for supported, governed-rejected, and unsupported actions.
+- [x] Add a real isolated-Hermes E2E harness that creates PM/worker/dependency/blocker/event evidence through the Hermes CLI.
+- [x] Exercise authenticated HTTP, ticketed SSE, live event arrival, blocker resolution with queried postcondition, governed rejection, unsupported approval decision, and reconnection.
+- [x] Exercise browser provider/workspace selection, topology, task detail, live evidence, and mutation controls without mocked HTTP.
+- [x] Prove the production bundle has no fixture/demo runtime fallback.
+- [x] Verify temporary processes, workspaces, databases, credentials, and browser state are cleaned up.
+- [x] Add a discoverable root npm script and exact operator documentation.
+- [x] Run focused tests, full relevant tests, lint, typecheck, build, and `git diff --check`.
+- [x] Self-review the complete diff and final clean workspace status.
+- [x] Commit with David Mendez identity, push, and open one issue-scoped PR (#3869).
+- [ ] Run real `@codex review` to exact-head clean, green CI, and zero unresolved Codex threads; do not merge.
+- [ ] Record machine-readable root-blackboard and card handoff.

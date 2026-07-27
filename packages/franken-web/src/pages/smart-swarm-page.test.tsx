@@ -82,6 +82,19 @@ function createClient(overrides: Partial<SmartSwarmApiClient> = {}): SmartSwarmA
   return {
     listProviders: vi.fn().mockResolvedValue([provider]),
     fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
+    executeAction: vi.fn().mockResolvedValue({
+      status: 'applied',
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.resolve',
+        targetId: 'task-live',
+        outcome: 'applied',
+        previousState: 'blocked',
+        currentState: 'ready',
+      },
+    }),
     subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, handlers) => {
       handlers.connection?.('connected');
       return vi.fn();
@@ -127,7 +140,8 @@ describe('SmartSwarmPage', () => {
 
     const close = screen.getByRole('button', { name: 'Close' });
     await waitFor(() => expect(document.activeElement).toBe(close));
-    inspect.focus();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Resolve blocker' }));
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Tab' });
     expect(document.activeElement).toBe(close);
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
@@ -135,8 +149,66 @@ describe('SmartSwarmPage', () => {
     await waitFor(() => expect(document.activeElement).toBe(inspect));
   });
 
-  it('keeps advertised lifecycle controls disabled until mutations are wired', async () => {
+  it('resolves a supported blocker through the runtime API and refreshes the live postcondition', async () => {
+    const executeAction = vi.fn().mockResolvedValue({
+      status: 'applied',
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.resolve',
+        targetId: 'task-live',
+        outcome: 'applied',
+        previousState: 'blocked',
+        currentState: 'ready',
+      },
+    });
+    const fetchSnapshot = vi.fn().mockResolvedValue(snapshot);
+    render(<SmartSwarmPage client={createClient({ executeAction, fetchSnapshot })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+
+    await screen.findByText('Blocker resolved; live state refreshed.');
+    expect(executeAction).toHaveBeenCalledWith('hermes', expect.objectContaining({
+      correlationId: expect.any(String),
+      idempotencyKey: expect.any(String),
+      action: {
+        type: 'blocker.resolve',
+        workspaceId: 'board-main',
+        taskId: 'task-live',
+        reason: 'Resolved from the authenticated smart-swarm dashboard',
+      },
+    }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+  });
+
+  it('submits a governed promotion and reports a typed rejection without claiming state changed', async () => {
+    const executeAction = vi.fn().mockResolvedValue({
+      status: 'rejected',
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      reason: 'Runtime action was not approved by the governor',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'policy.apply',
+        targetId: 'task-live',
+        outcome: 'rejected',
+      },
+    });
     render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        tasks: {
+          status: 'available',
+          data: snapshot.tasks.status === 'available'
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'ready' as const } : task)
+            : [],
+        },
+        blockers: { status: 'available', data: [] },
+      }),
       listProviders: vi.fn().mockResolvedValue([{
         ...provider,
         capabilities: {
@@ -144,16 +216,30 @@ describe('SmartSwarmPage', () => {
           pause: { status: 'supported' },
           resume: { status: 'supported' },
           cancellation: { status: 'supported' },
+          policyActions: { status: 'supported' },
         },
       }]),
     })} />);
     await screen.findByText('Live dashboard');
     fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
 
-    expect(screen.getByRole('button', { name: 'Pause task' })).toHaveProperty('disabled', true);
+    const pause = screen.getByRole('button', { name: 'Pause task' });
+    expect(pause).toHaveProperty('disabled', false);
     expect(screen.getByRole('button', { name: 'Resume task' })).toHaveProperty('disabled', true);
-    expect(screen.getByRole('button', { name: 'Cancel task' })).toHaveProperty('disabled', true);
-    expect(screen.getAllByText('This control is not wired to a runtime mutation yet.')).toHaveLength(3);
+    const cancel = screen.getByRole('button', { name: 'Cancel task' });
+    expect(cancel).toHaveProperty('disabled', false);
+    fireEvent.click(screen.getByRole('button', { name: 'Promote task' }));
+
+    expect(await screen.findByText('rejected: Runtime action was not approved by the governor')).toBeDefined();
+    expect(executeAction).toHaveBeenCalledWith('hermes', expect.objectContaining({
+      action: {
+        type: 'policy.apply',
+        workspaceId: 'board-main',
+        taskId: 'task-live',
+        policy: 'promote-task',
+        reason: 'Promoted from the authenticated smart-swarm dashboard',
+      },
+    }));
   });
 
   it('names the selected provider in a truthful empty state', async () => {

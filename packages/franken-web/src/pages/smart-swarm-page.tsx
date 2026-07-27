@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SmartSwarmApiError,
   type RuntimeAgent,
+  type RuntimeAction,
   type RuntimeCapability,
   type RuntimeConnectionState,
   type RuntimeEvent,
@@ -635,6 +636,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
       {selectedTask && provider ? (
         <TaskDetail
+          client={client}
+          onActionApplied={() => setRefreshNonce((current) => current + 1)}
           onClose={() => setSelectedTaskId(null)}
           provider={provider}
           returnFocus={taskDetailTrigger.current}
@@ -649,24 +652,69 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   );
 }
 
-function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
+function TaskDetail({ task, provider, runs, client, returnFocus, onActionApplied, onClose }: {
   task: RuntimeTask;
   provider: RuntimeProvider;
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
+  client: SmartSwarmApiClient;
   returnFocus: HTMLButtonElement | null;
+  onActionApplied(): void;
   onClose(): void;
 }) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
+  const [actionPending, setActionPending] = useState(false);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
   useEffect(() => {
     closeButton.current?.focus();
     return () => {
       if (returnFocus?.isConnected) returnFocus.focus();
     };
   }, [returnFocus]);
-  const unwiredReason = 'This control is not wired to a runtime mutation yet.';
-  const pauseReason = capabilityReason(provider.capabilities.pause) ?? unwiredReason;
-  const resumeReason = capabilityReason(provider.capabilities.resume) ?? unwiredReason;
-  const cancelReason = capabilityReason(provider.capabilities.cancellation) ?? unwiredReason;
+  const pauseReason = capabilityReason(provider.capabilities.pause);
+  const resumeReason = capabilityReason(provider.capabilities.resume);
+  const cancelReason = capabilityReason(provider.capabilities.cancellation);
+  const policyReason = capabilityReason(provider.capabilities.policyActions);
+  const blockerReason = capabilityReason(provider.capabilities.blockers);
+
+  async function executeTaskAction(
+    action: 'blocker.resolve' | 'task.pause' | 'task.resume' | 'task.cancel' | 'policy.apply',
+    reason: string,
+    successMessage: string,
+  ): Promise<void> {
+    setActionPending(true);
+    setActionStatus(null);
+    try {
+      const runtimeAction: RuntimeAction = action === 'policy.apply'
+        ? {
+            type: action,
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            policy: 'promote-task',
+            reason,
+          }
+        : {
+            type: action,
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            reason,
+          };
+      const result = await client.executeAction(provider.id, {
+        correlationId: crypto.randomUUID(),
+        idempotencyKey: `${action}:${crypto.randomUUID()}`,
+        action: runtimeAction,
+      });
+      if (result.status === 'applied') {
+        setActionStatus(successMessage);
+        onActionApplied();
+      } else {
+        setActionStatus(`${result.status}: ${result.reason}`);
+      }
+    } catch (error) {
+      setActionStatus(errorMessage(error));
+    } finally {
+      setActionPending(false);
+    }
+  }
   return (
     <section
       aria-label={`${task.title} details`}
@@ -677,8 +725,16 @@ function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
           event.preventDefault();
           onClose();
         } else if (event.key === 'Tab') {
-          event.preventDefault();
-          closeButton.current?.focus();
+          const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+          const first = focusable[0];
+          const last = focusable.at(-1);
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first?.focus();
+          }
         }
       }}
       role="dialog"
@@ -698,12 +754,76 @@ function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
       </section>
       <section className="smart-swarm-actions" aria-label="Task lifecycle controls">
         <h4>Capability-driven controls</h4>
-        <button disabled title={pauseReason} type="button">Pause task</button>
+        {task.state === 'blocked' ? (
+          <>
+            <button
+              disabled={actionPending || blockerReason !== null}
+              onClick={() => {
+                void executeTaskAction(
+                  'blocker.resolve',
+                  'Resolved from the authenticated smart-swarm dashboard',
+                  'Blocker resolved; live state refreshed.',
+                );
+              }}
+              title={blockerReason ?? undefined}
+              type="button"
+            >Resolve blocker</button>
+            {blockerReason ? <p>{blockerReason}</p> : null}
+          </>
+        ) : null}
+        <button
+          disabled={actionPending || pauseReason !== null || (task.state !== 'ready' && task.state !== 'running')}
+          onClick={() => {
+            void executeTaskAction(
+              'task.pause',
+              'Paused from the authenticated smart-swarm dashboard',
+              'Task paused; live state refreshed.',
+            );
+          }}
+          title={pauseReason ?? undefined}
+          type="button"
+        >Pause task</button>
         {pauseReason ? <p>{pauseReason}</p> : null}
-        <button disabled title={resumeReason} type="button">Resume task</button>
+        <button
+          disabled={actionPending || resumeReason !== null || task.state !== 'queued'}
+          onClick={() => {
+            void executeTaskAction(
+              'task.resume',
+              'Resumed from the authenticated smart-swarm dashboard',
+              'Task resumed; live state refreshed.',
+            );
+          }}
+          title={resumeReason ?? undefined}
+          type="button"
+        >Resume task</button>
         {resumeReason ? <p>{resumeReason}</p> : null}
-        <button disabled title={cancelReason} type="button">Cancel task</button>
+        <button
+          disabled={actionPending || cancelReason !== null || task.state === 'succeeded' || task.state === 'failed' || task.state === 'cancelled'}
+          onClick={() => {
+            void executeTaskAction(
+              'task.cancel',
+              'Cancelled from the authenticated smart-swarm dashboard',
+              'Task cancelled; live state refreshed.',
+            );
+          }}
+          title={cancelReason ?? undefined}
+          type="button"
+        >Cancel task</button>
         {cancelReason ? <p>{cancelReason}</p> : null}
+        <button
+          disabled={actionPending || policyReason !== null || task.state === 'succeeded' || task.state === 'cancelled'}
+          onClick={() => {
+            void executeTaskAction(
+              'policy.apply',
+              'Promoted from the authenticated smart-swarm dashboard',
+              'Task promoted; live state refreshed.',
+            );
+          }}
+          title={policyReason ?? undefined}
+          type="button"
+        >Promote task</button>
+        {policyReason ? <p>{policyReason}</p> : null}
+        {actionStatus ? <p role="status">{actionStatus}</p> : null}
       </section>
     </section>
   );
