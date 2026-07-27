@@ -13,7 +13,7 @@
 - [x] Run package tests plus root lint, typecheck, build, `git diff --check`, and self-review; focused tests, lint, typecheck, build, and diff checks pass, while the package suite retains three unrelated environment/order-dependent baseline failures.
 - [x] Commit with Conventional Commits using David Mendez <me@davidmendez.dev>.
 - [x] Push `feat/ollama-runtime-adapter-3817` and open PR #3834 with `Closes #3817`.
-- [ ] Drive real GitHub `@codex review` to exact-current-head clean with zero unresolved Codex threads and green CI. The default five-invocation cap is exhausted; all Ollama findings through round 5 are fixed and resolved, but a tier-12 trigger is required for the new exact head.
+- [ ] Drive real GitHub `@codex review` to exact-current-head clean with zero unresolved Codex threads and green CI. Tier-12 round 6 produced three Ollama findings now fixed locally and one inherited #3812 finding routed upstream; push, resolve, and final exact-head review remain.
 - [x] Post durable evidence to root card `t_25558345` and complete/block this card accurately without merging.
 
 ## Requirement evidence
@@ -38,6 +38,7 @@ The canonical worktree was clean on `feat/ollama-runtime-adapter-3817` at `7b98d
 - Round 3 fixed live network-policy refresh and cancellation of fulfilled sibling bodies after transport rejection.
 - Round 4 produced only inherited #3812 findings, which were routed to the canonical upstream card instead of broadening #3817.
 - Round 5 fixed scheme-less `OLLAMA_HOST` normalization and cached health-check timestamps; three more inherited #3812 findings were routed upstream.
+- Round 6 found missing managed-chat Ollama environment inheritance, uncancelled sibling bodies after JSON normalization failure, and permissive malformed model-entry handling. Regression tests failed for each behavior before implementation; 72/72 focused tests plus root lint, typecheck, and build pass after the fixes. The inherited Hermes workspace-preservation finding was routed to `t_3828faf1`.
 - Ollama adapter suite: 24/24 passed after round 5; the focused runtime/HTTP set is 47/47 and root lint, typecheck, and build pass.
 - Every Codex thread through round 5 was replied to and resolved; the next exact-head review requires explicit approval to raise the invocation cap from 5 to 12.
 - Four inherited round-2 findings were posted to root card `t_25558345`, and the three additional inherited #3812 findings were posted directly to canonical upstream card `t_3828faf1`.

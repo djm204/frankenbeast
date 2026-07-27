@@ -94,6 +94,16 @@ function modelList(value: unknown, includeVram: boolean): OllamaModel[] {
   });
 }
 
+function hasValidModelEntries(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || !Array.isArray((value as { models?: unknown }).models)) return false;
+  return (value as { models: unknown[] }).models.every((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const row = entry as Record<string, unknown>;
+    return (typeof row['name'] === 'string' && row['name'].trim().length > 0)
+      || (typeof row['model'] === 'string' && row['model'].trim().length > 0);
+  });
+}
+
 function nextModelExpiry(models: readonly OllamaModel[]): string | undefined {
   return models.flatMap((model) => model.expiresAt ? [model.expiresAt] : []).sort()[0];
 }
@@ -378,7 +388,8 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
   private async pollEndpoints(signal: AbortSignal): Promise<EndpointInspection[]> {
     return await Promise.all(this.endpoints.map(async (config) => {
       const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
-      const requestSignal = AbortSignal.any([signal, timeoutSignal]);
+      const normalizationController = new AbortController();
+      const requestSignal = AbortSignal.any([signal, timeoutSignal, normalizationController.signal]);
       try {
         const headers = new Headers({ accept: 'application/json' });
         if (config.apiKeyEnv) {
@@ -414,20 +425,27 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
           await Promise.allSettled(responses.map(async (response) => await response.body?.cancel()));
           throw new OllamaEndpointError(`Ollama endpoint returned HTTP ${failedResponse.status}`);
         }
-        const [versionValue, tagsValue, psValue] = await Promise.all([
-          readBoundedJson(versionResponse, this.maxResponseBytes),
-          readBoundedJson(tagsResponse, this.maxResponseBytes),
-          readBoundedJson(psResponse, this.maxResponseBytes),
-        ]);
+        let versionValue: unknown;
+        let tagsValue: unknown;
+        let psValue: unknown;
+        try {
+          [versionValue, tagsValue, psValue] = await Promise.all([
+            readBoundedJson(versionResponse, this.maxResponseBytes),
+            readBoundedJson(tagsResponse, this.maxResponseBytes),
+            readBoundedJson(psResponse, this.maxResponseBytes),
+          ]);
+        } catch (error) {
+          normalizationController.abort();
+          await Promise.allSettled(responses.map(async (response) => await response.body?.cancel()));
+          throw error;
+        }
         const version = versionValue && typeof versionValue === 'object'
           && typeof (versionValue as { version?: unknown }).version === 'string'
           && (versionValue as { version: string }).version.trim().length > 0
           ? (versionValue as { version: string }).version
           : undefined;
-        const tagsValid = tagsValue && typeof tagsValue === 'object'
-          && Array.isArray((tagsValue as { models?: unknown }).models);
-        const psValid = psValue && typeof psValue === 'object'
-          && Array.isArray((psValue as { models?: unknown }).models);
+        const tagsValid = hasValidModelEntries(tagsValue);
+        const psValid = hasValidModelEntries(psValue);
         if (!version || !tagsValid || !psValid) {
           throw new OllamaEndpointError('Ollama endpoint returned an invalid API payload');
         }

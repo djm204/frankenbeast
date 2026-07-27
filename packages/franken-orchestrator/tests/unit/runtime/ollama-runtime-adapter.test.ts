@@ -343,6 +343,50 @@ describe('OllamaRuntimeAdapter', () => {
     });
   });
 
+  it('cancels sibling response bodies when JSON normalization fails', async () => {
+    const siblingCancellations = [vi.fn(), vi.fn()];
+    let index = 0;
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const call = index++;
+      if (call === 0) return new Response('{');
+      return new Response(new ReadableStream({
+        start(controller) {
+          init?.signal?.addEventListener('abort', () => {
+            siblingCancellations[call - 1]!();
+            controller.error(new DOMException('aborted', 'AbortError'));
+          }, { once: true });
+        },
+      }));
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({ state: 'unavailable' });
+    for (const cancellation of siblingCancellations) expect(cancellation).toHaveBeenCalledOnce();
+  });
+
+  it('rejects model arrays whose entries lack a usable identity', async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/version') return Response.json({ version: '0.11.4' });
+      if (path === '/api/tags') return Response.json({ models: [{}] });
+      return Response.json({ models: [] });
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toMatchObject({
+      state: 'unavailable',
+      workspaces: {
+        data: [{ metadata: { diagnostic: 'Ollama endpoint returned an invalid API payload' } }],
+      },
+    });
+  });
+
   it('coalesces concurrent polls and rate-limits repeated endpoint reads', async () => {
     const endpoint = await ollamaServer();
     const adapter = new OllamaRuntimeAdapter({
