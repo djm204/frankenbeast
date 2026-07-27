@@ -173,6 +173,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [workspaceId, setWorkspaceId] = useState('');
   const [workspaceCatalog, setWorkspaceCatalog] = useState<RuntimeSnapshot['workspaces'] | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
+  const [liveEvents, setLiveEvents] = useState<RuntimeEvent[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [providerError, setProviderError] = useState<unknown>(null);
@@ -185,8 +186,6 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
   const snapshotRequestGeneration = useRef(0);
-  const streamEventGeneration = useRef(0);
-  const recentStreamEvents = useRef<Array<{ generation: number; event: RuntimeEvent }>>([]);
   const snapshotScope = useRef('');
   const refreshPending = useRef(false);
   const lastTopologyRefreshAt = useRef(0);
@@ -203,7 +202,12 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const tasks = snapshot ? available(snapshot.tasks) ?? [] : [];
   const runs = snapshot ? available(snapshot.runs) ?? [] : [];
   const events = snapshot
-    ? [...(available(snapshot.events) ?? [])].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE)
+    ? [...new Map([
+      ...(available(snapshot.events) ?? []),
+      ...liveEvents,
+    ].map((event) => [event.id, event])).values()]
+      .sort(compareRuntimeEvidenceRecency)
+      .slice(0, MAX_VISIBLE_EVIDENCE)
     : [];
   const blockers = snapshot
     ? [...(available(snapshot.blockers) ?? [])]
@@ -263,6 +267,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           currentProviderId.current = nextProviderId;
           currentWorkspaceId.current = '';
           setSnapshot(null);
+          setLiveEvents([]);
           setWorkspaceCatalog(null);
           setWorkspaceId('');
           setSelectedTaskId(null);
@@ -290,14 +295,13 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     if (snapshotScope.current !== nextScope) {
       snapshotScope.current = nextScope;
       snapshotRequestGeneration.current += 1;
-      recentStreamEvents.current = [];
+      setLiveEvents([]);
       snapshotRequestsInFlight.current = 0;
       refreshPending.current = false;
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
       refreshTimer.current = null;
     }
     const requestGeneration = snapshotRequestGeneration.current;
-    const requestStreamEventGeneration = streamEventGeneration.current;
     setLoading(true);
     snapshotRequestsInFlight.current += 1;
     void client.fetchSnapshot(providerId, {
@@ -306,21 +310,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     })
       .then((nextSnapshot) => {
         if (cancelled || currentProviderId.current !== providerId) return;
-        const streamedDuringRequest = recentStreamEvents.current
-          .filter(({ generation }) => generation > requestStreamEventGeneration)
-          .map(({ event }) => event);
-        setSnapshot(() => {
-          if (streamedDuringRequest.length === 0 || nextSnapshot.events.status !== 'available') return nextSnapshot;
-          const byId = new Map(nextSnapshot.events.data.map((event) => [event.id, event]));
-          for (const event of streamedDuringRequest) byId.set(event.id, event);
-          return {
-            ...nextSnapshot,
-            events: {
-              status: 'available',
-              data: [...byId.values()].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE),
-            },
-          };
-        });
+        setSnapshot(nextSnapshot);
         if (!workspaceId) setWorkspaceCatalog(nextSnapshot.workspaces);
         if (nextSnapshot.workspaces.status === 'available') {
           const nextWorkspaces = nextSnapshot.workspaces.data;
@@ -376,22 +366,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       },
       event: (event: RuntimeEvent) => {
         if (cancelled) return;
-        streamEventGeneration.current += 1;
-        recentStreamEvents.current = [
-          ...recentStreamEvents.current,
-          { generation: streamEventGeneration.current, event },
-        ].slice(-MAX_VISIBLE_EVIDENCE);
-        setSnapshot((current) => {
-          if (!current || current.events.status !== 'available') return current;
-          const withoutDuplicate = current.events.data.filter((candidate) => candidate.id !== event.id);
-          return {
-            ...current,
-            events: {
-              status: 'available',
-              data: [event, ...withoutDuplicate].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE),
-            },
-          };
-        });
+        setLiveEvents((current) => [
+          event,
+          ...current.filter((candidate) => candidate.id !== event.id),
+        ].sort(compareRuntimeEvidenceRecency).slice(0, MAX_VISIBLE_EVIDENCE));
         scheduleTopologyRefresh();
       },
     }).then((stop) => {
@@ -480,6 +458,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               className="field-control"
               onChange={(event) => {
                 setSnapshot(null);
+                setLiveEvents([]);
                 setWorkspaceCatalog(null);
                 setWorkspaceId('');
                 setSelectedTaskId(null);
@@ -499,7 +478,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               className="field-control"
               disabled={workspaces.length === 0}
               onChange={(event) => {
+                setSnapshot(null);
+                setLiveEvents([]);
                 setSelectedTaskId(null);
+                setLoading(true);
                 setWorkspaceId(event.target.value);
               }}
               value={workspaceId}
@@ -541,6 +523,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         onRetry={() => {
           setProviderRefreshNonce((current) => current + 1);
           setRefreshNonce((current) => current + 1);
+          if (workspaceCatalogError) void refreshWorkspaceCatalog();
         }}
         provider={provider}
         snapshot={snapshot}

@@ -620,6 +620,34 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText('Streamed during refresh')).toBeDefined();
   });
 
+  it('shows streamed activity when snapshot event history is unsupported', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    const unsupportedEventHistory: RuntimeSnapshot = {
+      ...snapshot,
+      events: { status: 'unsupported', reason: 'Historical event queries are unavailable.' },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(unsupportedEventHistory),
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await screen.findByText('Historical event queries are unavailable.');
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+
+    act(() => handlers.event({
+      ...baseEvent,
+      id: 'live-without-history',
+      cursor: 'live-without-history',
+      summary: 'Live event without history',
+    }));
+
+    expect(screen.getByText('Live event without history')).toBeDefined();
+    expect(screen.getByText('Historical event queries are unavailable.')).toBeDefined();
+  });
+
   it('keeps newest activity first before and after snapshot refreshes', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
@@ -806,6 +834,23 @@ describe('SmartSwarmPage', () => {
     expect(fetchSnapshot).toHaveBeenLastCalledWith('hermes', { activityLimit: 1 });
   });
 
+  it('retries a failed workspace catalog request from the recovery action', async () => {
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(snapshot)
+      .mockRejectedValueOnce(new Error('Workspace catalog refresh failed.'))
+      .mockResolvedValue(snapshot);
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh workspaces' }));
+    expect(await screen.findByText('Workspace catalog refresh failed.')).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry smart-swarm' }));
+
+    await waitFor(() => expect(screen.queryByText('Workspace catalog refresh failed.')).toBeNull());
+    expect(fetchSnapshot.mock.calls.filter(([, options]) => options?.activityLimit === 1)).toHaveLength(2);
+  });
+
   it('does not clear a topology failure after a workspace catalog refresh succeeds', async () => {
     const fetchSnapshot = vi.fn()
       .mockResolvedValueOnce(snapshot)
@@ -919,6 +964,35 @@ describe('SmartSwarmPage', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Live dashboard details' })).toBeNull();
     resolveWorkspaceSnapshot({ ...expandedSnapshot, tasks: { status: 'available', data: [] } });
+  });
+
+  it('clears the prior snapshot while a newly selected workspace loads', async () => {
+    const secondWorkspace = { id: 'board-secondary', name: 'Secondary board', kind: 'board' as const, state: 'available' as const };
+    const emptySnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      state: 'empty',
+      workspaces: {
+        status: 'available',
+        data: [...snapshot.workspaces.status === 'available' ? snapshot.workspaces.data : [], secondWorkspace],
+      },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    const pendingWorkspace = new Promise<RuntimeSnapshot>(() => undefined);
+    const fetchSnapshot = vi.fn().mockImplementation((_providerId: string, options?: { workspaceId?: string }) => (
+      options?.workspaceId === 'board-secondary' ? pendingWorkspace : Promise.resolve(emptySnapshot)
+    ));
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+    expect(await screen.findByText('No runtime work in Main board')).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: 'board-secondary' } });
+
+    expect(await screen.findByText('Loading smart-swarm live state…')).toBeDefined();
+    expect(screen.queryByText('No runtime work in Secondary board')).toBeNull();
   });
 
   it('shows the newest runs before bounding task evidence', async () => {
