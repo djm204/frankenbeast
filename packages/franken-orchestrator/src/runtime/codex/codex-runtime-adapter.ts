@@ -169,20 +169,36 @@ function agentState(status: CodexThread['status']): RuntimeAgent['state'] {
 }
 
 function eventStatus(thread: CodexThread): string {
-  return thread.archived ? 'archived' : thread.status.type;
+  if (thread.archived) return 'archived';
+  if (thread.status.type === 'active' && agentState(thread.status) === 'blocked') return 'blocked';
+  return thread.status.type;
+}
+
+interface CodexBoundaryThread {
+  threadId: string;
+  workspaceId: string;
+  status: string;
 }
 
 function eventCursor(
-  thread: CodexThread,
-  boundaryStatuses?: Record<string, string>,
+  status: string,
+  boundaryThreads?: Record<string, CodexBoundaryThread>,
   watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
+  scopeWorkspaceId?: string,
 ): string {
   const payload = Buffer.from(JSON.stringify({
-    version: 2,
-    occurredAt: watermark?.occurredAt ?? timestamp(thread.updatedAt),
-    threadId: watermark?.threadId ?? thread.id,
-    status: eventStatus(thread),
-    ...(boundaryStatuses ? { boundaryStatuses } : {}),
+    version: 3,
+    occurredAt: watermark?.occurredAt,
+    threadId: watermark?.threadId,
+    status,
+    ...(scopeWorkspaceId !== undefined ? { workspaceId: scopeWorkspaceId } : {}),
+    ...(boundaryThreads ? {
+      boundaryThreads: Object.values(boundaryThreads).map((thread) => [
+        thread.threadId,
+        thread.workspaceId,
+        thread.status,
+      ]),
+    } : {}),
   }));
   return `z.${deflateRawSync(payload).toString('base64url')}`;
 }
@@ -191,7 +207,9 @@ interface CodexCursor {
   occurredAt: string;
   threadId: string;
   status?: string | undefined;
+  workspaceId?: string | undefined;
   boundaryStatuses?: Record<string, string> | undefined;
+  boundaryThreads?: Record<string, CodexBoundaryThread> | undefined;
 }
 
 function parseCursor(value: string | undefined): CodexCursor | null {
@@ -204,8 +222,9 @@ function parseCursor(value: string | undefined): CodexCursor | null {
       : Buffer.from(value, 'base64url').toString('utf8');
     const decoded = JSON.parse(serialized) as Record<string, unknown>;
     const boundaryStatuses = decoded['boundaryStatuses'];
+    const boundaryThreads = decoded['boundaryThreads'];
     if (
-      (decoded['version'] !== undefined && decoded['version'] !== 2)
+      (decoded['version'] !== undefined && decoded['version'] !== 2 && decoded['version'] !== 3)
       || Buffer.byteLength(serialized) > MAX_CURSOR_JSON_BYTES
       || typeof decoded['occurredAt'] !== 'string'
       || Number.isNaN(Date.parse(decoded.occurredAt))
@@ -213,6 +232,10 @@ function parseCursor(value: string | undefined): CodexCursor | null {
       || typeof decoded.threadId !== 'string'
       || decoded.threadId.length === 0
       || (decoded.status !== undefined && (typeof decoded.status !== 'string' || decoded.status.length === 0))
+      || (decoded.workspaceId !== undefined && (
+        typeof decoded.workspaceId !== 'string'
+        || !/^codex:workspace:[a-f0-9]{16}$/.test(decoded.workspaceId)
+      ))
       || (boundaryStatuses !== undefined && (
         boundaryStatuses === null
         || typeof boundaryStatuses !== 'object'
@@ -225,18 +248,51 @@ function parseCursor(value: string | undefined): CodexCursor | null {
           || status.length === 0
         ))
       ))
+      || (boundaryThreads !== undefined && (
+        decoded['version'] !== 3
+        || !Array.isArray(boundaryThreads)
+        || boundaryThreads.length > MAX_ACTIVITY_LIMIT
+        || boundaryThreads.some((thread) => (
+          !Array.isArray(thread)
+          || thread.length !== 3
+          || typeof thread[0] !== 'string'
+          || thread[0].length === 0
+          || thread[0].length > 1_024
+          || typeof thread[1] !== 'string'
+          || !/^codex:workspace:[a-f0-9]{16}$/.test(thread[1])
+          || typeof thread[2] !== 'string'
+          || thread[2].length === 0
+          || thread[2].length > 64
+        ))
+      ))
     ) throw new Error('invalid');
-    const normalizedStatuses = boundaryStatuses === undefined
+    const normalizedBoundaryThreads = boundaryThreads === undefined
       ? undefined
-      : Object.fromEntries(Object.entries(boundaryStatuses as Record<string, string>).map(
-          ([id, status]) => [decoded['version'] === 2 ? id : threadKey(id), status],
+      : Object.fromEntries((boundaryThreads as [string, string, string][]).map(
+          ([threadId, currentWorkspaceId, status]) => [
+            threadKey(threadId),
+            { threadId, workspaceId: currentWorkspaceId, status },
+          ],
         ));
+    const normalizedStatuses = normalizedBoundaryThreads !== undefined
+      ? Object.fromEntries(Object.entries(normalizedBoundaryThreads).map(
+          ([key, thread]) => [key, thread.status],
+        ))
+      : boundaryStatuses === undefined
+        ? undefined
+        : Object.fromEntries(Object.entries(boundaryStatuses as Record<string, string>).map(
+            ([id, status]) => [decoded['version'] === 2 ? id : threadKey(id), status],
+          ));
     return {
       occurredAt: decoded['occurredAt'] as string,
       threadId: decoded['threadId'] as string,
       ...(decoded['status'] !== undefined ? { status: decoded['status'] as string } : {}),
+      ...(decoded['workspaceId'] !== undefined ? { workspaceId: decoded['workspaceId'] as string } : {}),
       ...(normalizedStatuses !== undefined
         ? { boundaryStatuses: normalizedStatuses }
+        : {}),
+      ...(normalizedBoundaryThreads !== undefined
+        ? { boundaryThreads: normalizedBoundaryThreads }
         : {}),
     };
   } catch {
@@ -248,23 +304,32 @@ function compareCursor(a: CodexCursor, b: CodexCursor): number {
   return a.occurredAt.localeCompare(b.occurredAt) || a.threadId.localeCompare(b.threadId);
 }
 
-function rememberStatus(statuses: Record<string, string>, threadId: string, status: string): void {
+function rememberThread(
+  threads: Record<string, CodexBoundaryThread>,
+  thread: CodexBoundaryThread,
+): void {
+  const { threadId } = thread;
   const key = threadKey(threadId);
-  if (!Object.hasOwn(statuses, key) && Object.keys(statuses).length >= MAX_ACTIVITY_LIMIT) {
-    const oldestThreadId = Object.keys(statuses)[0];
-    if (oldestThreadId !== undefined) delete statuses[oldestThreadId];
+  if (!Object.hasOwn(threads, key) && Object.keys(threads).length >= MAX_ACTIVITY_LIMIT) {
+    const oldestThreadKey = Object.keys(threads)[0];
+    if (oldestThreadKey !== undefined) delete threads[oldestThreadKey];
   }
-  statuses[key] = status;
+  threads[key] = thread;
 }
 
 function eventForThread(
   thread: CodexThread,
-  boundaryStatuses?: Record<string, string>,
+  boundaryThreads?: Record<string, CodexBoundaryThread>,
   watermark?: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
+  scopeWorkspaceId?: string,
 ): RuntimeEvent {
+  const currentWatermark = watermark ?? {
+    occurredAt: timestamp(thread.updatedAt)!,
+    threadId: thread.id,
+  };
   return {
     id: `codex:thread:${thread.id}:${thread.updatedAt}:${eventStatus(thread)}`,
-    cursor: eventCursor(thread, boundaryStatuses, watermark),
+    cursor: eventCursor(eventStatus(thread), boundaryThreads, currentWatermark, scopeWorkspaceId),
     workspaceId: workspaceId(thread.cwd),
     taskId: null,
     runId: null,
@@ -272,6 +337,26 @@ function eventForThread(
     occurredAt: timestamp(thread.updatedAt)!,
     summary: `Codex thread is ${eventStatus(thread)}`,
     metadata: { agentId: `codex:thread:${thread.id}`, sessionId: thread.sessionId },
+  };
+}
+
+function eventForDisappearedThread(
+  thread: CodexBoundaryThread,
+  occurredAt: string,
+  boundaryThreads: Record<string, CodexBoundaryThread>,
+  watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'>,
+  scopeWorkspaceId?: string,
+): RuntimeEvent {
+  return {
+    id: `codex:thread:${thread.threadId}:disappeared`,
+    cursor: eventCursor('disappeared', boundaryThreads, watermark, scopeWorkspaceId),
+    workspaceId: thread.workspaceId,
+    taskId: null,
+    runId: null,
+    type: 'lifecycle',
+    occurredAt,
+    summary: 'Codex thread disappeared',
+    metadata: { agentId: `codex:thread:${thread.threadId}` },
   };
 }
 
@@ -468,6 +553,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
   async getEvents(request: RuntimeEventRequest = {}): Promise<RuntimeEventPage> {
     const limit = normalizeLimit(request.limit);
     const after = parseCursor(request.cursor);
+    if (after && after.workspaceId !== request.workspaceId) throw new RuntimeCursorError();
     const stop = (threads: CodexThread[]): boolean => after === null
       ? request.workspaceId === undefined || threads.filter(
           (thread) => workspaceId(thread.cwd) === request.workspaceId,
@@ -493,8 +579,9 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       (thread) => !activeIds.has(thread.id),
     )]
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId);
-    const candidates = matchingThreads
+    const threadCandidates = matchingThreads
       .map((thread) => ({
+        kind: 'thread' as const,
         thread,
         cursor: {
           occurredAt: timestamp(thread.updatedAt)!,
@@ -510,24 +597,63 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           if (Object.hasOwn(after.boundaryStatuses, key)) {
             return after.boundaryStatuses[key] !== entry.cursor.status;
           }
-          if (entry.cursor.occurredAt === after.occurredAt) return true;
+          if (
+            entry.cursor.occurredAt === after.occurredAt
+            && Object.keys(after.boundaryStatuses).length < MAX_ACTIVITY_LIMIT
+          ) return true;
         }
         return order > 0 || (order === 0 && after.status !== undefined && entry.cursor.status !== after.status);
       });
+    const currentThreadKeys = new Set(matchingThreads.map((thread) => threadKey(thread.id)));
+    const observedAt = this.now().toISOString();
+    const disappearedAt = after && observedAt <= after.occurredAt
+      ? new Date(Date.parse(after.occurredAt) + 1).toISOString()
+      : observedAt;
+    const disappearedCandidates = after?.boundaryThreads
+      ? Object.entries(after.boundaryThreads)
+          .filter(([key]) => !currentThreadKeys.has(key))
+          .map(([key, thread]) => ({
+            kind: 'disappeared' as const,
+            key,
+            thread,
+            cursor: {
+              occurredAt: disappearedAt,
+              threadId: thread.threadId,
+              status: 'disappeared',
+            },
+          }))
+      : [];
+    const candidates = [...threadCandidates, ...disappearedCandidates];
     const entries = after
       ? candidates.sort((a, b) => compareCursor(a.cursor, b.cursor)).slice(0, limit)
       : candidates
           .sort((a, b) => compareCursor(b.cursor, a.cursor))
           .slice(0, limit)
           .sort((a, b) => compareCursor(a.cursor, b.cursor));
-    const emittedStatuses = after?.boundaryStatuses ? { ...after.boundaryStatuses } : {};
+    const emittedThreads = after?.boundaryThreads ? { ...after.boundaryThreads } : {};
     let watermark: Pick<CodexCursor, 'occurredAt' | 'threadId'> | undefined = after ?? undefined;
     const events = entries.map((entry) => {
-      rememberStatus(emittedStatuses, entry.cursor.threadId, entry.cursor.status);
+      if (entry.kind === 'thread') {
+        rememberThread(emittedThreads, {
+          threadId: entry.thread.id,
+          workspaceId: workspaceId(entry.thread.cwd),
+          status: entry.cursor.status,
+        });
+      } else {
+        delete emittedThreads[entry.key];
+      }
       if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
         watermark = entry.cursor;
       }
-      return eventForThread(entry.thread, emittedStatuses, watermark);
+      return entry.kind === 'thread'
+        ? eventForThread(entry.thread, emittedThreads, watermark, request.workspaceId)
+        : eventForDisappearedThread(
+            entry.thread,
+            entry.cursor.occurredAt,
+            emittedThreads,
+            watermark,
+            request.workspaceId,
+          );
     });
     return RuntimeEventPageSchema.parse({
       events,
