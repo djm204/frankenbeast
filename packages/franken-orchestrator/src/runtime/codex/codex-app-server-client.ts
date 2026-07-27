@@ -257,6 +257,7 @@ export function createCodexAppServerRequest(
     if (!Number.isSafeInteger(requestOptions.timeoutMs) || requestOptions.timeoutMs <= 0) {
       throw new Error('Codex app-server timeout must be a positive integer');
     }
+    const deadline = Date.now() + requestOptions.timeoutMs;
     if (requestOptions.signal?.aborted) throw abortedError(requestOptions.signal);
     clearIdleTimer();
     await awaitInitialization(ensureServer(requestOptions.timeoutMs), requestOptions.signal);
@@ -273,7 +274,7 @@ export function createCodexAppServerRequest(
         : undefined;
       const timer = setTimeout(() => {
         failServer(server, safeError('Codex app-server request timed out'));
-      }, requestOptions.timeoutMs);
+      }, Math.max(1, deadline - Date.now()));
       pending.set(id, {
         resolve,
         reject,

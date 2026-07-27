@@ -634,17 +634,24 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       .filter((thread) => request.workspaceId === undefined || workspaceId(thread.cwd) === request.workspaceId);
     const observedKeys = new Set(matchingThreads.map((thread) => threadKey(thread.id)));
     const trackedBoundaryThreads = after?.boundaryThreads;
-    const needsAbsenceConfirmation = trackedBoundaryThreads !== undefined
-      && Object.keys(trackedBoundaryThreads).some((key) => !observedKeys.has(key));
+    const trackedLiveKeys = trackedBoundaryThreads === undefined
+      ? []
+      : Object.entries(trackedBoundaryThreads)
+          .filter(([, thread]) => thread.status !== 'disappeared')
+          .map(([key]) => key);
+    const needsAbsenceConfirmation = trackedLiveKeys.some((key) => !observedKeys.has(key));
     if (needsAbsenceConfirmation) {
       const confirmedActive = await this.readThreadPages({
         pageSize: MAX_ACTIVITY_LIMIT,
         signal: request.signal,
         archived: false,
-        stop: () => false,
+        stop: (threads) => {
+          const confirmedKeys = new Set(threads.map((thread) => threadKey(thread.id)));
+          return trackedLiveKeys.every((key) => confirmedKeys.has(key));
+        },
       });
       const confirmedActiveKeys = new Set(confirmedActive.threads.map((thread) => threadKey(thread.id)));
-      const trackedKeysMissingFromActive = new Set(Object.keys(trackedBoundaryThreads).filter(
+      const trackedKeysMissingFromActive = new Set(trackedLiveKeys.filter(
         (key) => !confirmedActiveKeys.has(key),
       ));
       const confirmedArchived = await this.readThreadPages({
@@ -702,7 +709,7 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
       : observedAt;
     const disappearedCandidates = after?.boundaryThreads
       ? Object.entries(after.boundaryThreads)
-          .filter(([key]) => !currentThreadKeys.has(key))
+          .filter(([key, thread]) => thread.status !== 'disappeared' && !currentThreadKeys.has(key))
           .map(([key, thread]) => ({
             kind: 'disappeared' as const,
             key,
@@ -748,7 +755,11 @@ export class CodexRuntimeAdapter implements RuntimeAdapter {
           transitionSequence,
         );
       } else {
-        delete emittedThreads[entry.key];
+        rememberThread(emittedThreads, {
+          ...entry.thread,
+          status: 'disappeared',
+          transitionSequence: entry.thread.transitionSequence + 1,
+        });
       }
       if (!watermark || compareCursor(entry.cursor, watermark) > 0) {
         watermark = entry.cursor;

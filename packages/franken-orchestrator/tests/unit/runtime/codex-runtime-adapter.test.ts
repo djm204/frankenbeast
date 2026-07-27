@@ -250,6 +250,34 @@ main().catch((error) => {
     await expect(pending).rejects.toThrow('operator cancelled');
   });
 
+  it('applies one timeout budget across initialization and the requested method', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-deadline-'));
+    tempPaths.push(directory);
+    const command = join(directory, 'codex-deadline.cjs');
+    await writeFile(command, `#!/usr/bin/env node
+const readline = require('node:readline');
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.method === 'initialize') {
+    setTimeout(() => process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n'), 70);
+  } else if (message.method === 'thread/list') {
+    setTimeout(() => process.stdout.write(JSON.stringify({
+      id: message.id,
+      result: { data: [], nextCursor: null }
+    }) + '\\n'), 70);
+  }
+});
+`);
+    await chmod(command, 0o700);
+    const request = createCodexAppServerRequest({
+      command,
+      env: { PATH: process.env['PATH'] ?? '' },
+    });
+
+    await expect(request('thread/list', {}, { timeoutMs: 100 })).rejects.toThrow('timed out');
+  });
+
   it('ignores late output from an app-server process replaced after timeout', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'codex-app-server-replace-'));
     tempPaths.push(directory);
@@ -930,6 +958,55 @@ input.on('line', (line) => {
     ]);
   });
 
+  it('emits a lifecycle transition when a disappeared thread reappears', async () => {
+    let visible = true;
+    const adapter = new CodexRuntimeAdapter({
+      now: () => new Date('2026-07-27T01:15:00.000Z'),
+      request: async () => ({
+        data: visible ? [{
+          id: 'transient-thread', sessionId: 'session-transient', cliVersion: '0.145.0',
+          createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+          ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+        }] : [],
+        nextCursor: null,
+      }),
+    });
+
+    const first = await adapter.getEvents({ limit: 10 });
+    visible = false;
+    const disappeared = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    visible = true;
+    const reappeared = await adapter.getEvents({ cursor: disappeared.nextCursor!, limit: 10 });
+
+    expect(reappeared.events).toEqual([
+      expect.objectContaining({
+        id: 'codex:thread:transient-thread:200:idle:transition-2',
+        summary: 'Codex thread is idle',
+      }),
+    ]);
+  });
+
+  it('does not reconfirm a retained disappearance tombstone', async () => {
+    let visible = true;
+    const request = vi.fn(async () => ({
+      data: visible ? [{
+        id: 'removed-thread', sessionId: 'session-removed', cliVersion: '0.145.0',
+        createdAt: 100, updatedAt: 200, cwd: '/workspace/project',
+        ephemeral: false, modelProvider: 'openai', status: { type: 'idle' },
+      }] : [],
+      nextCursor: null,
+    }));
+    const adapter = new CodexRuntimeAdapter({ request });
+
+    const first = await adapter.getEvents({ limit: 10 });
+    visible = false;
+    const disappeared = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
+    const unchanged = await adapter.getEvents({ cursor: disappeared.nextCursor!, limit: 10 });
+
+    expect(unchanged).toEqual({ events: [], nextCursor: disappeared.nextCursor });
+    expect(request).toHaveBeenCalledTimes(8);
+  });
+
   it('fails closed instead of emitting disappearance when a thread record is incompatible', async () => {
     let incompatible = false;
     const adapter = new CodexRuntimeAdapter({
@@ -1010,6 +1087,47 @@ input.on('line', (line) => {
       expect.objectContaining({ cursor: 'active-page-2', archived: false }),
       expect.any(Object),
     );
+  });
+
+  it('stops absence confirmation after every tracked thread is found', async () => {
+    const cwd = '/workspace/project';
+    const trackedWorkspaceId = `codex:workspace:${createHash('sha256')
+      .update(cwd).digest('hex').slice(0, 16)}`;
+    const thread = (id: string) => ({
+      id,
+      sessionId: `session-${id}`,
+      cliVersion: '0.145.0',
+      createdAt: 100,
+      updatedAt: 200,
+      cwd,
+      ephemeral: false,
+      modelProvider: 'openai',
+      status: { type: 'idle' },
+    });
+    const tracked = [thread('tracked-a'), thread('tracked-b')];
+    const cursor = Buffer.from(JSON.stringify({
+      version: 3,
+      occurredAt: '1970-01-01T00:05:00.000Z',
+      threadId: 'watermark',
+      status: 'idle',
+      boundaryThreads: tracked.map((entry) => [entry.id, trackedWorkspaceId, 'idle', 0]),
+    })).toString('base64url');
+    let activeReads = 0;
+    const adapter = new CodexRuntimeAdapter({
+      request: async (_method, params) => {
+        if (params['archived'] === true) return { data: [], nextCursor: null };
+        activeReads += 1;
+        return activeReads === 1
+          ? { data: [tracked[0]], nextCursor: 'initial-next' }
+          : { data: tracked, nextCursor: 'never-ending' };
+      },
+    });
+
+    await expect(adapter.getEvents({ cursor, limit: 10 })).resolves.toEqual({
+      events: [],
+      nextCursor: cursor,
+    });
+    expect(activeReads).toBe(2);
   });
 
   it('returns the newest matching events on an initial poll', async () => {
