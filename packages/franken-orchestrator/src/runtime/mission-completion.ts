@@ -169,6 +169,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
       hasText(issue.mergeSha) && input.deployment.includedMergeShas.includes(issue.mergeSha)
     ));
   const deployed = input.deployment.state === 'deployed'
+    && merged
     && hasText(input.deployment.reviewedMainSha)
     && hasText(input.deployment.deployedSha)
     && input.deployment.deployedSha === input.deployment.reviewedMainSha

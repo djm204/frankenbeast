@@ -1,5 +1,5 @@
-import { readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { MissionCompletionInput } from './mission-completion.js';
 
@@ -121,22 +121,45 @@ export function createProductionMissionCompletionDeps(
   const inputPath = completionInputPath(options.root, env);
   const stopUrl = env.FRANKENBEAST_MISSION_COMPLETION_STOP_URL;
   const stopToken = env.FRANKENBEAST_MISSION_COMPLETION_STOP_TOKEN;
+  const configuredInputPath = env.FRANKENBEAST_MISSION_COMPLETION_INPUT;
+  let trustedEvidenceLoaded = false;
 
   return {
     async getInput() {
+      trustedEvidenceLoaded = false;
       let input: MissionCompletionInput;
       try {
-        const size = statSync(inputPath).size;
+        const resolvedInputPath = realpathSync(inputPath);
+        const size = statSync(resolvedInputPath).size;
         if (size > MAX_INPUT_BYTES) throw new Error(`mission completion input exceeds ${MAX_INPUT_BYTES} bytes`);
         input = MissionCompletionInputSchema.parse(
-          JSON.parse(readFileSync(inputPath, 'utf8')),
+          JSON.parse(readFileSync(resolvedInputPath, 'utf8')),
         ) as unknown as MissionCompletionInput;
+        const rootRelativePath = relative(realpathSync(options.root), resolvedInputPath);
+        trustedEvidenceLoaded = Boolean(
+          configuredInputPath
+          && isAbsolute(configuredInputPath)
+          && (
+            rootRelativePath === '..'
+            || rootRelativePath.startsWith(`..${sep}`)
+            || isAbsolute(rootRelativePath)
+          ),
+        );
       } catch (error) {
         const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
         if (!missing) throw error;
         return pendingInput(now());
       }
       const serverCheckedInput = { ...input, checkedAt: now().toISOString() };
+      if (stopUrl && !trustedEvidenceLoaded) {
+        return {
+          ...serverCheckedInput,
+          alerts: [
+            ...serverCheckedInput.alerts,
+            'mission completion control evidence must be stored outside the project root',
+          ],
+        };
+      }
       if (!stopUrl) {
         return {
           ...serverCheckedInput,
@@ -147,6 +170,9 @@ export function createProductionMissionCompletionDeps(
     },
 
     async stopJobs(jobIds, stopOnceKey) {
+      if (!trustedEvidenceLoaded) {
+        throw new Error('job stops require trusted external mission completion evidence');
+      }
       if (!stopUrl) throw new Error('mission completion stop endpoint is not configured');
       const headers: Record<string, string> = {
         'content-type': 'application/json',

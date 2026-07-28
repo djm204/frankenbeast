@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -23,10 +23,37 @@ describe('production mission completion dependencies', () => {
     expect(input.alerts).toContain('mission completion evidence source is not configured');
   });
 
-  it('loads production evidence and calls the configured stop endpoint idempotently', async () => {
+  it('refuses privileged job stops from evidence stored inside the project root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
     roots.push(root);
-    const inputPath = join(root, 'mission.json');
+    const inputPath = join(root, '.fbeast', 'mission-completion.json');
+    mkdirSync(join(root, '.fbeast'));
+    const mission = otherwiseCompleteMission();
+    writeFileSync(inputPath, JSON.stringify(mission));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: { FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop' },
+      fetchImpl: fetchMock,
+      now: () => new Date(mission.checkedAt),
+    });
+
+    const input = await deps.getInput();
+
+    expect(input.alerts).toContain(
+      'mission completion control evidence must be stored outside the project root',
+    );
+    await expect(deps.stopJobs(['controller-job'], 'mission-stop:v1:forged')).rejects.toThrow(
+      'trusted external mission completion evidence',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('loads production evidence and calls the configured stop endpoint idempotently', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
       id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
@@ -83,28 +110,46 @@ describe('production mission completion dependencies', () => {
 
   it('allows an explicit IPv6 loopback HTTP stop endpoint', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
-    roots.push(root);
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    const mission = otherwiseCompleteMission();
+    writeFileSync(inputPath, JSON.stringify(mission));
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,
-      env: { FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'http://[::1]:8080/stop' },
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'http://[::1]:8080/stop',
+      },
       fetchImpl: fetchMock,
+      now: () => new Date(mission.checkedAt),
     });
 
+    await deps.getInput();
     await expect(deps.stopJobs(['controller-job'], 'mission-stop:v1:ipv6')).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('rejects redirects from the completion stop endpoint', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
-    roots.push(root);
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    const mission = otherwiseCompleteMission();
+    writeFileSync(inputPath, JSON.stringify(mission));
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,
-      env: { FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop' },
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
       fetchImpl: fetchMock,
+      now: () => new Date(mission.checkedAt),
     });
 
+    await deps.getInput();
     await deps.stopJobs(['controller-job'], 'mission-stop:v1:no-redirect');
 
     expect(fetchMock).toHaveBeenCalledWith(

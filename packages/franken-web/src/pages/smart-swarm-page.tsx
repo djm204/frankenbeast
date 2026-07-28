@@ -299,6 +299,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [workspaceCatalog, setWorkspaceCatalog] = useState<RuntimeSnapshot['workspaces'] | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [missionCompletion, setMissionCompletion] = useState<MissionCompletionStatus | null>(null);
+  const [missionCompletionUnavailable, setMissionCompletionUnavailable] = useState(false);
   const [liveEvents, setLiveEvents] = useState<RuntimeEvent[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedPulseSource, setSelectedPulseSource] = useState<RuntimeEvent | null>(null);
@@ -466,6 +467,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         const completion = await client.fetchMissionCompletion();
         if (cancelled) return;
         setMissionCompletion(completion);
+        setMissionCompletionUnavailable(false);
         if (completion.evidenceMaxAgeMs !== undefined) {
           intervalMs = Math.max(
             1_000,
@@ -474,7 +476,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         }
       } catch {
         if (cancelled) return;
-        setMissionCompletion(null);
+        setMissionCompletionUnavailable(true);
       }
       timer = setTimeout(() => { void pollCompletion(); }, intervalMs);
     };
@@ -730,6 +732,14 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         workspaceName={workspaces.find((workspace) => workspace.id === workspaceId)?.name}
       />
       {loading ? <p className="smart-swarm-refresh" role="status">Refreshing normalized state…</p> : null}
+
+      {missionCompletionUnavailable ? (
+        <p role="alert">
+          {missionCompletion
+            ? 'Mission completion unavailable; showing last known status.'
+            : 'Mission completion unavailable.'}
+        </p>
+      ) : null}
 
       {missionCompletion ? (
         <section className="smart-swarm-capabilities rail-card" aria-label="Mission completion">

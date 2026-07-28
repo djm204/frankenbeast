@@ -552,6 +552,11 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
           return c.json({
             data: runtimeResponse({
               ...result,
+              terminal: false,
+              shouldStopJobs: false,
+              health: 'attention-required',
+              summary: 'Mission completion job stop failed; retry pending.',
+              stages: { ...result.stages, completion: 'pending' },
               blockers: [...result.blockers, 'completion job stop failed; retry pending'],
             }),
           });

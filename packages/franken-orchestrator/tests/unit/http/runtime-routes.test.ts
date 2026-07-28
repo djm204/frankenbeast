@@ -173,13 +173,17 @@ describe('smart-swarm runtime routes', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       data: expect.objectContaining({
-        terminal: true,
+        terminal: false,
+        shouldStopJobs: false,
+        health: 'attention-required',
+        summary: 'Mission completion job stop failed; retry pending.',
+        stages: expect.objectContaining({ completion: 'pending' }),
         blockers: expect.arrayContaining(['completion job stop failed; retry pending']),
       }),
     });
   });
 
-  it('keeps authoritative completion status available when job stopping throws synchronously', async () => {
+  it('keeps completion pending when job stopping throws synchronously', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
     const mission = otherwiseCompleteMission();
@@ -204,7 +208,11 @@ describe('smart-swarm runtime routes', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       data: expect.objectContaining({
-        terminal: true,
+        terminal: false,
+        shouldStopJobs: false,
+        health: 'attention-required',
+        summary: 'Mission completion job stop failed; retry pending.',
+        stages: expect.objectContaining({ completion: 'pending' }),
         blockers: expect.arrayContaining(['completion job stop failed; retry pending']),
       }),
     });

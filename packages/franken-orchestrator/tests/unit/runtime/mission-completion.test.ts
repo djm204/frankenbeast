@@ -311,6 +311,21 @@ describe('smart-swarm mission completion', () => {
     );
   });
 
+  it('keeps deployment and acceptance pending until merge evidence is valid', () => {
+    const mission = otherwiseCompleteMission();
+    mission.scopedIssues[0]!.mergedReviewedHead = 'different-reviewed-head';
+    mission.externalGates = [{
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+    }];
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.stages.merged).toBe('pending');
+    expect(result.stages.deployed).toBe('pending');
+    expect(result.stages.realDataAccepted).toBe('pending');
+  });
+
   it('requires reviewed main to include every scoped merge', () => {
     const mission = otherwiseCompleteMission() as MissionCompletionInput & {
       deployment: MissionCompletionInput['deployment'] & { includedMergeShas: string[] };
