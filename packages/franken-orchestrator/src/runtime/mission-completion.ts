@@ -168,9 +168,11 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
       ));
       return canonical?.status === 'done';
     });
-  const reviewed = input.scopedIssues.length > 0
+  const reviewed = implementation
+    && input.scopedIssues.length > 0
     && input.scopedIssues.every((issue) => isGitOid(issue.reviewedHead));
-  const merged = input.scopedIssues.length > 0
+  const merged = reviewed
+    && input.scopedIssues.length > 0
     && input.scopedIssues.every((issue) => (
       isGitOid(issue.mergeSha)
       && isGitOid(issue.mergedReviewedHead)

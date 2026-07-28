@@ -496,6 +496,9 @@ describe('SmartSwarmPage', () => {
 
       await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
 
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+
       expect(screen.getByText('Deployment: pending')).toBeDefined();
       expect(screen.getByRole('alert').textContent).toContain(
         'Mission completion unavailable; showing last known status.',
@@ -537,9 +540,9 @@ describe('SmartSwarmPage', () => {
       await act(async () => { await Promise.resolve(); });
       expect(fetchMissionCompletion).toHaveBeenCalledTimes(1);
 
-      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       expect(fetchMissionCompletion).toHaveBeenCalledTimes(2);
-      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
 
       expect(fetchMissionCompletion).toHaveBeenCalledTimes(3);
     } finally {

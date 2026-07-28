@@ -70,6 +70,40 @@ describe('chat server bootstrap', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('stops admitting HTTP requests before awaiting completion monitor shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    let releaseMonitor!: () => void;
+    let markStopping!: () => void;
+    const monitorStopping = new Promise<void>((resolve) => { markStopping = resolve; });
+    const monitorStopped = new Promise<void>((resolve) => { releaseMonitor = resolve; });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('unused') },
+      projectName: 'test-project',
+      missionCompletion: {
+        getInput: vi.fn() as never,
+        stopJobs: vi.fn(),
+        getStatus: vi.fn() as never,
+        startMonitoring: vi.fn(),
+        stopMonitoring: async () => {
+          markStopping();
+          await monitorStopped;
+        },
+      },
+    });
+
+    const closing = server.close();
+    await monitorStopping;
+    try {
+      await expect(fetch(`${server.url}/health`)).rejects.toThrow();
+    } finally {
+      releaseMonitor();
+      await closing;
+    }
+  });
+
   it('serves HTTP sessions and websocket upgrades from the same live server', async () => {
     mkdirSync(TMP, { recursive: true });
     const llm = { complete: vi.fn().mockResolvedValue('Server reply') };

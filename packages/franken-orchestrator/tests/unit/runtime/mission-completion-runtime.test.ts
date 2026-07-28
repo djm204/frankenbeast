@@ -23,6 +23,25 @@ describe('production mission completion dependencies', () => {
     expect(input.alerts).toContain('mission completion evidence source is not configured');
   });
 
+  it('preserves server gate and path configuration when evidence is temporarily absent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    roots.push(root);
+    const inputPath = join(root, 'missing-mission.json');
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'deployment-gate,public-acceptance',
+      },
+    });
+
+    const input = await deps.getInput();
+
+    expect(input.requiredExternalGateIds).toEqual(['deployment-gate', 'public-acceptance']);
+    expect(input.alerts).toContain(`mission completion evidence file is missing: ${inputPath}`);
+    expect(input.alerts).not.toContain('mission completion evidence source is not configured');
+  });
+
   it('refuses privileged job stops from evidence stored inside the project root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
     roots.push(root);
@@ -35,7 +54,12 @@ describe('production mission completion dependencies', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,
-      env: { FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop' },
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
       fetchImpl: fetchMock,
       now: () => new Date(mission.checkedAt),
     });
@@ -77,6 +101,8 @@ describe('production mission completion dependencies', () => {
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
         FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: 'smart-swarm-runtime',
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
       },
     });
@@ -84,6 +110,29 @@ describe('production mission completion dependencies', () => {
     await expect(deps.getInput()).rejects.toThrow(
       'mission completion input is writable by untrusted users',
     );
+  });
+
+  it('fails closed when evidence ownership checks are unavailable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    writeFileSync(inputPath, JSON.stringify(otherwiseCompleteMission()));
+    chmodSync(inputPath, 0o600);
+    const originalGetuid = process.getuid;
+    Object.defineProperty(process, 'getuid', { configurable: true, value: undefined });
+    try {
+      const deps = createProductionMissionCompletionDeps({
+        root,
+        env: { FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath },
+      });
+
+      await expect(deps.getInput()).rejects.toThrow(
+        'mission completion evidence ownership checks are unavailable',
+      );
+    } finally {
+      Object.defineProperty(process, 'getuid', { configurable: true, value: originalGetuid });
+    }
   });
 
   it('injects the server-configured required external gate inventory', async () => {
@@ -127,6 +176,8 @@ describe('production mission completion dependencies', () => {
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
         FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
         FRANKENBEAST_MISSION_COMPLETION_STOP_TOKEN: 'secret-token',
       },
@@ -150,6 +201,62 @@ describe('production mission completion dependencies', () => {
     });
   });
 
+  it('rejects job stops outside the server-owned mission and job inventory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    const mission = otherwiseCompleteMission();
+    writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job',
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
+      fetchImpl: fetchMock,
+      now: () => new Date(mission.checkedAt),
+    });
+    await deps.getInput();
+
+    await expect(deps.stopJobs(['foreign-job'], 'mission-stop:v1:foreign')).rejects.toThrow(
+      'server-configured completion job inventory',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects evidence that omits server-configured completion jobs', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    const mission = otherwiseCompleteMission();
+    mission.completionJobs = mission.completionJobs.slice(0, 1);
+    writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
+      },
+      now: () => new Date(mission.checkedAt),
+    });
+
+    const input = await deps.getInput();
+
+    expect(input.alerts).toContain(
+      'mission completion evidence does not match the server-configured mission and job inventory',
+    );
+  });
+
   it('stops terminal mission jobs from the server monitor without dashboard polling', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
@@ -169,6 +276,8 @@ describe('production mission completion dependencies', () => {
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
         FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
       },
       fetchImpl: fetchMock,
@@ -199,6 +308,8 @@ describe('production mission completion dependencies', () => {
         env: {
           FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
           FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
           FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
         },
         fetchImpl: fetchMock,
@@ -238,6 +349,8 @@ describe('production mission completion dependencies', () => {
         env: {
           FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
           FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
           FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
         },
         now: () => new Date(mission.checkedAt),
@@ -267,6 +380,8 @@ describe('production mission completion dependencies', () => {
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
         FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
       },
       now: () => new Date('2026-07-28T03:10:00.000Z'),
@@ -291,6 +406,8 @@ describe('production mission completion dependencies', () => {
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
         FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'http://[::1]:8080/stop',
       },
       fetchImpl: fetchMock,
@@ -316,6 +433,8 @@ describe('production mission completion dependencies', () => {
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
         FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_MISSION_ID: mission.missionId,
+        FRANKENBEAST_MISSION_COMPLETION_JOB_IDS: 'controller-job,liveness-job,hourly-job',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
       },
       fetchImpl: fetchMock,

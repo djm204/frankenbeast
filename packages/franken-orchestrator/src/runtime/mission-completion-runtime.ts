@@ -83,16 +83,21 @@ export interface ProductionMissionCompletionDeps {
   stopMonitoring(): Promise<void>;
 }
 
-function pendingInput(now: Date): MissionCompletionInput {
+function pendingInput(
+  now: Date,
+  options: { configuredPath?: string; requiredExternalGateIds?: string[] } = {},
+): MissionCompletionInput {
   return {
     missionId: 'smart-swarm-runtime',
     checkedAt: now.toISOString(),
     evidenceMaxAgeMs: 300_000,
     completionJobs: [],
-    alerts: ['mission completion evidence source is not configured'],
+    alerts: [options.configuredPath
+      ? `mission completion evidence file is missing: ${options.configuredPath}`
+      : 'mission completion evidence source is not configured'],
     scopedIssues: [],
     workItems: [],
-    requiredExternalGateIds: [],
+    requiredExternalGateIds: options.requiredExternalGateIds ?? [],
     externalGates: [],
     deployment: {
       state: 'pending', reviewedMainSha: null, deployedSha: null, includedMergeShas: [],
@@ -127,6 +132,9 @@ function readBoundedRegularFile(path: string): string {
     const stat = fstatSync(descriptor);
     if (!stat.isFile()) throw new Error('mission completion input must be a regular file');
     const expectedUid = process.getuid?.();
+    if (expectedUid === undefined) {
+      throw new Error('mission completion evidence ownership checks are unavailable');
+    }
     if (expectedUid !== undefined && stat.uid !== expectedUid) {
       throw new Error('mission completion input is not owned by the expected account');
     }
@@ -185,6 +193,13 @@ export function createProductionMissionCompletionDeps(
   const stopUrl = env.FRANKENBEAST_MISSION_COMPLETION_STOP_URL;
   const stopToken = env.FRANKENBEAST_MISSION_COMPLETION_STOP_TOKEN;
   const configuredInputPath = env.FRANKENBEAST_MISSION_COMPLETION_INPUT;
+  const expectedMissionId = env.FRANKENBEAST_MISSION_COMPLETION_MISSION_ID?.trim();
+  const allowedCompletionJobIds = new Set(
+    (env.FRANKENBEAST_MISSION_COMPLETION_JOB_IDS ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0),
+  );
   const requiredExternalGateIds = [...new Set(
     (env.FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES ?? '')
       .split(',')
@@ -221,13 +236,42 @@ export function createProductionMissionCompletionDeps(
       } catch (error) {
         const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
         if (!missing) throw error;
-        return pendingInput(now());
+        return pendingInput(now(), {
+          ...(configuredInputPath ? { configuredPath: inputPath } : {}),
+          requiredExternalGateIds,
+        });
       }
       const serverCheckedInput = {
         ...input,
         checkedAt: now().toISOString(),
         requiredExternalGateIds,
       };
+      if (!expectedMissionId || allowedCompletionJobIds.size === 0) {
+        return {
+          ...serverCheckedInput,
+          alerts: [
+            ...serverCheckedInput.alerts,
+            'mission completion mission and job inventory are not configured',
+          ],
+        };
+      }
+      const evidenceJobIds = new Set(serverCheckedInput.completionJobs.map((job) => job.id));
+      if (
+        serverCheckedInput.missionId !== expectedMissionId
+        || evidenceJobIds.size !== allowedCompletionJobIds.size
+        || [...allowedCompletionJobIds].some((id) => !evidenceJobIds.has(id))
+        || serverCheckedInput.completionJobs.some((job) => (
+          job.missionId !== expectedMissionId || !allowedCompletionJobIds.has(job.id)
+        ))
+      ) {
+        return {
+          ...serverCheckedInput,
+          alerts: [
+            ...serverCheckedInput.alerts,
+            'mission completion evidence does not match the server-configured mission and job inventory',
+          ],
+        };
+      }
       if (stopUrl && !trustedEvidenceLoaded) {
         return {
           ...serverCheckedInput,
@@ -261,6 +305,9 @@ export function createProductionMissionCompletionDeps(
       }
       if (requiredExternalGateIds.length === 0) {
         throw new Error('job stops require a server-configured external gate inventory');
+      }
+      if (!expectedMissionId || jobIds.some((id) => !allowedCompletionJobIds.has(id))) {
+        throw new Error('job stops require the server-configured completion job inventory');
       }
       if (!stopUrl) throw new Error('mission completion stop endpoint is not configured');
       const headers: Record<string, string> = {

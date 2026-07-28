@@ -13,6 +13,10 @@
 - [x] Run focused tests, full relevant tests, lint, typecheck, build, and `git diff --check`.
 - [x] Complete independent pre-commit review and remediate all blocking findings.
 - [x] Commit with the required identity, push, and open a linked PR (#3871).
+- [x] Rebase #3871 onto current `origin/main` and preserve both runtime-brain-pulse and mission-completion behavior through the two-file conflict.
+- [x] RED→GREEN: remediate the sixth Codex epoch's seven findings (server-owned stop scope, ownership verification, configured missing-evidence status, shutdown fencing, bounded browser polling, causal stages, and status-only GET).
+- [x] RED→GREEN: require the complete server-owned completion-job inventory and document the new deployment configuration after independent review.
+- [x] Re-run focused tests, full web tests (897/897), full orchestrator tests (4,958 passed; two unrelated timeout flakes passed on targeted retry), lint, typecheck, build, and independent Codex CLI review (no actionable findings).
 - [ ] Complete bounded exact-head GitHub Codex review, green CI, and fully paginated zero unresolved threads.
 - [ ] Guarded exact-head squash merge after gates are met; record reviewed head and merge SHA.
 - [ ] Verify the deployed reviewed-main SHA and authenticated public genuine-data browser acceptance through downstream #3857/#3858 evidence before terminal closeout.

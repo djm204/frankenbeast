@@ -10,11 +10,7 @@ import {
   type BeastRateLimitOptions,
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
-import {
-  evaluateMissionCompletion,
-  type MissionCompletionInput,
-  type MissionCompletionResult,
-} from '../../runtime/mission-completion.js';
+import type { MissionCompletionInput, MissionCompletionResult } from '../../runtime/mission-completion.js';
 import {
   RuntimeActionUncertainError,
   type RuntimeAdapter,
@@ -57,7 +53,7 @@ export interface RuntimeRouteDeps {
 export interface MissionCompletionRouteDeps {
   getInput(): MissionCompletionInput | Promise<MissionCompletionInput>;
   stopJobs(jobIds: string[], stopOnceKey: string): void | Promise<void>;
-  getStatus?(): MissionCompletionResult | Promise<MissionCompletionResult>;
+  getStatus(): MissionCompletionResult | Promise<MissionCompletionResult>;
   startMonitoring?(): void | Promise<void>;
   stopMonitoring?(): void | Promise<void>;
 }
@@ -430,9 +426,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   let activeStreams = 0;
   const actionStore = deps.actionStore ?? new RuntimeActionStore();
   const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
-  const completionStops = new Map<string, Promise<void>>();
-  let latestCompletionStopKey: string | null = null;
-  let completedCompletionStopKey: string | null = null;
+
 
   const actionAuditEvent = (
     providerId: string,
@@ -534,44 +528,10 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
 
   if (deps.missionCompletion) {
     app.get('/v1/smart-swarm/completion', async (c) => {
-      if (deps.missionCompletion!.getStatus) {
-        return c.json({ data: runtimeResponse(await deps.missionCompletion!.getStatus()) });
+      if (!deps.missionCompletion!.getStatus) {
+        throw new Error('mission completion status monitor is not configured');
       }
-      const result = evaluateMissionCompletion(await deps.missionCompletion!.getInput());
-      if (result.shouldStopJobs && result.stopOnceKey) {
-        const stopOnceKey = result.stopOnceKey;
-        latestCompletionStopKey = stopOnceKey;
-        if (completedCompletionStopKey === stopOnceKey) {
-          return c.json({ data: runtimeResponse(result) });
-        }
-        let stop = completionStops.get(stopOnceKey);
-        if (!stop) {
-          stop = Promise.resolve().then(
-            () => deps.missionCompletion!.stopJobs(result.jobsToStop, stopOnceKey),
-          );
-          completionStops.set(stopOnceKey, stop);
-        }
-        try {
-          await stop;
-          if (latestCompletionStopKey === stopOnceKey) completedCompletionStopKey = stopOnceKey;
-        } catch {
-          if (completedCompletionStopKey === stopOnceKey) completedCompletionStopKey = null;
-          return c.json({
-            data: runtimeResponse({
-              ...result,
-              terminal: false,
-              shouldStopJobs: false,
-              health: 'attention-required',
-              summary: 'Mission completion job stop failed; retry pending.',
-              stages: { ...result.stages, completion: 'pending' },
-              blockers: [...result.blockers, 'completion job stop failed; retry pending'],
-            }),
-          });
-        } finally {
-          if (completionStops.get(stopOnceKey) === stop) completionStops.delete(stopOnceKey);
-        }
-      }
-      return c.json({ data: runtimeResponse(result) });
+      return c.json({ data: runtimeResponse(await deps.missionCompletion!.getStatus()) });
     });
   }
 

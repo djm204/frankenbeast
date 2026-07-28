@@ -36,6 +36,7 @@ const MAX_VISIBLE_EVIDENCE = 100;
 const STREAM_REFRESH_DEBOUNCE_MS = 250;
 const TOPOLOGY_REFRESH_INTERVAL_MS = 5_000;
 const DEFAULT_COMPLETION_POLL_INTERVAL_MS = 30_000;
+const MIN_COMPLETION_POLL_INTERVAL_MS = 10_000;
 const TERMINAL_RUN_STATES = new Set(['succeeded', 'failed', 'cancelled']);
 
 function actionIntentKey(
@@ -471,7 +472,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         setMissionCompletionUnavailable(false);
         if (completion.evidenceMaxAgeMs !== undefined) {
           intervalMs = Math.max(
-            1_000,
+            MIN_COMPLETION_POLL_INTERVAL_MS,
             Math.min(DEFAULT_COMPLETION_POLL_INTERVAL_MS, completion.evidenceMaxAgeMs / 2),
           );
         }

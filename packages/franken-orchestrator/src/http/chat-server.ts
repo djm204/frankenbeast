@@ -493,12 +493,6 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
-      let monitorShutdownError: unknown;
-      try {
-        await options.missionCompletion?.stopMonitoring?.();
-      } catch (error) {
-        monitorShutdownError = error;
-      }
       const closedServer = closeHttpServer(server);
       let shutdownFenceError: unknown;
       try {
@@ -508,6 +502,12 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       }
       server.closeAllConnections();
       webSocketServer.close();
+      let monitorShutdownError: unknown;
+      try {
+        await options.missionCompletion?.stopMonitoring?.();
+      } catch (error) {
+        monitorShutdownError = error;
+      }
       const actionsDrained = await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();

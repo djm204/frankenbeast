@@ -27,6 +27,22 @@ describe('smart-swarm mission completion', () => {
     expect(result.summary).not.toMatch(/mission complete/i);
   });
 
+  it('keeps downstream stages pending until implementation passes', () => {
+    const mission = otherwiseCompleteMission();
+    mission.scopedIssues[0]!.implementationState = 'pending';
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.stages).toMatchObject({
+      implementation: 'pending',
+      reviewed: 'pending',
+      merged: 'pending',
+      deployed: 'pending',
+      realDataAccepted: 'pending',
+      completion: 'pending',
+    });
+  });
+
   it('rejects blank and foreign completion jobs instead of stopping arbitrary jobs', () => {
     const mission = otherwiseCompleteMission() as MissionCompletionInput & {
       completionJobs: Array<{ id: string; missionId: string }>;

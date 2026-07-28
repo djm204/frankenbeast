@@ -18,6 +18,7 @@ import {
   type RuntimeAdapter,
 } from '../../../src/runtime/index.js';
 import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
+import { evaluateMissionCompletion } from '../../../src/runtime/mission-completion.js';
 import { otherwiseCompleteMission } from '../runtime/mission-completion-fixtures.js';
 
 const stores: SseConnectionTicketStore[] = [];
@@ -116,116 +117,13 @@ function authHeaders(): Record<string, string> {
 }
 
 describe('smart-swarm runtime routes', () => {
-  it('evaluates mission completion for the dashboard and stops scoped jobs once', async () => {
-    const ticketStore = new SseConnectionTicketStore();
-    stores.push(ticketStore);
-    const adapter = runtimeAdapter();
-    const mission = otherwiseCompleteMission();
-    mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
-      trigger: 'deployment verified', nextTransition: 'terminalize mission',
-      scope: { kind: 'deployed-sha' },
-    }];
-    const stopJobs = vi.fn(async () => undefined);
-    const app = createRuntimeRoutes({
-      registry: new RuntimeAdapterRegistry([adapter]),
-      operatorToken: 'operator-secret',
-      security: new TransportSecurityService(),
-      ticketStore,
-      missionCompletion: { getInput: () => mission, stopJobs },
-    });
-
-    const first = await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    const replay = await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-
-    expect(first.status).toBe(200);
-    await expect(first.json()).resolves.toEqual({ data: expect.objectContaining({ terminal: true }) });
-    expect(replay.status).toBe(200);
-    expect(stopJobs).toHaveBeenCalledTimes(1);
-    expect(stopJobs).toHaveBeenCalledWith(
-      ['controller-job', 'hourly-job', 'liveness-job'],
-      expect.stringMatching(/^mission-stop:v1:[0-9a-f]{64}$/),
-    );
-  });
-
-  it('keeps authoritative completion status available when job stopping fails', async () => {
+  it('never invokes job control while reading completion status', async () => {
     const ticketStore = new SseConnectionTicketStore();
     stores.push(ticketStore);
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
       id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
-      trigger: 'deployment verified', nextTransition: 'terminalize mission',
-      scope: { kind: 'deployed-sha' },
-    }];
-    const app = createRuntimeRoutes({
-      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
-      operatorToken: 'operator-secret',
-      security: new TransportSecurityService(),
-      ticketStore,
-      missionCompletion: {
-        getInput: () => mission,
-        stopJobs: async () => { throw new Error('control plane unavailable'); },
-      },
-    });
-
-    const response = await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      data: expect.objectContaining({
-        terminal: false,
-        shouldStopJobs: false,
-        health: 'attention-required',
-        summary: 'Mission completion job stop failed; retry pending.',
-        stages: expect.objectContaining({ completion: 'pending' }),
-        blockers: expect.arrayContaining(['completion job stop failed; retry pending']),
-      }),
-    });
-  });
-
-  it('keeps completion pending when job stopping throws synchronously', async () => {
-    const ticketStore = new SseConnectionTicketStore();
-    stores.push(ticketStore);
-    const mission = otherwiseCompleteMission();
-    mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
-      trigger: 'deployment verified', nextTransition: 'terminalize mission',
-      scope: { kind: 'deployed-sha' },
-    }];
-    const app = createRuntimeRoutes({
-      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
-      operatorToken: 'operator-secret',
-      security: new TransportSecurityService(),
-      ticketStore,
-      missionCompletion: {
-        getInput: () => mission,
-        stopJobs: () => { throw new Error('synchronous control plane failure'); },
-      },
-    });
-
-    const response = await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      data: expect.objectContaining({
-        terminal: false,
-        shouldStopJobs: false,
-        health: 'attention-required',
-        summary: 'Mission completion job stop failed; retry pending.',
-        stages: expect.objectContaining({ completion: 'pending' }),
-        blockers: expect.arrayContaining(['completion job stop failed; retry pending']),
-      }),
-    });
-  });
-
-  it('retains only the current successful completion stop decision', async () => {
-    const ticketStore = new SseConnectionTicketStore();
-    stores.push(ticketStore);
-    const mission = otherwiseCompleteMission();
-    mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
-      trigger: 'deployment verified', nextTransition: 'terminalize mission',
-      scope: { kind: 'deployed-sha' },
+      trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
     }];
     const stopJobs = vi.fn(async () => undefined);
     const app = createRuntimeRoutes({
@@ -233,67 +131,20 @@ describe('smart-swarm runtime routes', () => {
       operatorToken: 'operator-secret',
       security: new TransportSecurityService(),
       ticketStore,
-      missionCompletion: { getInput: () => mission, stopJobs },
+      missionCompletion: {
+        getInput: () => mission,
+        stopJobs,
+        getStatus: () => evaluateMissionCompletion(mission),
+      },
     });
 
-    await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    mission.deployment.deployedSha = '4444444444444444444444444444444444444444';
-    mission.deployment.reviewedMainSha = '4444444444444444444444444444444444444444';
-    mission.acceptance.deployedSha = '4444444444444444444444444444444444444444';
-    mission.deployment.endpointChecks[0]!.deployedSha = '4444444444444444444444444444444444444444';
-    mission.externalGates[0]!.head = '4444444444444444444444444444444444444444';
-    await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    mission.deployment.deployedSha = '3333333333333333333333333333333333333333';
-    mission.deployment.reviewedMainSha = '3333333333333333333333333333333333333333';
-    mission.acceptance.deployedSha = '3333333333333333333333333333333333333333';
-    mission.deployment.endpointChecks[0]!.deployedSha = '3333333333333333333333333333333333333333';
-    mission.externalGates[0]!.head = '3333333333333333333333333333333333333333';
-    await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
+    const response = await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
 
-    expect(stopJobs).toHaveBeenCalledTimes(3);
-  });
-
-  it('deduplicates in-flight completion stops while terminal evidence changes', async () => {
-    const ticketStore = new SseConnectionTicketStore();
-    stores.push(ticketStore);
-    const mission = otherwiseCompleteMission();
-    mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
-      trigger: 'deployment verified', nextTransition: 'terminalize mission',
-      scope: { kind: 'deployed-sha' },
-    }];
-    const resolutions: Array<() => void> = [];
-    const stopJobs = vi.fn(() => new Promise<void>((resolve) => resolutions.push(resolve)));
-    const app = createRuntimeRoutes({
-      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
-      operatorToken: 'operator-secret',
-      security: new TransportSecurityService(),
-      ticketStore,
-      missionCompletion: { getInput: () => mission, stopJobs },
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({ terminal: true }),
     });
-
-    const first = app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    await vi.waitFor(() => expect(stopJobs).toHaveBeenCalledTimes(1));
-    mission.deployment.deployedSha = '4444444444444444444444444444444444444444';
-    mission.deployment.reviewedMainSha = '4444444444444444444444444444444444444444';
-    mission.acceptance.deployedSha = '4444444444444444444444444444444444444444';
-    mission.deployment.endpointChecks[0]!.deployedSha = '4444444444444444444444444444444444444444';
-    mission.externalGates[0]!.head = '4444444444444444444444444444444444444444';
-    const second = app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    await vi.waitFor(() => expect(stopJobs).toHaveBeenCalledTimes(2));
-    mission.deployment.deployedSha = '3333333333333333333333333333333333333333';
-    mission.deployment.reviewedMainSha = '3333333333333333333333333333333333333333';
-    mission.acceptance.deployedSha = '3333333333333333333333333333333333333333';
-    mission.deployment.endpointChecks[0]!.deployedSha = '3333333333333333333333333333333333333333';
-    mission.externalGates[0]!.head = '3333333333333333333333333333333333333333';
-    const replay = app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    await Promise.resolve();
-    const stopCallCount = stopJobs.mock.calls.length;
-    resolutions.forEach((resolve) => resolve());
-    await Promise.all([first, second, replay]);
-
-    expect(stopCallCount).toBe(2);
+    expect(stopJobs).not.toHaveBeenCalled();
   });
 
   it('fails closed through the governor before destructive runtime actions', async () => {
