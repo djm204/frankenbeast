@@ -14,6 +14,6 @@
 - [ ] Capture deployed SHA, service health, endpoint health, artifact parity, and sanitized evidence.
 - [x] Focused web tests (84/84), full repository tests, full lint, full typecheck, full build, dependency audit, and `git diff --check` pass.
 - [x] Final independent review is clean after remediating address classification, SSE route continuation, browser installation, timestamp normalization, and stale runbook prose with RED→GREEN coverage.
-- [ ] Commit with required identity, push, and open one issue-linked PR.
+- [x] Commit with required identity, push, and open issue-linked PR #3874.
 - [ ] Complete bounded exact-head GitHub Codex review/remediation, green CI, and fully paginated zero unresolved threads.
 - [ ] Guarded exact-head routine squash merge, replay public acceptance against reviewed main, and record durable sanitized issue/task evidence.
