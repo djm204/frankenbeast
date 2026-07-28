@@ -140,6 +140,34 @@ describe('SmartSwarmPage', () => {
     expect(detail.textContent).toContain('run-1');
   });
 
+  it('does not let impossible future evidence evict current pulse activity', async () => {
+    const sourceEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!sourceEvent) throw new Error('Expected normalized runtime event');
+    const current = {
+      ...sourceEvent,
+      id: 'event-current',
+      occurredAt: new Date().toISOString(),
+      summary: 'Current activity',
+    };
+    const impossibleFuture = Array.from({ length: 100 }, (_, index) => ({
+      ...sourceEvent,
+      id: `event-future-${index}`,
+      occurredAt: new Date(Date.now() + 3_600_000 + index).toISOString(),
+      summary: `Impossible future ${index}`,
+    }));
+    const futureHeavySnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      events: { status: 'available', data: [current, ...impossibleFuture] },
+    };
+
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(futureHeavySnapshot),
+    })} />);
+
+    const pulse = await screen.findByRole('region', { name: 'Runtime brain pulse' });
+    expect(pulse.textContent).toContain('Current activity');
+  });
+
   it('does not resolve a pulse source task from a different workspace', async () => {
     const occurredAt = new Date().toISOString();
     const crossWorkspaceSnapshot: RuntimeSnapshot = {
@@ -656,33 +684,36 @@ describe('SmartSwarmPage', () => {
     expect(retryKey).toBe(firstKey);
   });
 
-  it('isolates pending actions for the same task id across workspaces', async () => {
+  it('isolates delimiter-colliding pending action identities across workspaces', async () => {
     const workspaceCatalog = [
-      { id: 'board-main', name: 'Main board', kind: 'workspace' as const, state: 'available' as const },
-      { id: 'board-other', name: 'Other board', kind: 'workspace' as const, state: 'available' as const },
+      { id: 'a:b', name: 'Main board', kind: 'workspace' as const, state: 'available' as const },
+      { id: 'a', name: 'Other board', kind: 'workspace' as const, state: 'available' as const },
     ];
-    const snapshotFor = (selectedWorkspace: string): RuntimeSnapshot => ({
-      ...snapshot,
-      workspaces: { status: 'available', data: workspaceCatalog },
-      tasks: {
-        status: 'available',
-        data: snapshot.tasks.status === 'available'
-          ? snapshot.tasks.data.map((task) => task.id === 'task-live'
-            ? { ...task, workspaceId: selectedWorkspace, title: `${selectedWorkspace} live task` }
-            : { ...task, workspaceId: selectedWorkspace })
-          : [],
-      },
-      runs: { status: 'available', data: [] },
-      events: { status: 'available', data: [] },
-      blockers: {
-        status: 'available',
-        data: [{
-          id: `${selectedWorkspace}-blocker`, workspaceId: selectedWorkspace, taskId: 'task-live',
-          category: 'dependency', summary: 'Waiting', createdAt: '2026-07-26T17:50:00.000Z',
-        }],
-      },
-      approvals: { status: 'available', data: [] },
-    });
+    const snapshotFor = (selectedWorkspace: string): RuntimeSnapshot => {
+      const selectedTaskId = selectedWorkspace === 'a:b' ? 'c' : 'b:c';
+      return {
+        ...snapshot,
+        workspaces: { status: 'available', data: workspaceCatalog },
+        tasks: {
+          status: 'available',
+          data: snapshot.tasks.status === 'available'
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live'
+              ? { ...task, id: selectedTaskId, workspaceId: selectedWorkspace, title: `${selectedWorkspace} live task` }
+              : { ...task, workspaceId: selectedWorkspace })
+            : [],
+        },
+        runs: { status: 'available', data: [] },
+        events: { status: 'available', data: [] },
+        blockers: {
+          status: 'available',
+          data: [{
+            id: `${selectedWorkspace}-blocker`, workspaceId: selectedWorkspace, taskId: selectedTaskId,
+            category: 'dependency', summary: 'Waiting', createdAt: '2026-07-26T17:50:00.000Z',
+          }],
+        },
+        approvals: { status: 'available', data: [] },
+      };
+    };
     const executeAction = vi.fn()
       .mockRejectedValueOnce(new TypeError('workspace A response lost'))
       .mockResolvedValue({
@@ -692,25 +723,25 @@ describe('SmartSwarmPage', () => {
         audit: {
           requestedBy: 'authenticated-operator',
           actionType: 'blocker.resolve',
-          targetId: 'task-live',
+          targetId: 'b:c',
           outcome: 'applied',
         },
       });
     const fetchSnapshot = vi.fn().mockImplementation(async (_providerId, options) => (
-      snapshotFor(options?.workspaceId === 'board-other' ? 'board-other' : 'board-main')
+      snapshotFor(options?.workspaceId === 'a' ? 'a' : 'a:b')
     ));
     render(<SmartSwarmPage client={createClient({ executeAction, fetchSnapshot })} />);
-    await screen.findByText('board-main live task');
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect board-main live task' }));
+    await screen.findByText('a:b live task');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect a:b live task' }));
     fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
     await screen.findByText('workspace A response lost');
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), {
-      target: { value: 'board-other' },
+      target: { value: 'a' },
     });
-    await screen.findByText('board-other live task');
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect board-other live task' }));
+    await screen.findByText('a live task');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect a live task' }));
     const otherResolve = screen.getByRole('button', { name: 'Resolve blocker' });
     expect(otherResolve).toHaveProperty('disabled', false);
     fireEvent.click(otherResolve);

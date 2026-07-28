@@ -42,7 +42,7 @@ function actionIntentKey(
   taskId: string,
   action: RuntimeAction['type'],
 ): string {
-  return `${providerId}:${workspaceId}:${taskId}:${action}`;
+  return JSON.stringify([providerId, workspaceId, taskId, action]);
 }
 
 function available<T>(section: RuntimeSection<T>): T | null {
@@ -332,7 +332,6 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       ...liveEvents,
     ].map((event) => [event.id, event])).values()]
       .sort(compareRuntimeEvidenceRecency)
-      .slice(0, MAX_VISIBLE_EVIDENCE)
     : [];
   const blockers = snapshot
     ? [...(available(snapshot.blockers) ?? [])]
@@ -561,8 +560,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const visibleTasks = [...filteredTasks]
     .sort(compareTaskActivity)
     .slice(0, MAX_VISIBLE_TASKS);
-  const filteredEvents = events
-    .filter((event) => !workspaceId || event.workspaceId === workspaceId)
+  const pulseEvents = events.filter((event) => !workspaceId || event.workspaceId === workspaceId);
+  const filteredEvents = [...pulseEvents]
     .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
     .slice(0, 100);
   const filteredBlockers = blockers.filter((blocker) => !workspaceId || blocker.workspaceId === workspaceId);
@@ -707,7 +706,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             <RuntimeBrainPulse
               connection={connection}
               eventLimit={MAX_VISIBLE_EVIDENCE}
-              events={filteredEvents}
+              events={pulseEvents}
               onOpenTask={(event, trigger) => {
                 taskDetailTrigger.current = trigger;
                 setSelectedPulseSource(event);

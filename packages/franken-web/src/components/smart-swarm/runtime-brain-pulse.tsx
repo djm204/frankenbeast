@@ -86,11 +86,13 @@ export function RuntimeBrainPulse({
       const current = unique.get(event.id);
       if (!current || occurredAt > Date.parse(current.occurredAt)) unique.set(event.id, event);
     }
-    return [...unique.values()].sort((left, right) => (
-      Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
-      || left.id.localeCompare(right.id)
-    ));
-  }, [events, now, receiptRevision]);
+    return [...unique.values()]
+      .sort((left, right) => (
+        Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
+        || left.id.localeCompare(right.id)
+      ))
+      .slice(0, eventLimit);
+  }, [eventLimit, events, now, receiptRevision]);
   const unsupportedReason = provider.capabilities.streaming.status === 'unsupported'
     ? provider.capabilities.streaming.reason
     : null;

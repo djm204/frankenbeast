@@ -664,7 +664,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     throwIfAborted(request.signal);
     const inspected = selectedSources.filter((source) => source.status === 'compatible');
     const entries: Array<{ event: RuntimeEvent; cursor: CursorValue }> = [];
-    const sourceLatest = new Map<string, CursorValue>();
+    const sourceCheckpoints = new Map<string, CursorValue>();
     let successfulReads = 0;
     for (const source of inspected) {
       throwIfAborted(request.signal);
@@ -677,10 +677,9 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           const decoded = parseCursor(event.cursor);
           if (decoded) entries.push({ event, cursor: decoded });
         }
-        const latest = events.at(-1);
-        const latestCursor = latest ? parseCursor(latest.cursor) : undefined;
-        if (latestCursor) sourceLatest.set(source.workspaceId, latestCursor);
-        else if (activity.checkpoint) sourceLatest.set(source.workspaceId, activity.checkpoint);
+        if (events.length === 0 && activity.checkpoint) {
+          sourceCheckpoints.set(source.workspaceId, activity.checkpoint);
+        }
       } catch {
         // Preserve healthy workspace activity across transient or corrupt sibling sources.
       }
@@ -722,19 +721,12 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         });
       }
     }
-    if (request.cursor) {
-      const pageWorkspaces = new Set(page.map((entry) => entry.cursor.workspaceId));
-      for (const [workspaceId, latest] of sourceLatest) {
-        if (pageWorkspaces.has(workspaceId)) continue;
-        const current = positions.get(workspaceId);
-        if (!current || eventOrder(latest, current) > 0) positions.set(workspaceId, latest);
-      }
+    for (const [workspaceId, checkpoint] of sourceCheckpoints) {
+      const current = positions.get(workspaceId);
+      if (!current || eventOrder(checkpoint, current) > 0) positions.set(workspaceId, checkpoint);
     }
     if (!request.cursor) {
       const pageWorkspaces = new Set(page.map((entry) => entry.cursor.workspaceId));
-      for (const [workspaceId, latest] of sourceLatest) {
-        if (!pageWorkspaces.has(workspaceId)) positions.set(workspaceId, latest);
-      }
       for (const workspaceId of pageWorkspaces) {
         const firstPageEntry = page.find((entry) => entry.cursor.workspaceId === workspaceId);
         const predecessor = firstPageEntry
@@ -752,7 +744,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     });
     return RuntimeEventPageSchema.parse({
       events,
-      nextCursor: events.at(-1)?.cursor ?? (request.cursor ? cursorForPositions(positions) : null),
+      nextCursor: events.at(-1)?.cursor ?? (positions.size > 0 ? cursorForPositions(positions) : null),
     });
   }
 
@@ -1280,7 +1272,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           .filter((activity) => activity.truncated && activity.checkpoint)
           .map((activity) => activity.checkpoint as CursorValue)
           .sort(eventOrder);
-        const safeThrough = truncatedCheckpoints.at(0);
+        const safeThrough = after ? truncatedCheckpoints.at(0) : undefined;
         const normalizedEvents = this.normalizeRows(
           source, [], [], [], eventActivity.rows, commentActivity.rows, limit * 2,
         ).events;
@@ -1316,12 +1308,14 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       if (!acceptRow) return { rows: readBatch(0, limit) };
       const accepted: RuntimeRow[] = [];
       let offset = 0;
+      let firstInspected: RuntimeRow | undefined;
       let lastInspected: RuntimeRow | undefined;
       let scanLimitReached = false;
       while (accepted.length < limit && offset < MAX_ACTIVITY_SCAN_ROWS) {
         const batchSize = Math.min(limit, MAX_ACTIVITY_SCAN_ROWS - offset);
         const batch = readBatch(offset, batchSize);
         if (batch.length === 0) break;
+        firstInspected ??= batch.at(0);
         lastInspected = batch.at(-1);
         accepted.push(...batch.filter(acceptRow));
         offset += batch.length;
@@ -1330,12 +1324,12 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       }
       return {
         rows: accepted.slice(0, limit),
-        ...(lastInspected ? {
+        ...((after ? lastInspected : firstInspected) ? {
           checkpoint: {
-            occurredAt: requiredTimestamp(lastInspected['created_at']),
+            occurredAt: requiredTimestamp((after ? lastInspected : firstInspected)?.['created_at']),
             workspaceId,
             source: activitySource,
-            sourceId: Number(lastInspected['id']),
+            sourceId: Number((after ? lastInspected : firstInspected)?.['id']),
           },
         } : {}),
         ...(scanLimitReached ? { truncated: true } : {}),

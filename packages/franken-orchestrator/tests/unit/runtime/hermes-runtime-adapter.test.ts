@@ -186,6 +186,68 @@ describe('HermesRuntimeAdapter', () => {
     expect(recoveredPage.events.map((event) => event.id)).toContain('hermes:global:event:4000');
   });
 
+  it('emits a cold-start checkpoint after a bounded quarantined scan', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec('DELETE FROM task_events; DELETE FROM task_comments;');
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 2_000; index += 1) {
+        insert.run(1_000 + index, `t_${'x'.repeat(1_100)}_${index}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+    })();
+    db.close();
+
+    const page = await new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } })
+      .getEvents({ limit: 100 });
+
+    expect(page.events).toEqual([]);
+    expect(page.nextCursor).not.toBeNull();
+  });
+
+  it('preserves valid cold-start events when a descending scan reaches its bound', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec('DELETE FROM task_events; DELETE FROM task_comments;');
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    insert.run(5_000, 't_parent', null, 'completed', null, 1_785_090_000);
+    db.transaction(() => {
+      for (let index = 0; index < 2_000; index += 1) {
+        insert.run(1_000 + index, `t_${'x'.repeat(1_100)}_${index}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+    })();
+    db.close();
+
+    const page = await new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } })
+      .getEvents({ limit: 100 });
+
+    expect(page.events.map((event) => event.id)).toContain('hermes:global:event:5000');
+  });
+
+  it('does not checkpoint valid events omitted by provider-wide pagination', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    await mkdir(join(home, 'kanban', 'boards', 'beta'), { recursive: true });
+    createCurrentKanban(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'));
+    createCurrentKanban(join(home, 'kanban', 'boards', 'beta', 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+
+    const first = await adapter.getEvents({ limit: 1 });
+    const second = await adapter.getEvents({ cursor: first.nextCursor ?? undefined, limit: 1 });
+
+    expect(new Set([...first.events, ...second.events].map((event) => event.workspaceId))).toEqual(
+      new Set(['hermes:alpha', 'hermes:beta']),
+    );
+  });
+
   it('backfills snapshot activity after quarantining the newest Hermes events', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');
@@ -1258,7 +1320,7 @@ if (args.includes('show')) {
     expect(recovered.events.map((event) => event.id)).toEqual(['hermes:alpha:event:11']);
   });
 
-  it('seeds initial cursors for healthy workspaces whose older events fall outside the page', async () => {
+  it('replays healthy workspaces whose valid events fall outside the initial page', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
     createCurrentKanban(join(home, 'kanban.db'));
@@ -1269,7 +1331,9 @@ if (args.includes('show')) {
     const replay = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
 
     expect(first.events).toHaveLength(1);
-    expect(replay.events).toEqual([]);
+    expect(new Set([...first.events, ...replay.events].map((event) => event.workspaceId))).toEqual(
+      new Set(['hermes:global', 'hermes:alpha']),
+    );
   });
 
   it('preserves legacy cursor workspace ordering until each source advances', async () => {
@@ -1464,7 +1528,7 @@ if (args.includes('show')) {
     }
   });
 
-  it('rejects workspace sets that cannot fit in a bounded replay cursor', async () => {
+  it('keeps provider-wide replay cursors bounded without checkpointing omitted valid workspaces', async () => {
     const home = await createHome();
     for (let index = 0; index < 100; index += 1) {
       const boardName = `workspace-${String(index).padStart(3, '0')}-${'x'.repeat(120)}`;
@@ -1473,8 +1537,10 @@ if (args.includes('show')) {
       createCurrentKanban(join(boardDir, 'kanban.db'));
     }
 
-    await expect(new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 }))
-      .rejects.toThrow('exceeds the supported runtime cursor size');
+    const page = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 });
+
+    expect(page.events).toHaveLength(1);
+    expect(page.nextCursor?.length).toBeLessThanOrEqual(4_096);
   });
 
   it('preserves slash commands and API routes in normalized runtime text', async () => {
