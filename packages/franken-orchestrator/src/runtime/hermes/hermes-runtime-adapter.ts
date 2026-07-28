@@ -148,6 +148,11 @@ function taskId(workspaceId: string, id: unknown): string {
   return prefixed(workspaceId, String(id));
 }
 
+function hasBoundedTaskId(workspaceId: string, value: unknown): boolean {
+  return value !== null && value !== undefined
+    && taskId(workspaceId, value).length <= RUNTIME_EVENT_ID_MAX_LENGTH;
+}
+
 function agentId(workspaceId: string, id: string): string {
   return prefixed(workspaceId, id);
 }
@@ -1197,11 +1202,35 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     try {
       return db.transaction(() => {
         const commentTable = this.commentTable(db);
-        const eventRows = this.readActivityRows(db, 'task_events', 'event', source.workspaceId, after, limit);
+        const eventRows = this.readActivityRows(
+          db,
+          'task_events',
+          'event',
+          source.workspaceId,
+          after,
+          limit,
+          (row) => row['task_id'] === null || hasBoundedTaskId(source.workspaceId, row['task_id']),
+        );
         const commentRows = commentTable === 'comments'
-          ? this.readActivityRows(db, 'comments', 'comment', source.workspaceId, after, limit)
+          ? this.readActivityRows(
+              db,
+              'comments',
+              'comment',
+              source.workspaceId,
+              after,
+              limit,
+              (row) => hasBoundedTaskId(source.workspaceId, row['task_id']),
+            )
           : commentTable === 'task_comments'
-            ? this.readActivityRows(db, 'task_comments', 'comment', source.workspaceId, after, limit)
+            ? this.readActivityRows(
+                db,
+                'task_comments',
+                'comment',
+                source.workspaceId,
+                after,
+                limit,
+                (row) => hasBoundedTaskId(source.workspaceId, row['task_id']),
+              )
             : [];
         return this.normalizeRows(source, [], [], [], eventRows, commentRows, limit * 2).events;
       }).deferred();
@@ -1217,9 +1246,24 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     workspaceId: string,
     after: CursorValue | undefined,
     limit: number,
+    acceptRow?: ((row: RuntimeRow) => boolean) | undefined,
   ): RuntimeRow[] {
+    const acceptedRows = (readBatch: (offset: number) => RuntimeRow[]): RuntimeRow[] => {
+      if (!acceptRow) return readBatch(0);
+      const accepted: RuntimeRow[] = [];
+      let offset = 0;
+      while (accepted.length < limit) {
+        const batch = readBatch(offset);
+        if (batch.length === 0) break;
+        accepted.push(...batch.filter(acceptRow));
+        offset += batch.length;
+        if (batch.length < limit) break;
+      }
+      return accepted.slice(0, limit);
+    };
     if (!after) {
-      return db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC, id DESC LIMIT ?`).all(limit) as RuntimeRow[];
+      const statement = db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`);
+      return acceptedRows((offset) => statement.all(limit, offset) as RuntimeRow[]);
     }
 
     const sample = db.prepare(`SELECT created_at FROM ${table} WHERE created_at IS NOT NULL LIMIT 1`).get() as RuntimeRow | undefined;
@@ -1231,20 +1275,24 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     const sourceOrder = activitySource.localeCompare(after.source);
 
     if (workspaceOrder === 0 && sourceOrder === 0) {
-      return db.prepare(`
+      const statement = db.prepare(`
         SELECT * FROM ${table}
         WHERE created_at > ? OR (created_at = ? AND id > ?)
         ORDER BY created_at, id
-        LIMIT ?
-      `).all(threshold, threshold, after.sourceId, limit) as RuntimeRow[];
+        LIMIT ? OFFSET ?
+      `);
+      return acceptedRows((offset) => statement.all(
+        threshold, threshold, after.sourceId, limit, offset,
+      ) as RuntimeRow[]);
     }
     const includeSameTimestamp = workspaceOrder > 0 || (workspaceOrder === 0 && sourceOrder > 0);
-    return db.prepare(`
+    const statement = db.prepare(`
       SELECT * FROM ${table}
       WHERE created_at ${includeSameTimestamp ? '>=' : '>'} ?
       ORDER BY created_at, id
-      LIMIT ?
-    `).all(threshold, limit) as RuntimeRow[];
+      LIMIT ? OFFSET ?
+    `);
+    return acceptedRows((offset) => statement.all(threshold, limit, offset) as RuntimeRow[]);
   }
 
   private normalizeRows(
@@ -1257,20 +1305,17 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     activityLimit: number,
     blockerEventRows: RuntimeRow[] = eventRows,
   ) {
-    const hasBoundedTaskId = (value: unknown): boolean => (
-      value !== null && value !== undefined
-      && taskId(source.workspaceId, value).length <= RUNTIME_EVENT_ID_MAX_LENGTH
-    );
-    taskRows = taskRows.filter((task) => hasBoundedTaskId(task['id']));
+    taskRows = taskRows.filter((task) => hasBoundedTaskId(source.workspaceId, task['id']));
     linkRows = linkRows.filter((link) => (
-      hasBoundedTaskId(link['parent_id']) && hasBoundedTaskId(link['child_id'])
+      hasBoundedTaskId(source.workspaceId, link['parent_id'])
+      && hasBoundedTaskId(source.workspaceId, link['child_id'])
     ));
-    runRows = runRows.filter((run) => hasBoundedTaskId(run['task_id']));
+    runRows = runRows.filter((run) => hasBoundedTaskId(source.workspaceId, run['task_id']));
     eventRows = eventRows.filter((event) => (
-      event['task_id'] === null || hasBoundedTaskId(event['task_id'])
+      event['task_id'] === null || hasBoundedTaskId(source.workspaceId, event['task_id'])
     ));
-    commentRows = commentRows.filter((comment) => hasBoundedTaskId(comment['task_id']));
-    blockerEventRows = blockerEventRows.filter((event) => hasBoundedTaskId(event['task_id']));
+    commentRows = commentRows.filter((comment) => hasBoundedTaskId(source.workspaceId, comment['task_id']));
+    blockerEventRows = blockerEventRows.filter((event) => hasBoundedTaskId(source.workspaceId, event['task_id']));
     const dependencies = new Map<string, string[]>();
     for (const link of linkRows) {
       const child = String(link['child_id']);

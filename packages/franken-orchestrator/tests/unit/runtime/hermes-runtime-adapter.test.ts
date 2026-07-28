@@ -136,6 +136,29 @@ describe('HermesRuntimeAdapter', () => {
     expect(eventPage.events).toHaveLength(0);
   });
 
+  it('advances past a full page of quarantined Hermes events', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const before = await adapter.getEvents({ limit: 10 });
+    const db = new Database(dbPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 102; index += 1) {
+        insert.run(100 + index, `t_${'x'.repeat(1_100)}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+      insert.run(300, 't_parent', null, 'completed', null, 1_785_081_900);
+    })();
+    db.close();
+
+    const page = await adapter.getEvents({ cursor: before.nextCursor!, limit: 100 });
+
+    expect(page.events.map((event) => event.id)).toEqual(['hermes:global:event:300']);
+  });
+
   it('preserves HERMES_KANBAN_DB when an explicit Hermes home is configured', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');

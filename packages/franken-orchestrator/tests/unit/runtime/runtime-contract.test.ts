@@ -6,6 +6,7 @@ import {
   RuntimeApprovalSchema,
   RuntimeBlockerSchema,
   RuntimeCursorError,
+  RuntimeEventPageSchema,
   RuntimeEventSchema,
   RuntimeHealthSchema,
   RuntimeMetadataSchema,
@@ -216,6 +217,12 @@ describe('provider-neutral runtime contract', () => {
     expect(RuntimeEventSchema.safeParse({ ...event, runId: `${event.runId}x` }).success).toBe(false);
     expect(RuntimeEventSchema.safeParse({ ...event, cursor: `${event.cursor}x` }).success).toBe(false);
     expect(RuntimeEventSchema.safeParse({ ...event, cursor: '🚀'.repeat(1_025) }).success).toBe(false);
+  });
+
+  it('bounds checkpoint-only event page cursors by UTF-8 transport bytes', () => {
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: 'x'.repeat(4_096) }).success).toBe(true);
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: 'x'.repeat(4_097) }).success).toBe(false);
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: '🚀'.repeat(1_025) }).success).toBe(false);
   });
 
   it('bounds normalized metadata consistently with browser validation', () => {

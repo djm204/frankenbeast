@@ -73,6 +73,43 @@ describe('RuntimeBrainPulse', () => {
     expect(pulse.textContent).toContain('Runtime host is ahead');
   });
 
+  it('does not let an arbitrarily future event hide current runtime activity', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    const currentEvent: RuntimeEvent = {
+      id: 'event-current',
+      cursor: 'cursor-current',
+      workspaceId: 'board-main',
+      taskId: 'task-1',
+      runId: 'run-1',
+      type: 'lifecycle',
+      occurredAt: '2026-07-28T00:00:00.000Z',
+      summary: 'Current runtime activity',
+    };
+    const futureEvent: RuntimeEvent = {
+      ...currentEvent,
+      id: 'event-future',
+      cursor: 'cursor-future',
+      occurredAt: '2026-07-28T02:00:00.000Z',
+      summary: 'Corrupt future activity',
+    };
+
+    render(
+      <RuntimeBrainPulse
+        connection="connected"
+        events={[currentEvent, futureEvent]}
+        onOpenTask={() => undefined}
+        provider={provider}
+        snapshot={snapshot}
+      />,
+    );
+
+    const pulse = screen.getByRole('region', { name: 'Runtime brain pulse' });
+    expect(pulse.getAttribute('data-pulse-state')).toBe('active');
+    expect(pulse.textContent).toContain('Current runtime activity');
+    expect(pulse.textContent).not.toContain('Corrupt future activity');
+  });
+
   it('prunes pulses when their source timestamp leaves the one-minute window', async () => {
     vi.useFakeTimers();
     const now = new Date('2026-07-28T00:01:00.000Z');

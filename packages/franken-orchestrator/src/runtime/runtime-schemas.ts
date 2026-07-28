@@ -253,7 +253,7 @@ export const RuntimeSnapshotSchema = z.object({
 
 export const RuntimeEventPageSchema = z.object({
   events: z.array(RuntimeEventSchema),
-  nextCursor: z.string().min(1).nullable(),
+  nextCursor: RuntimeEventCursorSchema.nullable(),
 }).strict();
 
 export type RuntimeProvider = z.infer<typeof RuntimeProviderSchema>;
