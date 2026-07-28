@@ -229,7 +229,7 @@ describe('SmartSwarmPage', () => {
         ...provider,
         capabilities: {
           ...provider.capabilities,
-          pause: { status: 'supported' },
+          cancellation: { status: 'supported' },
         },
       }]),
       subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
@@ -261,7 +261,7 @@ describe('SmartSwarmPage', () => {
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     await act(async () => finishAction?.());
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause task' })).toHaveProperty('disabled', false));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel task' })).toHaveProperty('disabled', false));
   });
 
   it('does not leak an action completion into another task detail dialog', async () => {
@@ -585,6 +585,40 @@ describe('SmartSwarmPage', () => {
     }));
   });
 
+  it('does not expose pause when normalized state cannot keep the task resumable', async () => {
+    const executeAction = vi.fn();
+    render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot: vi.fn().mockResolvedValue({
+        ...snapshot,
+        tasks: {
+          status: 'available',
+          data: snapshot.tasks.status === 'available'
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'running' as const } : task)
+            : [],
+        },
+      }),
+      listProviders: vi.fn().mockResolvedValue([{
+        ...provider,
+        capabilities: {
+          ...provider.capabilities,
+          pause: { status: 'supported' },
+          resume: { status: 'supported' },
+        },
+      }]),
+    })} />);
+    await screen.findByText('Live dashboard');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+
+    const pause = screen.getByRole('button', { name: 'Pause task' });
+    expect(pause).toHaveProperty('disabled', true);
+    expect(pause.getAttribute('title')).toBe(
+      'Pause is disabled because normalized task state does not distinguish paused from queued work.',
+    );
+    fireEvent.click(pause);
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
   it('reports a typed failed action as failed rather than unsupported', async () => {
     const executeAction = vi.fn().mockResolvedValue({
       status: 'failed',
@@ -641,6 +675,7 @@ describe('SmartSwarmPage', () => {
         capabilities: {
           ...provider.capabilities,
           pause: { status: 'supported' },
+          cancellation: { status: 'supported' },
           policyActions: { status: 'supported' },
         },
       }]),
@@ -650,7 +685,7 @@ describe('SmartSwarmPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Promote task' }));
 
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
-    expect(screen.getByRole('button', { name: 'Pause task' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Cancel task' })).toHaveProperty('disabled', false);
   });
 
   it.each([

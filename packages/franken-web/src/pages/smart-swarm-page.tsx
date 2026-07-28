@@ -731,6 +731,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
     };
   }, [returnFocus]);
   const pauseReason = capabilityReason(provider.capabilities.pause);
+  const pauseStateReason = 'Pause is disabled because normalized task state does not distinguish paused from queued work.';
   const resumeReason = capabilityReason(provider.capabilities.resume);
   const resumeStateReason = 'Resume is disabled because normalized task state does not distinguish paused from queued work.';
   const cancelReason = capabilityReason(provider.capabilities.cancellation);
@@ -867,7 +868,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
           </>
         ) : null}
         <button
-          disabled={actionPending || pauseReason !== null || (task.state !== 'ready' && task.state !== 'running')}
+          disabled
           onClick={() => {
             void executeTaskAction(
               'task.pause',
@@ -875,7 +876,7 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
               'Task paused; refreshing live state.',
             );
           }}
-          title={pauseReason ?? undefined}
+          title={pauseReason ?? pauseStateReason}
           type="button"
         >Pause task</button>
         {pauseReason ? <p>{pauseReason}</p> : null}
