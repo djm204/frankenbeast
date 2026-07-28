@@ -8,6 +8,7 @@ import type {
 
 const PULSE_WINDOW_MS = 60_000;
 const MAX_FUTURE_SKEW_MS = 60_000;
+const MAX_PAST_SKEW_MS = 60_000;
 
 function eventReceiptKey(event: RuntimeEvent): string {
   return `${event.id}\u0000${event.occurredAt}`;
@@ -42,8 +43,15 @@ export function RuntimeBrainPulse({
   useEffect(() => {
     const currentKeys = new Set(events.map(eventReceiptKey));
     const receivedAt = Date.now();
-    for (const key of currentKeys) {
-      if (!knownEventKeys.current.has(key)) receivedAtByEvent.current.set(key, receivedAt);
+    for (const event of events) {
+      const key = eventReceiptKey(event);
+      if (knownEventKeys.current.has(key)) continue;
+      const occurredAt = Date.parse(event.occurredAt);
+      if (
+        Number.isFinite(occurredAt)
+        && occurredAt >= receivedAt - MAX_PAST_SKEW_MS
+        && occurredAt <= receivedAt + MAX_FUTURE_SKEW_MS
+      ) receivedAtByEvent.current.set(key, receivedAt);
     }
     for (const key of receivedAtByEvent.current.keys()) {
       if (!currentKeys.has(key)) receivedAtByEvent.current.delete(key);
