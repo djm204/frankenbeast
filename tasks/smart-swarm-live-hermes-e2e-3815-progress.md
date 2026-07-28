@@ -28,8 +28,8 @@
 - [x] Re-run the live dependency guard, 24/24 guard tests, serial orchestrator suite (4,887/4,887), root lint/typecheck/build, and `git diff --check`. The first concurrent full-suite run exposed eight load-sensitive orchestrator failures; all passed unchanged in the isolated serial rerun. The first pushed guard regression exposed a CI-only checkout-name mismatch, corrected by using the canonical root package identity `frankenbeast`.
 - [x] Reproduce the tenth-round early-confirmation and over-broad SSE exemption findings with focused RED tests.
 - [x] Verify the preserved minimal remediations with 64/64 focused web tests and 2/2 active E2E-classifier tests.
-- [x] Run the full required local test, lint, typecheck, build, and diff-check gates. Live Hermes E2E passed 3/3; serial orchestrator passed 4,887/4,887; root lint, typecheck, build, and `git diff --check` passed. The concurrent root test runner's sole unhandled Codex app-server rejection passed unchanged in the serial rerun.
-- [x] Commit and push the tenth-round remediation with the required identity (`44b5a3839`).
+- [x] Run the full required local test, lint, typecheck, build, and diff-check gates. Live Hermes E2E passed 3/3; serial orchestrator passed 4,887/4,887; root lint, typecheck, build, and `git diff --check` passed. The concurrent root runner's seven load-sensitive orchestrator failures and one unhandled rejection all passed unchanged in the serial rerun.
+- [x] Commit and push the tenth-round remediation as `44b5a3839` with the required identity.
 - [ ] Reply to and resolve both current-head Codex threads.
 - [ ] Run one bounded tier-12 `@codex review` to exact-head clean, four green CI checks, and fully paginated zero unresolved Codex threads; do not merge.
 - [ ] Record machine-readable root-blackboard and card handoff.
