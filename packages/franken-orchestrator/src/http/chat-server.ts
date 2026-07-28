@@ -18,7 +18,7 @@ import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
-import type { RuntimeActionAuditEvent } from './routes/runtime-routes.js';
+import type { MissionCompletionRouteDeps, RuntimeActionAuditEvent } from './routes/runtime-routes.js';
 import type { IGovernorModule } from '../deps.js';
 import { RuntimeActionStore } from '../runtime/runtime-action-store.js';
 import type { RuntimeAdapterRegistry } from '../runtime/runtime-adapter-registry.js';
@@ -83,6 +83,7 @@ export interface StartChatServerOptions {
   runtimeActionGovernor?: IGovernorModule;
   runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
   runtimeActionStore?: RuntimeActionStore;
+  missionCompletion?: MissionCompletionRouteDeps;
   runtimeRegistry?: RuntimeAdapterRegistry;
 }
 
@@ -427,6 +428,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
       ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
       ...(runtimeActionStore ? { runtimeActionStore } : {}),
+      ...(options.missionCompletion ? { missionCompletion: options.missionCompletion } : {}),
       ...(options.runtimeRegistry ? { runtimeRegistry: options.runtimeRegistry } : {}),
       chatRateLimiter,
       chatMutationAdmission,
@@ -459,11 +461,13 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         resolve();
       });
     });
+    await options.missionCompletion?.startMonitoring?.();
     address = createdServer.address();
     if (!address || typeof address === 'string') {
       throw new Error('Chat server did not bind to a TCP address');
     }
   } catch (error) {
+    await Promise.resolve(options.missionCompletion?.stopMonitoring?.()).catch(() => undefined);
     server?.closeAllConnections();
     webSocketServer?.close();
     ownedRuntimeActionStore?.beginShutdown();
@@ -498,6 +502,12 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       }
       server.closeAllConnections();
       webSocketServer.close();
+      let monitorShutdownError: unknown;
+      try {
+        await options.missionCompletion?.stopMonitoring?.();
+      } catch (error) {
+        monitorShutdownError = error;
+      }
       const actionsDrained = await ownedRuntimeActionStore?.drain(RUNTIME_ACTION_DRAIN_TIMEOUT_MS);
       await stopLiveBeastControlRuns(options.beastControl);
       options.beastControl?.ticketStore.destroy();
@@ -514,6 +524,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ownedBrainRegistry?.close();
       options.analyticsDeps?.analytics.close?.();
       if (shutdownFenceError) throw shutdownFenceError;
+      if (monitorShutdownError) throw monitorShutdownError;
     },
   };
 }

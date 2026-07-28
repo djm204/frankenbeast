@@ -10,6 +10,7 @@ import {
   type BeastRateLimitOptions,
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
+import type { MissionCompletionInput, MissionCompletionResult } from '../../runtime/mission-completion.js';
 import {
   RuntimeActionUncertainError,
   type RuntimeAdapter,
@@ -46,6 +47,15 @@ export interface RuntimeRouteDeps {
   actionAudit?: ((event: RuntimeActionAuditEvent) => void | Promise<void>) | undefined;
   actionGovernor?: IGovernorModule | undefined;
   actionStore?: RuntimeActionStore | undefined;
+  missionCompletion?: MissionCompletionRouteDeps | undefined;
+}
+
+export interface MissionCompletionRouteDeps {
+  getInput(): MissionCompletionInput | Promise<MissionCompletionInput>;
+  stopJobs(jobIds: string[], stopOnceKey: string): void | Promise<void>;
+  getStatus(): MissionCompletionResult | Promise<MissionCompletionResult>;
+  startMonitoring?(): void | Promise<void>;
+  stopMonitoring?(): void | Promise<void>;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -417,6 +427,7 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   const actionStore = deps.actionStore ?? new RuntimeActionStore();
   const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
 
+
   const actionAuditEvent = (
     providerId: string,
     request: ReturnType<typeof RuntimeActionRequestSchema.parse>,
@@ -514,6 +525,15 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   app.use(`${BASE_PATH}/:providerId/actions`, requestSizeLimit(MAX_ACTION_BODY_BYTES));
 
   app.get(BASE_PATH, async (c) => c.json({ data: runtimeResponse(await deps.registry.list()) }));
+
+  if (deps.missionCompletion) {
+    app.get('/v1/smart-swarm/completion', async (c) => {
+      if (!deps.missionCompletion!.getStatus) {
+        throw new Error('mission completion status monitor is not configured');
+      }
+      return c.json({ data: runtimeResponse(await deps.missionCompletion!.getStatus()) });
+    });
+  }
 
   app.get(`${BASE_PATH}/:providerId/snapshot`, async (c) => {
     const adapter = adapterOr404(deps.registry, c.req.param('providerId'));

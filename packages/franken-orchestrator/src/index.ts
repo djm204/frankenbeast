@@ -180,6 +180,8 @@ export {
   RuntimeTaskSchema,
   RuntimeWorkspaceSchema,
   createDefaultRuntimeAdapterRegistry,
+  evaluateMissionCompletion,
+  renderMissionCompletionStatus,
 } from './runtime/index.js';
 export type {
   CodexRuntimeAdapterOptions,
@@ -204,6 +206,16 @@ export type {
   RuntimeSnapshotRequest,
   RuntimeTask,
   RuntimeWorkspace,
+  MissionAcceptanceStatus,
+  MissionCompletionInput,
+  MissionCompletionJob,
+  MissionCompletionResult,
+  MissionDeploymentStatus,
+  MissionExternalGate,
+  MissionExternalGateScope,
+  MissionIssueStatus,
+  MissionStageState,
+  MissionWorkItem,
 } from './runtime/index.js';
 
 // LLM helpers

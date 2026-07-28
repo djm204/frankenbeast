@@ -134,6 +134,32 @@ export interface RuntimeEventPage {
   nextCursor: string | null;
 }
 
+export interface MissionCompletionStatus {
+  missionId: string;
+  checkedAt: string;
+  evidenceMaxAgeMs?: number;
+  terminal: boolean;
+  shouldStopJobs: boolean;
+  jobsToStop: string[];
+  blockers: string[];
+  externalGates?: Array<{
+    id: string;
+    state: 'pending' | 'passed';
+    owner: string | null;
+    head: string | null;
+    trigger: string | null;
+    nextTransition: string | null;
+  }>;
+  stages: {
+    implementation: 'passed' | 'pending';
+    reviewed: 'passed' | 'pending';
+    merged: 'passed' | 'pending';
+    deployed: 'passed' | 'pending';
+    realDataAccepted: 'passed' | 'pending';
+    completion: 'passed' | 'pending';
+  };
+}
+
 export type RuntimeAction =
   | { type: 'approval.resolve'; workspaceId: string; approvalId: string; decision: 'approve' | 'reject'; reason?: string }
   | { type: 'blocker.add'; workspaceId: string; taskId: string; category: 'dependency' | 'needs-input' | 'capability' | 'transient'; reason: string }
@@ -297,6 +323,10 @@ export class SmartSwarmApiClient {
     }
     if (snapshot.events.status === 'available') snapshot.events.data.forEach(parseRuntimeEvent);
     return snapshot;
+  }
+
+  fetchMissionCompletion(): Promise<MissionCompletionStatus> {
+    return this.request('/v1/smart-swarm/completion');
   }
 
   async executeAction(providerId: string, request: RuntimeActionRequest): Promise<RuntimeActionResult> {

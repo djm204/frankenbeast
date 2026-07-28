@@ -39,6 +39,7 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { basename, delimiter, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
+import { createProductionMissionCompletionDeps } from '../runtime/mission-completion-runtime.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
 import { buildSloDashboardFromKanban, createSqliteSloDashboardSource } from '../availability/slo-dashboard.js';
 import { parse as parseDotenv } from 'dotenv';
@@ -1496,6 +1497,7 @@ async function runChatCommandIfRequested(
       llm: chatLlm,
       executionLlm: execLlm,
       projectName: projectId,
+      missionCompletion: createProductionMissionCompletionDeps({ root }),
       ...(beastOperatorToken ? { operatorToken: beastOperatorToken } : {}),
       ...(localBeastServices && beastOperatorToken
         ? {

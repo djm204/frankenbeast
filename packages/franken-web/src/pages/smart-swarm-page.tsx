@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SmartSwarmApiError,
+  type MissionCompletionStatus,
   type RuntimeAgent,
   type RuntimeAction,
   type RuntimeCapability,
@@ -34,6 +35,8 @@ const MAX_VISIBLE_TASKS = 200;
 const MAX_VISIBLE_EVIDENCE = 100;
 const STREAM_REFRESH_DEBOUNCE_MS = 250;
 const TOPOLOGY_REFRESH_INTERVAL_MS = 5_000;
+const DEFAULT_COMPLETION_POLL_INTERVAL_MS = 30_000;
+const MIN_COMPLETION_POLL_INTERVAL_MS = 10_000;
 const TERMINAL_RUN_STATES = new Set(['succeeded', 'failed', 'cancelled']);
 
 function actionIntentKey(
@@ -296,6 +299,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [workspaceId, setWorkspaceId] = useState('');
   const [workspaceCatalog, setWorkspaceCatalog] = useState<RuntimeSnapshot['workspaces'] | null>(null);
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
+  const [missionCompletion, setMissionCompletion] = useState<MissionCompletionStatus | null>(null);
+  const [missionCompletionUnavailable, setMissionCompletionUnavailable] = useState(false);
   const [liveEvents, setLiveEvents] = useState<RuntimeEvent[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedPulseSource, setSelectedPulseSource] = useState<RuntimeEvent | null>(null);
@@ -306,6 +311,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [streamError, setStreamError] = useState<unknown>(null);
   const [connection, setConnection] = useState<RuntimeConnectionState>('connecting');
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [completionRefreshNonce, setCompletionRefreshNonce] = useState(0);
   const [providerRefreshNonce, setProviderRefreshNonce] = useState(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
@@ -453,6 +459,35 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       });
     return () => { cancelled = true; };
   }, [client, providerRefreshNonce]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let intervalMs = DEFAULT_COMPLETION_POLL_INTERVAL_MS;
+    const pollCompletion = async (): Promise<void> => {
+      try {
+        const completion = await client.fetchMissionCompletion();
+        if (cancelled) return;
+        setMissionCompletion(completion);
+        setMissionCompletionUnavailable(false);
+        if (completion.evidenceMaxAgeMs !== undefined) {
+          intervalMs = Math.max(
+            MIN_COMPLETION_POLL_INTERVAL_MS,
+            Math.min(DEFAULT_COMPLETION_POLL_INTERVAL_MS, completion.evidenceMaxAgeMs / 2),
+          );
+        }
+      } catch {
+        if (cancelled) return;
+        setMissionCompletionUnavailable(true);
+      }
+      timer = setTimeout(() => { void pollCompletion(); }, intervalMs);
+    };
+    void pollCompletion();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [client, completionRefreshNonce]);
 
   useEffect(() => {
     if (!providerId) return;
@@ -669,7 +704,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           <button
             className="button button--secondary button--compact"
             disabled={loading || !providerId}
-            onClick={() => setRefreshNonce((current) => current + 1)}
+            onClick={() => {
+              setRefreshNonce((current) => current + 1);
+              setCompletionRefreshNonce((current) => current + 1);
+            }}
             type="button"
           >
             Refresh topology
@@ -692,6 +730,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         onRetry={() => {
           setProviderRefreshNonce((current) => current + 1);
           setRefreshNonce((current) => current + 1);
+          setCompletionRefreshNonce((current) => current + 1);
           if (workspaceCatalogError) void refreshWorkspaceCatalog();
         }}
         provider={provider}
@@ -699,6 +738,49 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         workspaceName={workspaces.find((workspace) => workspace.id === workspaceId)?.name}
       />
       {loading ? <p className="smart-swarm-refresh" role="status">Refreshing normalized state…</p> : null}
+
+      {missionCompletionUnavailable ? (
+        <p role="alert">
+          {missionCompletion
+            ? 'Mission completion unavailable; showing last known status.'
+            : 'Mission completion unavailable.'}
+        </p>
+      ) : null}
+
+      {missionCompletion ? (
+        <section className="smart-swarm-capabilities rail-card" aria-label="Mission completion">
+          <div>
+            <p className="eyebrow">Authoritative completion gate</p>
+            <h3>Mission completion</h3>
+            <p>{missionCompletion.terminal ? 'Complete' : 'In progress'}</p>
+            <small>Checked {new Date(missionCompletion.checkedAt).toLocaleString()}</small>
+          </div>
+          <dl>
+            <div><dt>Implementation</dt><dd>Implementation: {missionCompletion.stages.implementation}</dd></div>
+            <div><dt>Review</dt><dd>Review: {missionCompletion.stages.reviewed}</dd></div>
+            <div><dt>Merge</dt><dd>Merge: {missionCompletion.stages.merged}</dd></div>
+            <div><dt>Deployment</dt><dd>Deployment: {missionCompletion.stages.deployed}</dd></div>
+            <div><dt>Real data</dt><dd>Real data: {missionCompletion.stages.realDataAccepted}</dd></div>
+            <div><dt>Completion</dt><dd>Completion: {missionCompletion.stages.completion}</dd></div>
+          </dl>
+          {missionCompletion.blockers.length > 0 ? (
+            <ul>{missionCompletion.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>
+          ) : null}
+          {missionCompletion.externalGates && missionCompletion.externalGates.length > 0 ? (
+            <ul aria-label="External mission gates">
+              {missionCompletion.externalGates.map((gate) => (
+                <li key={gate.id}>
+                  <strong>{gate.id}</strong>: {gate.state}
+                  {' · '}Owner: {gate.owner ?? 'unassigned'}
+                  {' · '}Trigger: {gate.trigger ?? 'missing'}
+                  {' · '}Next: {gate.nextTransition ?? 'missing'}
+                  {' · '}Head: {gate.head ?? 'missing'}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       {snapshot ? (
         <>
@@ -857,7 +939,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           actionPendingFromStore={selectedTaskActionPending}
           client={client}
           key={`${provider.id}:${selectedTask.id}`}
-          onActionApplied={() => setRefreshNonce((current) => current + 1)}
+          onActionApplied={() => {
+            setRefreshNonce((current) => current + 1);
+            setCompletionRefreshNonce((current) => current + 1);
+          }}
           onClose={() => {
             setSelectedPulseSource(null);
             setSelectedTaskId(null);

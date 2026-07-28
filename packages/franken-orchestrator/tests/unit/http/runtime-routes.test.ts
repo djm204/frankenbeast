@@ -18,6 +18,8 @@ import {
   type RuntimeAdapter,
 } from '../../../src/runtime/index.js';
 import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
+import { evaluateMissionCompletion } from '../../../src/runtime/mission-completion.js';
+import { otherwiseCompleteMission } from '../runtime/mission-completion-fixtures.js';
 
 const stores: SseConnectionTicketStore[] = [];
 const actionStores: RuntimeActionStore[] = [];
@@ -115,6 +117,36 @@ function authHeaders(): Record<string, string> {
 }
 
 describe('smart-swarm runtime routes', () => {
+  it('never invokes job control while reading completion status', async () => {
+    const ticketStore = new SseConnectionTicketStore();
+    stores.push(ticketStore);
+    const mission = otherwiseCompleteMission();
+    mission.externalGates = [{
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
+      trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+    }];
+    const stopJobs = vi.fn(async () => undefined);
+    const app = createRuntimeRoutes({
+      registry: new RuntimeAdapterRegistry([runtimeAdapter()]),
+      operatorToken: 'operator-secret',
+      security: new TransportSecurityService(),
+      ticketStore,
+      missionCompletion: {
+        getInput: () => mission,
+        stopJobs,
+        getStatus: () => evaluateMissionCompletion(mission),
+      },
+    });
+
+    const response = await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: expect.objectContaining({ terminal: true }),
+    });
+    expect(stopJobs).not.toHaveBeenCalled();
+  });
+
   it('fails closed through the governor before destructive runtime actions', async () => {
     const { app, adapter, actionGovernor, actionAudit } = createRoutes();
     const describe = await adapter.describe();

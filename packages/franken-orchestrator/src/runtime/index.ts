@@ -3,6 +3,19 @@ export { RuntimeActionUncertainError, RuntimeCursorError } from './runtime-adapt
 export { RuntimeAdapterRegistry } from './runtime-adapter-registry.js';
 export { createDefaultRuntimeAdapterRegistry } from './runtime-defaults.js';
 export type { DefaultRuntimeAdapterOptions, RuntimeAdapterDefaultsOptions } from './runtime-defaults.js';
+export { evaluateMissionCompletion, renderMissionCompletionStatus } from './mission-completion.js';
+export type {
+  MissionAcceptanceStatus,
+  MissionCompletionInput,
+  MissionCompletionJob,
+  MissionCompletionResult,
+  MissionDeploymentStatus,
+  MissionExternalGate,
+  MissionExternalGateScope,
+  MissionIssueStatus,
+  MissionStageState,
+  MissionWorkItem,
+} from './mission-completion.js';
 export { HermesRuntimeAdapter } from './hermes/hermes-runtime-adapter.js';
 export type { HermesRuntimeAdapterOptions } from './hermes/hermes-runtime-adapter.js';
 export { OllamaRuntimeAdapter } from './ollama/ollama-runtime-adapter.js';
