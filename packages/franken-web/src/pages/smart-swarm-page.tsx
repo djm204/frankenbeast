@@ -200,6 +200,83 @@ function UnsupportedSection({ label, section }: { label: string; section: Runtim
   );
 }
 
+function MetricProvenance({
+  label,
+  provider,
+  capturedAt,
+  section,
+}: {
+  label: string;
+  provider: RuntimeProvider | undefined;
+  capturedAt: string;
+  section: RuntimeSection<unknown[]>;
+}) {
+  const source = provider?.displayName ?? 'Unknown runtime adapter';
+  return (
+    <div data-testid={`metric-${label.toLowerCase()}`}>
+      <dt>{label}</dt>
+      <dd>
+        <strong>{section.status === 'available' ? section.data.length : 'unsupported'}</strong>
+        <span>{section.status}</span>
+        <small>Source: {source} · Captured {new Date(capturedAt).toLocaleString()}</small>
+      </dd>
+    </div>
+  );
+}
+
+function MetricCount({
+  availableText,
+  capturedAt,
+  label,
+  provider,
+  section,
+}: {
+  availableText: string;
+  capturedAt: string;
+  label: string;
+  provider: RuntimeProvider | undefined;
+  section: RuntimeSection<unknown[]>;
+}) {
+  if (section.status === 'unsupported') {
+    return <span title={section.reason}>{label} unsupported</span>;
+  }
+  return (
+    <span title={`${label} available from ${provider?.displayName ?? 'runtime adapter'}. Captured ${new Date(capturedAt).toLocaleString()}.`}>
+      {availableText}
+    </span>
+  );
+}
+
+function EventMetricCount({
+  capturedAt,
+  count,
+  liveEventCount,
+  provider,
+  section,
+}: {
+  capturedAt: string;
+  count: number;
+  liveEventCount: number;
+  provider: RuntimeProvider | undefined;
+  section: RuntimeSection<RuntimeEvent[]>;
+}) {
+  const source = provider?.displayName ?? 'runtime adapter';
+  if (section.status === 'unsupported') {
+    if (liveEventCount === 0) return <span title={section.reason}>Events unsupported</span>;
+    return (
+      <span title={`Events received live from ${source}.`}>
+        {count} live {count === 1 ? 'event' : 'events'}
+      </span>
+    );
+  }
+  const streamProvenance = liveEventCount > 0 ? '; includes events received by the live stream' : '';
+  return (
+    <span title={`Events available from ${source}. Snapshot captured ${new Date(capturedAt).toLocaleString()}${streamProvenance}.`}>
+      {count}
+    </span>
+  );
+}
+
 export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [providers, setProviders] = useState<RuntimeProvider[]>([]);
   const [providerId, setProviderId] = useState('');
@@ -500,8 +577,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       <header className="smart-swarm-header rail-card">
         <div>
           <p className="eyebrow">Provider-neutral runtime</p>
-          <h2>smart-swarm</h2>
-          <p>Live normalized topology and bounded operator evidence.</p>
+          <h2>Smart Swarm</h2>
+          <p>The canonical live operations surface for normalized topology and bounded provider evidence.</p>
         </div>
         <div className="smart-swarm-selectors">
           <label className="field-stack">
@@ -604,13 +681,36 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
             </dl>
           </section>
 
+          <section className="smart-swarm-capabilities rail-card" aria-label="Live metric provenance">
+            <div>
+              <p className="eyebrow">Availability and provenance</p>
+              <h3>Live metrics</h3>
+              <p>Counts are shown only when the selected runtime adapter supplies that section.</p>
+            </div>
+            <dl>
+              <MetricProvenance label="Workspaces" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.workspaces} />
+              <MetricProvenance label="Agents" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.agents} />
+              <MetricProvenance label="Tasks" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.tasks} />
+              <MetricProvenance label="Runs" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.runs} />
+              <MetricProvenance label="Events" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.events} />
+              <MetricProvenance label="Blockers" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.blockers} />
+              <MetricProvenance label="Approvals" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.approvals} />
+            </dl>
+          </section>
+
           <div className="smart-swarm-layout">
             <section className="smart-swarm-topology rail-card" aria-label="Runtime topology">
               <div className="rail-card__header">
                 <div><p className="eyebrow">Topology</p><h3>Tasks and agents</h3></div>
-                <span>{filteredTasks.length > MAX_VISIBLE_TASKS
-                  ? `Showing ${MAX_VISIBLE_TASKS} of ${filteredTasks.length} tasks`
-                  : `${filteredTasks.length} tasks`}</span>
+                <MetricCount
+                  availableText={filteredTasks.length > MAX_VISIBLE_TASKS
+                    ? `Showing ${MAX_VISIBLE_TASKS} of ${filteredTasks.length} tasks`
+                    : `${filteredTasks.length} tasks`}
+                  capturedAt={snapshot.capturedAt}
+                  label="Tasks"
+                  provider={provider}
+                  section={snapshot.tasks}
+                />
               </div>
               <UnsupportedSection label="Agents" section={snapshot.agents} />
               <UnsupportedSection label="Tasks" section={snapshot.tasks} />
@@ -645,7 +745,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                         type="button"
                       >
                         <span><strong>{task.title}</strong><small>{task.state} · priority {task.priority ?? 'unset'}</small></span>
-                        <span>{currentRun ? `Run ${currentRun.id}: ${currentRun.state}` : 'No current run'}</span>
+                        <span>{currentRun
+                          ? `Run ${currentRun.id}: ${currentRun.state}`
+                          : snapshot.runs.status === 'unsupported' ? 'Runs unsupported' : 'No current run'}</span>
                         {parents.map((parent) => <small key={`parent:${parent.id}`}>Parent {parent.label}</small>)}
                         {dependencies.map((dependency) => <small key={`dependency:${dependency.id}`}>Depends on {dependency.label}</small>)}
                       </button>
@@ -657,8 +759,17 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
             <aside className="smart-swarm-evidence">
               <section className="rail-card">
-                <div className="rail-card__header"><div><p className="eyebrow">Activity</p><h3>Events and logs</h3></div><span>{filteredEvents.length}</span></div>
-                <UnsupportedSection label="Events" section={snapshot.events} />
+                <div className="rail-card__header">
+                  <div><p className="eyebrow">Activity</p><h3>Events and logs</h3></div>
+                  <EventMetricCount
+                    capturedAt={snapshot.capturedAt}
+                    count={filteredEvents.length}
+                    liveEventCount={liveEvents.length}
+                    provider={provider}
+                    section={snapshot.events}
+                  />
+                </div>
+                <UnsupportedSection label="Event history" section={snapshot.events} />
                 <ol className="smart-swarm-timeline">
                   {filteredEvents.map((event) => (
                     <li key={event.id}><time dateTime={event.occurredAt}>{new Date(event.occurredAt).toLocaleTimeString()}</time><strong>{event.type}</strong><span>{event.summary}</span></li>

@@ -456,7 +456,7 @@ The shipped HTTP server is integrated in `@franken/orchestrator`:
 |---------|----------|-------|
 | Chat server | `packages/franken-orchestrator/src/http/chat-server.ts` | Default port `3737`; WebSocket path `/v1/chat/ws`; loopback dev mode can run without an operator token. |
 | Route mounting | `packages/franken-orchestrator/src/http/chat-app.ts` | Always mounts chat (+ WebSocket) and analytics; mounts Beast agents/SSE, network, and skills/dashboard routes when their deps are supplied. When comms channels are enabled, the `chat-server` CLI resolves comms config, auto-wires a `ChatRuntimeCommsAdapter`, and mounts `/comms/health`, `/v1/comms/*`, and enabled `/webhooks/*` routes in-process. Security (`/api/security`) mounts when `securityConfig` is passed. |
-| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @franken/web run dev:chat`. The overview keeps the read-only faculty Brain panel separate from the operational Brain Vitals panel. Brain Vitals discovers real definitions/runs through `/v1/beasts/runs`, reads snapshot/history/per-run telemetry through `/v1/brain-vitals/*`, and receives live snapshots/activity through the one-shot cookie-ticket SSE route. |
+| Dashboard UI | `packages/franken-web` | Talks to the orchestrator HTTP server, usually through `npm --workspace @franken/web run dev:chat`. Smart Swarm is the canonical live operations surface and consumes provider-neutral runtime adapters. The overview retains only the separate read-only faculty Brain inspector; the retired `#/brain-vitals` hash redirects to `#/smart-swarm` and no production component queries the legacy Beast-run acceptance store. |
 
 The old standalone Firewall/Critique/Governor HTTP-service table describes historical/target microservice boundaries, not the current local runtime surface.
 
@@ -1060,6 +1060,15 @@ registry ownership decision.
 
 #### Brain Vitals telemetry reads
 
+These routes are a legacy diagnostic/compatibility API, not a production web
+operations surface. Smart Swarm replaces the former Brain Vitals panel and
+Pulse Map in `franken-web`; the legacy hash redirects to `#/smart-swarm`, and
+the overview does not discover Beast runs for vitals. This prevents stale
+acceptance-only `design-interview` data from appearing as current operations.
+Provider-neutral Smart Swarm adapters are authoritative for live topology,
+capabilities, availability, and provenance. Unsupported normalized sections are
+reported explicitly and are never converted to zero-valued metrics.
+
 The Beast daemon owns `/v1/brain-vitals/*`; `chat-server` mounts the same routes
 with local Beast services or proxies them to an attached daemon. Every REST
 request requires the Beast operator token. EventSource connections use the
@@ -1077,14 +1086,14 @@ The stream sends a fresh snapshot every second and separate typed `activity`
 events for cache hits/misses, compaction completion, lifecycle churn,
 resource-threshold crossings, and budget-threshold crossings.
 
-`franken-web` uses those discrete events as the sole pulse-rate input for the
-Brain Vitals panel's primary Live Brain Pulse Map. Its five current nodes map
+The retired `franken-web` Brain Vitals implementation used those discrete events
+as the sole pulse-rate input for the Live Brain Pulse Map. Its five nodes mapped
 directly to the `cache`, `compaction`, `churn`, `resource`, and `cost` event
 dimensions; a rolling one-minute client window controls pulse speed, each
 dimension's normalized health signal controls node state, and the aggregate
 health score controls the center ring. Selecting a node exposes the contributing
 events and their real run ids before the existing per-run telemetry drill-down.
-Hive Brain's memory/planning/reasoning/action/learning faculty nodes are omitted
+Hive Brain's memory/planning/reasoning/action/learning faculty nodes were omitted
 rather than borrowing vitals data: the read-only `/v1/brain/*` surface has
 faculty state, but no compatible live faculty activity-event stream yet. Adding
 those nodes is therefore an additive cross-epic follow-up, not a synthetic
