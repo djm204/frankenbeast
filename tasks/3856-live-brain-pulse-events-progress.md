@@ -13,5 +13,6 @@
 - [x] Address all five follow-up current-head Codex findings with focused RED/GREEN coverage: exact event-section discriminants, normalized timestamps, shared metadata bounds, wrapping for long evidence, and honest retained-event counts.
 - [x] Address all four third-round current-head Codex findings plus two independent local review findings: normalized ID/cursor bounds, unavailable-state semantics, retained source-task resolution, Codex metadata limits, transition suffix budget, and source-specific status reasons.
 - [x] Address all five fifth-round current-head Codex findings with focused RED/GREEN coverage: poison-frame quarantine, runtime-failure precedence, UTF-8 cursor bytes, impossible calendar dates, and bounded Hermes status/outcome metadata.
+- [x] Address the tier-12 follow-up finding with RED/GREEN coverage by bounding Ollama installed/loaded model-name metadata before shared snapshot parsing.
 - [ ] Push remediation and complete fresh exact-head Codex/CI/thread gates.
 - [ ] Guarded squash merge exact reviewed head, verify issue closure/deployment/public authenticated browser evidence, and record terminal Kanban handoff.
