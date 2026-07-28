@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.12.0...franken-web-v0.13.0) (2026-07-28)
+
+
+### Features
+
+* **orchestrator:** add mission completion gates ([#3871](https://github.com/djm204/frankenbeast/issues/3871)) ([1d339b4](https://github.com/djm204/frankenbeast/commit/1d339b445fe8e285d9a139ddc67032f51c42d01f))
+* **web:** add live smart-swarm dashboard ([#3867](https://github.com/djm204/frankenbeast/issues/3867)) ([8747367](https://github.com/djm204/frankenbeast/commit/8747367fd4eb099e56b852e4300643e22bbcb925))
+* **web:** drive brain pulse from runtime events ([#3872](https://github.com/djm204/frankenbeast/issues/3872)) ([4fbb635](https://github.com/djm204/frankenbeast/commit/4fbb6355fa4cfa8abaf51c677ab84b148d8f8578))
+* **web:** make Smart Swarm canonical operations surface ([#3870](https://github.com/djm204/frankenbeast/issues/3870)) ([42642f3](https://github.com/djm204/frankenbeast/commit/42642f3d50d11dcbdd5eaa12cb44100518b6fd0b))
+
+
+### Bug Fixes
+
+* **web:** remove Brain Vitals faculty placeholders ([#3810](https://github.com/djm204/frankenbeast/issues/3810)) ([cb2e7c3](https://github.com/djm204/frankenbeast/commit/cb2e7c39199a007c4a4c244c16aa383fb0f633d0))
+
+
+### Tests
+
+* **web:** add live Hermes smart-swarm E2E ([#3869](https://github.com/djm204/frankenbeast/issues/3869)) ([41ffed4](https://github.com/djm204/frankenbeast/commit/41ffed4e55e69d15cca24fceba05ae849667c426))
+* **web:** add public live dashboard acceptance ([#3874](https://github.com/djm204/frankenbeast/issues/3874)) ([f9cc11b](https://github.com/djm204/frankenbeast/commit/f9cc11b88bf55916c85efdf29719376e0e83c754))
+
 ## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.11.0...franken-web-v0.12.0) (2026-07-26)
 
 
