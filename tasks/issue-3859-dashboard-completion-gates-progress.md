@@ -12,7 +12,7 @@
 - [x] Expose a liveness-dashboard renderer with staged status, canonical/linked ownership, actionable gates, durable evidence, blockers, and scoped stop output.
 - [x] Run focused tests, full relevant tests, lint, typecheck, build, and `git diff --check`.
 - [x] Complete independent pre-commit review and remediate all blocking findings.
-- [ ] Commit with the required identity, push, and open a linked PR.
+- [x] Commit with the required identity, push, and open a linked PR (#3871).
 - [ ] Complete bounded exact-head GitHub Codex review, green CI, and fully paginated zero unresolved threads.
 - [ ] Guarded exact-head squash merge after gates are met; record reviewed head and merge SHA.
 - [ ] Verify the deployed reviewed-main SHA and authenticated public genuine-data browser acceptance through downstream #3857/#3858 evidence before terminal closeout.
