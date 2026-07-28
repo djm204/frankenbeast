@@ -83,6 +83,18 @@ function createClient(overrides: Partial<SmartSwarmApiClient> = {}): SmartSwarmA
   return {
     listProviders: vi.fn().mockResolvedValue([provider]),
     fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
+    fetchMissionCompletion: vi.fn().mockResolvedValue({
+      missionId: 'smart-swarm-runtime',
+      checkedAt: '2026-07-28T03:00:00.000Z',
+      terminal: false,
+      shouldStopJobs: false,
+      jobsToStop: [],
+      blockers: ['deployment evidence is incomplete'],
+      stages: {
+        implementation: 'passed', reviewed: 'passed', merged: 'passed',
+        deployed: 'pending', realDataAccepted: 'pending', completion: 'pending',
+      },
+    }),
     executeAction: vi.fn().mockResolvedValue({
       status: 'applied',
       providerId: 'hermes',
@@ -371,6 +383,76 @@ describe('SmartSwarmPage', () => {
     const detail = await screen.findByRole('dialog', { name: 'Source task task-source unavailable' });
     expect(detail.textContent).toContain('Referenced run evidence is unavailable');
     expect(detail.textContent).not.toContain('Wrong workspace run');
+  });
+
+  it('renders authoritative mission completion stages and blockers', async () => {
+    render(<SmartSwarmPage client={createClient()} />);
+
+    expect(await screen.findByRole('heading', { name: 'Mission completion' })).toBeDefined();
+    expect(screen.getByText('In progress')).toBeDefined();
+    expect(screen.getByText('deployment evidence is incomplete')).toBeDefined();
+    expect(screen.getByText('Deployment: pending')).toBeDefined();
+    expect(screen.getByText('Real data: pending')).toBeDefined();
+  });
+
+  it('polls mission completion independently at half the evidence freshness window', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMissionCompletion = vi.fn().mockResolvedValue({
+        missionId: 'smart-swarm-runtime',
+        checkedAt: '2026-07-28T03:00:00.000Z',
+        evidenceMaxAgeMs: 60_000,
+        terminal: false,
+        shouldStopJobs: false,
+        jobsToStop: [],
+        blockers: ['deployment evidence is incomplete'],
+        externalGates: [],
+        stages: {
+          implementation: 'passed', reviewed: 'passed', merged: 'passed',
+          deployed: 'pending', realDataAccepted: 'pending', completion: 'pending',
+        },
+      });
+      render(<SmartSwarmPage client={createClient({ fetchMissionCompletion })} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(1);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('renders external gate ownership, trigger, and next transition', async () => {
+    render(<SmartSwarmPage client={createClient({
+      fetchMissionCompletion: vi.fn().mockResolvedValue({
+        missionId: 'smart-swarm-runtime',
+        checkedAt: '2026-07-28T03:00:00.000Z',
+        terminal: false,
+        shouldStopJobs: false,
+        jobsToStop: [],
+        blockers: ['deployment gate is pending'],
+        stages: {
+          implementation: 'passed', reviewed: 'passed', merged: 'passed',
+          deployed: 'pending', realDataAccepted: 'pending', completion: 'pending',
+        },
+        externalGates: [{
+          id: 'public-deployment',
+          state: 'pending',
+          owner: 'deployment-controller',
+          head: 'reviewed-main-sha',
+          trigger: 'PR #3871 merged',
+          nextTransition: 'deploy reviewed main',
+        }],
+      }),
+    })} />);
+
+    const gates = await screen.findByRole('list', { name: 'External mission gates' });
+    expect(gates.textContent).toContain('public-deployment');
+    expect(gates.textContent).toContain('deployment-controller');
+    expect(gates.textContent).toContain('PR #3871 merged');
+    expect(gates.textContent).toContain('deploy reviewed main');
   });
 
   it('renders normalized provider, workspace, topology, and real evidence', async () => {

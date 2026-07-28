@@ -10,6 +10,23 @@ afterEach(() => {
 });
 
 describe('SmartSwarmApiClient', () => {
+  it('loads the authoritative mission completion decision', async () => {
+    const completion = {
+      missionId: 'smart-swarm-runtime', checkedAt: '2026-07-28T03:00:00.000Z',
+      terminal: false, shouldStopJobs: false, jobsToStop: [], blockers: ['deployment pending'],
+      stages: {
+        implementation: 'passed', reviewed: 'passed', merged: 'passed',
+        deployed: 'pending', realDataAccepted: 'pending', completion: 'pending',
+      },
+    } as const;
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ data: completion }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchMissionCompletion()).resolves.toEqual(completion);
+    expect(fetchMock).toHaveBeenCalledWith(`${BASE_URL}/v1/smart-swarm/completion`, { method: 'GET' });
+  });
+
   it('loads normalized providers and a workspace-scoped snapshot', async () => {
     const provider = {
       id: 'hermes',

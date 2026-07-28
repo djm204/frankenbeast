@@ -76,6 +76,7 @@ export interface MissionCompletionInput {
 export interface MissionCompletionResult {
   missionId: string;
   checkedAt: string;
+  evidenceMaxAgeMs: number;
   health: 'healthy-progression' | 'attention-required';
   terminal: boolean;
   shouldStopJobs: boolean;
@@ -116,9 +117,30 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   const hasText = (value: string | null | undefined): value is string => (
     typeof value === 'string' && value.trim().length > 0
   );
-  const checkedAtMs = Date.parse(input.checkedAt);
-  const deploymentVerifiedAtMs = Date.parse(input.deployment.verifiedAt ?? '');
-  const acceptanceVerifiedAtMs = Date.parse(input.acceptance.verifiedAt ?? '');
+  const explicitTimestampMs = (value: string | null | undefined): number => {
+    if (!hasText(value)) return Number.NaN;
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/iu.exec(value);
+    if (!match) return Number.NaN;
+    const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [
+      number, number, number, number, number, number,
+    ];
+    const calendar = new Date(0);
+    calendar.setUTCFullYear(year, month - 1, day);
+    calendar.setUTCHours(hour, minute, second, 0);
+    if (
+      calendar.getUTCFullYear() !== year
+      || calendar.getUTCMonth() !== month - 1
+      || calendar.getUTCDate() !== day
+      || calendar.getUTCHours() !== hour
+      || calendar.getUTCMinutes() !== minute
+      || calendar.getUTCSeconds() !== second
+    ) return Number.NaN;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  };
+  const checkedAtMs = explicitTimestampMs(input.checkedAt);
+  const deploymentVerifiedAtMs = explicitTimestampMs(input.deployment.verifiedAt);
+  const acceptanceVerifiedAtMs = explicitTimestampMs(input.acceptance.verifiedAt);
   const timestampIsFresh = (timestampMs: number): boolean => (
     Number.isFinite(timestampMs)
     && Number.isFinite(checkedAtMs)
@@ -126,7 +148,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
     && checkedAtMs - timestampMs <= input.evidenceMaxAgeMs
   );
   const endpointTimestampsValid = input.deployment.endpointChecks.every((check) => {
-    const timestampMs = Date.parse(check.checkedAt);
+    const timestampMs = explicitTimestampMs(check.checkedAt);
     return timestampIsFresh(timestampMs) && timestampMs <= deploymentVerifiedAtMs;
   });
   const deploymentTimestampValid = timestampIsFresh(deploymentVerifiedAtMs);
@@ -224,6 +246,9 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   if (input.scopedIssues.length === 0) blockers.push('no scoped issues were supplied');
   const scopedIssueCounts = new Map<number, number>();
   for (const issue of input.scopedIssues) {
+    if (!Number.isSafeInteger(issue.issue) || issue.issue < 1) {
+      blockers.push(`scoped issue number ${issue.issue} is invalid`);
+    }
     scopedIssueCounts.set(issue.issue, (scopedIssueCounts.get(issue.issue) ?? 0) + 1);
   }
   for (const [issue, count] of scopedIssueCounts) {
@@ -285,7 +310,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
     blockers.push('deployment verification timestamp is stale');
   }
   for (const check of input.deployment.endpointChecks) {
-    const timestampMs = Date.parse(check.checkedAt);
+    const timestampMs = explicitTimestampMs(check.checkedAt);
     if (checkedAtMs - timestampMs > input.evidenceMaxAgeMs) {
       blockers.push(`endpoint check ${check.endpoint} timestamp is stale`);
     }
@@ -312,7 +337,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
     blockers.push('deployment verification timestamp is in the future');
   }
   for (const check of input.deployment.endpointChecks) {
-    const timestampMs = Date.parse(check.checkedAt);
+    const timestampMs = explicitTimestampMs(check.checkedAt);
     if (!Number.isFinite(timestampMs)) {
       blockers.push(`endpoint check ${check.endpoint} timestamp is invalid`);
     } else if (Number.isFinite(checkedAtMs) && timestampMs > checkedAtMs) {
@@ -435,6 +460,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   return {
     missionId: input.missionId,
     checkedAt: input.checkedAt,
+    evidenceMaxAgeMs: input.evidenceMaxAgeMs,
     health: input.alerts.length === 0 ? 'healthy-progression' : 'attention-required',
     terminal,
     shouldStopJobs: terminal,

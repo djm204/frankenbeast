@@ -18,7 +18,7 @@ import { ChatBeastDispatchAdapter } from '../chat/beast-dispatch-adapter.js';
 import { BeastDaemonDispatchAdapter } from '../chat/beast-daemon-dispatch-adapter.js';
 import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createChatApp } from './chat-app.js';
-import type { RuntimeActionAuditEvent } from './routes/runtime-routes.js';
+import type { MissionCompletionRouteDeps, RuntimeActionAuditEvent } from './routes/runtime-routes.js';
 import type { IGovernorModule } from '../deps.js';
 import { RuntimeActionStore } from '../runtime/runtime-action-store.js';
 import type { RuntimeAdapterRegistry } from '../runtime/runtime-adapter-registry.js';
@@ -83,6 +83,7 @@ export interface StartChatServerOptions {
   runtimeActionGovernor?: IGovernorModule;
   runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
   runtimeActionStore?: RuntimeActionStore;
+  missionCompletion?: MissionCompletionRouteDeps;
   runtimeRegistry?: RuntimeAdapterRegistry;
 }
 
@@ -427,6 +428,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ...(options.runtimeActionGovernor ? { runtimeActionGovernor: options.runtimeActionGovernor } : {}),
       ...(options.runtimeActionAudit ? { runtimeActionAudit: options.runtimeActionAudit } : {}),
       ...(runtimeActionStore ? { runtimeActionStore } : {}),
+      ...(options.missionCompletion ? { missionCompletion: options.missionCompletion } : {}),
       ...(options.runtimeRegistry ? { runtimeRegistry: options.runtimeRegistry } : {}),
       chatRateLimiter,
       chatMutationAdmission,

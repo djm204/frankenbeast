@@ -198,6 +198,16 @@ describe('smart-swarm mission completion', () => {
     expect(result.blockers).toContain('scoped issue #3812 is duplicated');
   });
 
+  it('rejects scoped issue numbers that are not positive safe integers', () => {
+    const mission = otherwiseCompleteMission();
+    mission.scopedIssues[0]!.issue = 3812.5;
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.terminal).toBe(false);
+    expect(result.blockers).toContain('scoped issue number 3812.5 is invalid');
+  });
+
   it('requires every scoped issue to bind to a done canonical work item', () => {
     const mission = otherwiseCompleteMission();
     delete mission.scopedIssues[0]!.canonicalWorkItemId;
@@ -418,6 +428,58 @@ describe('smart-swarm mission completion', () => {
       'endpoint check https://dashboard.example.test/health timestamp is invalid',
       'acceptance verification timestamp is invalid',
     ]));
+  });
+
+  it('rejects evidence timestamps without an explicit timezone', () => {
+    const mission = otherwiseCompleteMission();
+    mission.checkedAt = '2026-07-28T03:00:00';
+    mission.deployment.verifiedAt = '2026-07-28T02:55:00';
+    mission.deployment.endpointChecks[0]!.checkedAt = '2026-07-28T02:56:00';
+    mission.acceptance.verifiedAt = '2026-07-28T02:57:00';
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.terminal).toBe(false);
+    expect(result.blockers).toEqual(expect.arrayContaining([
+      'mission checkedAt timestamp is invalid',
+      'deployment verification timestamp is invalid',
+      'endpoint check https://dashboard.example.test/health timestamp is invalid',
+      'acceptance verification timestamp is invalid',
+    ]));
+  });
+
+  it('rejects impossible calendar timestamps instead of normalizing them', () => {
+    const mission = otherwiseCompleteMission();
+    mission.checkedAt = '2026-02-30T03:00:00.000Z';
+    mission.deployment.verifiedAt = '2026-02-30T02:55:00.000Z';
+    mission.deployment.endpointChecks[0]!.checkedAt = '2026-02-30T02:56:00.000Z';
+    mission.acceptance.verifiedAt = '2026-02-30T02:57:00.000Z';
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.terminal).toBe(false);
+    expect(result.blockers).toEqual(expect.arrayContaining([
+      'mission checkedAt timestamp is invalid',
+      'deployment verification timestamp is invalid',
+      'endpoint check https://dashboard.example.test/health timestamp is invalid',
+      'acceptance verification timestamp is invalid',
+    ]));
+  });
+
+  it('accepts lowercase UTC designators in otherwise valid evidence', () => {
+    const mission = otherwiseCompleteMission();
+    mission.checkedAt = mission.checkedAt.replace(/Z$/u, 'z');
+    mission.deployment.verifiedAt = mission.deployment.verifiedAt!.replace(/Z$/u, 'z');
+    mission.deployment.endpointChecks[0]!.checkedAt = mission.deployment.endpointChecks[0]!.checkedAt.replace(/Z$/u, 'z');
+    mission.acceptance.verifiedAt = mission.acceptance.verifiedAt!.replace(/Z$/u, 'z');
+    mission.externalGates = [{
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+    }];
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.terminal).toBe(true);
   });
 
   it('requires endpoint and acceptance evidence to follow deployment in causal order', () => {

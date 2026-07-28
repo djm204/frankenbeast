@@ -2231,6 +2231,10 @@ describe('main() execution', () => {
       }),
     }));
     const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
+    expect(startOptions.missionCompletion).toEqual(expect.objectContaining({
+      getInput: expect.any(Function),
+      stopJobs: expect.any(Function),
+    }));
     expect(startOptions).not.toHaveProperty('runtimeActionGovernor');
     expect(startOptions.dashboardDeps?.getSecurityConfig()).toEqual(expect.objectContaining({
       profile: 'permissive',

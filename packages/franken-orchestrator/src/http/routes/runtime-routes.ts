@@ -11,6 +11,10 @@ import {
 } from '../../beasts/http/beast-rate-limit.js';
 import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-registry.js';
 import {
+  evaluateMissionCompletion,
+  type MissionCompletionInput,
+} from '../../runtime/mission-completion.js';
+import {
   RuntimeActionUncertainError,
   type RuntimeAdapter,
 } from '../../runtime/runtime-adapter.js';
@@ -46,6 +50,12 @@ export interface RuntimeRouteDeps {
   actionAudit?: ((event: RuntimeActionAuditEvent) => void | Promise<void>) | undefined;
   actionGovernor?: IGovernorModule | undefined;
   actionStore?: RuntimeActionStore | undefined;
+  missionCompletion?: MissionCompletionRouteDeps | undefined;
+}
+
+export interface MissionCompletionRouteDeps {
+  getInput(): MissionCompletionInput | Promise<MissionCompletionInput>;
+  stopJobs(jobIds: string[], stopOnceKey: string): void | Promise<void>;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -416,6 +426,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   let activeStreams = 0;
   const actionStore = deps.actionStore ?? new RuntimeActionStore();
   const inFlightActions = new Map<string, Promise<ReturnType<typeof RuntimeActionResultSchema.parse>>>();
+  const completionStops = new Map<string, Promise<void>>();
+  let latestCompletionStopKey: string | null = null;
+  let completedCompletionStopKey: string | null = null;
 
   const actionAuditEvent = (
     providerId: string,
@@ -514,6 +527,41 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
   app.use(`${BASE_PATH}/:providerId/actions`, requestSizeLimit(MAX_ACTION_BODY_BYTES));
 
   app.get(BASE_PATH, async (c) => c.json({ data: runtimeResponse(await deps.registry.list()) }));
+
+  if (deps.missionCompletion) {
+    app.get('/v1/smart-swarm/completion', async (c) => {
+      const result = evaluateMissionCompletion(await deps.missionCompletion!.getInput());
+      if (result.shouldStopJobs && result.stopOnceKey) {
+        const stopOnceKey = result.stopOnceKey;
+        latestCompletionStopKey = stopOnceKey;
+        if (completedCompletionStopKey === stopOnceKey) {
+          return c.json({ data: runtimeResponse(result) });
+        }
+        let stop = completionStops.get(stopOnceKey);
+        if (!stop) {
+          stop = Promise.resolve().then(
+            () => deps.missionCompletion!.stopJobs(result.jobsToStop, stopOnceKey),
+          );
+          completionStops.set(stopOnceKey, stop);
+        }
+        try {
+          await stop;
+          if (latestCompletionStopKey === stopOnceKey) completedCompletionStopKey = stopOnceKey;
+        } catch {
+          if (completedCompletionStopKey === stopOnceKey) completedCompletionStopKey = null;
+          return c.json({
+            data: runtimeResponse({
+              ...result,
+              blockers: [...result.blockers, 'completion job stop failed; retry pending'],
+            }),
+          });
+        } finally {
+          if (completionStops.get(stopOnceKey) === stop) completionStops.delete(stopOnceKey);
+        }
+      }
+      return c.json({ data: runtimeResponse(result) });
+    });
+  }
 
   app.get(`${BASE_PATH}/:providerId/snapshot`, async (c) => {
     const adapter = adapterOr404(deps.registry, c.req.param('providerId'));
