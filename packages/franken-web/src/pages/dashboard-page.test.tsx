@@ -126,6 +126,19 @@ describe('DashboardPage', () => {
     expect(client.fetchBrainState).not.toHaveBeenCalled();
   });
 
+  it('does not mount the retired acceptance-only Brain Vitals data path', async () => {
+    const listBrainVitalsRuns = vi.fn().mockRejectedValue(
+      new Error('The stale design-interview acceptance store must not be queried.'),
+    );
+    const client = mockClient({ listBrainVitalsRuns });
+
+    render(<DashboardPage client={client} />);
+
+    await screen.findByRole('region', { name: 'Brain faculties' });
+    expect(listBrainVitalsRuns).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Brain Vitals/i)).toBeNull();
+  });
+
   it('renders partial dependency outages with remediation and safe work guidance', async () => {
     const client = mockClient();
 

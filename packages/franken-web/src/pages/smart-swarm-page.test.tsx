@@ -131,6 +131,40 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText('Pause is not supported by Hermes.')).toBeDefined();
   });
 
+  it('renders capability-aware metric provenance from adapter metadata', async () => {
+    const adapterProvider = {
+      ...provider,
+      displayName: 'Hermes production adapter',
+    };
+    const unsupportedSections: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'unsupported', reason: 'Hermes exposes no canonical task source.' },
+      events: { status: 'unsupported', reason: 'Hermes exposes no canonical event source.' },
+      approvals: { status: 'unsupported', reason: 'Hermes exposes no canonical approval source.' },
+    };
+
+    render(<SmartSwarmPage client={createClient({
+      listProviders: vi.fn().mockResolvedValue([adapterProvider]),
+      fetchSnapshot: vi.fn().mockResolvedValue(unsupportedSections),
+    })} />);
+
+    const metrics = await screen.findByRole('region', { name: 'Live metric provenance' });
+    expect(metrics.textContent).toContain('Hermes production adapter');
+    expect(metrics.textContent).toContain('Captured 7/26/2026');
+    expect(screen.getByTestId('metric-workspaces').textContent).toContain('1');
+    expect(screen.getByTestId('metric-workspaces').textContent).toContain('available');
+    expect(screen.getByTestId('metric-tasks').textContent).toContain('unsupported');
+    expect(screen.getByTestId('metric-event-history').textContent).toContain('unsupported');
+    expect(screen.getByTestId('metric-approvals').textContent).toContain('unsupported');
+    expect(screen.getByTestId('metric-approvals').textContent).not.toMatch(/\b0\b/);
+    const topology = screen.getByRole('region', { name: 'Runtime topology' });
+    expect(topology.textContent).toContain('Tasks unsupported');
+    expect(topology.textContent).not.toContain('0 tasks');
+    const activity = screen.getByRole('heading', { name: 'Events and logs' }).closest('section');
+    expect(activity?.textContent).toContain('Events unsupported');
+    expect(activity?.textContent).not.toMatch(/Events and logs0/u);
+  });
+
   it('moves focus into task details and restores it to the inspect trigger', async () => {
     render(<SmartSwarmPage client={createClient()} />);
     const inspect = await screen.findByRole('button', { name: 'Inspect Live dashboard' });
@@ -685,7 +719,7 @@ describe('SmartSwarmPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Promote task' }));
 
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
-    expect(screen.getByRole('button', { name: 'Cancel task' })).toHaveProperty('disabled', false);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel task' })).toHaveProperty('disabled', false));
   });
 
   it.each([
@@ -1213,6 +1247,7 @@ describe('SmartSwarmPage', () => {
 
     expect(screen.getByText('Live event without history')).toBeDefined();
     expect(screen.getByText('Historical event queries are unavailable.')).toBeDefined();
+    expect(screen.getByTitle('Events received live from Hermes.').textContent).toContain('1 live event');
   });
 
   it('keeps newest activity first before and after snapshot refreshes', async () => {
@@ -1252,6 +1287,7 @@ describe('SmartSwarmPage', () => {
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
 
     act(() => handlers.event(newestEvent));
+    expect(screen.getByTitle(/Snapshot captured .* includes events received by the live stream/u)).toBeDefined();
     expect(screen.getByText('Newest event').compareDocumentPosition(screen.getByText('Focused tests passed')))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });

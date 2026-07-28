@@ -231,8 +231,10 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       let latestSseRequestUrl: string | null = null;
       let expectedSseReplacementReason: ExpectedSseInterruption | null = 'initial-workspace-selection';
       let ticketRequests = 0;
+      let legacyBrainVitalsRequests = 0;
       page.on('request', (request) => {
         if (request.url().endsWith('/events/ticket')) ticketRequests += 1;
+        if (request.url().includes('/v1/brain-vitals/')) legacyBrainVitalsRequests += 1;
         if (isSmartSwarmSseRequest(request.url())) {
           if (latestSseRequestUrl && expectedSseReplacementReason) {
             expectedSseInterruptions.set(latestSseRequestUrl, expectedSseReplacementReason);
@@ -261,11 +263,21 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
         });
       });
 
-      await page.goto(`${dashboardUrl}#/smart-swarm`);
-      await expectBrowser(page.getByRole('heading', { name: 'smart-swarm' })).toBeVisible();
+      await page.goto(`${dashboardUrl}#/brain-vitals`);
+      await expectBrowser(page).toHaveURL(/#\/smart-swarm$/u);
+      await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm' })).toBeVisible();
+      expect(legacyBrainVitalsRequests).toBe(0);
       await page.getByLabel('Runtime provider').selectOption('hermes');
       await expectBrowser(page.getByLabel('Runtime provider')).toHaveValue('hermes');
       await expectBrowser(page.getByText('Live · connected')).toBeVisible({ timeout: 15_000 });
+      const metricProvenance = page.getByRole('region', { name: 'Live metric provenance' });
+      await expectBrowser(metricProvenance).toContainText('Source: Hermes');
+      await expectBrowser(metricProvenance).toContainText('Captured');
+      await expectBrowser(page.getByTestId('metric-tasks')).toContainText('available');
+      await expectBrowser(page.getByTestId('metric-approvals')).toContainText('unsupported');
+      await expectBrowser(page.getByTestId('metric-approvals')).not.toContainText(/\b0\b/u);
+      await expectBrowser(page.getByTitle(/Tasks available from Hermes/u)).toBeVisible();
+      await expectBrowser(page.getByTitle(/Events available from Hermes/u)).toBeVisible();
       expectedSseReplacementReason = null;
       await expectBrowser(page.getByText(new RegExp(`${marker} Worker`))).toBeVisible();
       await expectBrowser(page.locator('body')).not.toContainText(secretMarker);

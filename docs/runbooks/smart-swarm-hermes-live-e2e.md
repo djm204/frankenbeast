@@ -25,6 +25,8 @@ The script installs the pinned Playwright Chromium binary if absent, builds the 
 
 - unauthenticated smart-swarm HTTP is rejected and the authenticated Vite proxy succeeds;
 - the browser selects Hermes and renders real CLI-created PM/worker/dependency/blocker/event evidence;
+- the retired `#/brain-vitals` route redirects to Smart Swarm without requesting `/v1/brain-vitals/*`;
+- live metric counts identify their adapter and capture time, while unsupported sections never render as zero;
 - a fresh Hermes comment reaches the dashboard over live SSE;
 - an interrupted dashboard proxy reconnects, obtains a new one-time stream ticket, and returns to connected state;
 - the dashboard resolves a real blocked Hermes task and verifies its CLI-visible postcondition;
