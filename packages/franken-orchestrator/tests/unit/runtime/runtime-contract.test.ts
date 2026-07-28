@@ -197,6 +197,15 @@ describe('provider-neutral runtime contract', () => {
     expect(RuntimeEventSchema.safeParse({ ...event, summary: `${event.summary}x` }).success).toBe(false);
   });
 
+  it('bounds normalized metadata consistently with browser validation', () => {
+    const metadata = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`key-${index}`, index]));
+
+    expect(RuntimeMetadataSchema.safeParse(metadata).success).toBe(true);
+    expect(RuntimeMetadataSchema.safeParse({ ...metadata, overflow: true }).success).toBe(false);
+    expect(RuntimeMetadataSchema.safeParse({ key: 'x'.repeat(4_097) }).success).toBe(false);
+    expect(RuntimeMetadataSchema.safeParse({ ['x'.repeat(257)]: true }).success).toBe(false);
+  });
+
   it('requires every capability to declare supported or unsupported state', async () => {
     const value = adapter('one').describe();
     await expect(value).resolves.toMatchObject({ id: 'one' });

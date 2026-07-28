@@ -2404,6 +2404,11 @@ button {
   font-size: 0.76rem;
 }
 
+.runtime-brain-pulse li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .runtime-brain-pulse button {
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--control-border);

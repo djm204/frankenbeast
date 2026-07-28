@@ -85,6 +85,57 @@ describe('SmartSwarmApiClient', () => {
     await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
   });
 
+  it('rejects parseable timestamps that are not normalized ISO datetimes', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [{
+        id: 'event-1',
+        cursor: 'cursor-1',
+        workspaceId: 'board-main',
+        taskId: null,
+        runId: null,
+        type: 'log',
+        occurredAt: '07/28/2026',
+        summary: 'Browser-dependent timestamp',
+      }] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+  });
+
+  it('rejects malformed runtime event section discriminants', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'unsupported' },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: snapshot }))
+      .mockResolvedValueOnce(Response.json({ data: { ...snapshot, events: { status: 'available', data: [], extra: true } } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event snapshot');
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event snapshot');
+  });
+
   it('reconnects the live stream with the last real event cursor', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);

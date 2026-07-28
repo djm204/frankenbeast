@@ -1,8 +1,17 @@
 import { z } from 'zod';
 
 const TimestampSchema = z.string().datetime({ offset: true });
-const SafeMetadataValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
-export const RuntimeMetadataSchema = z.record(z.string(), SafeMetadataValueSchema);
+const SafeMetadataValueSchema = z.union([z.string().max(4_096), z.number(), z.boolean(), z.null()]);
+export const RuntimeMetadataSchema = z
+  .record(z.string().min(1).max(256), SafeMetadataValueSchema)
+  .superRefine((metadata, context) => {
+    if (Object.keys(metadata).length > 64) {
+      context.addIssue({ code: 'custom', message: 'Runtime metadata must contain at most 64 entries' });
+    }
+    if (JSON.stringify(metadata).length > 16_384) {
+      context.addIssue({ code: 'custom', message: 'Runtime metadata exceeds the serialized size limit' });
+    }
+  });
 
 const CorrelationIdSchema = z.string().uuid();
 const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);

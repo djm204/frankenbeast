@@ -10,5 +10,6 @@
 - [x] Update architecture docs with source, cursor, validation, state, motion, and drill-down behavior.
 - [x] Commit as David Mendez, push, and open linked PR #3872.
 - [x] Address all three first-round current-head Codex findings with focused RED/GREEN coverage.
+- [x] Address all five follow-up current-head Codex findings with focused RED/GREEN coverage: exact event-section discriminants, normalized timestamps, shared metadata bounds, wrapping for long evidence, and honest retained-event counts.
 - [ ] Push remediation and complete fresh exact-head Codex/CI/thread gates.
 - [ ] Guarded squash merge exact reviewed head, verify issue closure/deployment/public authenticated browser evidence, and record terminal Kanban handoff.

@@ -173,6 +173,7 @@ export interface RuntimeSubscriptionHandlers {
 const RUNTIME_EVENT_TYPES = new Set<RuntimeEvent['type']>([
   'lifecycle', 'comment', 'log', 'audit', 'blocker', 'approval', 'unknown',
 ]);
+const NORMALIZED_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
 const RUNTIME_EVENT_KEYS = new Set([
   'id', 'cursor', 'workspaceId', 'taskId', 'runId', 'type', 'occurredAt', 'summary', 'metadata',
 ]);
@@ -218,13 +219,29 @@ function parseRuntimeEvent(value: unknown): RuntimeEvent {
     || (candidate.taskId !== null && !isBoundedString(candidate.taskId, MAX_RUNTIME_EVENT_ID_LENGTH))
     || (candidate.runId !== null && !isBoundedString(candidate.runId, MAX_RUNTIME_EVENT_ID_LENGTH))
     || typeof candidate.type !== 'string' || !RUNTIME_EVENT_TYPES.has(candidate.type as RuntimeEvent['type'])
-    || !isBoundedString(candidate.occurredAt, 64) || !Number.isFinite(Date.parse(candidate.occurredAt))
+    || !isBoundedString(candidate.occurredAt, 64)
+    || !NORMALIZED_TIMESTAMP_PATTERN.test(candidate.occurredAt)
+    || !Number.isFinite(Date.parse(candidate.occurredAt))
     || !isBoundedString(candidate.summary, MAX_RUNTIME_EVENT_SUMMARY_LENGTH, true)
     || !isRuntimeEventMetadata(candidate.metadata)
   ) {
     throw new Error('Malformed runtime event: normalized provenance fields are invalid or exceed safe limits.');
   }
   return candidate as RuntimeEvent;
+}
+
+function isRuntimeEventSection(value: unknown): value is RuntimeSnapshot['events'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as { status?: unknown; data?: unknown; reason?: unknown };
+  const keys = Object.keys(value);
+  if (candidate.status === 'available') {
+    return keys.length === 2 && keys.includes('data') && Array.isArray(candidate.data);
+  }
+  return candidate.status === 'unsupported'
+    && keys.length === 2
+    && keys.includes('reason')
+    && typeof candidate.reason === 'string'
+    && candidate.reason.length > 0;
 }
 
 export class SmartSwarmApiError extends Error {
@@ -259,11 +276,7 @@ export class SmartSwarmApiClient {
     const snapshot = await this.request<RuntimeSnapshot>(
       `/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/snapshot${query}`,
     );
-    if (
-      !snapshot.events
-      || typeof snapshot.events !== 'object'
-      || (snapshot.events.status === 'available' && !Array.isArray(snapshot.events.data))
-    ) {
+    if (!isRuntimeEventSection(snapshot.events)) {
       throw new Error('Malformed runtime event snapshot: expected a normalized event section.');
     }
     if (snapshot.events.status === 'available') snapshot.events.data.forEach(parseRuntimeEvent);

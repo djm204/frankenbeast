@@ -269,4 +269,32 @@ describe('RuntimeBrainPulse', () => {
     expect(status.textContent).not.toContain('Unsupported');
     expect(status.textContent).not.toContain('event history');
   });
+
+  it('discloses when the displayed event count reaches its retention limit', () => {
+    const now = new Date();
+    const events = Array.from({ length: 100 }, (_, index): RuntimeEvent => ({
+      id: `event-${index}`,
+      cursor: `cursor-${index}`,
+      workspaceId: 'board-main',
+      taskId: null,
+      runId: null,
+      type: 'log',
+      occurredAt: now.toISOString(),
+      summary: `Event ${index}`,
+    }));
+
+    render(
+      <RuntimeBrainPulse
+        connection="connected"
+        eventLimit={100}
+        events={events}
+        onOpenTask={() => undefined}
+        provider={provider}
+        snapshot={snapshot}
+      />,
+    );
+
+    expect(document.querySelector('[aria-live="polite"]')?.textContent)
+      .toBe('Latest 100 retained events from the last minute');
+  });
 });

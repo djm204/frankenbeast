@@ -690,6 +690,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           {provider ? (
             <RuntimeBrainPulse
               connection={connection}
+              eventLimit={MAX_VISIBLE_EVIDENCE}
               events={filteredEvents}
               onOpenTask={(event, trigger) => {
                 taskDetailTrigger.current = trigger;

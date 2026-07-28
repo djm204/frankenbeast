@@ -13,6 +13,7 @@ interface RuntimeBrainPulseProps {
   snapshot: RuntimeSnapshot;
   connection: RuntimeConnectionState;
   events: readonly RuntimeEvent[];
+  eventLimit?: number;
   onOpenTask(event: RuntimeEvent, trigger: HTMLButtonElement): void;
 }
 
@@ -21,6 +22,7 @@ export function RuntimeBrainPulse({
   snapshot,
   connection,
   events,
+  eventLimit,
   onOpenTask,
 }: RuntimeBrainPulseProps) {
   const [now, setNow] = useState(() => Date.now());
@@ -56,7 +58,9 @@ export function RuntimeBrainPulse({
       ? 'active'
       : 'stale';
   const eventCountLabel = connection === 'connected'
-    ? `${recentEvents.length} ${recentEvents.length === 1 ? 'event' : 'events'} in the last minute`
+    ? eventLimit !== undefined && recentEvents.length >= eventLimit
+      ? `Latest ${recentEvents.length} retained events from the last minute`
+      : `${recentEvents.length} ${recentEvents.length === 1 ? 'event' : 'events'} in the last minute`
     : `${recentEvents.length} retained ${recentEvents.length === 1 ? 'event' : 'events'} · not live`;
 
   return (

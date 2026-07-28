@@ -25,4 +25,8 @@ describe('app.css smart-swarm dashboard', () => {
     expect(appCss).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.smart-swarm-connection/m);
     expect(appCss).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.runtime-brain-pulse\[data-pulse-state="active"\][\s\S]*?animation:\s*none;/m);
   });
+
+  it('wraps long normalized pulse evidence without expanding the dashboard', () => {
+    expect(appCss).toMatch(/\.runtime-brain-pulse li span\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?overflow-wrap:\s*anywhere;/m);
+  });
 });
