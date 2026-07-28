@@ -204,6 +204,66 @@ describe('SmartSwarmPage', () => {
     await act(async () => finishAction?.());
   });
 
+  it('unlocks task actions when live state confirms the postcondition before the request resolves', async () => {
+    let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+    let currentSnapshot = snapshot;
+    let finishAction: (() => void) | undefined;
+    const executeAction = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      finishAction = () => resolve({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    }));
+    const fetchSnapshot = vi.fn().mockImplementation(async () => currentSnapshot);
+    render(<SmartSwarmPage client={createClient({
+      executeAction,
+      fetchSnapshot,
+      listProviders: vi.fn().mockResolvedValue([{
+        ...provider,
+        capabilities: {
+          ...provider.capabilities,
+          pause: { status: 'supported' },
+        },
+      }]),
+      subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+        handlers = nextHandlers;
+        return vi.fn();
+      }),
+    })} />);
+    await screen.findByText('Live dashboard');
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    expect(executeAction).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Resolve blocker' })).toHaveProperty('disabled', true);
+
+    currentSnapshot = {
+      ...snapshot,
+      tasks: {
+        status: 'available',
+        data: snapshot.tasks.status === 'available'
+          ? snapshot.tasks.data.map((task) => task.id === 'task-live' ? { ...task, state: 'ready' as const } : task)
+          : [],
+      },
+      blockers: { status: 'available', data: [] },
+    };
+    const baseEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!baseEvent) throw new Error('Expected an event fixture');
+    act(() => handlers.event({ ...baseEvent, id: 'early-confirmation', cursor: 'early-confirmation' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3), { timeout: 1_000 });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    await act(async () => finishAction?.());
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause task' })).toHaveProperty('disabled', false));
+  });
+
   it('does not leak an action completion into another task detail dialog', async () => {
     let finishAction: (() => void) | undefined;
     const executeAction = vi.fn().mockImplementation(() => new Promise((resolve) => {

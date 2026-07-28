@@ -783,8 +783,10 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
       });
       if (result.status === 'applied') {
         const appliedIntent = actionIdempotencyKeys.get(actionIntentKey);
-        if (appliedIntent) appliedIntent.awaitingConfirmation = true;
-        awaitingConfirmation = true;
+        if (appliedIntent) {
+          appliedIntent.awaitingConfirmation = true;
+          awaitingConfirmation = true;
+        }
         setActionStatus(successMessage);
         onActionApplied();
       } else if (result.status === 'rejected') {

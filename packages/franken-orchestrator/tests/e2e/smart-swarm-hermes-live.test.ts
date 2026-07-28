@@ -84,9 +84,16 @@ async function productionBundleText(): Promise<string> {
   return (await Promise.all(files.map((file) => readFile(join(assetsDir, file), 'utf8')))).join('\n');
 }
 
-function isExpectedResourceFailure(failure: string): boolean {
+type ExpectedSseInterruption = 'initial-workspace-selection' | 'forced-outage' | 'workspace-change';
+
+function isSmartSwarmSseRequest(url: string): boolean {
+  return url.includes('/v1/smart-swarm/providers/hermes/events/') && !url.endsWith('/events/ticket');
+}
+
+function isExpectedResourceFailure(failure: string, expectedSseInterruption: ExpectedSseInterruption | null = null): boolean {
   if (failure.startsWith('404 ') && failure.includes('/v1/network/')) return true;
-  return failure.includes('/events/') && (
+  return expectedSseInterruption !== null
+    && failure.includes('/v1/smart-swarm/providers/hermes/events/') && (
     failure.includes('ERR_ABORTED') || failure.includes('ERR_INCOMPLETE_CHUNKED_ENCODING')
   );
 }
@@ -96,6 +103,13 @@ describe('smart-swarm browser resource failure classification', () => {
     expect(isExpectedResourceFailure('404 http://127.0.0.1/v1/network/status')).toBe(true);
     expect(isExpectedResourceFailure('500 http://127.0.0.1/v1/network/status')).toBe(false);
     expect(isExpectedResourceFailure('net::ERR_FAILED http://127.0.0.1/v1/network/status')).toBe(false);
+  });
+
+  it('exempts only specifically identified smart-swarm SSE interruptions', () => {
+    const failure = 'net::ERR_ABORTED http://127.0.0.1/v1/smart-swarm/providers/hermes/events/stream';
+    expect(isExpectedResourceFailure(failure, 'forced-outage')).toBe(true);
+    expect(isExpectedResourceFailure(failure)).toBe(false);
+    expect(isExpectedResourceFailure('net::ERR_ABORTED http://127.0.0.1/v1/brain-vitals/events/stream', 'forced-outage')).toBe(false);
   });
 });
 
@@ -209,10 +223,22 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       context = await browser.newContext();
       const page = await context.newPage();
       const browserErrors: string[] = [];
-      const resourceFailures: string[] = [];
+      const resourceFailures: Array<{
+        failure: string;
+        requestUrl: string;
+      }> = [];
+      const expectedSseInterruptions = new Map<string, ExpectedSseInterruption>();
+      let latestSseRequestUrl: string | null = null;
+      let expectedSseReplacementReason: ExpectedSseInterruption | null = 'initial-workspace-selection';
       let ticketRequests = 0;
       page.on('request', (request) => {
         if (request.url().endsWith('/events/ticket')) ticketRequests += 1;
+        if (isSmartSwarmSseRequest(request.url())) {
+          if (latestSseRequestUrl && expectedSseReplacementReason) {
+            expectedSseInterruptions.set(latestSseRequestUrl, expectedSseReplacementReason);
+          }
+          latestSseRequestUrl = request.url();
+        }
       });
       page.on('console', (message) => {
         if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) {
@@ -221,10 +247,18 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       });
       page.on('pageerror', (error) => browserErrors.push(error.message));
       page.on('response', (response) => {
-        if (response.status() >= 400) resourceFailures.push(`${response.status()} ${response.url()}`);
+        if (response.status() >= 400) {
+          resourceFailures.push({
+            failure: `${response.status()} ${response.url()}`,
+            requestUrl: response.url(),
+          });
+        }
       });
       page.on('requestfailed', (request) => {
-        resourceFailures.push(`${request.failure()?.errorText ?? 'request failed'} ${request.url()}`);
+        resourceFailures.push({
+          failure: `${request.failure()?.errorText ?? 'request failed'} ${request.url()}`,
+          requestUrl: request.url(),
+        });
       });
 
       await page.goto(`${dashboardUrl}#/smart-swarm`);
@@ -232,6 +266,7 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       await page.getByLabel('Runtime provider').selectOption('hermes');
       await expectBrowser(page.getByLabel('Runtime provider')).toHaveValue('hermes');
       await expectBrowser(page.getByText('Live · connected')).toBeVisible({ timeout: 15_000 });
+      expectedSseReplacementReason = null;
       await expectBrowser(page.getByText(new RegExp(`${marker} Worker`))).toBeVisible();
       await expectBrowser(page.locator('body')).not.toContainText(secretMarker);
       await expectBrowser(page.getByText(`Depends on ${marker} PM`, { exact: true })).toBeVisible();
@@ -253,6 +288,8 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       await expectBrowser(page.getByText(new RegExp(streamedMarker))).toBeVisible({ timeout: 15_000 });
 
       const ticketRequestsBeforeRecovery = ticketRequests;
+      if (latestSseRequestUrl) expectedSseInterruptions.set(latestSseRequestUrl, 'forced-outage');
+      expectedSseReplacementReason = 'forced-outage';
       await vite.close();
       vite = undefined;
       await expectBrowser(page.getByText('Connection lost · reconnecting')).toBeVisible({ timeout: 10_000 });
@@ -265,6 +302,7 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       await vite.listen();
       await expect.poll(() => ticketRequests, { timeout: 20_000 }).toBeGreaterThan(ticketRequestsBeforeRecovery);
       await expectBrowser(page.getByText('Live · connected')).toBeVisible({ timeout: 20_000 });
+      expectedSseReplacementReason = null;
 
       await page.getByRole('button', { name: new RegExp(`Inspect ${marker} Worker`) }).click();
       await expectBrowser(page.getByRole('button', { name: 'Promote task' })).toBeEnabled();
@@ -302,10 +340,15 @@ describe.runIf(enabled)('live smart-swarm dashboard against isolated Hermes', ()
       }));
 
       await page.getByRole('button', { name: 'Close' }).click();
+      if (latestSseRequestUrl) expectedSseInterruptions.set(latestSseRequestUrl, 'workspace-change');
+      expectedSseReplacementReason = 'workspace-change';
       await page.getByLabel('Workspace').selectOption({ label: 'empty-e2e' });
       await expectBrowser(page.getByText('No runtime work in empty-e2e')).toBeVisible({ timeout: 10_000 });
+      expectedSseReplacementReason = null;
       expect(browserErrors).toEqual([]);
-      const unexpectedResourceFailures = resourceFailures.filter((failure) => !isExpectedResourceFailure(failure));
+      const unexpectedResourceFailures = resourceFailures.filter(({ failure, requestUrl }) => (
+        !isExpectedResourceFailure(failure, expectedSseInterruptions.get(requestUrl) ?? null)
+      ));
       expect(unexpectedResourceFailures).toEqual([]);
 
       const bundle = await productionBundleText();
