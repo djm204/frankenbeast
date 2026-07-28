@@ -145,6 +145,16 @@ describe('network-registry', () => {
     expect(dashboard?.runtimeConfig.process?.inheritedEnvKeys).toContain('VITE_PROJECT_ID');
   });
 
+  it('preserves trusted proxy settings for the managed dashboard', () => {
+    const dashboard = resolveNetworkServices(defaultConfig(), context)
+      .find((service) => service.id === 'dashboard-web');
+
+    expect(dashboard?.runtimeConfig.process?.inheritedEnvKeys).toEqual(expect.arrayContaining([
+      'FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_ORIGIN',
+      'FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN',
+    ]));
+  });
+
   it('declares active 1Password session variables only for the 1Password backend', () => {
     vi.stubEnv('OP_SESSION_WORK', 'session-for-test');
     const config = defaultConfig();

@@ -190,6 +190,35 @@ describe('dashboard static server', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('normalizes an authenticated forwarded HTTPS origin before comparison', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}'));
+    globalThis.fetch = fetchMock;
+
+    const proxied = await createDashboardStaticResponse(
+      new Request('http://127.0.0.1:5190/v1/smart-swarm/providers', {
+        headers: {
+          origin: 'https://dashboard.example.com',
+          'x-forwarded-host': 'DASHBOARD.EXAMPLE.COM:443',
+          'x-forwarded-proto': 'HTTPS',
+          'x-frankenbeast-proxy-token': TEST_PROXY_TOKEN,
+          'x-frankenbeast-remote-address': '127.0.0.1',
+        },
+      }),
+      staticDir,
+      {
+        apiTarget: 'http://127.0.0.1:4242',
+        operatorToken: TEST_OPERATOR_TOKEN,
+        trustedProxyOrigin: 'https://dashboard.example.com',
+        trustedProxyToken: TEST_PROXY_TOKEN,
+      },
+    );
+
+    expect(proxied.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('rejects spoofed forwarded origins without a trusted loopback proxy peer', async () => {
     const staticDir = await createDashboardDist();
     dirs.push(staticDir);

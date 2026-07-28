@@ -118,6 +118,11 @@ function parseTrustedProxyOrigin(value: string | undefined): URL | undefined {
   }
 }
 
+function parseForwardedOrigin(host: string | undefined, protocol: string | undefined): URL | undefined {
+  if (!host || !protocol) return undefined;
+  return parseTrustedProxyOrigin(`${protocol.toLowerCase()}://${host}`);
+}
+
 function isLoopbackAddress(value: string | null): boolean {
   if (!value) return false;
   const normalized = value.trim().toLowerCase().replace(/^\[|\]$/gu, '');
@@ -143,11 +148,12 @@ function trustedForwardedOrigin(
   const forwardedProto = firstForwardedValue(request.headers.get('x-forwarded-proto'));
   if (!forwardedHost && !forwardedProto) return undefined;
   const trustedOrigin = parseTrustedProxyOrigin(configuredOrigin);
+  const forwardedOrigin = parseForwardedOrigin(forwardedHost, forwardedProto);
   if (!trustedOrigin
+    || !forwardedOrigin
     || !isLoopbackAddress(request.headers.get(TRUSTED_REMOTE_ADDRESS_HEADER))
     || !secretsMatch(request.headers.get(TRUSTED_PROXY_TOKEN_HEADER), configuredToken)
-    || forwardedHost !== trustedOrigin.host
-    || `${forwardedProto}:` !== trustedOrigin.protocol) return undefined;
+    || forwardedOrigin.origin !== trustedOrigin.origin) return undefined;
   return trustedOrigin;
 }
 
