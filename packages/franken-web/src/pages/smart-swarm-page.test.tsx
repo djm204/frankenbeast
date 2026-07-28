@@ -596,6 +596,7 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByText('Focused tests passed')).toBeDefined();
     expect(screen.getByText('Waiting for contract')).toBeDefined();
     expect(screen.getByText('Approve publication')).toBeDefined();
+    expect(screen.getByText('Run run-1: blocked').className).toContain('smart-swarm-task__run');
     expect(await screen.findByText('Live · connected')).toBeDefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Inspect Live dashboard' }));
