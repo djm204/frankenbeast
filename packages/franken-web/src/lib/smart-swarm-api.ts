@@ -2,6 +2,7 @@ import { extractResponseErrorMessage } from './http-error';
 
 const STREAM_RECONNECT_BASE_DELAY_MS = 1_000;
 const STREAM_RECONNECT_MAX_DELAY_MS = 30_000;
+const CURSOR_VALIDATION_TIMEOUT_MS = 10_000;
 
 export type RuntimeCapability =
   | { status: 'supported' }
@@ -169,6 +170,63 @@ export interface RuntimeSubscriptionHandlers {
   error?(error: Error): void;
 }
 
+const RUNTIME_EVENT_TYPES = new Set<RuntimeEvent['type']>([
+  'lifecycle', 'comment', 'log', 'audit', 'blocker', 'approval', 'unknown',
+]);
+const RUNTIME_EVENT_KEYS = new Set([
+  'id', 'cursor', 'workspaceId', 'taskId', 'runId', 'type', 'occurredAt', 'summary', 'metadata',
+]);
+const MAX_RUNTIME_EVENT_ID_LENGTH = 1_024;
+const MAX_RUNTIME_EVENT_CURSOR_LENGTH = 4_096;
+const MAX_RUNTIME_EVENT_SUMMARY_LENGTH = 16_384;
+const MAX_RUNTIME_EVENT_METADATA_LENGTH = 16_384;
+const MAX_RUNTIME_EVENT_METADATA_ENTRIES = 64;
+const MAX_RUNTIME_EVENT_METADATA_KEY_LENGTH = 256;
+const MAX_RUNTIME_EVENT_METADATA_STRING_LENGTH = 4_096;
+const MAX_RUNTIME_EVENT_RAW_PAYLOAD_LENGTH = 262_144;
+
+function isBoundedString(value: unknown, maximum: number, allowEmpty = false): value is string {
+  return typeof value === 'string' && (allowEmpty || value.length > 0) && value.length <= maximum;
+}
+
+function isRuntimeEventMetadata(value: unknown): value is RuntimeEvent['metadata'] {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  if (entries.length > MAX_RUNTIME_EVENT_METADATA_ENTRIES) return false;
+  if (JSON.stringify(value).length > MAX_RUNTIME_EVENT_METADATA_LENGTH) return false;
+  return entries.every(([key, entry]) => (
+    key.length > 0
+    && key.length <= MAX_RUNTIME_EVENT_METADATA_KEY_LENGTH
+    && (entry === null
+      || typeof entry === 'boolean'
+      || (typeof entry === 'number' && Number.isFinite(entry))
+      || isBoundedString(entry, MAX_RUNTIME_EVENT_METADATA_STRING_LENGTH, true))
+  ));
+}
+
+function parseRuntimeEvent(value: unknown): RuntimeEvent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Malformed runtime event: expected an object.');
+  }
+  const candidate = value as Partial<RuntimeEvent>;
+  if (
+    Object.keys(value).some((key) => !RUNTIME_EVENT_KEYS.has(key))
+    || !isBoundedString(candidate.id, MAX_RUNTIME_EVENT_ID_LENGTH)
+    || !isBoundedString(candidate.cursor, MAX_RUNTIME_EVENT_CURSOR_LENGTH)
+    || !isBoundedString(candidate.workspaceId, MAX_RUNTIME_EVENT_ID_LENGTH)
+    || (candidate.taskId !== null && !isBoundedString(candidate.taskId, MAX_RUNTIME_EVENT_ID_LENGTH))
+    || (candidate.runId !== null && !isBoundedString(candidate.runId, MAX_RUNTIME_EVENT_ID_LENGTH))
+    || typeof candidate.type !== 'string' || !RUNTIME_EVENT_TYPES.has(candidate.type as RuntimeEvent['type'])
+    || !isBoundedString(candidate.occurredAt, 64) || !Number.isFinite(Date.parse(candidate.occurredAt))
+    || !isBoundedString(candidate.summary, MAX_RUNTIME_EVENT_SUMMARY_LENGTH, true)
+    || !isRuntimeEventMetadata(candidate.metadata)
+  ) {
+    throw new Error('Malformed runtime event: normalized provenance fields are invalid or exceed safe limits.');
+  }
+  return candidate as RuntimeEvent;
+}
+
 export class SmartSwarmApiError extends Error {
   constructor(
     message: string,
@@ -190,7 +248,7 @@ export class SmartSwarmApiClient {
     return this.request('/v1/smart-swarm/providers');
   }
 
-  fetchSnapshot(
+  async fetchSnapshot(
     providerId: string,
     options: { workspaceId?: string; activityLimit?: number } = {},
   ): Promise<RuntimeSnapshot> {
@@ -198,7 +256,18 @@ export class SmartSwarmApiClient {
     if (options.workspaceId) search.set('workspaceId', options.workspaceId);
     if (options.activityLimit !== undefined) search.set('activityLimit', String(options.activityLimit));
     const query = search.size > 0 ? `?${search.toString()}` : '';
-    return this.request(`/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/snapshot${query}`);
+    const snapshot = await this.request<RuntimeSnapshot>(
+      `/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/snapshot${query}`,
+    );
+    if (
+      !snapshot.events
+      || typeof snapshot.events !== 'object'
+      || (snapshot.events.status === 'available' && !Array.isArray(snapshot.events.data))
+    ) {
+      throw new Error('Malformed runtime event snapshot: expected a normalized event section.');
+    }
+    if (snapshot.events.status === 'available') snapshot.events.data.forEach(parseRuntimeEvent);
+    return snapshot;
   }
 
   async executeAction(providerId: string, request: RuntimeActionRequest): Promise<RuntimeActionResult> {
@@ -227,8 +296,9 @@ export class SmartSwarmApiClient {
     const baseUrl = this.baseUrl;
     let source: EventSource | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let cursorValidationController: AbortController | undefined;
+    let cursorValidationTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectAttempt = 0;
-    let consecutivePreOpenFailures = 0;
     let cursor: string | undefined;
     let closed = false;
 
@@ -282,38 +352,77 @@ export class SmartSwarmApiClient {
       const activeSource = new EventSource(`${baseUrl}${streamPath}${query}`, { withCredentials: true });
       source = activeSource;
       let opened = false;
+      let handlingPreOpenFailure = false;
       activeSource.addEventListener('open', () => {
         if (source !== activeSource || closed) return;
         opened = true;
         reconnectAttempt = 0;
-        consecutivePreOpenFailures = 0;
         handlers.connection?.('connected');
       });
       activeSource.addEventListener('checkpoint', (rawEvent) => {
         if (source !== activeSource || closed) return;
         const lastEventId = (rawEvent as MessageEvent<string>).lastEventId;
-        if (lastEventId) cursor = lastEventId;
+        if (!lastEventId) return;
+        if (!isBoundedString(lastEventId, MAX_RUNTIME_EVENT_CURSOR_LENGTH)) {
+          handlers.error?.(new Error('Malformed checkpoint cursor: value exceeds safe limits.'));
+          scheduleReconnect();
+          return;
+        }
+        cursor = lastEventId;
       });
       activeSource.addEventListener('activity', (rawEvent) => {
         if (source !== activeSource || closed) return;
         try {
-          const event = JSON.parse((rawEvent as MessageEvent<string>).data) as RuntimeEvent;
+          const data = (rawEvent as MessageEvent<unknown>).data;
+          if (typeof data !== 'string' || data.length > MAX_RUNTIME_EVENT_RAW_PAYLOAD_LENGTH) {
+            throw new Error('Malformed activity payload: raw data exceeds safe limits.');
+          }
+          const event = parseRuntimeEvent(JSON.parse(data));
           cursor = event.cursor;
           handlers.event(event);
         } catch (error) {
-          const lastEventId = (rawEvent as MessageEvent<string>).lastEventId;
-          if (lastEventId) cursor = lastEventId;
           handlers.error?.(error instanceof Error ? error : new Error('Unable to parse smart-swarm activity.'));
           scheduleReconnect();
         }
       });
       activeSource.addEventListener('error', () => {
-        if (source !== activeSource || closed) return;
-        if (!opened && cursor) {
-          consecutivePreOpenFailures += 1;
-          if (consecutivePreOpenFailures >= 2) cursor = undefined;
+        if (source !== activeSource || closed || handlingPreOpenFailure) return;
+        if (opened || !cursor) {
+          scheduleReconnect();
+          return;
         }
-        scheduleReconnect();
+        handlingPreOpenFailure = true;
+        activeSource.close();
+        const failedCursor = cursor;
+        const validationSearch = new URLSearchParams({ cursor: failedCursor, limit: '1' });
+        if (workspaceId) validationSearch.set('workspaceId', workspaceId);
+        const validationController = new AbortController();
+        cursorValidationController = validationController;
+        cursorValidationTimer = setTimeout(() => {
+          if (cursorValidationController !== validationController) return;
+          cursorValidationController = undefined;
+          cursorValidationTimer = undefined;
+          validationController.abort();
+          if (source === activeSource && !closed) scheduleReconnect();
+        }, CURSOR_VALIDATION_TIMEOUT_MS);
+        void fetch(
+          `${baseUrl}/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/events?${validationSearch.toString()}`,
+          { method: 'GET', credentials: 'include', signal: validationController.signal },
+        ).then((response) => {
+          if (cursorValidationController !== validationController) return;
+          if (cursorValidationTimer) clearTimeout(cursorValidationTimer);
+          cursorValidationController = undefined;
+          cursorValidationTimer = undefined;
+          if (source !== activeSource || closed) return;
+          if (response.status === 422 && cursor === failedCursor) cursor = undefined;
+          scheduleReconnect();
+        }).catch(() => {
+          if (cursorValidationController !== validationController) return;
+          if (cursorValidationTimer) clearTimeout(cursorValidationTimer);
+          cursorValidationController = undefined;
+          cursorValidationTimer = undefined;
+          if (source === activeSource && !closed) scheduleReconnect();
+        });
       });
     }
 
@@ -327,6 +436,10 @@ export class SmartSwarmApiClient {
     return () => {
       closed = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (cursorValidationTimer) clearTimeout(cursorValidationTimer);
+      cursorValidationController?.abort();
+      cursorValidationController = undefined;
+      cursorValidationTimer = undefined;
       closeSource();
     };
   }

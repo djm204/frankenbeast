@@ -14,6 +14,7 @@ import {
   type RuntimeWorkspace,
   type SmartSwarmApiClient,
 } from '../lib/smart-swarm-api';
+import { RuntimeBrainPulse } from '../components/smart-swarm/runtime-brain-pulse';
 
 interface SmartSwarmPageProps {
   client: SmartSwarmApiClient;
@@ -285,6 +286,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [liveEvents, setLiveEvents] = useState<RuntimeEvent[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedPulseSource, setSelectedPulseSource] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [providerError, setProviderError] = useState<unknown>(null);
   const [snapshotError, setSnapshotError] = useState<unknown>(null);
@@ -334,7 +336,25 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           || left.id.localeCompare(right.id);
       })
     : [];
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const selectedTask = tasks.find((task) => (
+    task.id === selectedTaskId
+    && (!selectedPulseSource || task.workspaceId === selectedPulseSource.workspaceId)
+  )) ?? null;
+  const referencedRun = selectedPulseSource?.runId
+    ? runs.find((run) => (
+      run.id === selectedPulseSource.runId
+      && run.workspaceId === selectedPulseSource.workspaceId
+      && run.taskId === selectedPulseSource.taskId
+    )) ?? null
+    : null;
+  const selectedTaskRuns = selectedTask
+    ? [...new Map([
+        ...(referencedRun ? [referencedRun] : []),
+        ...runs.filter((run) => (
+          run.taskId === selectedTask.id && run.workspaceId === selectedTask.workspaceId
+        )).sort(compareRuntimeRunRecency),
+      ].map((run) => [run.id, run])).values()].slice(0, 20)
+    : [];
   const selectedTaskActionPending = selectedTask
     ? [...actionIdempotencyKeys.current.values()].some((intent) => (
         intent.providerId === providerId
@@ -400,6 +420,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           setLiveEvents([]);
           setWorkspaceCatalog(null);
           setWorkspaceId('');
+          setSelectedPulseSource(null);
           setSelectedTaskId(null);
           setSnapshotError(null);
           setWorkspaceCatalogError(null);
@@ -545,6 +566,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         const catalogWorkspaces = catalogSnapshot.workspaces.data;
         if (!catalogWorkspaces.some((workspace) => workspace.id === currentWorkspaceId.current)) {
           setSnapshot(null);
+          setSelectedPulseSource(null);
           setSelectedTaskId(null);
           setWorkspaceId(preferredWorkspaceId(catalogWorkspaces));
         }
@@ -591,6 +613,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                 setLiveEvents([]);
                 setWorkspaceCatalog(null);
                 setWorkspaceId('');
+                setSelectedPulseSource(null);
                 setSelectedTaskId(null);
                 setWorkspaceCatalogError(null);
                 setStreamError(null);
@@ -610,6 +633,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               onChange={(event) => {
                 setSnapshot(null);
                 setLiveEvents([]);
+                setSelectedPulseSource(null);
                 setSelectedTaskId(null);
                 setLoading(true);
                 setWorkspaceId(event.target.value);
@@ -663,6 +687,19 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
       {snapshot ? (
         <>
+          {provider ? (
+            <RuntimeBrainPulse
+              connection={connection}
+              events={filteredEvents}
+              onOpenTask={(event, trigger) => {
+                taskDetailTrigger.current = trigger;
+                setSelectedPulseSource(event);
+                setSelectedTaskId(event.taskId);
+              }}
+              provider={provider}
+              snapshot={snapshot}
+            />
+          ) : null}
           <section className="smart-swarm-capabilities rail-card" aria-label="Provider capabilities">
             <div>
               <p className="eyebrow">Runtime status</p>
@@ -740,6 +777,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                         className="smart-swarm-task"
                         onClick={(event) => {
                           taskDetailTrigger.current = event.currentTarget;
+                          setSelectedPulseSource(null);
                           setSelectedTaskId(task.id);
                         }}
                         type="button"
@@ -804,17 +842,75 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           client={client}
           key={`${provider.id}:${selectedTask.id}`}
           onActionApplied={() => setRefreshNonce((current) => current + 1)}
-          onClose={() => setSelectedTaskId(null)}
+          onClose={() => {
+            setSelectedPulseSource(null);
+            setSelectedTaskId(null);
+          }}
           provider={provider}
           returnFocus={taskDetailTrigger.current}
-          runs={runs
-            .filter((run) => run.taskId === selectedTask.id)
-            .sort(compareRuntimeRunRecency)
-            .slice(0, 20)}
+          runs={selectedTaskRuns}
           task={selectedTask}
+        />
+      ) : selectedPulseSource?.taskId ? (
+        <UnavailableSourceDetail
+          event={selectedPulseSource}
+          onClose={() => {
+            setSelectedPulseSource(null);
+            setSelectedTaskId(null);
+          }}
+          referencedRun={referencedRun}
+          returnFocus={taskDetailTrigger.current}
         />
       ) : null}
     </main>
+  );
+}
+
+function UnavailableSourceDetail({ event, referencedRun, returnFocus, onClose }: {
+  event: RuntimeEvent;
+  referencedRun: RuntimeRun | null;
+  returnFocus: HTMLButtonElement | null;
+  onClose(): void;
+}) {
+  const closeButton = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeButton.current?.focus();
+    return () => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+    };
+  }, [returnFocus]);
+  return (
+    <section
+      aria-label={`Source task ${event.taskId} unavailable`}
+      aria-modal="true"
+      className="smart-swarm-detail"
+      onKeyDown={(keyEvent) => {
+        if (keyEvent.key === 'Escape') {
+          keyEvent.preventDefault();
+          onClose();
+        } else if (keyEvent.key === 'Tab') {
+          keyEvent.preventDefault();
+          closeButton.current?.focus();
+        }
+      }}
+      role="dialog"
+    >
+      <header>
+        <div><p className="eyebrow">Unavailable source</p><h3>Task {event.taskId}</h3></div>
+        <button className="button button--secondary button--compact" onClick={onClose} ref={closeButton} type="button">Close</button>
+      </header>
+      <p role="status">The referenced task is outside the bounded task snapshot.</p>
+      <dl>
+        <div><dt>Event</dt><dd>{event.id}</dd></div>
+        <div><dt>Workspace</dt><dd>{event.workspaceId}</dd></div>
+      </dl>
+      <section>
+        <h4>Referenced run evidence</h4>
+        {referencedRun ? (
+          <article><strong>{referencedRun.id}</strong><span>{referencedRun.state}</span><p>{referencedRun.summary ?? 'No run summary.'}</p></article>
+        ) : <p>Referenced run evidence is unavailable.</p>}
+      </section>
+    </section>
   );
 }
 
