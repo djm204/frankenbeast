@@ -2527,6 +2527,7 @@ button {
 
 .smart-swarm-task > span:first-child,
 .smart-swarm-task > span:first-child > *,
+.smart-swarm-task__run,
 .smart-swarm-task > small {
   min-width: 0;
   overflow-wrap: anywhere;

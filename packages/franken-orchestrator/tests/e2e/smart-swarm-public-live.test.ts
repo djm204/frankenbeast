@@ -15,6 +15,7 @@ import {
 } from '@playwright/test';
 import { describe, expect, it } from 'vitest';
 import { isPublicIpAddress } from './smart-swarm-public-live-address.js';
+import { credentialRedactionNeedles } from './smart-swarm-public-live-redaction.js';
 import { hermesTimestamp } from './smart-swarm-public-live-time.js';
 
 const execFileAsync = promisify(execFile);
@@ -114,16 +115,6 @@ function browserSubprocessEnvironment(): Record<string, string> {
     const value = process.env[key];
     return value === undefined ? [] : [[key, value]];
   }));
-}
-
-function credentialRedactionNeedles(credential: { username: string; password: string }): string[] {
-  const basicMaterial = Buffer.from(`${credential.username}:${credential.password}`).toString('base64');
-  return [...new Set([
-    credential.username,
-    credential.password,
-    basicMaterial,
-    `Basic ${basicMaterial}`,
-  ])];
 }
 
 function expectCredentialRedaction(
@@ -324,6 +315,10 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
             constructor(...args) {
               super(...args);
               window.__publicAcceptanceEventSource = this;
+              window.__publicAcceptanceRawActivityEvents ??= [];
+              this.addEventListener('activity', (event) => {
+                window.__publicAcceptanceRawActivityEvents.push(event.data);
+              });
             }
           };
           window.__interruptPublicAcceptanceEventSource = () => {
@@ -400,6 +395,12 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       const eventTime = liveEvent.locator(`time[datetime="${expectedOccurredAt}"]`);
       await expectBrowser(eventTime).toBeVisible();
       expectCredentialRedaction(await liveEvent.evaluate((element) => element.outerHTML), credential, 'live SSE event');
+      const rawLiveEvents = await page.evaluate<string[]>('window.__publicAcceptanceRawActivityEvents || []');
+      const rawLiveEvent = rawLiveEvents.map((payload) => JSON.parse(payload) as Record<string, unknown>)
+        .find((event) => event['id'] === expectedLiveEventId);
+      expect(rawLiveEvent, 'The raw live SSE payload must be captured').toBeDefined();
+      expectCredentialRedaction(rawLiveEvent, credential, 'raw live SSE payload');
+      expect(objectKeys(rawLiveEvent).map((key) => key.toLowerCase())).not.toContain('authorization');
       await openSource.click();
       const sourceDetail = page.getByRole('dialog', { name: `${sourceBefore.title} details` });
       await expectBrowser(sourceDetail).toBeVisible();
@@ -491,6 +492,13 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       }).count()).toBe(1);
       const replayEvents = page.getByText(replayMarker, { exact: true });
       expectCredentialRedaction(await replayEvents.first().evaluate((element) => element.outerHTML), credential, 'replayed SSE event');
+      const replayEventId = normalizedCommentId(replaySource.id);
+      const rawReplayEvents = await page.evaluate<string[]>('window.__publicAcceptanceRawActivityEvents || []');
+      const rawReplayEvent = rawReplayEvents.map((payload) => JSON.parse(payload) as Record<string, unknown>)
+        .find((event) => event['id'] === replayEventId);
+      expect(rawReplayEvent, 'The raw replayed SSE payload must be captured').toBeDefined();
+      expectCredentialRedaction(rawReplayEvent, credential, 'raw replayed SSE payload');
+      expect(objectKeys(rawReplayEvent).map((key) => key.toLowerCase())).not.toContain('authorization');
 
       for (const viewport of [
         { width: 390, height: 844 },

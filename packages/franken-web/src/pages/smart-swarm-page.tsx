@@ -881,7 +881,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                         type="button"
                       >
                         <span><strong>{task.title}</strong><small>{task.state} · priority {task.priority ?? 'unset'}</small></span>
-                        <span>{currentRun
+                        <span className="smart-swarm-task__run">{currentRun
                           ? `Run ${currentRun.id}: ${currentRun.state}`
                           : snapshot.runs.status === 'unsupported' ? 'Runs unsupported' : 'No current run'}</span>
                         {parents.map((parent) => <small key={`parent:${parent.id}`}>Parent {parent.label}</small>)}
