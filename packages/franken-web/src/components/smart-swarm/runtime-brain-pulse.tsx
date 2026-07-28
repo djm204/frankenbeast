@@ -52,12 +52,21 @@ export function RuntimeBrainPulse({
   const unsupportedReason = provider.capabilities.streaming.status === 'unsupported'
     ? provider.capabilities.streaming.reason
     : null;
+  const snapshotUnavailable = snapshot.state === 'unavailable'
+    || snapshot.state === 'schema-incompatible';
+  const providerUnavailable = provider.health.state === 'unavailable'
+    || provider.health.state === 'schema-incompatible';
+  const runtimeUnavailable = snapshotUnavailable || providerUnavailable;
+  const runtimeUnavailableReason = snapshotUnavailable
+    ? snapshot.message ?? 'The normalized runtime snapshot is unavailable.'
+    : provider.health.message ?? 'The normalized runtime provider is unavailable.';
+  const isLiveConnected = connection === 'connected' && !runtimeUnavailable;
   const pulseState = recentEvents.length === 0
     ? 'idle'
-    : connection === 'connected'
+    : isLiveConnected
       ? 'active'
       : 'stale';
-  const eventCountLabel = connection === 'connected'
+  const eventCountLabel = isLiveConnected
     ? eventLimit !== undefined && recentEvents.length >= eventLimit
       ? `Latest ${recentEvents.length} retained events from the last minute`
       : `${recentEvents.length} ${recentEvents.length === 1 ? 'event' : 'events'} in the last minute`
@@ -86,6 +95,10 @@ export function RuntimeBrainPulse({
       ) : connection === 'reconnecting' || connection === 'unavailable' ? (
         <p className="runtime-brain-pulse__state runtime-brain-pulse__state--disconnected" role="alert">
           <strong>Disconnected</strong> · {connection === 'reconnecting' ? 'Reconnecting to normalized runtime events.' : 'Live runtime events are unavailable.'}
+        </p>
+      ) : runtimeUnavailable ? (
+        <p className="runtime-brain-pulse__state runtime-brain-pulse__state--disconnected" role="alert">
+          <strong>Unavailable</strong> · {runtimeUnavailableReason}
         </p>
       ) : snapshot.state === 'degraded' || provider.health.state === 'degraded' ? (
         <p className="runtime-brain-pulse__state runtime-brain-pulse__state--degraded" role="status">

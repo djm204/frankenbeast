@@ -270,6 +270,48 @@ describe('RuntimeBrainPulse', () => {
     expect(status.textContent).not.toContain('event history');
   });
 
+  it.each([
+    {
+      label: 'snapshot unavailable',
+      expectedReason: 'Snapshot source unavailable.',
+      ignoredReason: 'The runtime provider is healthy.',
+      testProvider: provider,
+      testSnapshot: { ...snapshot, state: 'unavailable' as const, message: 'Snapshot source unavailable.' },
+    },
+    {
+      label: 'provider schema incompatible',
+      expectedReason: 'Provider schema incompatible.',
+      ignoredReason: 'Snapshot data is stale but readable.',
+      testProvider: {
+        ...provider,
+        health: { ...provider.health, state: 'schema-incompatible' as const, message: 'Provider schema incompatible.' },
+      },
+      testSnapshot: { ...snapshot, message: 'Snapshot data is stale but readable.' },
+    },
+  ])('preserves $label while the event transport is connected', ({
+    expectedReason,
+    ignoredReason,
+    testProvider,
+    testSnapshot,
+  }) => {
+    render(
+      <RuntimeBrainPulse
+        connection="connected"
+        events={[]}
+        onOpenTask={() => undefined}
+        provider={testProvider}
+        snapshot={testSnapshot}
+      />,
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Unavailable');
+    expect(alert.textContent).toContain(expectedReason);
+    expect(alert.textContent).not.toContain(ignoredReason);
+    expect(alert.textContent).not.toContain('Connected');
+    expect(alert.textContent).not.toContain('No activity');
+  });
+
   it('discloses when the displayed event count reaches its retention limit', () => {
     const now = new Date();
     const events = Array.from({ length: 100 }, (_, index): RuntimeEvent => ({

@@ -18,6 +18,8 @@ const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+
 const RuntimeWorkspaceIdSchema = z.string().min(1);
 const RuntimeTaskIdSchema = z.string().min(1);
 const RuntimeApprovalIdSchema = z.string().min(1);
+const RuntimeEventIdSchema = z.string().min(1).max(1_024);
+const RuntimeEventCursorSchema = z.string().min(1).max(4_096);
 const RuntimeActionWorkspaceIdSchema = RuntimeWorkspaceIdSchema;
 const RuntimeActionTaskIdSchema = RuntimeTaskIdSchema;
 const BoundedReasonSchema = z.string().trim().min(1).max(1000);
@@ -192,11 +194,11 @@ export const RuntimeRunSchema = z.object({
 }).strict();
 
 export const RuntimeEventSchema = z.object({
-  id: z.string().min(1),
-  cursor: z.string().min(1),
-  workspaceId: z.string().min(1),
-  taskId: z.string().min(1).nullable(),
-  runId: z.string().min(1).nullable(),
+  id: RuntimeEventIdSchema,
+  cursor: RuntimeEventCursorSchema,
+  workspaceId: RuntimeEventIdSchema,
+  taskId: RuntimeEventIdSchema.nullable(),
+  runId: RuntimeEventIdSchema.nullable(),
   type: z.enum(['lifecycle', 'comment', 'log', 'audit', 'blocker', 'approval', 'unknown']),
   occurredAt: TimestampSchema,
   summary: z.string().max(16_384),

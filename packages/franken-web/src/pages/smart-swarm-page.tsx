@@ -336,8 +336,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           || left.id.localeCompare(right.id);
       })
     : [];
+  const selectedTaskLookupId = selectedTaskId ?? selectedPulseSource?.taskId ?? null;
   const selectedTask = tasks.find((task) => (
-    task.id === selectedTaskId
+    task.id === selectedTaskLookupId
     && (!selectedPulseSource || task.workspaceId === selectedPulseSource.workspaceId)
   )) ?? null;
   const referencedRun = selectedPulseSource?.runId

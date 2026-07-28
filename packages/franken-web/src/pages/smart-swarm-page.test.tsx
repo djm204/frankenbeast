@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { SmartSwarmPage } from './smart-swarm-page';
 import { SmartSwarmApiError } from '../lib/smart-swarm-api';
 import type {
+  RuntimeEvent,
   RuntimeProvider,
   RuntimeSnapshot,
   SmartSwarmApiClient,
@@ -238,6 +239,60 @@ describe('SmartSwarmPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open source task task-missing for event event-missing' }));
     detail = await screen.findByRole('dialog', { name: 'Source task task-missing unavailable' });
     expect(detail.textContent).toContain('Referenced run evidence is unavailable');
+  });
+
+  it('upgrades an open pulse source when a later topology refresh includes its task', async () => {
+    const occurredAt = new Date().toISOString();
+    const sourceEvent: RuntimeEvent = {
+      id: 'event-late-task',
+      cursor: 'cursor-late-task',
+      workspaceId: 'board-main',
+      taskId: 'task-late',
+      runId: null,
+      type: 'log',
+      occurredAt,
+      summary: 'Task topology will arrive later',
+    };
+    const withoutTask: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'available', data: [] },
+      events: { status: 'available', data: [sourceEvent] },
+    };
+    const withTask: RuntimeSnapshot = {
+      ...withoutTask,
+      tasks: { status: 'available', data: [{
+        id: 'task-late',
+        workspaceId: 'board-main',
+        title: 'Late topology task',
+        state: 'running',
+        parentIds: [],
+        dependencyIds: [],
+        ownerIds: [],
+        priority: null,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      }] },
+    };
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(withoutTask)
+      .mockResolvedValueOnce(withoutTask)
+      .mockResolvedValueOnce(withoutTask)
+      .mockResolvedValue(withTask);
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open source task task-late for event event-late-task' }));
+    expect(await screen.findByRole('dialog', { name: 'Source task task-late unavailable' })).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('dialog', { name: 'Source task task-late unavailable' })).toBeDefined();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh topology' }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+
+    const detail = await screen.findByRole('dialog', { name: 'Late topology task details' });
+    expect(detail.textContent).toContain('Late topology task');
+    expect(screen.queryByRole('dialog', { name: 'Source task task-late unavailable' })).toBeNull();
   });
 
   it('does not resolve referenced run evidence for a different task', async () => {

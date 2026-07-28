@@ -11,5 +11,6 @@
 - [x] Commit as David Mendez, push, and open linked PR #3872.
 - [x] Address all three first-round current-head Codex findings with focused RED/GREEN coverage.
 - [x] Address all five follow-up current-head Codex findings with focused RED/GREEN coverage: exact event-section discriminants, normalized timestamps, shared metadata bounds, wrapping for long evidence, and honest retained-event counts.
+- [x] Address all four third-round current-head Codex findings plus two independent local review findings: normalized ID/cursor bounds, unavailable-state semantics, retained source-task resolution, Codex metadata limits, transition suffix budget, and source-specific status reasons.
 - [ ] Push remediation and complete fresh exact-head Codex/CI/thread gates.
 - [ ] Guarded squash merge exact reviewed head, verify issue closure/deployment/public authenticated browser evidence, and record terminal Kanban handoff.

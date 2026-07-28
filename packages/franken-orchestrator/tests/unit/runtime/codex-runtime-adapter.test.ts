@@ -531,6 +531,61 @@ input.on('line', (line) => {
     expect(JSON.stringify(snapshot)).not.toContain('secret-status-value');
   });
 
+  it.each(['sessionId', 'cliVersion', 'modelProvider'] as const)(
+    'degrades safely when thread %s exceeds normalized metadata bounds',
+    async (field) => {
+      const adapter = new CodexRuntimeAdapter({
+        request: async () => ({
+          data: [{
+            id: 'thread-oversized-metadata',
+            sessionId: 'session-1',
+            cliVersion: '0.145.0',
+            createdAt: 1_785_081_400,
+            updatedAt: 1_785_081_660,
+            cwd: '/workspace/project',
+            ephemeral: false,
+            modelProvider: 'openai',
+            status: { type: 'idle' },
+            [field]: 'x'.repeat(4_097),
+          }],
+          nextCursor: null,
+        }),
+      });
+
+      await expect(adapter.describe()).resolves.toEqual(expect.objectContaining({
+        health: expect.objectContaining({ state: 'degraded' }),
+      }));
+      await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({
+        state: 'degraded',
+        agents: { status: 'available', data: [] },
+      }));
+    },
+  );
+
+  it('degrades safely when a thread id cannot fit normalized event identifiers', async () => {
+    const adapter = new CodexRuntimeAdapter({
+      request: async () => ({
+        data: [{
+          id: 'x'.repeat(957),
+          sessionId: 'session-1',
+          cliVersion: '0.145.0',
+          createdAt: 1_785_081_400,
+          updatedAt: 1_785_081_660,
+          cwd: '/workspace/project',
+          ephemeral: false,
+          modelProvider: 'openai',
+          status: { type: 'idle' },
+        }],
+        nextCursor: null,
+      }),
+    });
+
+    await expect(adapter.getSnapshot()).resolves.toEqual(expect.objectContaining({
+      state: 'degraded',
+      agents: { status: 'available', data: [] },
+    }));
+  });
+
   it('rejects active thread metadata that omits required active flags', async () => {
     const adapter = new CodexRuntimeAdapter({
       request: async () => ({

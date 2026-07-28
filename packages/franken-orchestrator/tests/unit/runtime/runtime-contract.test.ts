@@ -197,6 +197,26 @@ describe('provider-neutral runtime contract', () => {
     expect(RuntimeEventSchema.safeParse({ ...event, summary: `${event.summary}x` }).success).toBe(false);
   });
 
+  it('bounds normalized event identifiers and cursors consistently with browser validation', () => {
+    const event = {
+      id: 'x'.repeat(1_024),
+      cursor: 'x'.repeat(4_096),
+      workspaceId: 'x'.repeat(1_024),
+      taskId: 'x'.repeat(1_024),
+      runId: 'x'.repeat(1_024),
+      type: 'log',
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      summary: 'bounded identifiers',
+    } as const;
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(RuntimeEventSchema.safeParse({ ...event, id: `${event.id}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, workspaceId: `${event.workspaceId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, taskId: `${event.taskId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, runId: `${event.runId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, cursor: `${event.cursor}x` }).success).toBe(false);
+  });
+
   it('bounds normalized metadata consistently with browser validation', () => {
     const metadata = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`key-${index}`, index]));
 
