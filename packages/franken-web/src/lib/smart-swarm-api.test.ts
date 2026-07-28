@@ -391,4 +391,44 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
     vi.useRealTimers();
   });
+
+  it('submits provider-neutral runtime actions through the authenticated same-origin API', async () => {
+    const result = {
+      status: 'applied' as const,
+      providerId: 'hermes',
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      audit: {
+        requestedBy: 'authenticated-operator' as const,
+        actionType: 'blocker.resolve' as const,
+        targetId: 'hermes:global:t_worker',
+        outcome: 'applied' as const,
+        previousState: 'blocked',
+        currentState: 'ready',
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ data: result }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const request = {
+      correlationId: result.correlationId,
+      idempotencyKey: 'blocker.resolve:t_worker:one',
+      action: {
+        type: 'blocker.resolve' as const,
+        workspaceId: 'hermes:global',
+        taskId: 'hermes:global:t_worker',
+        reason: 'Operator resolved the blocker',
+      },
+    };
+
+    await expect(client.executeAction('hermes', request)).resolves.toEqual(result);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/actions`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      },
+    );
+  });
 });

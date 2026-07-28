@@ -81,6 +81,17 @@ function runOutdatedGuard(report: unknown, baseline: unknown = []) {
   );
 }
 
+function runOutdatedGuardWithRepoBaseline(report: unknown) {
+  return spawnSync(
+    process.execPath,
+    [OUTDATED_SCRIPT, "--input", writeJson(report)],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+    },
+  );
+}
+
 function runDependabotSupplyChainGuard(config: string) {
   return spawnSync(
     process.execPath,
@@ -232,6 +243,45 @@ describe("dependency CI guards for issue #1414", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("baseline-approved major gap");
+  });
+
+  it("keeps the OpenAI 7 registry drift in the checked-in baseline", () => {
+    const result = runOutdatedGuardWithRepoBaseline({
+      openai: {
+        current: "6.48.0",
+        wanted: "6.49.0",
+        latest: "7.0.0",
+        location: "node_modules/openai",
+        dependent: "franken-orchestrator",
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("baseline-approved major gap");
+  });
+
+  it("keeps the JSDOM 30 registry drift in both checked-in workspace baselines", () => {
+    const result = runOutdatedGuardWithRepoBaseline({
+      jsdom: [
+        {
+          current: "29.1.1",
+          wanted: "29.1.1",
+          latest: "30.0.0",
+          location: "node_modules/jsdom",
+          dependent: "franken-web",
+        },
+        {
+          current: "29.1.1",
+          wanted: "29.1.1",
+          latest: "30.0.0",
+          location: "node_modules/jsdom",
+          dependent: "frankenbeast",
+        },
+      ],
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("2 baseline-approved major gaps");
   });
 
   it("does not let one baseline entry approve another workspace location", () => {

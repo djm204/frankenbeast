@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SmartSwarmApiError,
   type RuntimeAgent,
+  type RuntimeAction,
   type RuntimeCapability,
   type RuntimeConnectionState,
   type RuntimeEvent,
@@ -16,6 +17,15 @@ import {
 
 interface SmartSwarmPageProps {
   client: SmartSwarmApiClient;
+}
+
+interface PendingActionIntent {
+  idempotencyKey: string;
+  providerId: string;
+  taskId: string;
+  action: RuntimeAction['type'];
+  inFlight: boolean;
+  awaitingConfirmation: boolean;
 }
 
 const MAX_VISIBLE_TASKS = 200;
@@ -34,6 +44,29 @@ function errorMessage(error: unknown): string {
 
 function capabilityReason(capability: RuntimeCapability): string | null {
   return capability.status === 'unsupported' ? capability.reason : null;
+}
+
+function actionPostconditionConfirmed(
+  intent: PendingActionIntent,
+  task: RuntimeTask,
+  blockers: Array<{ taskId: string }> | null,
+): boolean {
+  switch (intent.action) {
+    case 'blocker.resolve':
+      return task.state !== 'blocked'
+        && blockers !== null
+        && !blockers.some((blocker) => blocker.taskId === intent.taskId);
+    case 'task.cancel':
+      return task.state === 'cancelled';
+    case 'policy.apply':
+      return task.state === 'ready' || task.state === 'running';
+    case 'task.pause':
+      return task.state === 'queued';
+    case 'task.resume':
+      return task.state === 'ready' || task.state === 'running';
+    default:
+      return false;
+  }
 }
 
 function taskActivityRank(state: RuntimeTask['state']): number {
@@ -194,6 +227,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const currentWorkspaceId = useRef(workspaceId);
   currentWorkspaceId.current = workspaceId;
   const taskDetailTrigger = useRef<HTMLButtonElement | null>(null);
+  const actionIdempotencyKeys = useRef(new Map<string, PendingActionIntent>());
 
   const provider = providers.find((candidate) => candidate.id === providerId);
   const error = snapshotError ?? providerError ?? workspaceCatalogError ?? streamError;
@@ -213,6 +247,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
     ? [...(available(snapshot.blockers) ?? [])]
       .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.id.localeCompare(right.id))
     : [];
+  const confirmedBlockers = snapshot?.blockers.status === 'available' ? blockers : null;
   const approvals = snapshot
     ? [...(available(snapshot.approvals) ?? [])]
       .sort((left, right) => {
@@ -223,6 +258,24 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       })
     : [];
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const selectedTaskActionPending = selectedTask
+    ? [...actionIdempotencyKeys.current.values()].some((intent) => (
+        intent.providerId === providerId
+        && intent.taskId === selectedTask.id
+        && (intent.inFlight || intent.awaitingConfirmation)
+        && !actionPostconditionConfirmed(intent, selectedTask, confirmedBlockers)
+      ))
+    : false;
+
+  useEffect(() => {
+    for (const [key, intent] of actionIdempotencyKeys.current) {
+      if (intent.providerId !== providerId) continue;
+      const currentTask = tasks.find((task) => task.id === intent.taskId);
+      if (currentTask && actionPostconditionConfirmed(intent, currentTask, confirmedBlockers)) {
+        actionIdempotencyKeys.current.delete(key);
+      }
+    }
+  }, [confirmedBlockers, providerId, tasks]);
 
   const taskNames = useMemo(() => new Map(tasks.map((task) => [task.id, task.title])), [tasks]);
   const newestUnfinishedRunByTask = useMemo(() => {
@@ -635,6 +688,11 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
       {selectedTask && provider ? (
         <TaskDetail
+          actionIdempotencyKeys={actionIdempotencyKeys.current}
+          actionPendingFromStore={selectedTaskActionPending}
+          client={client}
+          key={`${provider.id}:${selectedTask.id}`}
+          onActionApplied={() => setRefreshNonce((current) => current + 1)}
           onClose={() => setSelectedTaskId(null)}
           provider={provider}
           returnFocus={taskDetailTrigger.current}
@@ -649,24 +707,107 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   );
 }
 
-function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
+function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempotencyKeys, actionPendingFromStore, onActionApplied, onClose }: {
   task: RuntimeTask;
   provider: RuntimeProvider;
   runs: RuntimeSnapshot['runs'] extends RuntimeSection<infer T> ? T : never;
+  client: SmartSwarmApiClient;
   returnFocus: HTMLButtonElement | null;
+  actionIdempotencyKeys: Map<string, PendingActionIntent>;
+  actionPendingFromStore: boolean;
+  onActionApplied(): void;
   onClose(): void;
 }) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
+  const [actionPending, setActionPending] = useState(actionPendingFromStore);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+  useEffect(() => {
+    setActionPending(actionPendingFromStore);
+  }, [actionPendingFromStore]);
   useEffect(() => {
     closeButton.current?.focus();
     return () => {
       if (returnFocus?.isConnected) returnFocus.focus();
     };
   }, [returnFocus]);
-  const unwiredReason = 'This control is not wired to a runtime mutation yet.';
-  const pauseReason = capabilityReason(provider.capabilities.pause) ?? unwiredReason;
-  const resumeReason = capabilityReason(provider.capabilities.resume) ?? unwiredReason;
-  const cancelReason = capabilityReason(provider.capabilities.cancellation) ?? unwiredReason;
+  const pauseReason = capabilityReason(provider.capabilities.pause);
+  const pauseStateReason = 'Pause is disabled because normalized task state does not distinguish paused from queued work.';
+  const resumeReason = capabilityReason(provider.capabilities.resume);
+  const resumeStateReason = 'Resume is disabled because normalized task state does not distinguish paused from queued work.';
+  const cancelReason = capabilityReason(provider.capabilities.cancellation);
+  const policyReason = capabilityReason(provider.capabilities.policyActions);
+  const blockerReason = capabilityReason(provider.capabilities.blockers);
+  const policyStateReason = !['blocked', 'queued'].includes(task.state)
+    ? 'Only blocked and queued tasks can be promoted.'
+    : null;
+
+  async function executeTaskAction(
+    action: 'blocker.resolve' | 'task.pause' | 'task.resume' | 'task.cancel' | 'policy.apply',
+    reason: string,
+    successMessage: string,
+  ): Promise<void> {
+    setActionPending(true);
+    setActionStatus(null);
+    let awaitingConfirmation = false;
+    try {
+      const runtimeAction: RuntimeAction = action === 'policy.apply'
+        ? {
+            type: action,
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            policy: 'promote-task',
+            reason,
+          }
+        : {
+            type: action,
+            workspaceId: task.workspaceId,
+            taskId: task.id,
+            reason,
+          };
+      const actionIntentKey = `${provider.id}:${task.id}:${action}`;
+      const pendingIntent = actionIdempotencyKeys.get(actionIntentKey);
+      const idempotencyKey = pendingIntent?.idempotencyKey ?? `${action}:${crypto.randomUUID()}`;
+      const actionIntent = pendingIntent ?? {
+        idempotencyKey,
+        providerId: provider.id,
+        taskId: task.id,
+        action,
+        inFlight: true,
+        awaitingConfirmation: false,
+      };
+      actionIntent.inFlight = true;
+      actionIdempotencyKeys.set(actionIntentKey, actionIntent);
+      const result = await client.executeAction(provider.id, {
+        correlationId: crypto.randomUUID(),
+        idempotencyKey,
+        action: runtimeAction,
+      });
+      if (result.status === 'applied') {
+        const appliedIntent = actionIdempotencyKeys.get(actionIntentKey);
+        if (appliedIntent) {
+          appliedIntent.awaitingConfirmation = true;
+          awaitingConfirmation = true;
+        }
+        setActionStatus(successMessage);
+        onActionApplied();
+      } else if (result.status === 'rejected') {
+        actionIdempotencyKeys.delete(actionIntentKey);
+        setActionStatus(`rejected: ${result.reason}`);
+      } else if (result.status === 'failed') {
+        actionIdempotencyKeys.delete(actionIntentKey);
+        setActionStatus(`failed: ${result.reason}`);
+      } else {
+        actionIdempotencyKeys.delete(actionIntentKey);
+        setActionStatus(`unsupported: ${result.reason}`);
+      }
+    } catch (error) {
+      setActionStatus(errorMessage(error));
+    } finally {
+      const pendingIntent = actionIdempotencyKeys.get(`${provider.id}:${task.id}:${action}`);
+      if (pendingIntent) pendingIntent.inFlight = false;
+      if (!awaitingConfirmation) setActionPending(false);
+    }
+  }
   return (
     <section
       aria-label={`${task.title} details`}
@@ -677,8 +818,19 @@ function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
           event.preventDefault();
           onClose();
         } else if (event.key === 'Tab') {
-          event.preventDefault();
-          closeButton.current?.focus();
+          const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+          const first = focusable[0];
+          const last = focusable.at(-1);
+          if (!focusable.some((element) => element === document.activeElement)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first)?.focus();
+          } else if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first?.focus();
+          }
         }
       }}
       role="dialog"
@@ -698,12 +850,76 @@ function TaskDetail({ task, provider, runs, returnFocus, onClose }: {
       </section>
       <section className="smart-swarm-actions" aria-label="Task lifecycle controls">
         <h4>Capability-driven controls</h4>
-        <button disabled title={pauseReason} type="button">Pause task</button>
+        {task.state === 'blocked' ? (
+          <>
+            <button
+              disabled={actionPending || blockerReason !== null}
+              onClick={() => {
+                void executeTaskAction(
+                  'blocker.resolve',
+                  'Resolved from the authenticated smart-swarm dashboard',
+                  'Blocker resolved; refreshing live state.',
+                );
+              }}
+              title={blockerReason ?? undefined}
+              type="button"
+            >Resolve blocker</button>
+            {blockerReason ? <p>{blockerReason}</p> : null}
+          </>
+        ) : null}
+        <button
+          disabled
+          onClick={() => {
+            void executeTaskAction(
+              'task.pause',
+              'Paused from the authenticated smart-swarm dashboard',
+              'Task paused; refreshing live state.',
+            );
+          }}
+          title={pauseReason ?? pauseStateReason}
+          type="button"
+        >Pause task</button>
         {pauseReason ? <p>{pauseReason}</p> : null}
-        <button disabled title={resumeReason} type="button">Resume task</button>
+        <button
+          disabled
+          onClick={() => {
+            void executeTaskAction(
+              'task.resume',
+              'Resumed from the authenticated smart-swarm dashboard',
+              'Task resumed; refreshing live state.',
+            );
+          }}
+          title={resumeReason ?? resumeStateReason}
+          type="button"
+        >Resume task</button>
         {resumeReason ? <p>{resumeReason}</p> : null}
-        <button disabled title={cancelReason} type="button">Cancel task</button>
+        <button
+          disabled={actionPending || cancelReason !== null || !['queued', 'ready', 'running', 'blocked'].includes(task.state)}
+          onClick={() => {
+            void executeTaskAction(
+              'task.cancel',
+              'Cancelled from the authenticated smart-swarm dashboard',
+              'Task cancelled; refreshing live state.',
+            );
+          }}
+          title={cancelReason ?? undefined}
+          type="button"
+        >Cancel task</button>
         {cancelReason ? <p>{cancelReason}</p> : null}
+        <button
+          disabled={actionPending || policyReason !== null || policyStateReason !== null}
+          onClick={() => {
+            void executeTaskAction(
+              'policy.apply',
+              'Promoted from the authenticated smart-swarm dashboard',
+              'Task promoted; refreshing live state.',
+            );
+          }}
+          title={policyReason ?? policyStateReason ?? undefined}
+          type="button"
+        >Promote task</button>
+        {policyReason ? <p>{policyReason}</p> : null}
+        {actionStatus ? <p role="status">{actionStatus}</p> : null}
       </section>
     </section>
   );

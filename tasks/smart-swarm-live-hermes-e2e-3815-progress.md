@@ -1,0 +1,37 @@
+# Smart-swarm live Hermes E2E (#3815) progress
+
+- [x] Verify #3812, #3813, and #3814 are available together on exact `origin/main`.
+- [x] Create and verify isolated worktree/branch from exact base.
+- [x] Read issue acceptance criteria and trace runtime HTTP/SSE, Hermes adapter, dashboard, and existing tests.
+- [x] Add a browser-facing runtime action client test and observe the intended RED failure.
+- [x] Implement the minimal provider-neutral browser action client and observe GREEN.
+- [x] Add dashboard mutation controls with RED→GREEN tests for supported, governed-rejected, and unsupported actions.
+- [x] Add a real isolated-Hermes E2E harness that creates PM/worker/dependency/blocker/event evidence through the Hermes CLI.
+- [x] Exercise authenticated HTTP, ticketed SSE, live event arrival, blocker resolution with queried postcondition, governed rejection, unsupported approval decision, and reconnection.
+- [x] Exercise browser provider/workspace selection, topology, task detail, live evidence, and mutation controls without mocked HTTP.
+- [x] Prove the production bundle has no fixture/demo runtime fallback.
+- [x] Verify temporary processes, workspaces, databases, credentials, and browser state are cleaned up.
+- [x] Add a discoverable root npm script and exact operator documentation.
+- [x] Run focused tests, full relevant tests, lint, typecheck, build, and `git diff --check`.
+- [x] Self-review the complete diff and final clean workspace status.
+- [x] Commit with David Mendez identity, push, and open one issue-scoped PR (#3869).
+- [x] Remediate first-round Codex findings with RED→GREEN tests, isolated Vite credentials, truthful refresh-pending copy, and terminal-state action guards.
+- [x] Remediate second-round Codex findings with RED→GREEN tests for uncertain-action idempotency, pending-action focus trapping, and ready-task promotion guards.
+- [x] Remediate third-round Codex findings with RED→GREEN tests for remount-safe uncertain-action idempotency and archived-task cancellation guards.
+- [x] Remediate fourth-round Codex findings with snapshot-confirmed intent retirement, explicit Hermes command registry wiring, and isolated manual backend state.
+- [x] Remediate fifth-round Codex findings by retaining applied-action locks through snapshot confirmation, removing the Vite-prefixed secret alias, and isolating the E2E registry to Hermes.
+- [x] Remediate sixth-round Codex findings with typed failed outcomes, remount-safe in-flight locks, and action-specific uncertain-key postconditions.
+- [x] Remediate seventh-round Codex findings with running promotion confirmation, task-keyed dialog state, and strict network-404 failure exemption.
+- [x] Remediate eighth-round Codex finding by allowlisting only blocked and queued tasks for promotion.
+- [x] Remediate ninth-round Codex findings with blocked-state confirmation and fail-closed cancellation eligibility.
+- [x] Restore the repository dependency-freshness gate after OpenAI 7 and JSDOM 30 registry drift with exact dependent/location-scoped baselines and RED→GREEN checked-baseline regressions; no opportunistic major upgrade.
+- [x] Re-run the live dependency guard, 24/24 guard tests, serial orchestrator suite (4,887/4,887), root lint/typecheck/build, and `git diff --check`. The first concurrent full-suite run exposed eight load-sensitive orchestrator failures; all passed unchanged in the isolated serial rerun. The first pushed guard regression exposed a CI-only checkout-name mismatch, corrected by using the canonical root package identity `frankenbeast`.
+- [x] Reproduce the tenth-round early-confirmation and over-broad SSE exemption findings with focused RED tests.
+- [x] Verify the preserved minimal remediations with 64/64 focused web tests and 2/2 active E2E-classifier tests.
+- [x] Run the full required local test, lint, typecheck, build, and diff-check gates. Live Hermes E2E passed 3/3; serial orchestrator passed 4,887/4,887; root lint, typecheck, build, and `git diff --check` passed. The concurrent root runner's seven load-sensitive orchestrator failures and one unhandled rejection all passed unchanged in the serial rerun.
+- [x] Commit and push the tenth-round remediation as `44b5a3839` with the required identity.
+- [x] Reply to and resolve both current-head Codex threads; fully paginated GraphQL audit reports zero unresolved Codex-authored threads.
+- [x] Escalate to approved tier 24 and collect the current-head paused-task resumability finding from trigger `5098759747`.
+- [x] Remediate the tier-24 finding by disabling pause while normalized state cannot distinguish paused from queued work; focused RED→GREEN passed, all 65 page tests and all 844 web tests passed, root lint/typecheck/build passed, and the one remaining load-sensitive serial orchestrator timeout passed in isolation.
+- [ ] Commit/push the remediation, resolve the finding, and run one fresh bounded tier-24 `@codex review` to exact-head clean, four green CI checks, and fully paginated zero unresolved Codex threads; do not merge.
+- [ ] Record machine-readable root-blackboard and card handoff.

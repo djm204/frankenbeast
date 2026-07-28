@@ -133,6 +133,34 @@ export interface RuntimeEventPage {
   nextCursor: string | null;
 }
 
+export type RuntimeAction =
+  | { type: 'approval.resolve'; workspaceId: string; approvalId: string; decision: 'approve' | 'reject'; reason?: string }
+  | { type: 'blocker.add'; workspaceId: string; taskId: string; category: 'dependency' | 'needs-input' | 'capability' | 'transient'; reason: string }
+  | { type: 'blocker.resolve'; workspaceId: string; taskId: string; reason?: string }
+  | { type: 'task.pause' | 'task.resume' | 'task.cancel'; workspaceId: string; taskId: string; reason?: string }
+  | { type: 'policy.apply'; workspaceId: string; taskId: string; policy: 'promote-task'; reason: string };
+
+export interface RuntimeActionRequest {
+  correlationId: string;
+  causationId?: string;
+  idempotencyKey: string;
+  action: RuntimeAction;
+}
+
+export interface RuntimeActionAudit {
+  requestedBy: 'authenticated-operator';
+  actionType: RuntimeAction['type'];
+  targetId: string;
+  outcome: 'applied' | 'unsupported' | 'rejected' | 'failed';
+  previousState?: string;
+  currentState?: string;
+}
+
+export type RuntimeActionResult =
+  | { status: 'applied'; providerId: string; correlationId: string; replayed?: boolean; audit: RuntimeActionAudit }
+  | { status: 'unsupported' | 'rejected'; providerId: string; correlationId: string; reason: string; audit: RuntimeActionAudit }
+  | { status: 'failed'; providerId: string; correlationId: string; reason: string; audit: RuntimeActionAudit };
+
 export type RuntimeConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 
 export interface RuntimeSubscriptionHandlers {
@@ -171,6 +199,24 @@ export class SmartSwarmApiClient {
     if (options.activityLimit !== undefined) search.set('activityLimit', String(options.activityLimit));
     const query = search.size > 0 ? `?${search.toString()}` : '';
     return this.request(`/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/snapshot${query}`);
+  }
+
+  async executeAction(providerId: string, request: RuntimeActionRequest): Promise<RuntimeActionResult> {
+    const response = await fetch(
+      `${this.baseUrl}/v1/smart-swarm/providers/${encodeURIComponent(providerId)}/actions`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      },
+    );
+    if (!response.ok) {
+      const message = await extractResponseErrorMessage(response);
+      throw new SmartSwarmApiError(message ?? `HTTP ${response.status}`, response.status);
+    }
+    const body = await response.json() as { data: RuntimeActionResult };
+    return body.data;
   }
 
   async subscribe(
