@@ -424,6 +424,59 @@ describe('SmartSwarmPage', () => {
     }
   });
 
+  it('does not restart completion polling when streamed topology activity refreshes the snapshot', async () => {
+    vi.useFakeTimers();
+    try {
+      let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
+      const fetchMissionCompletion = vi.fn().mockResolvedValue({
+        missionId: 'smart-swarm-runtime', checkedAt: '2026-07-28T03:00:00.000Z',
+        evidenceMaxAgeMs: 60_000, terminal: false, shouldStopJobs: false,
+        jobsToStop: [], blockers: ['deployment evidence is incomplete'], externalGates: [],
+        stages: {
+          implementation: 'passed', reviewed: 'passed', merged: 'passed',
+          deployed: 'pending', realDataAccepted: 'pending', completion: 'pending',
+        },
+      });
+      render(<SmartSwarmPage client={createClient({
+        fetchMissionCompletion,
+        subscribe: vi.fn().mockImplementation(async (_providerId, _workspaceId, nextHandlers) => {
+          handlers = nextHandlers;
+          return vi.fn();
+        }),
+      })} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(1);
+      const event = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+      if (!event) throw new Error('Expected an event fixture');
+
+      act(() => handlers.event({ ...event, id: 'topology-refresh', cursor: 'topology-refresh' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('refreshes mission completion immediately for an explicit topology refresh', async () => {
+    const fetchMissionCompletion = vi.fn().mockResolvedValue({
+      missionId: 'smart-swarm-runtime', checkedAt: '2026-07-28T03:00:00.000Z',
+      evidenceMaxAgeMs: 60_000, terminal: false, shouldStopJobs: false,
+      jobsToStop: [], blockers: ['deployment evidence is incomplete'], externalGates: [],
+      stages: {
+        implementation: 'passed', reviewed: 'passed', merged: 'passed',
+        deployed: 'pending', realDataAccepted: 'pending', completion: 'pending',
+      },
+    });
+    render(<SmartSwarmPage client={createClient({ fetchMissionCompletion })} />);
+    await screen.findByText('Live dashboard');
+    await waitFor(() => expect(fetchMissionCompletion).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+
+    await waitFor(() => expect(fetchMissionCompletion).toHaveBeenCalledTimes(2));
+  });
+
   it('preserves the last completion result and marks it unavailable after polling fails', async () => {
     vi.useFakeTimers();
     try {

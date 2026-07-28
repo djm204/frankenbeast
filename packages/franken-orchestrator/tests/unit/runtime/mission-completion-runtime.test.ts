@@ -49,6 +49,42 @@ describe('production mission completion dependencies', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a configured evidence source that is not a regular file', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    roots.push(root);
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: '/dev/null',
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
+    });
+
+    await expect(deps.getInput()).rejects.toThrow('mission completion input must be a regular file');
+  });
+
+  it('injects the server-configured required external gate inventory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    const mission = otherwiseCompleteMission();
+    writeFileSync(inputPath, JSON.stringify(mission));
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'deployment-gate, public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
+      now: () => new Date(mission.checkedAt),
+    });
+
+    const input = await deps.getInput();
+
+    expect(input.requiredExternalGateIds).toEqual(['deployment-gate', 'public-acceptance']);
+  });
+
   it('loads production evidence and calls the configured stop endpoint idempotently', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
@@ -56,7 +92,7 @@ describe('production mission completion dependencies', () => {
     const inputPath = join(evidenceRoot, 'mission.json');
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
     }];
     writeFileSync(inputPath, JSON.stringify(mission));
@@ -65,6 +101,7 @@ describe('production mission completion dependencies', () => {
       root,
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
         FRANKENBEAST_MISSION_COMPLETION_STOP_TOKEN: 'secret-token',
       },
@@ -98,6 +135,7 @@ describe('production mission completion dependencies', () => {
       root,
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
       },
       now: () => new Date('2026-07-28T03:10:00.000Z'),
@@ -120,6 +158,7 @@ describe('production mission completion dependencies', () => {
       root,
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'http://[::1]:8080/stop',
       },
       fetchImpl: fetchMock,
@@ -143,6 +182,7 @@ describe('production mission completion dependencies', () => {
       root,
       env: {
         FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
         FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
       },
       fetchImpl: fetchMock,

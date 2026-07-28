@@ -310,6 +310,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [streamError, setStreamError] = useState<unknown>(null);
   const [connection, setConnection] = useState<RuntimeConnectionState>('connecting');
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [completionRefreshNonce, setCompletionRefreshNonce] = useState(0);
   const [providerRefreshNonce, setProviderRefreshNonce] = useState(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const snapshotRequestsInFlight = useRef(0);
@@ -485,7 +486,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [client, refreshNonce]);
+  }, [client, completionRefreshNonce]);
 
   useEffect(() => {
     if (!providerId) return;
@@ -702,7 +703,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           <button
             className="button button--secondary button--compact"
             disabled={loading || !providerId}
-            onClick={() => setRefreshNonce((current) => current + 1)}
+            onClick={() => {
+              setRefreshNonce((current) => current + 1);
+              setCompletionRefreshNonce((current) => current + 1);
+            }}
             type="button"
           >
             Refresh topology
@@ -725,6 +729,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         onRetry={() => {
           setProviderRefreshNonce((current) => current + 1);
           setRefreshNonce((current) => current + 1);
+          setCompletionRefreshNonce((current) => current + 1);
           if (workspaceCatalogError) void refreshWorkspaceCatalog();
         }}
         provider={provider}
@@ -933,7 +938,10 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           actionPendingFromStore={selectedTaskActionPending}
           client={client}
           key={`${provider.id}:${selectedTask.id}`}
-          onActionApplied={() => setRefreshNonce((current) => current + 1)}
+          onActionApplied={() => {
+            setRefreshNonce((current) => current + 1);
+            setCompletionRefreshNonce((current) => current + 1);
+          }}
           onClose={() => {
             setSelectedPulseSource(null);
             setSelectedTaskId(null);

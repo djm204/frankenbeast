@@ -68,6 +68,7 @@ export interface MissionCompletionInput {
   alerts: string[];
   scopedIssues: MissionIssueStatus[];
   workItems: MissionWorkItem[];
+  requiredExternalGateIds: string[];
   externalGates: MissionExternalGate[];
   deployment: MissionDeploymentStatus;
   acceptance: MissionAcceptanceStatus;
@@ -117,6 +118,9 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   const hasText = (value: string | null | undefined): value is string => (
     typeof value === 'string' && value.trim().length > 0
   );
+  const isGitOid = (value: string | null | undefined): value is string => (
+    typeof value === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/iu.test(value)
+  );
   const explicitTimestampMs = (value: string | null | undefined): number => {
     if (!hasText(value)) return Number.NaN;
     const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/iu.exec(value);
@@ -157,11 +161,11 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   const implementation = input.scopedIssues.length > 0
     && input.scopedIssues.every((issue) => issue.implementationState === 'implemented');
   const reviewed = input.scopedIssues.length > 0
-    && input.scopedIssues.every((issue) => hasText(issue.reviewedHead));
+    && input.scopedIssues.every((issue) => isGitOid(issue.reviewedHead));
   const merged = input.scopedIssues.length > 0
     && input.scopedIssues.every((issue) => (
-      hasText(issue.mergeSha)
-      && hasText(issue.mergedReviewedHead)
+      isGitOid(issue.mergeSha)
+      && isGitOid(issue.mergedReviewedHead)
       && issue.mergedReviewedHead === issue.reviewedHead
     ));
   const reviewedMainIncludesScopedMerges = input.scopedIssues.length > 0
@@ -170,8 +174,8 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
     ));
   const deployed = input.deployment.state === 'deployed'
     && merged
-    && hasText(input.deployment.reviewedMainSha)
-    && hasText(input.deployment.deployedSha)
+    && isGitOid(input.deployment.reviewedMainSha)
+    && isGitOid(input.deployment.deployedSha)
     && input.deployment.deployedSha === input.deployment.reviewedMainSha
     && reviewedMainIncludesScopedMerges
     && input.deployment.endpointChecks.length > 0
@@ -270,7 +274,9 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
     }
     if (issue.implementationState !== 'implemented') blockers.push(`issue #${issue.issue} implementation is pending`);
     if (!hasText(issue.reviewedHead)) blockers.push(`issue #${issue.issue} is missing an exact reviewed head`);
+    else if (!isGitOid(issue.reviewedHead)) blockers.push(`issue #${issue.issue} reviewed head is not a full Git object id`);
     if (!hasText(issue.mergeSha)) blockers.push(`issue #${issue.issue} is missing a merge SHA`);
+    else if (!isGitOid(issue.mergeSha)) blockers.push(`issue #${issue.issue} merge SHA is not a full Git object id`);
     if (hasText(issue.mergeSha) && !hasText(issue.mergedReviewedHead)) {
       blockers.push(`issue #${issue.issue} merge evidence is missing its reviewed head`);
     } else if (issue.mergedReviewedHead && issue.mergedReviewedHead !== issue.reviewedHead) {
@@ -281,7 +287,9 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   }
   if (input.deployment.state !== 'deployed') blockers.push('final reviewed main has not been deployed');
   if (!hasText(input.deployment.reviewedMainSha)) blockers.push('reviewed main SHA is missing');
+  else if (!isGitOid(input.deployment.reviewedMainSha)) blockers.push('reviewed main SHA is not a full Git object id');
   if (!hasText(input.deployment.deployedSha)) blockers.push('deployed SHA is missing');
+  else if (!isGitOid(input.deployment.deployedSha)) blockers.push('deployed SHA is not a full Git object id');
   for (const issue of input.scopedIssues) {
     if (hasText(issue.mergeSha) && !input.deployment.includedMergeShas.includes(issue.mergeSha)) {
       blockers.push(
@@ -360,6 +368,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   }
   blockers.push(...input.alerts.map((alert) => `alert: ${alert}`));
   const externalGates = [...input.externalGates].sort((left, right) => left.id.localeCompare(right.id));
+  const requiredExternalGateIds = [...new Set(input.requiredExternalGateIds)].sort();
   const gateScopeMatches = (gate: MissionExternalGate): boolean => {
     const scope = gate.scope;
     if (!scope || !gate.head) return false;
@@ -367,6 +376,7 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
     return gate.head === input.scopedIssues.find((issue) => issue.issue === scope.issue)?.reviewedHead;
   };
   if (externalGates.length === 0) blockers.push('scheduled and external gate evidence is missing');
+  if (requiredExternalGateIds.length === 0) blockers.push('required external gate inventory is missing');
   const externalGateIdCounts = new Map<string, number>();
   for (const gate of externalGates) {
     if (hasText(gate.id)) {
@@ -375,6 +385,10 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   }
   for (const [id, count] of externalGateIdCounts) {
     if (count > 1) blockers.push(`external gate id ${id} is duplicated`);
+  }
+  for (const id of requiredExternalGateIds) {
+    if (!hasText(id)) blockers.push('required external gate id is blank');
+    else if (!externalGateIdCounts.has(id)) blockers.push(`required external gate ${id} is missing`);
   }
   for (const gate of externalGates) {
     if (!hasText(gate.id)) blockers.push('external gate id is blank');
@@ -411,7 +425,9 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
       }
     }
   }
-  const externalGatesPassed = input.externalGates.length > 0 && input.externalGates.every((gate) => (
+  const externalGatesPassed = requiredExternalGateIds.length > 0
+    && requiredExternalGateIds.every((id) => externalGateIdCounts.has(id))
+    && input.externalGates.length > 0 && input.externalGates.every((gate) => (
     gate.state === 'passed'
     && hasText(gate.id)
     && hasText(gate.owner)

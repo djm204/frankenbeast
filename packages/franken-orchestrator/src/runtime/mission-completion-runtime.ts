@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { MissionCompletionInput } from './mission-completion.js';
@@ -29,6 +29,7 @@ const MissionCompletionInputSchema = z.object({
     mergedReviewedHead: z.string().nullable().optional(),
   })),
   workItems: z.array(WorkItemSchema),
+  requiredExternalGateIds: z.array(z.string()).optional(),
   externalGates: z.array(z.object({
     id: z.string(),
     state: z.enum(['pending', 'passed']),
@@ -84,6 +85,7 @@ function pendingInput(now: Date): MissionCompletionInput {
     alerts: ['mission completion evidence source is not configured'],
     scopedIssues: [],
     workItems: [],
+    requiredExternalGateIds: [],
     externalGates: [],
     deployment: {
       state: 'pending', reviewedMainSha: null, deployedSha: null, includedMergeShas: [],
@@ -112,6 +114,36 @@ function validatedStopUrl(value: string): string {
   return url.toString();
 }
 
+function readBoundedRegularFile(path: string): string {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile()) throw new Error('mission completion input must be a regular file');
+    if (stat.size > MAX_INPUT_BYTES) {
+      throw new Error(`mission completion input exceeds ${MAX_INPUT_BYTES} bytes`);
+    }
+    const buffer = Buffer.alloc(MAX_INPUT_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const chunkSize = readSync(
+        descriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (chunkSize === 0) break;
+      bytesRead += chunkSize;
+    }
+    if (bytesRead > MAX_INPUT_BYTES) {
+      throw new Error(`mission completion input exceeds ${MAX_INPUT_BYTES} bytes`);
+    }
+    return buffer.toString('utf8', 0, bytesRead);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function createProductionMissionCompletionDeps(
   options: ProductionMissionCompletionOptions,
 ): ProductionMissionCompletionDeps {
@@ -122,6 +154,12 @@ export function createProductionMissionCompletionDeps(
   const stopUrl = env.FRANKENBEAST_MISSION_COMPLETION_STOP_URL;
   const stopToken = env.FRANKENBEAST_MISSION_COMPLETION_STOP_TOKEN;
   const configuredInputPath = env.FRANKENBEAST_MISSION_COMPLETION_INPUT;
+  const requiredExternalGateIds = [...new Set(
+    (env.FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0),
+  )].sort();
   let trustedEvidenceLoaded = false;
 
   return {
@@ -130,10 +168,8 @@ export function createProductionMissionCompletionDeps(
       let input: MissionCompletionInput;
       try {
         const resolvedInputPath = realpathSync(inputPath);
-        const size = statSync(resolvedInputPath).size;
-        if (size > MAX_INPUT_BYTES) throw new Error(`mission completion input exceeds ${MAX_INPUT_BYTES} bytes`);
         input = MissionCompletionInputSchema.parse(
-          JSON.parse(readFileSync(resolvedInputPath, 'utf8')),
+          JSON.parse(readBoundedRegularFile(resolvedInputPath)),
         ) as unknown as MissionCompletionInput;
         const rootRelativePath = relative(realpathSync(options.root), resolvedInputPath);
         trustedEvidenceLoaded = Boolean(
@@ -150,7 +186,11 @@ export function createProductionMissionCompletionDeps(
         if (!missing) throw error;
         return pendingInput(now());
       }
-      const serverCheckedInput = { ...input, checkedAt: now().toISOString() };
+      const serverCheckedInput = {
+        ...input,
+        checkedAt: now().toISOString(),
+        requiredExternalGateIds,
+      };
       if (stopUrl && !trustedEvidenceLoaded) {
         return {
           ...serverCheckedInput,
@@ -166,12 +206,24 @@ export function createProductionMissionCompletionDeps(
           alerts: [...serverCheckedInput.alerts, 'mission completion stop endpoint is not configured'],
         };
       }
+      if (requiredExternalGateIds.length === 0) {
+        return {
+          ...serverCheckedInput,
+          alerts: [
+            ...serverCheckedInput.alerts,
+            'mission completion required external gates are not configured',
+          ],
+        };
+      }
       return serverCheckedInput;
     },
 
     async stopJobs(jobIds, stopOnceKey) {
       if (!trustedEvidenceLoaded) {
         throw new Error('job stops require trusted external mission completion evidence');
+      }
+      if (requiredExternalGateIds.length === 0) {
+        throw new Error('job stops require a server-configured external gate inventory');
       }
       if (!stopUrl) throw new Error('mission completion stop endpoint is not configured');
       const headers: Record<string, string> = {

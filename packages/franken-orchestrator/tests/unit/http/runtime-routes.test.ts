@@ -122,7 +122,7 @@ describe('smart-swarm runtime routes', () => {
     const adapter = runtimeAdapter();
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
       scope: { kind: 'deployed-sha' },
     }];
@@ -153,7 +153,7 @@ describe('smart-swarm runtime routes', () => {
     stores.push(ticketStore);
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
       scope: { kind: 'deployed-sha' },
     }];
@@ -188,7 +188,7 @@ describe('smart-swarm runtime routes', () => {
     stores.push(ticketStore);
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
       scope: { kind: 'deployed-sha' },
     }];
@@ -223,7 +223,7 @@ describe('smart-swarm runtime routes', () => {
     stores.push(ticketStore);
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
       scope: { kind: 'deployed-sha' },
     }];
@@ -237,18 +237,18 @@ describe('smart-swarm runtime routes', () => {
     });
 
     await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    mission.deployment.deployedSha = 'new-main-sha';
-    mission.deployment.reviewedMainSha = 'new-main-sha';
-    mission.acceptance.deployedSha = 'new-main-sha';
-    mission.deployment.endpointChecks[0]!.deployedSha = 'new-main-sha';
-    mission.externalGates[0]!.head = 'new-main-sha';
+    mission.deployment.deployedSha = '4444444444444444444444444444444444444444';
+    mission.deployment.reviewedMainSha = '4444444444444444444444444444444444444444';
+    mission.acceptance.deployedSha = '4444444444444444444444444444444444444444';
+    mission.deployment.endpointChecks[0]!.deployedSha = '4444444444444444444444444444444444444444';
+    mission.externalGates[0]!.head = '4444444444444444444444444444444444444444';
     await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
     await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
-    mission.deployment.deployedSha = 'main-sha';
-    mission.deployment.reviewedMainSha = 'main-sha';
-    mission.acceptance.deployedSha = 'main-sha';
-    mission.deployment.endpointChecks[0]!.deployedSha = 'main-sha';
-    mission.externalGates[0]!.head = 'main-sha';
+    mission.deployment.deployedSha = '3333333333333333333333333333333333333333';
+    mission.deployment.reviewedMainSha = '3333333333333333333333333333333333333333';
+    mission.acceptance.deployedSha = '3333333333333333333333333333333333333333';
+    mission.deployment.endpointChecks[0]!.deployedSha = '3333333333333333333333333333333333333333';
+    mission.externalGates[0]!.head = '3333333333333333333333333333333333333333';
     await app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
 
     expect(stopJobs).toHaveBeenCalledTimes(3);
@@ -259,7 +259,7 @@ describe('smart-swarm runtime routes', () => {
     stores.push(ticketStore);
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
       scope: { kind: 'deployed-sha' },
     }];
@@ -275,18 +275,18 @@ describe('smart-swarm runtime routes', () => {
 
     const first = app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
     await vi.waitFor(() => expect(stopJobs).toHaveBeenCalledTimes(1));
-    mission.deployment.deployedSha = 'new-main-sha';
-    mission.deployment.reviewedMainSha = 'new-main-sha';
-    mission.acceptance.deployedSha = 'new-main-sha';
-    mission.deployment.endpointChecks[0]!.deployedSha = 'new-main-sha';
-    mission.externalGates[0]!.head = 'new-main-sha';
+    mission.deployment.deployedSha = '4444444444444444444444444444444444444444';
+    mission.deployment.reviewedMainSha = '4444444444444444444444444444444444444444';
+    mission.acceptance.deployedSha = '4444444444444444444444444444444444444444';
+    mission.deployment.endpointChecks[0]!.deployedSha = '4444444444444444444444444444444444444444';
+    mission.externalGates[0]!.head = '4444444444444444444444444444444444444444';
     const second = app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
     await vi.waitFor(() => expect(stopJobs).toHaveBeenCalledTimes(2));
-    mission.deployment.deployedSha = 'main-sha';
-    mission.deployment.reviewedMainSha = 'main-sha';
-    mission.acceptance.deployedSha = 'main-sha';
-    mission.deployment.endpointChecks[0]!.deployedSha = 'main-sha';
-    mission.externalGates[0]!.head = 'main-sha';
+    mission.deployment.deployedSha = '3333333333333333333333333333333333333333';
+    mission.deployment.reviewedMainSha = '3333333333333333333333333333333333333333';
+    mission.acceptance.deployedSha = '3333333333333333333333333333333333333333';
+    mission.deployment.endpointChecks[0]!.deployedSha = '3333333333333333333333333333333333333333';
+    mission.externalGates[0]!.head = '3333333333333333333333333333333333333333';
     const replay = app.request('/v1/smart-swarm/completion', { headers: authHeaders() });
     await Promise.resolve();
     const stopCallCount = stopJobs.mock.calls.length;

@@ -35,7 +35,7 @@ describe('smart-swarm mission completion', () => {
       id: 'public-acceptance',
       state: 'passed',
       owner: 'acceptance-worker',
-      head: 'main-sha',
+      head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified',
       nextTransition: 'terminalize mission',
     }];
@@ -64,7 +64,7 @@ describe('smart-swarm mission completion', () => {
       id: 'public-acceptance',
       state: 'passed',
       owner: 'acceptance-worker',
-      head: 'main-sha',
+      head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified',
       nextTransition: 'terminalize mission',
     }];
@@ -126,7 +126,7 @@ describe('smart-swarm mission completion', () => {
       linkedCanonicalId: 'canonical-3812',
     });
     mission.externalGates = [{
-      id: 'deployment-gate', state: 'passed', owner: 'owner', head: 'main-sha',
+      id: 'deployment-gate', state: 'passed', owner: 'owner', head: '3333333333333333333333333333333333333333',
       trigger: 'deployed', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
     }];
 
@@ -146,7 +146,7 @@ describe('smart-swarm mission completion', () => {
       linkedCanonicalId: 'missing-canonical',
     });
     mission.externalGates = [{
-      id: 'deployment-gate', state: 'passed', owner: 'owner', head: 'main-sha',
+      id: 'deployment-gate', state: 'passed', owner: 'owner', head: '3333333333333333333333333333333333333333',
       trigger: 'deployed', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
     }];
 
@@ -168,7 +168,7 @@ describe('smart-swarm mission completion', () => {
       linkedCanonicalId: null,
     });
     mission.externalGates = [{
-      id: 'deployment-gate', state: 'passed', owner: 'owner', head: 'main-sha',
+      id: 'deployment-gate', state: 'passed', owner: 'owner', head: '3333333333333333333333333333333333333333',
       trigger: 'deployed', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
     }];
 
@@ -187,7 +187,7 @@ describe('smart-swarm mission completion', () => {
       mergedReviewedHead: 'conflicting-reviewed-head',
     });
     mission.externalGates = [{
-      id: 'issue-review-gate', state: 'passed', owner: 'reviewer', head: 'reviewed-head-3812',
+      id: 'issue-review-gate', state: 'passed', owner: 'reviewer', head: '1111111111111111111111111111111111111111',
       trigger: 'review completed', nextTransition: 'merge',
       scope: { kind: 'issue-reviewed-head', issue: 3812 },
     }];
@@ -212,7 +212,7 @@ describe('smart-swarm mission completion', () => {
     const mission = otherwiseCompleteMission();
     delete mission.scopedIssues[0]!.canonicalWorkItemId;
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
     }];
 
@@ -230,7 +230,7 @@ describe('smart-swarm mission completion', () => {
       linkedCanonicalId: 'canonical-3812',
     });
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
     }];
 
@@ -277,7 +277,7 @@ describe('smart-swarm mission completion', () => {
       id: 'review-gate',
       state: 'passed',
       owner: 'reviewer',
-      head: 'reviewed-head-3812',
+      head: '1111111111111111111111111111111111111111',
       trigger: 'review completed',
       nextTransition: 'merge',
       scope: { kind: 'issue-reviewed-head', issue: 3812 },
@@ -298,7 +298,7 @@ describe('smart-swarm mission completion', () => {
     };
     mission.scopedIssues[0]!.mergedReviewedHead = 'different-head';
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission',
     }];
 
@@ -307,7 +307,7 @@ describe('smart-swarm mission completion', () => {
     expect(result.terminal).toBe(false);
     expect(result.stages.merged).toBe('pending');
     expect(result.blockers).toContain(
-      'issue #3812 merge evidence reviewed head different-head does not match reviewed-head-3812',
+      'issue #3812 merge evidence reviewed head different-head does not match 1111111111111111111111111111111111111111',
     );
   });
 
@@ -315,7 +315,7 @@ describe('smart-swarm mission completion', () => {
     const mission = otherwiseCompleteMission();
     mission.scopedIssues[0]!.mergedReviewedHead = 'different-reviewed-head';
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
     }];
 
@@ -326,13 +326,42 @@ describe('smart-swarm mission completion', () => {
     expect(result.stages.realDataAccepted).toBe('pending');
   });
 
+  it('rejects placeholder revision evidence that is not a full Git object id', () => {
+    const mission = otherwiseCompleteMission();
+    mission.scopedIssues[0]!.reviewedHead = 'unknown';
+    mission.scopedIssues[0]!.mergedReviewedHead = 'unknown';
+    mission.scopedIssues[0]!.mergeSha = 'unknown';
+    mission.deployment.reviewedMainSha = 'unknown';
+    mission.deployment.deployedSha = 'unknown';
+    mission.deployment.includedMergeShas = ['unknown'];
+    mission.deployment.endpointChecks[0]!.deployedSha = 'unknown';
+    mission.acceptance.deployedSha = 'unknown';
+    mission.externalGates = [{
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'unknown',
+      trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+    }];
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.terminal).toBe(false);
+    expect(result.stages.reviewed).toBe('pending');
+    expect(result.stages.merged).toBe('pending');
+    expect(result.stages.deployed).toBe('pending');
+    expect(result.blockers).toEqual(expect.arrayContaining([
+      'issue #3812 reviewed head is not a full Git object id',
+      'issue #3812 merge SHA is not a full Git object id',
+      'reviewed main SHA is not a full Git object id',
+      'deployed SHA is not a full Git object id',
+    ]));
+  });
+
   it('requires reviewed main to include every scoped merge', () => {
     const mission = otherwiseCompleteMission() as MissionCompletionInput & {
       deployment: MissionCompletionInput['deployment'] & { includedMergeShas: string[] };
     };
     mission.deployment.includedMergeShas = [];
     mission.externalGates = [{
-      id: 'deployment-gate', state: 'passed', owner: 'deployer', head: 'main-sha',
+      id: 'deployment-gate', state: 'passed', owner: 'deployer', head: '3333333333333333333333333333333333333333',
       trigger: 'deployed', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
     }];
 
@@ -341,14 +370,14 @@ describe('smart-swarm mission completion', () => {
     expect(result.stages.deployed).toBe('pending');
     expect(result.terminal).toBe(false);
     expect(result.blockers).toContain(
-      'reviewed main SHA main-sha does not include scoped merge SHA merge-sha-3812 for issue #3812',
+      'reviewed main SHA 3333333333333333333333333333333333333333 does not include scoped merge SHA 2222222222222222222222222222222222222222 for issue #3812',
     );
   });
 
   it('binds each passed external gate head to its typed evidence scope', () => {
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'issue-review-gate', state: 'passed', owner: 'reviewer', head: 'main-sha',
+      id: 'issue-review-gate', state: 'passed', owner: 'reviewer', head: '3333333333333333333333333333333333333333',
       trigger: 'review completed', nextTransition: 'merge',
       scope: { kind: 'issue-reviewed-head', issue: 3812 },
     }] as MissionCompletionInput['externalGates'];
@@ -357,7 +386,7 @@ describe('smart-swarm mission completion', () => {
 
     expect(result.terminal).toBe(false);
     expect(result.blockers).toContain(
-      'external gate issue-review-gate head main-sha does not match reviewed head reviewed-head-3812 for issue #3812',
+      'external gate issue-review-gate head 3333333333333333333333333333333333333333 does not match reviewed head 1111111111111111111111111111111111111111 for issue #3812',
     );
   });
 
@@ -365,11 +394,11 @@ describe('smart-swarm mission completion', () => {
     const mission = otherwiseCompleteMission();
     mission.externalGates = [
       {
-        id: 'deployment-gate', state: 'passed', owner: 'deployer', head: 'main-sha',
+        id: 'deployment-gate', state: 'passed', owner: 'deployer', head: '3333333333333333333333333333333333333333',
         trigger: 'deployed', nextTransition: 'acceptance', scope: { kind: 'deployed-sha' },
       },
       {
-        id: 'deployment-gate', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+        id: 'deployment-gate', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
         trigger: 'accepted', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
       },
     ];
@@ -378,6 +407,23 @@ describe('smart-swarm mission completion', () => {
 
     expect(result.terminal).toBe(false);
     expect(result.blockers).toContain('external gate id deployment-gate is duplicated');
+  });
+
+  it('fails closed when configured required external gate evidence is omitted', () => {
+    const mission = otherwiseCompleteMission() as MissionCompletionInput & {
+      requiredExternalGateIds: string[];
+    };
+    mission.requiredExternalGateIds = ['deployment-gate', 'public-acceptance'];
+    mission.externalGates = [{
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker',
+      head: '3333333333333333333333333333333333333333', trigger: 'deployment verified',
+      nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+    }];
+
+    const result = evaluateMissionCompletion(mission);
+
+    expect(result.terminal).toBe(false);
+    expect(result.blockers).toContain('required external gate deployment-gate is missing');
   });
 
   it('binds endpoint checks to the deployed SHA', () => {
@@ -392,7 +438,7 @@ describe('smart-swarm mission completion', () => {
 
     expect(result.stages.deployed).toBe('pending');
     expect(result.blockers).toContain(
-      'endpoint check https://dashboard.example.test/health targets other-sha, not deployed SHA main-sha',
+      'endpoint check https://dashboard.example.test/health targets other-sha, not deployed SHA 3333333333333333333333333333333333333333',
     );
   });
 
@@ -488,7 +534,7 @@ describe('smart-swarm mission completion', () => {
     mission.deployment.endpointChecks[0]!.checkedAt = mission.deployment.endpointChecks[0]!.checkedAt.replace(/Z$/u, 'z');
     mission.acceptance.verifiedAt = mission.acceptance.verifiedAt!.replace(/Z$/u, 'z');
     mission.externalGates = [{
-      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: 'main-sha',
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker', head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
     }];
 
@@ -537,7 +583,7 @@ describe('smart-swarm mission completion', () => {
       id: 'deployment-controller',
       state: 'pending',
       owner: 'scheduled-controller',
-      head: 'main-sha',
+      head: '3333333333333333333333333333333333333333',
       trigger: 'after #3857 merges',
       nextTransition: null,
     });
@@ -547,7 +593,7 @@ describe('smart-swarm mission completion', () => {
     expect(result.terminal).toBe(false);
     expect(result.externalGates).toEqual(mission.externalGates);
     expect(result.blockers).toContain(
-      'external gate deployment-controller is pending; next transition is missing (owner scheduled-controller; head main-sha; trigger after #3857 merges)',
+      'external gate deployment-controller is pending; next transition is missing (owner scheduled-controller; head 3333333333333333333333333333333333333333; trigger after #3857 merges)',
     );
   });
 
@@ -557,7 +603,7 @@ describe('smart-swarm mission completion', () => {
       id: 'public-acceptance',
       state: 'passed',
       owner: 'acceptance-worker',
-      head: 'main-sha',
+      head: '3333333333333333333333333333333333333333',
       trigger: 'deployment verified',
       nextTransition: 'terminalize mission',
       scope: { kind: 'deployed-sha' },
@@ -581,14 +627,14 @@ describe('smart-swarm mission completion', () => {
         completion: 'passed',
       },
       evidence: {
-        reviewedHeads: { '3812': 'reviewed-head-3812' },
-        mergeShas: { '3812': 'merge-sha-3812' },
-        deployedSha: 'main-sha',
+        reviewedHeads: { '3812': '1111111111111111111111111111111111111111' },
+        mergeShas: { '3812': '2222222222222222222222222222222222222222' },
+        deployedSha: '3333333333333333333333333333333333333333',
         endpointChecks: mission.deployment.endpointChecks,
         browserEvidenceId: 'browser-evidence-1',
       },
     });
-    expect(result.summary).toBe('Mission complete at deployed SHA main-sha.');
+    expect(result.summary).toBe('Mission complete at deployed SHA 3333333333333333333333333333333333333333.');
   });
 
   it('enumerates missing merge, deployment, endpoint, and browser acceptance evidence', () => {
@@ -600,7 +646,7 @@ describe('smart-swarm mission completion', () => {
     };
     mission.deployment = {
       state: 'deployed',
-      reviewedMainSha: 'main-sha',
+      reviewedMainSha: '3333333333333333333333333333333333333333',
       deployedSha: 'stale-sha',
       endpointChecks: [{
         endpoint: 'https://dashboard.example.test/health',
@@ -615,7 +661,7 @@ describe('smart-swarm mission completion', () => {
     expect(result.blockers).toEqual(expect.arrayContaining([
       'issue #3812 is missing an exact reviewed head',
       'issue #3812 is missing a merge SHA',
-      'deployed SHA stale-sha does not match reviewed main SHA main-sha',
+      'deployed SHA stale-sha does not match reviewed main SHA 3333333333333333333333333333333333333333',
       'endpoint check https://dashboard.example.test/health failed',
       'deployment verification timestamp is missing',
       '#3815 live E2E acceptance has not passed',
@@ -648,7 +694,7 @@ describe('smart-swarm mission completion', () => {
       id: 'deployment-verifier',
       state: 'pending',
       owner: 'verifier',
-      head: 'main-sha',
+      head: '3333333333333333333333333333333333333333',
       trigger: 'deploy succeeds',
       nextTransition: 'run authenticated browser acceptance',
     }];
@@ -658,7 +704,7 @@ describe('smart-swarm mission completion', () => {
     expect(status).toContain('MISSION smart-swarm-runtime · HEALTHY PROGRESSION · IN PROGRESS');
     expect(status).toContain('STAGES implementation=passed reviewed=passed merged=passed deployed=passed real-data=passed completion=pending');
     expect(status).toContain('OWNERSHIP canonical-3812 [done] owner=worker-a -> successor successor-3812 [running] owner=worker-b');
-    expect(status).toContain('GATE deployment-verifier [pending] owner=verifier head=main-sha trigger=deploy succeeds next=run authenticated browser acceptance');
+    expect(status).toContain('GATE deployment-verifier [pending] owner=verifier head=3333333333333333333333333333333333333333 trigger=deploy succeeds next=run authenticated browser acceptance');
     expect(status).toContain('STOP completion jobs remain active');
   });
 
@@ -668,7 +714,7 @@ describe('smart-swarm mission completion', () => {
       id: 'gate\nBLOCKER forged',
       state: 'pending',
       owner: 'owner\rSTOP forged',
-      head: 'main-sha',
+      head: '3333333333333333333333333333333333333333',
       trigger: 'trigger\u001b[31m\u0085forged\u009b31mCSI',
       nextTransition: 'next\u2028BLOCKER unicode\u2029STOP unicode\u202ereversed\u2066isolated\u2069',
       scope: { kind: 'deployed-sha' },
@@ -700,10 +746,10 @@ describe('smart-swarm mission completion', () => {
       endpoint: 'https://a.example.test/health',
       status: 'passed',
       checkedAt: mission.checkedAt,
-      deployedSha: 'main-sha',
+      deployedSha: '3333333333333333333333333333333333333333',
     });
     mission.externalGates = [{
-      id: 'deployment-gate', state: 'passed', owner: 'owner', head: 'main-sha',
+      id: 'deployment-gate', state: 'passed', owner: 'owner', head: '3333333333333333333333333333333333333333',
       trigger: 'deployed', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
     }];
     const reversed = structuredClone(mission);
@@ -718,9 +764,10 @@ describe('smart-swarm mission completion', () => {
   it('uses a collision-safe stop-once key bound to the exact shutdown job set', () => {
     const mission = otherwiseCompleteMission();
     mission.externalGates = [{
-      id: 'deployment-gate', state: 'passed', owner: 'owner', head: 'main-sha',
+      id: 'deployment-gate', state: 'passed', owner: 'owner', head: '3333333333333333333333333333333333333333',
       trigger: 'deployed', nextTransition: 'complete', scope: { kind: 'deployed-sha' },
     }];
+    mission.requiredExternalGateIds = ['deployment-gate'];
     const expanded = structuredClone(mission);
     expanded.completionJobs.push({ id: 'extra-job', missionId: mission.missionId });
 
