@@ -213,7 +213,7 @@ function MetricProvenance({
 }) {
   const source = provider?.displayName ?? 'Unknown runtime adapter';
   return (
-    <div data-testid={`metric-${label.toLowerCase()}`}>
+    <div data-testid={`metric-${label.toLowerCase().replaceAll(' ', '-')}`}>
       <dt>{label}</dt>
       <dd>
         <strong>{section.status === 'available' ? section.data.length : 'unsupported'}</strong>
@@ -692,7 +692,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               <MetricProvenance label="Agents" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.agents} />
               <MetricProvenance label="Tasks" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.tasks} />
               <MetricProvenance label="Runs" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.runs} />
-              <MetricProvenance label="Events" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.events} />
+              <MetricProvenance label="Event history" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.events} />
               <MetricProvenance label="Blockers" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.blockers} />
               <MetricProvenance label="Approvals" provider={provider} capturedAt={snapshot.capturedAt} section={snapshot.approvals} />
             </dl>

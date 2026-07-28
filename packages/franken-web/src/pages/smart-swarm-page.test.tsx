@@ -154,6 +154,7 @@ describe('SmartSwarmPage', () => {
     expect(screen.getByTestId('metric-workspaces').textContent).toContain('1');
     expect(screen.getByTestId('metric-workspaces').textContent).toContain('available');
     expect(screen.getByTestId('metric-tasks').textContent).toContain('unsupported');
+    expect(screen.getByTestId('metric-event-history').textContent).toContain('unsupported');
     expect(screen.getByTestId('metric-approvals').textContent).toContain('unsupported');
     expect(screen.getByTestId('metric-approvals').textContent).not.toMatch(/\b0\b/);
     const topology = screen.getByRole('region', { name: 'Runtime topology' });
