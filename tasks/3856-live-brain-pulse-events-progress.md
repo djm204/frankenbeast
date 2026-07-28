@@ -1,0 +1,23 @@
+# #3856 Live Brain Pulse from Runtime Events — Progress
+
+- [x] Read live issue #3856 and verify isolated worktree is clean at current `origin/main` with required Git identity.
+- [x] Trace the existing Beast-run Brain Pulse implementation and normalized smart-swarm runtime event stream.
+- [x] Define the smallest provider-neutral pulse contract and affected UI/API boundaries.
+- [x] RED: add focused tests for genuine normalized events, provenance, live updates, deduplication, replay/pruning, malformed input, provider unsupported/degraded/disconnected/no-activity states, drill-down, and accessibility/reduced motion.
+- [x] GREEN: implement runtime-backed Brain Pulse without fixture/demo/staging production data.
+- [x] Run focused tests, lint, typecheck, build, and relevant full suites.
+- [x] Independently review the diff and remediate findings.
+- [x] Update architecture docs with source, cursor, validation, state, motion, and drill-down behavior.
+- [x] Commit as David Mendez, push, and open linked PR #3872.
+- [x] Address all three first-round current-head Codex findings with focused RED/GREEN coverage.
+- [x] Address all five follow-up current-head Codex findings with focused RED/GREEN coverage: exact event-section discriminants, normalized timestamps, shared metadata bounds, wrapping for long evidence, and honest retained-event counts.
+- [x] Address all four third-round current-head Codex findings plus two independent local review findings: normalized ID/cursor bounds, unavailable-state semantics, retained source-task resolution, Codex metadata limits, transition suffix budget, and source-specific status reasons.
+- [x] Address all five fifth-round current-head Codex findings with focused RED/GREEN coverage: poison-frame quarantine, runtime-failure precedence, UTF-8 cursor bytes, impossible calendar dates, and bounded Hermes status/outcome metadata.
+- [x] Address the tier-12 follow-up finding with RED/GREEN coverage by bounding Ollama installed/loaded model-name metadata before shared snapshot parsing.
+- [x] Address all three replacement-head Codex findings with RED/GREEN coverage: bounded Ollama version metadata, clock-skew-tolerant pulse freshness, and consistent quarantine of oversized Hermes task IDs.
+- [x] Address all three tier-12 follow-up findings with RED/GREEN coverage: replay progress past quarantined Hermes rows, bounded future clock skew, and bounded checkpoint-only cursors.
+- [x] Address the final tier-12 findings round with RED/GREEN coverage: snapshot backfill after quarantine, bounded Hermes event run references, and full-minute retention for newly received negative-skew activity.
+- [x] Address the next current-head findings round with RED/GREEN coverage: bounded malformed-row scans/checkpoint progress, workspace-scoped action identity, immediate receipt-freshness render, and browser-time-bounded future-skew expiry.
+- [x] Address the follow-up findings with RED/GREEN coverage: cold poison checkpoints, pagination-safe workspace cursors, cold valid-event retention, post-skew evidence capping, and collision-free action tuple keys.
+- [ ] Push remediation and complete fresh exact-head Codex/CI/thread gates.
+- [ ] Guarded squash merge exact reviewed head, verify issue closure/deployment/public authenticated browser evidence, and record terminal Kanban handoff.

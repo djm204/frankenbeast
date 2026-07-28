@@ -1,14 +1,29 @@
 import { z } from 'zod';
 
 const TimestampSchema = z.string().datetime({ offset: true });
-const SafeMetadataValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
-export const RuntimeMetadataSchema = z.record(z.string(), SafeMetadataValueSchema);
+const SafeMetadataValueSchema = z.union([z.string().max(4_096), z.number(), z.boolean(), z.null()]);
+export const RuntimeMetadataSchema = z
+  .record(z.string().min(1).max(256), SafeMetadataValueSchema)
+  .superRefine((metadata, context) => {
+    if (Object.keys(metadata).length > 64) {
+      context.addIssue({ code: 'custom', message: 'Runtime metadata must contain at most 64 entries' });
+    }
+    if (JSON.stringify(metadata).length > 16_384) {
+      context.addIssue({ code: 'custom', message: 'Runtime metadata exceeds the serialized size limit' });
+    }
+  });
 
 const CorrelationIdSchema = z.string().uuid();
 const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/u);
 const RuntimeWorkspaceIdSchema = z.string().min(1);
 const RuntimeTaskIdSchema = z.string().min(1);
 const RuntimeApprovalIdSchema = z.string().min(1);
+export const RUNTIME_EVENT_ID_MAX_LENGTH = 1_024;
+const RuntimeEventIdSchema = z.string().min(1).max(RUNTIME_EVENT_ID_MAX_LENGTH);
+const RuntimeEventCursorSchema = z.string().min(1).max(4_096).refine(
+  (cursor) => new TextEncoder().encode(cursor).byteLength <= 4_096,
+  'Runtime event cursor exceeds the UTF-8 transport byte limit',
+);
 const RuntimeActionWorkspaceIdSchema = RuntimeWorkspaceIdSchema;
 const RuntimeActionTaskIdSchema = RuntimeTaskIdSchema;
 const BoundedReasonSchema = z.string().trim().min(1).max(1000);
@@ -183,14 +198,14 @@ export const RuntimeRunSchema = z.object({
 }).strict();
 
 export const RuntimeEventSchema = z.object({
-  id: z.string().min(1),
-  cursor: z.string().min(1),
-  workspaceId: z.string().min(1),
-  taskId: z.string().min(1).nullable(),
-  runId: z.string().min(1).nullable(),
+  id: RuntimeEventIdSchema,
+  cursor: RuntimeEventCursorSchema,
+  workspaceId: RuntimeEventIdSchema,
+  taskId: RuntimeEventIdSchema.nullable(),
+  runId: RuntimeEventIdSchema.nullable(),
   type: z.enum(['lifecycle', 'comment', 'log', 'audit', 'blocker', 'approval', 'unknown']),
   occurredAt: TimestampSchema,
-  summary: z.string(),
+  summary: z.string().max(16_384),
   metadata: RuntimeMetadataSchema.optional(),
 }).strict();
 
@@ -238,7 +253,7 @@ export const RuntimeSnapshotSchema = z.object({
 
 export const RuntimeEventPageSchema = z.object({
   events: z.array(RuntimeEventSchema),
-  nextCursor: z.string().min(1).nullable(),
+  nextCursor: RuntimeEventCursorSchema.nullable(),
 }).strict();
 
 export type RuntimeProvider = z.infer<typeof RuntimeProviderSchema>;

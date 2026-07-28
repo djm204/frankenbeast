@@ -57,6 +57,144 @@ describe('SmartSwarmApiClient', () => {
     );
   });
 
+  it('rejects malformed runtime events in snapshots before they can pulse', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [{
+        id: 'event-1',
+        cursor: 'cursor-1',
+        workspaceId: 'board-main',
+        taskId: null,
+        runId: null,
+        type: 'log',
+        occurredAt: '2026-07-26T18:00:02.000Z',
+        summary: 'x'.repeat(16_385),
+      }] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+  });
+
+  it('rejects runtime event cursors that exceed the UTF-8 transport byte limit', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [{
+        id: 'event-1',
+        cursor: '🚀'.repeat(1_025),
+        workspaceId: 'board-main',
+        taskId: null,
+        runId: null,
+        type: 'log',
+        occurredAt: '2026-07-26T18:00:02.000Z',
+        summary: 'Oversized transport cursor',
+      }] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+  });
+
+  it('rejects parseable timestamps that are not normalized ISO datetimes', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [{
+        id: 'event-1',
+        cursor: 'cursor-1',
+        workspaceId: 'board-main',
+        taskId: null,
+        runId: null,
+        type: 'log',
+        occurredAt: '07/28/2026',
+        summary: 'Browser-dependent timestamp',
+      }] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+  });
+
+  it.each(['2026-02-29T12:00:00Z', '2026-02-31T12:00:00Z'])(
+    'rejects impossible calendar timestamp %s',
+    async (occurredAt) => {
+      const snapshot = {
+        providerId: 'hermes',
+        state: 'ready',
+        capturedAt: '2026-07-26T18:00:01.000Z',
+        workspaces: { status: 'available', data: [] },
+        agents: { status: 'available', data: [] },
+        tasks: { status: 'available', data: [] },
+        runs: { status: 'available', data: [] },
+        events: { status: 'available', data: [{
+          id: 'event-1',
+          cursor: 'cursor-1',
+          workspaceId: 'board-main',
+          taskId: null,
+          runId: null,
+          type: 'log',
+          occurredAt,
+          summary: 'Impossible calendar date',
+        }] },
+        blockers: { status: 'available', data: [] },
+        approvals: { status: 'available', data: [] },
+      };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+      const client = new SmartSwarmApiClient(BASE_URL);
+
+      await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+    },
+  );
+
+  it('rejects malformed runtime event section discriminants', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'unsupported' },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: snapshot }))
+      .mockResolvedValueOnce(Response.json({ data: { ...snapshot, events: { status: 'available', data: [], extra: true } } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event snapshot');
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event snapshot');
+  });
+
   it('reconnects the live stream with the last real event cursor', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
@@ -156,6 +294,38 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
   });
 
+  it('rejects oversized checkpoint cursor IDs without replaying them', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      sources.push(listeners);
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-1' }))
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-2' })));
+    const error = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn(), error });
+
+    sources[0]!.checkpoint!(new MessageEvent('checkpoint', { lastEventId: 'x'.repeat(4_097) }));
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('checkpoint cursor') }));
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(EventSourceMock).toHaveBeenNthCalledWith(
+      2,
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-2`,
+      { withCredentials: true },
+    );
+    unsubscribe();
+  });
+
   it('reconnects after a malformed activity event', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
@@ -187,7 +357,101 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
   });
 
-  it('reconnects after a malformed activity event from the malformed frame cursor', async () => {
+  it('rejects structurally malformed runtime events before they can pulse', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<{ close: ReturnType<typeof vi.fn>; listeners: Record<string, (event: MessageEvent) => void> }> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const source = { close: vi.fn(), listeners: {} as Record<string, (event: MessageEvent) => void> };
+      sources.push(source);
+      this.close = source.close;
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        source.listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-1' }))
+      .mockResolvedValueOnce(Response.json({ connectionId: 'stream-2' })));
+    const event = vi.fn();
+    const error = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event, error });
+
+    sources[0]!.listeners.activity!(new MessageEvent('activity', {
+      data: JSON.stringify({ id: 'event-1', cursor: 'cursor-1', workspaceId: 'board-main' }),
+      lastEventId: 'cursor-1',
+    }));
+
+    expect(event).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Malformed runtime event') }));
+    expect(sources[0]!.close).toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(EventSourceMock).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it('rejects oversized event fields and nested metadata before they can pulse', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      sources.push(listeners);
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ connectionId: 'stream-1' })));
+    const event = vi.fn();
+    const error = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event, error });
+
+    sources[0]!.activity!(new MessageEvent('activity', { data: JSON.stringify({
+      id: 'event-1',
+      cursor: 'cursor-1',
+      workspaceId: 'board-main',
+      taskId: null,
+      runId: null,
+      type: 'log',
+      occurredAt: '2026-07-26T18:00:02.000Z',
+      summary: 'x'.repeat(16_385),
+      metadata: { nested: { payload: 'must not reach the UI' } },
+    }) }));
+
+    expect(event).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('Malformed runtime event') }));
+    unsubscribe();
+  });
+
+  it('rejects oversized raw activity payloads before parsing them', async () => {
+    const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      sources.push(listeners);
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ connectionId: 'stream-1' })));
+    const error = vi.fn();
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn(), error });
+    const parse = vi.spyOn(JSON, 'parse');
+
+    sources[0]!.activity!(new MessageEvent('activity', { data: `${' '.repeat(262_145)}{}` }));
+
+    expect(parse).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('activity payload') }));
+    unsubscribe();
+  });
+
+  it('quarantines a malformed activity frame by reconnecting after its SSE cursor', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
@@ -206,6 +470,7 @@ describe('SmartSwarmApiClient', () => {
     const client = new SmartSwarmApiClient(BASE_URL);
     const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn() });
     sources[0]!.open!(new MessageEvent('open'));
+    sources[0]!.checkpoint!(new MessageEvent('checkpoint', { lastEventId: 'validated-checkpoint' }));
 
     sources[0]!.activity!(new MessageEvent('activity', {
       data: '{bad json',
@@ -221,7 +486,7 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
   });
 
-  it('drops a replay cursor after repeated failures before the stream opens', async () => {
+  it('preserves a replay cursor across generic pre-open failures and drops it only after explicit rejection', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
@@ -234,12 +499,30 @@ describe('SmartSwarmApiClient', () => {
       }) as EventSource['addEventListener'];
     });
     vi.stubGlobal('EventSource', EventSourceMock);
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(Response.json({ connectionId: `stream-${sources.length + 1}` }))));
+    let cursorValidationAttempts = 0;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/events?')) {
+        cursorValidationAttempts += 1;
+        return Promise.resolve(new Response(JSON.stringify({ error: { message: 'Cursor rejected' } }), {
+          status: cursorValidationAttempts === 3 ? 422 : 503,
+        }));
+      }
+      return Promise.resolve(Response.json({ connectionId: `stream-${sources.length + 1}` }));
+    }));
     const client = new SmartSwarmApiClient(BASE_URL);
     const unsubscribe = await client.subscribe('hermes', 'board-main', { event: vi.fn() });
     sources[0]!.open!(new MessageEvent('open'));
     sources[0]!.activity!(new MessageEvent('activity', {
-      data: JSON.stringify({ id: 'event-1', cursor: 'stale-cursor', workspaceId: 'board-main' }),
+      data: JSON.stringify({
+        id: 'event-1',
+        cursor: 'replay-cursor',
+        workspaceId: 'board-main',
+        taskId: null,
+        runId: null,
+        type: 'lifecycle',
+        occurredAt: '2026-07-26T18:00:02.000Z',
+        summary: 'Task started',
+      }),
     }));
     sources[0]!.error!(new MessageEvent('error'));
     await vi.advanceTimersByTimeAsync(1_000);
@@ -249,10 +532,96 @@ describe('SmartSwarmApiClient', () => {
     await vi.advanceTimersByTimeAsync(4_000);
 
     expect(EventSourceMock).toHaveBeenLastCalledWith(
-      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-4?workspaceId=board-main`,
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-4?workspaceId=board-main&cursor=replay-cursor`,
+      { withCredentials: true },
+    );
+
+    sources[3]!.error!(new MessageEvent('error'));
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(EventSourceMock).toHaveBeenLastCalledWith(
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-5?workspaceId=board-main`,
       { withCredentials: true },
     );
     unsubscribe();
+  });
+
+  it('times out cursor validation so a hung request cannot block reconnection', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      sources.push(listeners);
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    let validationSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/events?')) {
+        validationSignal = init?.signal ?? undefined;
+        return new Promise<Response>(() => undefined);
+      }
+      return Promise.resolve(Response.json({ connectionId: `stream-${sources.length + 1}` }));
+    }));
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn() });
+    sources[0]!.open!(new MessageEvent('open'));
+    sources[0]!.activity!(new MessageEvent('activity', { data: JSON.stringify({
+      id: 'event-1', cursor: 'replay-cursor', workspaceId: 'board-main', taskId: null, runId: null,
+      type: 'log', occurredAt: '2026-07-26T18:00:02.000Z', summary: 'validated',
+    }) }));
+    sources[0]!.error!(new MessageEvent('error'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    sources[1]!.error!(new MessageEvent('error'));
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(validationSignal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(EventSourceMock).toHaveBeenCalledTimes(3);
+    unsubscribe();
+  });
+
+  it('aborts an in-flight cursor validation when unsubscribed', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
+    const EventSourceMock = vi.fn(function (this: EventSource) {
+      const listeners: Record<string, (event: MessageEvent) => void> = {};
+      sources.push(listeners);
+      this.close = vi.fn();
+      this.addEventListener = vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+        listeners[type] = listener as (event: MessageEvent) => void;
+      }) as EventSource['addEventListener'];
+    });
+    vi.stubGlobal('EventSource', EventSourceMock);
+    let validationSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/events?')) {
+        validationSignal = init?.signal ?? undefined;
+        return new Promise<Response>(() => undefined);
+      }
+      return Promise.resolve(Response.json({ connectionId: `stream-${sources.length + 1}` }));
+    }));
+    const client = new SmartSwarmApiClient(BASE_URL);
+    const unsubscribe = await client.subscribe('hermes', undefined, { event: vi.fn() });
+    sources[0]!.open!(new MessageEvent('open'));
+    sources[0]!.activity!(new MessageEvent('activity', { data: JSON.stringify({
+      id: 'event-1', cursor: 'replay-cursor', workspaceId: 'board-main', taskId: null, runId: null,
+      type: 'log', occurredAt: '2026-07-26T18:00:02.000Z', summary: 'validated',
+    }) }));
+    sources[0]!.error!(new MessageEvent('error'));
+    await vi.advanceTimersByTimeAsync(1_000);
+    sources[1]!.error!(new MessageEvent('error'));
+
+    unsubscribe();
+
+    expect(validationSignal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(EventSourceMock).toHaveBeenCalledTimes(2);
   });
 
   it('ignores callbacks from an event source superseded by reconnect', async () => {

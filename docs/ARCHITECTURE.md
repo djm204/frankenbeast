@@ -1099,6 +1099,18 @@ faculty state, but no compatible live faculty activity-event stream yet. Adding
 those nodes is therefore an additive cross-epic follow-up, not a synthetic
 mapping in the Brain Vitals UI.
 
+The canonical Brain Pulse lives on the smart-swarm route and consumes only the
+normalized `/v1/smart-swarm/providers/:providerId/events/:connectionId` stream.
+Every pulse preserves provider context plus the event's workspace, task/run
+entity ids, kind, source timestamp, summary, and stable cursor provenance. The
+browser rejects structurally malformed frames, reconnects from the last accepted
+event/checkpoint cursor, deduplicates replayed event ids per provider, and prunes
+the visible pulse window by source timestamp after one minute. `no activity`,
+`disconnected`, `degraded`, and `unsupported` are separate semantic states;
+reduced-motion clients retain all evidence without the pulse animation. Opening
+a pulse with a task id uses the existing normalized task detail and bounded run
+evidence rather than a staging or Beast-run surrogate.
+
 | Route | Purpose and bounds |
 |-------|--------------------|
 | `GET /v1/brain-vitals/:brainId` | Current one-hour health and telemetry snapshot; health score is persisted for history |

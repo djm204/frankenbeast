@@ -236,6 +236,33 @@ describe('OllamaRuntimeAdapter', () => {
     expect(endpoint.paths).toEqual(['/api/version', '/api/tags', '/api/ps']);
   });
 
+  it('bounds installed and loaded model metadata before parsing a snapshot', async () => {
+    const models = Array.from({ length: 200 }, (_, index) => ({
+      name: `model-${index.toString().padStart(3, '0')}-${'x'.repeat(24)}`,
+      size: index,
+      size_vram: index,
+    }));
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
+      if (path === '/api/version') return Response.json({ version: `v-${'x'.repeat(5_000)}` });
+      if (path === '/api/tags') return Response.json({ models });
+      if (path === '/api/ps') return Response.json({ models });
+      return Response.json({ error: 'not found' }, { status: 404 });
+    });
+    const adapter = new OllamaRuntimeAdapter({
+      endpoints: [{ id: 'lab', baseUrl: 'http://127.0.0.1:11434' }],
+      fetchImpl,
+    });
+
+    const snapshot = await adapter.getSnapshot();
+    expect(snapshot.workspaces.status).toBe('available');
+    if (snapshot.workspaces.status !== 'available') throw new Error('expected available workspaces');
+    expect(String(snapshot.workspaces.data[0]?.metadata?.['version']).length).toBeLessThanOrEqual(4_096);
+    expect(snapshot.workspaces.data[0]?.metadata?.['installedModels']).toEqual(expect.any(String));
+    expect(String(snapshot.workspaces.data[0]?.metadata?.['installedModels']).length).toBeLessThanOrEqual(4_096);
+    expect(String(snapshot.workspaces.data[0]?.metadata?.['loadedModels']).length).toBeLessThanOrEqual(4_096);
+  });
+
   it('keeps cloud-compatible endpoints available when daemon introspection routes are unsupported', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;

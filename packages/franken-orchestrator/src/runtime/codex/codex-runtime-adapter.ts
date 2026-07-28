@@ -54,6 +54,10 @@ const MAX_THREAD_PAGE_SIZE = 50;
 const MAX_THREAD_PAGES = 100;
 const MAX_CURSOR_JSON_BYTES = 64 * 1024;
 const MAX_EVENT_CURSOR_BYTES = 4_096;
+const MAX_NORMALIZED_METADATA_STRING_LENGTH = 4_096;
+// Reserves the remaining RuntimeEvent id budget for timestamp, status, and the
+// largest valid safe-integer transition suffix.
+const MAX_THREAD_ID_LENGTH = 956;
 const THREAD_STATUS_TYPES = new Set(['active', 'idle', 'notLoaded', 'systemError']);
 const THREAD_SOURCE_KINDS = [
   'cli', 'vscode', 'exec', 'appServer', 'subAgent',
@@ -94,20 +98,24 @@ function timestamp(value: number): string | null {
   return Number.isNaN(date.valueOf()) ? null : date.toISOString();
 }
 
+function isBoundedString(value: unknown, maximum: number, allowEmpty = true): value is string {
+  return typeof value === 'string' && (allowEmpty || value.length > 0) && value.length <= maximum;
+}
+
 function parseThread(value: unknown): CodexThread | null {
   if (!value || typeof value !== 'object') return null;
   const thread = value as Record<string, unknown>;
   if (
-    typeof thread['id'] !== 'string'
-    || typeof thread['sessionId'] !== 'string'
-    || typeof thread['cliVersion'] !== 'string'
+    !isBoundedString(thread['id'], MAX_THREAD_ID_LENGTH, false)
+    || !isBoundedString(thread['sessionId'], MAX_NORMALIZED_METADATA_STRING_LENGTH)
+    || !isBoundedString(thread['cliVersion'], MAX_NORMALIZED_METADATA_STRING_LENGTH)
     || typeof thread['createdAt'] !== 'number'
     || typeof thread['updatedAt'] !== 'number'
     || !timestamp(thread['createdAt'])
     || !timestamp(thread['updatedAt'])
     || typeof thread['cwd'] !== 'string'
     || typeof thread['ephemeral'] !== 'boolean'
-    || typeof thread['modelProvider'] !== 'string'
+    || !isBoundedString(thread['modelProvider'], MAX_NORMALIZED_METADATA_STRING_LENGTH)
     || !thread['status']
     || typeof thread['status'] !== 'object'
     || typeof (thread['status'] as Record<string, unknown>)['type'] !== 'string'

@@ -108,6 +108,192 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('quarantines oversized Hermes task identifiers before normalizing topology and events', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const oversizedTaskId = `t_${'x'.repeat(1_100)}`;
+    const db = new Database(dbPath);
+    db.transaction(() => {
+      db.prepare('UPDATE tasks SET id = ? WHERE id = ?').run(oversizedTaskId, 't_child');
+      db.prepare('UPDATE task_links SET child_id = ? WHERE child_id = ?').run(oversizedTaskId, 't_child');
+      db.prepare('UPDATE task_events SET task_id = ? WHERE task_id = ?').run(oversizedTaskId, 't_child');
+      db.prepare('UPDATE task_comments SET task_id = ? WHERE task_id = ?').run(oversizedTaskId, 't_child');
+    })();
+    db.close();
+
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const snapshot = await adapter.getSnapshot();
+    const eventPage = await adapter.getEvents();
+
+    expect(snapshot.tasks.status).toBe('available');
+    if (snapshot.tasks.status !== 'available') throw new Error('expected available tasks');
+    expect(snapshot.tasks.data).toHaveLength(1);
+    expect(snapshot.tasks.data[0]?.id).toBe('hermes:global:t_parent');
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data).toHaveLength(0);
+    expect(eventPage.events).toHaveLength(0);
+  });
+
+  it('advances past a full page of quarantined Hermes events', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const before = await adapter.getEvents({ limit: 10 });
+    const db = new Database(dbPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 102; index += 1) {
+        insert.run(100 + index, `t_${'x'.repeat(1_100)}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+      insert.run(300, 't_parent', null, 'completed', null, 1_785_081_900);
+    })();
+    db.close();
+
+    const page = await adapter.getEvents({ cursor: before.nextCursor!, limit: 100 });
+
+    expect(page.events.map((event) => event.id)).toEqual(['hermes:global:event:300']);
+  });
+
+  it('bounds quarantined replay scans and checkpoints inspected malformed rows', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const before = await adapter.getEvents({ limit: 100 });
+    if (!before.nextCursor) throw new Error('Expected an initial replay cursor');
+    const db = new Database(dbPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 2_001; index += 1) {
+        insert.run(1_000 + index, `t_${'x'.repeat(1_100)}_${index}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+      insert.run(4_000, 't_parent', null, 'completed', null, 1_785_084_000);
+    })();
+    db.close();
+
+    const quarantinedPage = await adapter.getEvents({ cursor: before.nextCursor, limit: 100 });
+    expect(quarantinedPage.events).toEqual([]);
+    expect(quarantinedPage.nextCursor).not.toBe(before.nextCursor);
+
+    const recoveredPage = await adapter.getEvents({ cursor: quarantinedPage.nextCursor ?? undefined, limit: 100 });
+    expect(recoveredPage.events.map((event) => event.id)).toContain('hermes:global:event:4000');
+  });
+
+  it('emits a cold-start checkpoint after a bounded quarantined scan', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec('DELETE FROM task_events; DELETE FROM task_comments;');
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 2_000; index += 1) {
+        insert.run(1_000 + index, `t_${'x'.repeat(1_100)}_${index}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+    })();
+    db.close();
+
+    const page = await new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } })
+      .getEvents({ limit: 100 });
+
+    expect(page.events).toEqual([]);
+    expect(page.nextCursor).not.toBeNull();
+  });
+
+  it('preserves valid cold-start events when a descending scan reaches its bound', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.exec('DELETE FROM task_events; DELETE FROM task_comments;');
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    insert.run(5_000, 't_parent', null, 'completed', null, 1_785_090_000);
+    db.transaction(() => {
+      for (let index = 0; index < 2_000; index += 1) {
+        insert.run(1_000 + index, `t_${'x'.repeat(1_100)}_${index}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+    })();
+    db.close();
+
+    const page = await new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } })
+      .getEvents({ limit: 100 });
+
+    expect(page.events.map((event) => event.id)).toContain('hermes:global:event:5000');
+  });
+
+  it('does not checkpoint valid events omitted by provider-wide pagination', async () => {
+    const home = await createHome();
+    await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
+    await mkdir(join(home, 'kanban', 'boards', 'beta'), { recursive: true });
+    createCurrentKanban(join(home, 'kanban', 'boards', 'alpha', 'kanban.db'));
+    createCurrentKanban(join(home, 'kanban', 'boards', 'beta', 'kanban.db'));
+    const adapter = new HermesRuntimeAdapter({ hermesHome: home });
+
+    const first = await adapter.getEvents({ limit: 1 });
+    const second = await adapter.getEvents({ cursor: first.nextCursor ?? undefined, limit: 1 });
+
+    expect(new Set([...first.events, ...second.events].map((event) => event.workspaceId))).toEqual(
+      new Set(['hermes:alpha', 'hermes:beta']),
+    );
+  });
+
+  it('backfills snapshot activity after quarantining the newest Hermes events', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 102; index += 1) {
+        insert.run(100 + index, `t_${'x'.repeat(1_100)}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+    })();
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({
+      env: { HERMES_KANBAN_DB: dbPath },
+    }).getSnapshot({ activityLimit: 100 });
+
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data.map((event) => event.id)).toContain('hermes:global:event:10');
+  });
+
+  it('quarantines oversized Hermes event run identifiers without rejecting activity', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE task_events SET run_id = ? WHERE id = ?').run(`r_${'x'.repeat(1_100)}`, 10);
+    db.close();
+
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const snapshot = await adapter.getSnapshot();
+    const eventPage = await adapter.getEvents();
+
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:event:10', runId: null }),
+    ]));
+    expect(eventPage.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:event:10', runId: null }),
+    ]));
+  });
+
   it('preserves HERMES_KANBAN_DB when an explicit Hermes home is configured', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');
@@ -1134,7 +1320,7 @@ if (args.includes('show')) {
     expect(recovered.events.map((event) => event.id)).toEqual(['hermes:alpha:event:11']);
   });
 
-  it('seeds initial cursors for healthy workspaces whose older events fall outside the page', async () => {
+  it('replays healthy workspaces whose valid events fall outside the initial page', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });
     createCurrentKanban(join(home, 'kanban.db'));
@@ -1145,7 +1331,9 @@ if (args.includes('show')) {
     const replay = await adapter.getEvents({ cursor: first.nextCursor!, limit: 10 });
 
     expect(first.events).toHaveLength(1);
-    expect(replay.events).toEqual([]);
+    expect(new Set([...first.events, ...replay.events].map((event) => event.workspaceId))).toEqual(
+      new Set(['hermes:global', 'hermes:alpha']),
+    );
   });
 
   it('preserves legacy cursor workspace ordering until each source advances', async () => {
@@ -1340,7 +1528,7 @@ if (args.includes('show')) {
     }
   });
 
-  it('rejects workspace sets that cannot fit in a bounded replay cursor', async () => {
+  it('keeps provider-wide replay cursors bounded without checkpointing omitted valid workspaces', async () => {
     const home = await createHome();
     for (let index = 0; index < 100; index += 1) {
       const boardName = `workspace-${String(index).padStart(3, '0')}-${'x'.repeat(120)}`;
@@ -1349,8 +1537,10 @@ if (args.includes('show')) {
       createCurrentKanban(join(boardDir, 'kanban.db'));
     }
 
-    await expect(new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 }))
-      .rejects.toThrow('exceeds the supported runtime cursor size');
+    const page = await new HermesRuntimeAdapter({ hermesHome: home }).getEvents({ limit: 1 });
+
+    expect(page.events).toHaveLength(1);
+    expect(page.nextCursor?.length).toBeLessThanOrEqual(4_096);
   });
 
   it('preserves slash commands and API routes in normalized runtime text', async () => {
@@ -2278,6 +2468,28 @@ if (args.includes('show')) {
     expect(snapshot.agents.data).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'hermes:global:worker-a', state: 'running' }),
     ]));
+  });
+
+  it('bounds unconstrained Hermes task and run metadata before shared schema parsing', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('s'.repeat(4_097), 't_parent');
+    db.prepare('UPDATE task_runs SET status = ?, outcome = ? WHERE id = ?')
+      .run('r'.repeat(4_097), 'o'.repeat(4_097), 1);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.tasks.status !== 'available' || snapshot.runs.status !== 'available') {
+      throw new Error('Expected tasks and runs');
+    }
+
+    const task = snapshot.tasks.data.find((candidate) => candidate.id === 'hermes:global:t_parent')!;
+    const run = snapshot.runs.data.find((candidate) => candidate.id === 'hermes:global:run:1')!;
+    expect(String(task.metadata?.['runtimeStatus']).length).toBeLessThanOrEqual(4_096);
+    expect(String(run.metadata?.['runtimeStatus']).length).toBeLessThanOrEqual(4_096);
+    expect(String(run.metadata?.['outcome']).length).toBeLessThanOrEqual(4_096);
   });
 
   it('discovers configured databases read-only and normalizes live task topology without leaking storage fields', async () => {

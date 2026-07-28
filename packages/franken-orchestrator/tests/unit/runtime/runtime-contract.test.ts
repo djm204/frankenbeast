@@ -6,6 +6,8 @@ import {
   RuntimeApprovalSchema,
   RuntimeBlockerSchema,
   RuntimeCursorError,
+  RuntimeEventPageSchema,
+  RuntimeEventSchema,
   RuntimeHealthSchema,
   RuntimeMetadataSchema,
   OllamaRuntimeAdapter,
@@ -178,6 +180,58 @@ describe('provider-neutral runtime contract', () => {
       createdAt: '2026-07-26T12:00:00.000Z',
       updatedAt: null,
     })).toEqual(expect.objectContaining({ id: 't'.repeat(201) }));
+  });
+
+  it('bounds normalized event summaries consistently with browser validation', () => {
+    const event = {
+      id: 'event-1',
+      cursor: 'cursor-1',
+      workspaceId: 'workspace-1',
+      taskId: null,
+      runId: null,
+      type: 'log',
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      summary: 'x'.repeat(16_384),
+    } as const;
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(RuntimeEventSchema.safeParse({ ...event, summary: `${event.summary}x` }).success).toBe(false);
+  });
+
+  it('bounds normalized event identifiers and cursors consistently with browser validation', () => {
+    const event = {
+      id: 'x'.repeat(1_024),
+      cursor: 'x'.repeat(4_096),
+      workspaceId: 'x'.repeat(1_024),
+      taskId: 'x'.repeat(1_024),
+      runId: 'x'.repeat(1_024),
+      type: 'log',
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      summary: 'bounded identifiers',
+    } as const;
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(RuntimeEventSchema.safeParse({ ...event, id: `${event.id}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, workspaceId: `${event.workspaceId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, taskId: `${event.taskId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, runId: `${event.runId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, cursor: `${event.cursor}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, cursor: '🚀'.repeat(1_025) }).success).toBe(false);
+  });
+
+  it('bounds checkpoint-only event page cursors by UTF-8 transport bytes', () => {
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: 'x'.repeat(4_096) }).success).toBe(true);
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: 'x'.repeat(4_097) }).success).toBe(false);
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: '🚀'.repeat(1_025) }).success).toBe(false);
+  });
+
+  it('bounds normalized metadata consistently with browser validation', () => {
+    const metadata = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`key-${index}`, index]));
+
+    expect(RuntimeMetadataSchema.safeParse(metadata).success).toBe(true);
+    expect(RuntimeMetadataSchema.safeParse({ ...metadata, overflow: true }).success).toBe(false);
+    expect(RuntimeMetadataSchema.safeParse({ key: 'x'.repeat(4_097) }).success).toBe(false);
+    expect(RuntimeMetadataSchema.safeParse({ ['x'.repeat(257)]: true }).success).toBe(false);
   });
 
   it('requires every capability to declare supported or unsupported state', async () => {

@@ -2344,6 +2344,85 @@ button {
   background: rgba(255, 122, 107, 0.1);
 }
 
+.runtime-brain-pulse {
+  gap: 0.75rem;
+}
+
+.runtime-brain-pulse > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.runtime-brain-pulse h3,
+.runtime-brain-pulse p {
+  margin: 0;
+}
+
+.runtime-brain-pulse[data-pulse-state="active"] {
+  animation: runtime-brain-pulse 1.4s ease-in-out infinite;
+  border-color: var(--accent);
+}
+
+.runtime-brain-pulse__state {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  color: var(--text-muted);
+}
+
+.runtime-brain-pulse__state--disconnected {
+  border-color: rgba(255, 122, 107, 0.42);
+}
+
+.runtime-brain-pulse__state--degraded {
+  border-color: rgba(255, 205, 86, 0.42);
+}
+
+.runtime-brain-pulse ol {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.runtime-brain-pulse li {
+  display: grid;
+  grid-template-columns: auto auto minmax(8rem, 1fr) repeat(4, auto) auto;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.65rem;
+  border-left: 3px solid var(--accent);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.runtime-brain-pulse time,
+.runtime-brain-pulse li span {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.runtime-brain-pulse li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.runtime-brain-pulse button {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--control-border);
+  border-radius: 0.55rem;
+  background: var(--control-bg);
+  color: var(--accent-strong);
+}
+
+@keyframes runtime-brain-pulse {
+  50% {
+    box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+}
+
 .smart-swarm-capabilities {
   grid-template-columns: minmax(12rem, 0.45fr) minmax(0, 1fr);
   align-items: start;
@@ -2504,7 +2583,10 @@ button {
 
 @media (prefers-reduced-motion: reduce) {
   .smart-swarm-connection,
-  .smart-swarm-task {
+  .smart-swarm-task,
+  .runtime-brain-pulse,
+  .runtime-brain-pulse[data-pulse-state="active"] {
+    animation: none;
     transition: none;
   }
 }
@@ -2520,6 +2602,10 @@ button {
 
   .smart-swarm-header,
   .smart-swarm-capabilities {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-brain-pulse li {
     grid-template-columns: 1fr;
   }
 

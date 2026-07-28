@@ -14,6 +14,7 @@ import {
   type RuntimeWorkspace,
   type SmartSwarmApiClient,
 } from '../lib/smart-swarm-api';
+import { RuntimeBrainPulse } from '../components/smart-swarm/runtime-brain-pulse';
 
 interface SmartSwarmPageProps {
   client: SmartSwarmApiClient;
@@ -22,6 +23,7 @@ interface SmartSwarmPageProps {
 interface PendingActionIntent {
   idempotencyKey: string;
   providerId: string;
+  workspaceId: string;
   taskId: string;
   action: RuntimeAction['type'];
   inFlight: boolean;
@@ -33,6 +35,15 @@ const MAX_VISIBLE_EVIDENCE = 100;
 const STREAM_REFRESH_DEBOUNCE_MS = 250;
 const TOPOLOGY_REFRESH_INTERVAL_MS = 5_000;
 const TERMINAL_RUN_STATES = new Set(['succeeded', 'failed', 'cancelled']);
+
+function actionIntentKey(
+  providerId: string,
+  workspaceId: string,
+  taskId: string,
+  action: RuntimeAction['type'],
+): string {
+  return JSON.stringify([providerId, workspaceId, taskId, action]);
+}
 
 function available<T>(section: RuntimeSection<T>): T | null {
   return section.status === 'available' ? section.data : null;
@@ -49,13 +60,15 @@ function capabilityReason(capability: RuntimeCapability): string | null {
 function actionPostconditionConfirmed(
   intent: PendingActionIntent,
   task: RuntimeTask,
-  blockers: Array<{ taskId: string }> | null,
+  blockers: Array<{ workspaceId: string; taskId: string }> | null,
 ): boolean {
   switch (intent.action) {
     case 'blocker.resolve':
       return task.state !== 'blocked'
         && blockers !== null
-        && !blockers.some((blocker) => blocker.taskId === intent.taskId);
+        && !blockers.some((blocker) => (
+          blocker.workspaceId === intent.workspaceId && blocker.taskId === intent.taskId
+        ));
     case 'task.cancel':
       return task.state === 'cancelled';
     case 'policy.apply':
@@ -285,6 +298,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot | null>(null);
   const [liveEvents, setLiveEvents] = useState<RuntimeEvent[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedPulseSource, setSelectedPulseSource] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [providerError, setProviderError] = useState<unknown>(null);
   const [snapshotError, setSnapshotError] = useState<unknown>(null);
@@ -318,7 +332,6 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
       ...liveEvents,
     ].map((event) => [event.id, event])).values()]
       .sort(compareRuntimeEvidenceRecency)
-      .slice(0, MAX_VISIBLE_EVIDENCE)
     : [];
   const blockers = snapshot
     ? [...(available(snapshot.blockers) ?? [])]
@@ -334,10 +347,30 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           || left.id.localeCompare(right.id);
       })
     : [];
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const selectedTaskLookupId = selectedTaskId ?? selectedPulseSource?.taskId ?? null;
+  const selectedTask = tasks.find((task) => (
+    task.id === selectedTaskLookupId
+    && (!selectedPulseSource || task.workspaceId === selectedPulseSource.workspaceId)
+  )) ?? null;
+  const referencedRun = selectedPulseSource?.runId
+    ? runs.find((run) => (
+      run.id === selectedPulseSource.runId
+      && run.workspaceId === selectedPulseSource.workspaceId
+      && run.taskId === selectedPulseSource.taskId
+    )) ?? null
+    : null;
+  const selectedTaskRuns = selectedTask
+    ? [...new Map([
+        ...(referencedRun ? [referencedRun] : []),
+        ...runs.filter((run) => (
+          run.taskId === selectedTask.id && run.workspaceId === selectedTask.workspaceId
+        )).sort(compareRuntimeRunRecency),
+      ].map((run) => [run.id, run])).values()].slice(0, 20)
+    : [];
   const selectedTaskActionPending = selectedTask
     ? [...actionIdempotencyKeys.current.values()].some((intent) => (
         intent.providerId === providerId
+        && intent.workspaceId === selectedTask.workspaceId
         && intent.taskId === selectedTask.id
         && (intent.inFlight || intent.awaitingConfirmation)
         && !actionPostconditionConfirmed(intent, selectedTask, confirmedBlockers)
@@ -347,7 +380,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   useEffect(() => {
     for (const [key, intent] of actionIdempotencyKeys.current) {
       if (intent.providerId !== providerId) continue;
-      const currentTask = tasks.find((task) => task.id === intent.taskId);
+      const currentTask = tasks.find((task) => (
+        task.workspaceId === intent.workspaceId && task.id === intent.taskId
+      ));
       if (currentTask && actionPostconditionConfirmed(intent, currentTask, confirmedBlockers)) {
         actionIdempotencyKeys.current.delete(key);
       }
@@ -400,6 +435,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           setLiveEvents([]);
           setWorkspaceCatalog(null);
           setWorkspaceId('');
+          setSelectedPulseSource(null);
           setSelectedTaskId(null);
           setSnapshotError(null);
           setWorkspaceCatalogError(null);
@@ -524,8 +560,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const visibleTasks = [...filteredTasks]
     .sort(compareTaskActivity)
     .slice(0, MAX_VISIBLE_TASKS);
-  const filteredEvents = events
-    .filter((event) => !workspaceId || event.workspaceId === workspaceId)
+  const pulseEvents = events.filter((event) => !workspaceId || event.workspaceId === workspaceId);
+  const filteredEvents = [...pulseEvents]
     .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
     .slice(0, 100);
   const filteredBlockers = blockers.filter((blocker) => !workspaceId || blocker.workspaceId === workspaceId);
@@ -545,6 +581,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
         const catalogWorkspaces = catalogSnapshot.workspaces.data;
         if (!catalogWorkspaces.some((workspace) => workspace.id === currentWorkspaceId.current)) {
           setSnapshot(null);
+          setSelectedPulseSource(null);
           setSelectedTaskId(null);
           setWorkspaceId(preferredWorkspaceId(catalogWorkspaces));
         }
@@ -591,6 +628,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                 setLiveEvents([]);
                 setWorkspaceCatalog(null);
                 setWorkspaceId('');
+                setSelectedPulseSource(null);
                 setSelectedTaskId(null);
                 setWorkspaceCatalogError(null);
                 setStreamError(null);
@@ -610,6 +648,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
               onChange={(event) => {
                 setSnapshot(null);
                 setLiveEvents([]);
+                setSelectedPulseSource(null);
                 setSelectedTaskId(null);
                 setLoading(true);
                 setWorkspaceId(event.target.value);
@@ -663,6 +702,20 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
 
       {snapshot ? (
         <>
+          {provider ? (
+            <RuntimeBrainPulse
+              connection={connection}
+              eventLimit={MAX_VISIBLE_EVIDENCE}
+              events={pulseEvents}
+              onOpenTask={(event, trigger) => {
+                taskDetailTrigger.current = trigger;
+                setSelectedPulseSource(event);
+                setSelectedTaskId(event.taskId);
+              }}
+              provider={provider}
+              snapshot={snapshot}
+            />
+          ) : null}
           <section className="smart-swarm-capabilities rail-card" aria-label="Provider capabilities">
             <div>
               <p className="eyebrow">Runtime status</p>
@@ -740,6 +793,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
                         className="smart-swarm-task"
                         onClick={(event) => {
                           taskDetailTrigger.current = event.currentTarget;
+                          setSelectedPulseSource(null);
                           setSelectedTaskId(task.id);
                         }}
                         type="button"
@@ -804,17 +858,75 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
           client={client}
           key={`${provider.id}:${selectedTask.id}`}
           onActionApplied={() => setRefreshNonce((current) => current + 1)}
-          onClose={() => setSelectedTaskId(null)}
+          onClose={() => {
+            setSelectedPulseSource(null);
+            setSelectedTaskId(null);
+          }}
           provider={provider}
           returnFocus={taskDetailTrigger.current}
-          runs={runs
-            .filter((run) => run.taskId === selectedTask.id)
-            .sort(compareRuntimeRunRecency)
-            .slice(0, 20)}
+          runs={selectedTaskRuns}
           task={selectedTask}
+        />
+      ) : selectedPulseSource?.taskId ? (
+        <UnavailableSourceDetail
+          event={selectedPulseSource}
+          onClose={() => {
+            setSelectedPulseSource(null);
+            setSelectedTaskId(null);
+          }}
+          referencedRun={referencedRun}
+          returnFocus={taskDetailTrigger.current}
         />
       ) : null}
     </main>
+  );
+}
+
+function UnavailableSourceDetail({ event, referencedRun, returnFocus, onClose }: {
+  event: RuntimeEvent;
+  referencedRun: RuntimeRun | null;
+  returnFocus: HTMLButtonElement | null;
+  onClose(): void;
+}) {
+  const closeButton = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    closeButton.current?.focus();
+    return () => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+    };
+  }, [returnFocus]);
+  return (
+    <section
+      aria-label={`Source task ${event.taskId} unavailable`}
+      aria-modal="true"
+      className="smart-swarm-detail"
+      onKeyDown={(keyEvent) => {
+        if (keyEvent.key === 'Escape') {
+          keyEvent.preventDefault();
+          onClose();
+        } else if (keyEvent.key === 'Tab') {
+          keyEvent.preventDefault();
+          closeButton.current?.focus();
+        }
+      }}
+      role="dialog"
+    >
+      <header>
+        <div><p className="eyebrow">Unavailable source</p><h3>Task {event.taskId}</h3></div>
+        <button className="button button--secondary button--compact" onClick={onClose} ref={closeButton} type="button">Close</button>
+      </header>
+      <p role="status">The referenced task is outside the bounded task snapshot.</p>
+      <dl>
+        <div><dt>Event</dt><dd>{event.id}</dd></div>
+        <div><dt>Workspace</dt><dd>{event.workspaceId}</dd></div>
+      </dl>
+      <section>
+        <h4>Referenced run evidence</h4>
+        {referencedRun ? (
+          <article><strong>{referencedRun.id}</strong><span>{referencedRun.state}</span><p>{referencedRun.summary ?? 'No run summary.'}</p></article>
+        ) : <p>Referenced run evidence is unavailable.</p>}
+      </section>
+    </section>
   );
 }
 
@@ -875,26 +987,27 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
             taskId: task.id,
             reason,
           };
-      const actionIntentKey = `${provider.id}:${task.id}:${action}`;
-      const pendingIntent = actionIdempotencyKeys.get(actionIntentKey);
+      const intentKey = actionIntentKey(provider.id, task.workspaceId, task.id, action);
+      const pendingIntent = actionIdempotencyKeys.get(intentKey);
       const idempotencyKey = pendingIntent?.idempotencyKey ?? `${action}:${crypto.randomUUID()}`;
       const actionIntent = pendingIntent ?? {
         idempotencyKey,
         providerId: provider.id,
+        workspaceId: task.workspaceId,
         taskId: task.id,
         action,
         inFlight: true,
         awaitingConfirmation: false,
       };
       actionIntent.inFlight = true;
-      actionIdempotencyKeys.set(actionIntentKey, actionIntent);
+      actionIdempotencyKeys.set(intentKey, actionIntent);
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
         idempotencyKey,
         action: runtimeAction,
       });
       if (result.status === 'applied') {
-        const appliedIntent = actionIdempotencyKeys.get(actionIntentKey);
+        const appliedIntent = actionIdempotencyKeys.get(intentKey);
         if (appliedIntent) {
           appliedIntent.awaitingConfirmation = true;
           awaitingConfirmation = true;
@@ -902,19 +1015,21 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
         setActionStatus(successMessage);
         onActionApplied();
       } else if (result.status === 'rejected') {
-        actionIdempotencyKeys.delete(actionIntentKey);
+        actionIdempotencyKeys.delete(intentKey);
         setActionStatus(`rejected: ${result.reason}`);
       } else if (result.status === 'failed') {
-        actionIdempotencyKeys.delete(actionIntentKey);
+        actionIdempotencyKeys.delete(intentKey);
         setActionStatus(`failed: ${result.reason}`);
       } else {
-        actionIdempotencyKeys.delete(actionIntentKey);
+        actionIdempotencyKeys.delete(intentKey);
         setActionStatus(`unsupported: ${result.reason}`);
       }
     } catch (error) {
       setActionStatus(errorMessage(error));
     } finally {
-      const pendingIntent = actionIdempotencyKeys.get(`${provider.id}:${task.id}:${action}`);
+      const pendingIntent = actionIdempotencyKeys.get(
+        actionIntentKey(provider.id, task.workspaceId, task.id, action),
+      );
       if (pendingIntent) pendingIntent.inFlight = false;
       if (!awaitingConfirmation) setActionPending(false);
     }

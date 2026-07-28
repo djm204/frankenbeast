@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { SmartSwarmPage } from './smart-swarm-page';
 import { SmartSwarmApiError } from '../lib/smart-swarm-api';
 import type {
+  RuntimeEvent,
   RuntimeProvider,
   RuntimeSnapshot,
   SmartSwarmApiClient,
@@ -106,6 +107,272 @@ function createClient(overrides: Partial<SmartSwarmApiClient> = {}): SmartSwarmA
 afterEach(cleanup);
 
 describe('SmartSwarmPage', () => {
+  it('pulses from recent normalized runtime events with traceable provider and entity provenance', async () => {
+    const occurredAt = new Date().toISOString();
+    const sourceEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!sourceEvent) throw new Error('Expected normalized runtime event');
+    const liveSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      events: {
+        status: 'available',
+        data: [{
+          ...sourceEvent,
+          occurredAt,
+        }],
+      },
+    };
+
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(liveSnapshot),
+    })} />);
+
+    const pulse = await screen.findByRole('region', { name: 'Runtime brain pulse' });
+    expect(pulse.textContent).toContain('1 event in the last minute');
+    expect(pulse.textContent).toContain('Hermes');
+    expect(pulse.textContent).toContain('board-main');
+    expect(pulse.textContent).toContain('task-live');
+    expect(pulse.textContent).toContain('run-1');
+    expect(pulse.textContent).toContain('log');
+    expect(pulse.querySelector('time')?.getAttribute('datetime')).toBe(occurredAt);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open source task task-live for event event-1' }));
+    const detail = await screen.findByRole('dialog', { name: 'Live dashboard details' });
+    expect(detail.textContent).toContain('run-1');
+  });
+
+  it('does not let impossible future evidence evict current pulse activity', async () => {
+    const sourceEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!sourceEvent) throw new Error('Expected normalized runtime event');
+    const current = {
+      ...sourceEvent,
+      id: 'event-current',
+      occurredAt: new Date().toISOString(),
+      summary: 'Current activity',
+    };
+    const impossibleFuture = Array.from({ length: 100 }, (_, index) => ({
+      ...sourceEvent,
+      id: `event-future-${index}`,
+      occurredAt: new Date(Date.now() + 3_600_000 + index).toISOString(),
+      summary: `Impossible future ${index}`,
+    }));
+    const futureHeavySnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      events: { status: 'available', data: [current, ...impossibleFuture] },
+    };
+
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(futureHeavySnapshot),
+    })} />);
+
+    const pulse = await screen.findByRole('region', { name: 'Runtime brain pulse' });
+    expect(pulse.textContent).toContain('Current activity');
+  });
+
+  it('does not resolve a pulse source task from a different workspace', async () => {
+    const occurredAt = new Date().toISOString();
+    const crossWorkspaceSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'available', data: [{
+        id: 'task-cross', workspaceId: 'board-other', title: 'Wrong workspace task', state: 'running',
+        parentIds: [], dependencyIds: [], ownerIds: [], priority: null, createdAt: occurredAt, updatedAt: occurredAt,
+      }] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [{
+        id: 'event-cross', cursor: 'cursor-cross', workspaceId: 'board-main', taskId: 'task-cross', runId: null,
+        type: 'audit', occurredAt, summary: 'Cross-workspace task reference',
+      }] },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(crossWorkspaceSnapshot),
+    })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open source task task-cross for event event-cross' }));
+
+    const detail = await screen.findByRole('dialog', { name: 'Source task task-cross unavailable' });
+    expect(detail.textContent).toContain('outside the bounded task snapshot');
+    expect(detail.textContent).not.toContain('Wrong workspace task');
+  });
+
+  it('does not include same-task-id run evidence from another workspace', async () => {
+    const occurredAt = new Date().toISOString();
+    const crossWorkspaceRunSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      runs: { status: 'available', data: [{
+        id: 'run-cross', workspaceId: 'board-other', taskId: 'task-live', agentId: null, sessionId: null,
+        state: 'running', startedAt: occurredAt, finishedAt: null, lastActiveAt: occurredAt, summary: 'Wrong workspace run',
+      }] },
+      events: { status: 'available', data: [{
+        id: 'event-cross-run', cursor: 'cursor-cross-run', workspaceId: 'board-main', taskId: 'task-live', runId: null,
+        type: 'log', occurredAt, summary: 'Task emitted workspace-scoped evidence',
+      }] },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(crossWorkspaceRunSnapshot),
+    })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open source task task-live for event event-cross-run' }));
+
+    const detail = await screen.findByRole('dialog', { name: 'Live dashboard details' });
+    expect(detail.textContent).not.toContain('run-cross');
+    expect(detail.textContent).not.toContain('Wrong workspace run');
+  });
+
+  it('opens pulse sources outside the task bound with referenced run evidence or an explicit unavailable state', async () => {
+    const occurredAt = new Date().toISOString();
+    const externalRun = {
+      id: 'run-external',
+      workspaceId: 'board-main',
+      taskId: 'task-external',
+      agentId: 'worker-1',
+      sessionId: 'session-external',
+      state: 'running' as const,
+      startedAt: occurredAt,
+      finishedAt: null,
+      lastActiveAt: occurredAt,
+      summary: 'External task run is still observable',
+    };
+    const boundedSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'available', data: snapshot.tasks.status === 'available' ? snapshot.tasks.data : [] },
+      runs: { status: 'available', data: [externalRun] },
+      events: {
+        status: 'available',
+        data: [
+          {
+            id: 'event-external', cursor: 'cursor-external', workspaceId: 'board-main', taskId: 'task-external', runId: 'run-external', type: 'log',
+            occurredAt, summary: 'External task emitted evidence',
+          },
+          {
+            id: 'event-missing', cursor: 'cursor-missing', workspaceId: 'board-main', taskId: 'task-missing', runId: 'run-missing', type: 'audit',
+            occurredAt, summary: 'Missing source emitted evidence',
+          },
+        ],
+      },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(boundedSnapshot),
+    })} />);
+
+    const externalTrigger = await screen.findByRole('button', { name: 'Open source task task-external for event event-external' });
+    fireEvent.click(externalTrigger);
+    let detail = await screen.findByRole('dialog', { name: 'Source task task-external unavailable' });
+    expect(detail.textContent).toContain('outside the bounded task snapshot');
+    expect(detail.textContent).toContain('run-external');
+    expect(detail.textContent).toContain('External task run is still observable');
+    externalTrigger.focus();
+    fireEvent.keyDown(detail, { key: 'Tab' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open source task task-missing for event event-missing' }));
+    detail = await screen.findByRole('dialog', { name: 'Source task task-missing unavailable' });
+    expect(detail.textContent).toContain('Referenced run evidence is unavailable');
+  });
+
+  it('upgrades an open pulse source when a later topology refresh includes its task', async () => {
+    const occurredAt = new Date().toISOString();
+    const sourceEvent: RuntimeEvent = {
+      id: 'event-late-task',
+      cursor: 'cursor-late-task',
+      workspaceId: 'board-main',
+      taskId: 'task-late',
+      runId: null,
+      type: 'log',
+      occurredAt,
+      summary: 'Task topology will arrive later',
+    };
+    const withoutTask: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'available', data: [] },
+      events: { status: 'available', data: [sourceEvent] },
+    };
+    const withTask: RuntimeSnapshot = {
+      ...withoutTask,
+      tasks: { status: 'available', data: [{
+        id: 'task-late',
+        workspaceId: 'board-main',
+        title: 'Late topology task',
+        state: 'running',
+        parentIds: [],
+        dependencyIds: [],
+        ownerIds: [],
+        priority: null,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      }] },
+    };
+    const fetchSnapshot = vi.fn()
+      .mockResolvedValueOnce(withoutTask)
+      .mockResolvedValueOnce(withoutTask)
+      .mockResolvedValueOnce(withoutTask)
+      .mockResolvedValue(withTask);
+    render(<SmartSwarmPage client={createClient({ fetchSnapshot })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open source task task-late for event event-late-task' }));
+    expect(await screen.findByRole('dialog', { name: 'Source task task-late unavailable' })).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+    await waitFor(() => expect(fetchSnapshot).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('dialog', { name: 'Source task task-late unavailable' })).toBeDefined();
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh topology' }).hasAttribute('disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh topology' }));
+
+    const detail = await screen.findByRole('dialog', { name: 'Late topology task details' });
+    expect(detail.textContent).toContain('Late topology task');
+    expect(screen.queryByRole('dialog', { name: 'Source task task-late unavailable' })).toBeNull();
+  });
+
+  it('does not resolve referenced run evidence for a different task', async () => {
+    const occurredAt = new Date().toISOString();
+    const mismatchedRunSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [{
+        id: 'run-collision', workspaceId: 'board-main', taskId: 'task-other', agentId: null, sessionId: null,
+        state: 'running', startedAt: occurredAt, finishedAt: null, lastActiveAt: occurredAt, summary: 'Wrong task run',
+      }] },
+      events: { status: 'available', data: [{
+        id: 'event-collision', cursor: 'cursor-collision', workspaceId: 'board-main', taskId: 'task-source', runId: 'run-collision',
+        type: 'log', occurredAt, summary: 'Task provenance must match',
+      }] },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(mismatchedRunSnapshot),
+    })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open source task task-source for event event-collision' }));
+
+    const detail = await screen.findByRole('dialog', { name: 'Source task task-source unavailable' });
+    expect(detail.textContent).toContain('Referenced run evidence is unavailable');
+    expect(detail.textContent).not.toContain('Wrong task run');
+  });
+
+  it('does not resolve referenced run evidence from a different workspace', async () => {
+    const occurredAt = new Date().toISOString();
+    const mismatchedRunSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [{
+        id: 'run-collision', workspaceId: 'board-other', taskId: 'task-source', agentId: null, sessionId: null,
+        state: 'running', startedAt: occurredAt, finishedAt: null, lastActiveAt: occurredAt, summary: 'Wrong workspace run',
+      }] },
+      events: { status: 'available', data: [{
+        id: 'event-collision', cursor: 'cursor-collision', workspaceId: 'board-main', taskId: 'task-source', runId: 'run-collision',
+        type: 'log', occurredAt, summary: 'Workspace provenance must match',
+      }] },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(mismatchedRunSnapshot),
+    })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open source task task-source for event event-collision' }));
+
+    const detail = await screen.findByRole('dialog', { name: 'Source task task-source unavailable' });
+    expect(detail.textContent).toContain('Referenced run evidence is unavailable');
+    expect(detail.textContent).not.toContain('Wrong workspace run');
+  });
+
   it('renders normalized provider, workspace, topology, and real evidence', async () => {
     const client = createClient();
     render(<SmartSwarmPage client={client} />);
@@ -181,6 +448,27 @@ describe('SmartSwarmPage', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(inspect));
+  });
+
+  it('restores focus to the pulse Open source trigger after task drill-down closes', async () => {
+    const sourceEvent = snapshot.events.status === 'available' ? snapshot.events.data[0] : undefined;
+    if (!sourceEvent) throw new Error('Expected normalized runtime event');
+    const liveSnapshot: RuntimeSnapshot = {
+      ...snapshot,
+      events: { status: 'available', data: [{ ...sourceEvent, occurredAt: new Date().toISOString() }] },
+    };
+    render(<SmartSwarmPage client={createClient({
+      fetchSnapshot: vi.fn().mockResolvedValue(liveSnapshot),
+    })} />);
+    const openSource = await screen.findByRole('button', { name: 'Open source task task-live for event event-1' });
+    openSource.focus();
+
+    fireEvent.click(openSource);
+    const close = await screen.findByRole('button', { name: 'Close' });
+    await waitFor(() => expect(document.activeElement).toBe(close));
+    fireEvent.click(close);
+
+    await waitFor(() => expect(document.activeElement).toBe(openSource));
   });
 
   it('keeps focus trapped when a pending action disables the focused control', async () => {
@@ -394,6 +682,73 @@ describe('SmartSwarmPage', () => {
     const firstKey = executeAction.mock.calls[0]?.[1].idempotencyKey;
     const retryKey = executeAction.mock.calls[1]?.[1].idempotencyKey;
     expect(retryKey).toBe(firstKey);
+  });
+
+  it('isolates delimiter-colliding pending action identities across workspaces', async () => {
+    const workspaceCatalog = [
+      { id: 'a:b', name: 'Main board', kind: 'workspace' as const, state: 'available' as const },
+      { id: 'a', name: 'Other board', kind: 'workspace' as const, state: 'available' as const },
+    ];
+    const snapshotFor = (selectedWorkspace: string): RuntimeSnapshot => {
+      const selectedTaskId = selectedWorkspace === 'a:b' ? 'c' : 'b:c';
+      return {
+        ...snapshot,
+        workspaces: { status: 'available', data: workspaceCatalog },
+        tasks: {
+          status: 'available',
+          data: snapshot.tasks.status === 'available'
+            ? snapshot.tasks.data.map((task) => task.id === 'task-live'
+              ? { ...task, id: selectedTaskId, workspaceId: selectedWorkspace, title: `${selectedWorkspace} live task` }
+              : { ...task, workspaceId: selectedWorkspace })
+            : [],
+        },
+        runs: { status: 'available', data: [] },
+        events: { status: 'available', data: [] },
+        blockers: {
+          status: 'available',
+          data: [{
+            id: `${selectedWorkspace}-blocker`, workspaceId: selectedWorkspace, taskId: selectedTaskId,
+            category: 'dependency', summary: 'Waiting', createdAt: '2026-07-26T17:50:00.000Z',
+          }],
+        },
+        approvals: { status: 'available', data: [] },
+      };
+    };
+    const executeAction = vi.fn()
+      .mockRejectedValueOnce(new TypeError('workspace A response lost'))
+      .mockResolvedValue({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'b:c',
+          outcome: 'applied',
+        },
+      });
+    const fetchSnapshot = vi.fn().mockImplementation(async (_providerId, options) => (
+      snapshotFor(options?.workspaceId === 'a' ? 'a' : 'a:b')
+    ));
+    render(<SmartSwarmPage client={createClient({ executeAction, fetchSnapshot })} />);
+    await screen.findByText('a:b live task');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect a:b live task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await screen.findByText('workspace A response lost');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), {
+      target: { value: 'a' },
+    });
+    await screen.findByText('a live task');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect a live task' }));
+    const otherResolve = screen.getByRole('button', { name: 'Resolve blocker' });
+    expect(otherResolve).toHaveProperty('disabled', false);
+    fireEvent.click(otherResolve);
+    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(2));
+
+    expect(executeAction.mock.calls[1]?.[1].idempotencyKey)
+      .not.toBe(executeAction.mock.calls[0]?.[1].idempotencyKey);
   });
 
   it('retains an uncertain blocker key while the task remains blocked without blocker evidence', async () => {

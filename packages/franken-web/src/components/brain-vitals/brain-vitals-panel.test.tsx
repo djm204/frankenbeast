@@ -155,7 +155,7 @@ describe('BrainVitalsPanel', () => {
     expect(api.fetchBrainVitalsRun).toHaveBeenCalledWith('reviewer', 'run-1');
   });
 
-  it('renders only the five real vitals dimensions and uses their activity for drill-down', async () => {
+  it('labels Beast telemetry as run activity rather than the provider-neutral Brain Pulse', async () => {
     let pushActivity!: (activity: BrainVitalsActivity) => void;
     const api = client({
       subscribeToBrainVitals: vi.fn((_brainId, _onSnapshot, _onError, onActivity) => {
@@ -166,7 +166,8 @@ describe('BrainVitalsPanel', () => {
 
     render(<BrainVitalsPanel client={api} />);
 
-    expect(await screen.findByRole('region', { name: 'Brain pulse map' })).toBeTruthy();
+    expect(await screen.findByRole('region', { name: 'Run telemetry activity map' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Brain pulse map' })).toBeNull();
     expect(screen.getAllByRole('button', { name: /activity:/ })).toHaveLength(5);
     expect(screen.queryByLabelText('Faculty pulse map availability')).toBeNull();
     expect(screen.queryByText(/Coming soon/)).toBeNull();
@@ -187,7 +188,7 @@ describe('BrainVitalsPanel', () => {
     });
 
     fireEvent.click(compactionNode);
-    expect(screen.getByRole('region', { name: 'Compaction pulse detail' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Compaction run activity detail' })).toBeTruthy();
     expect(screen.getByText('compaction.completed')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Open run run-1 from compaction activity' }));
 

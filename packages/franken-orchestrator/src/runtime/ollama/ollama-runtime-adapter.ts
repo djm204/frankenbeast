@@ -62,6 +62,7 @@ interface EndpointInspection {
 const UNCONFIGURED_REASON = 'Ollama endpoint is not configured; set OLLAMA_HOST or pass an endpoint';
 const UNSUPPORTED_REASON = 'Ollama does not expose a canonical upstream source for this data';
 const MAX_ENDPOINTS = 32;
+const MAX_METADATA_TEXT_LENGTH = 4_096;
 
 class OllamaEndpointError extends Error {}
 
@@ -109,6 +110,19 @@ function hasValidModelEntries(value: unknown): boolean {
 
 function nextModelExpiry(models: readonly OllamaModel[]): string | undefined {
   return models.flatMap((model) => model.expiresAt ? [model.expiresAt] : []).sort()[0];
+}
+
+function boundedMetadataText(value: string): string {
+  if (value.length <= MAX_METADATA_TEXT_LENGTH) return value;
+  let end = MAX_METADATA_TEXT_LENGTH - 1;
+  const previous = value.charCodeAt(end - 1);
+  const next = value.charCodeAt(end);
+  if (previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end -= 1;
+  return `${value.slice(0, end)}…`;
+}
+
+function boundedModelNames(models: readonly OllamaModel[]): string {
+  return boundedMetadataText(models.map((model) => model.name).sort().join(','));
 }
 
 function endpointUrl(baseUrl: string, path: string): URL {
@@ -285,12 +299,12 @@ export class OllamaRuntimeAdapter implements RuntimeAdapter {
         metadata: inspection.error
           ? { diagnostic: inspection.error }
           : {
-              ...(inspection.version ? { version: inspection.version } : {}),
+              ...(inspection.version ? { version: boundedMetadataText(inspection.version) } : {}),
               installedModelCount: inspection.installedModels.length,
-              installedModels: inspection.installedModels.map((model) => model.name).sort().join(','),
+              installedModels: boundedModelNames(inspection.installedModels),
               installedModelBytes: inspection.installedModels.reduce((total, model) => total + model.size, 0),
               loadedModelCount: inspection.loadedModels.length,
-              loadedModels: inspection.loadedModels.map((model) => model.name).sort().join(','),
+              loadedModels: boundedModelNames(inspection.loadedModels),
               loadedModelBytes: inspection.loadedModels.reduce((total, model) => total + model.size, 0),
               loadedVramBytes: inspection.loadedModels.reduce((total, model) => total + model.sizeVram, 0),
               ...(nextLoadedModelExpiry ? { nextLoadedModelExpiry } : {}),

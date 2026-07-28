@@ -99,11 +99,11 @@ export function BrainPulseMap({ snapshot, activities, activityReceipts, onOpenRu
     : [];
 
   return (
-    <section className="brain-pulse-map" role="region" aria-label="Brain pulse map">
+    <section className="brain-pulse-map" role="region" aria-label="Run telemetry activity map">
       <header>
         <div>
-          <h4>Live Brain Pulse Map</h4>
-          <p>Pulse rate reflects real activity events observed in the last minute.</p>
+          <h4>Live run telemetry activity</h4>
+          <p>Rates reflect Beast-run telemetry observed in the last minute, not provider-neutral Brain Pulse events.</p>
         </div>
         <small>{recentActivityCount} recent {recentActivityCount === 1 ? 'event' : 'events'}</small>
       </header>
@@ -145,7 +145,7 @@ export function BrainPulseMap({ snapshot, activities, activityReceipts, onOpenRu
         <section
           className="brain-pulse-map__detail"
           role="region"
-          aria-label={`${LABELS[selectedDimension]} pulse detail`}
+          aria-label={`${LABELS[selectedDimension]} run activity detail`}
         >
           <div>
             <h5>{LABELS[selectedDimension]} activity</h5>
