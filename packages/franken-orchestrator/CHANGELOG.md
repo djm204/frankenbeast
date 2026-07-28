@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.61.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.60.0...@franken/orchestrator-v0.61.0) (2026-07-28)
+
+
+### Features
+
+* **orchestrator:** add Codex runtime adapter ([#3861](https://github.com/djm204/frankenbeast/issues/3861)) ([b7dedb7](https://github.com/djm204/frankenbeast/commit/b7dedb7b53f76d7e0b8e28e090b711c7d7a992c9))
+* **orchestrator:** add governed smart-swarm actions ([#3862](https://github.com/djm204/frankenbeast/issues/3862)) ([a9ecf29](https://github.com/djm204/frankenbeast/commit/a9ecf2983a4f910dc7de0ff43ea057956d5b140d))
+* **orchestrator:** add Hermes runtime adapter boundary ([#3821](https://github.com/djm204/frankenbeast/issues/3821)) ([715da9d](https://github.com/djm204/frankenbeast/commit/715da9d456d9a883aa96d85f53cbefca832da1c1))
+* **orchestrator:** add mission completion gates ([#3871](https://github.com/djm204/frankenbeast/issues/3871)) ([1d339b4](https://github.com/djm204/frankenbeast/commit/1d339b445fe8e285d9a139ddc67032f51c42d01f))
+* **orchestrator:** add Ollama runtime adapter ([#3834](https://github.com/djm204/frankenbeast/issues/3834)) ([6734ad4](https://github.com/djm204/frankenbeast/commit/6734ad47f7746edf4c23679fceba17d0a6a45332))
+* **web:** drive brain pulse from runtime events ([#3872](https://github.com/djm204/frankenbeast/issues/3872)) ([4fbb635](https://github.com/djm204/frankenbeast/commit/4fbb6355fa4cfa8abaf51c677ab84b148d8f8578))
+* **web:** make Smart Swarm canonical operations surface ([#3870](https://github.com/djm204/frankenbeast/issues/3870)) ([42642f3](https://github.com/djm204/frankenbeast/commit/42642f3d50d11dcbdd5eaa12cb44100518b6fd0b))
+
+
+### Bug Fixes
+
+* **chat:** preserve HTTP conversation context ([#3866](https://github.com/djm204/frankenbeast/issues/3866)) ([a372df3](https://github.com/djm204/frankenbeast/commit/a372df380d529a66d1ca4a2d8abd2e7d0ef3be36))
+* **orchestrator:** expose trusted CLI paths to managed services ([#3868](https://github.com/djm204/frankenbeast/issues/3868)) ([522eb2d](https://github.com/djm204/frankenbeast/commit/522eb2d01448516619200d0011753512e83b486f))
+* **test:** stabilize public live acceptance ([#3875](https://github.com/djm204/frankenbeast/issues/3875)) ([3cb7e04](https://github.com/djm204/frankenbeast/commit/3cb7e045ee2cd0f185d7a7beb3df7e3c25b149b0))
+* **web:** authenticate forwarded dashboard origins ([#3873](https://github.com/djm204/frankenbeast/issues/3873)) ([595c9ae](https://github.com/djm204/frankenbeast/commit/595c9ae2fc64451eda244bbad41048ddc297a482))
+* **web:** remove Brain Vitals faculty placeholders ([#3810](https://github.com/djm204/frankenbeast/issues/3810)) ([cb2e7c3](https://github.com/djm204/frankenbeast/commit/cb2e7c39199a007c4a4c244c16aa383fb0f633d0))
+
+
+### Tests
+
+* **web:** add live Hermes smart-swarm E2E ([#3869](https://github.com/djm204/frankenbeast/issues/3869)) ([41ffed4](https://github.com/djm204/frankenbeast/commit/41ffed4e55e69d15cca24fceba05ae849667c426))
+* **web:** add public live dashboard acceptance ([#3874](https://github.com/djm204/frankenbeast/issues/3874)) ([f9cc11b](https://github.com/djm204/frankenbeast/commit/f9cc11b88bf55916c85efdf29719376e0e83c754))
+
 ## [0.60.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.59.0...@franken/orchestrator-v0.60.0) (2026-07-26)
 
 
