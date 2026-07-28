@@ -30,6 +30,6 @@
 - [x] Verify the preserved minimal remediations with 64/64 focused web tests and 2/2 active E2E-classifier tests.
 - [x] Run the full required local test, lint, typecheck, build, and diff-check gates. Live Hermes E2E passed 3/3; serial orchestrator passed 4,887/4,887; root lint, typecheck, build, and `git diff --check` passed. The concurrent root runner's seven load-sensitive orchestrator failures and one unhandled rejection all passed unchanged in the serial rerun.
 - [x] Commit and push the tenth-round remediation as `44b5a3839` with the required identity.
-- [ ] Reply to and resolve both current-head Codex threads.
-- [ ] Run one bounded tier-12 `@codex review` to exact-head clean, four green CI checks, and fully paginated zero unresolved Codex threads; do not merge.
+- [x] Reply to and resolve both current-head Codex threads; fully paginated GraphQL audit reports zero unresolved Codex-authored threads.
+- [ ] Run one bounded tier-12 `@codex review` to exact-head clean, four green CI checks, and fully paginated zero unresolved Codex threads; do not merge. Blocked because the PR already has 13 exact `@codex review` triggers, exceeding the approved tier-12 cap; a 14th trigger requires explicit tier-24 escalation.
 - [ ] Record machine-readable root-blackboard and card handoff.
