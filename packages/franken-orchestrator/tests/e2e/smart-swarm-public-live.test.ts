@@ -251,8 +251,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
     const unexpectedNetworkFailures: string[] = [];
-    const expectedManagedSseUrls = new Set<string>();
-    let captureManagedSseRequests = true;
+    const expectedManagedSseFailures = new Map<string, number>();
     let networkPhase = 'initial';
     let latestSseRequest: Request | undefined;
 
@@ -275,7 +274,6 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       page.on('request', (request) => {
         if (!isSmartSwarmSseRequest(request)) return;
         latestSseRequest = request;
-        if (captureManagedSseRequests) expectedManagedSseUrls.add(request.url());
       });
       page.on('console', (message) => {
         if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) {
@@ -290,10 +288,14 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       });
       page.on('requestfailed', (request) => {
         const errorText = request.failure()?.errorText ?? 'request failed';
-        if (expectedManagedSseUrls.has(request.url()) && [
+        const expectedFailureCount = expectedManagedSseFailures.get(request.url()) ?? 0;
+        const expectedInitialSseFailure = networkPhase === 'initial' && isSmartSwarmSseRequest(request);
+        if ((expectedInitialSseFailure || expectedFailureCount > 0) && [
           'net::ERR_ABORTED',
           'net::ERR_INCOMPLETE_CHUNKED_ENCODING',
         ].includes(errorText)) {
+          if (expectedFailureCount === 1) expectedManagedSseFailures.delete(request.url());
+          else if (expectedFailureCount > 1) expectedManagedSseFailures.set(request.url(), expectedFailureCount - 1);
           return;
         }
         unexpectedNetworkFailures.push(`${networkPhase} ${request.failure()?.errorText ?? 'request failed'} ${new URL(request.url()).pathname}`);
@@ -339,7 +341,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
         && response.url().includes('/v1/smart-swarm/providers/hermes/snapshot')
       ), { timeout: 30_000 });
       await page.goto(`${origin}/#/smart-swarm`, { waitUntil: 'domcontentloaded' });
-      await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm', level: 1 })).toBeVisible();
+      await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm', level: 2 })).toBeVisible();
       if (await page.getByLabel('Runtime provider').inputValue() !== 'hermes') {
         await page.getByLabel('Runtime provider').selectOption('hermes');
       }
@@ -350,7 +352,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
           cause: error,
         });
       }
-      captureManagedSseRequests = false;
+      networkPhase = 'live';
       await expectBrowser(page.getByRole('region', { name: 'Runtime brain pulse' })).toBeVisible();
       expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
@@ -483,8 +485,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       await page.route(reconnectStreamPattern, holdReconnect);
       const interruptedSseUrl = latestSseRequest?.url();
       if (!interruptedSseUrl) throw new Error('The deliberate interruption must target the active smart-swarm SSE request');
-      expectedManagedSseUrls.add(interruptedSseUrl);
-      captureManagedSseRequests = true;
+      expectedManagedSseFailures.set(interruptedSseUrl, 1);
       networkPhase = 'interruption';
       expect(await page.evaluate('window.__interruptPublicAcceptanceEventSource()')).toBe(true);
       await expectBrowser(page.getByText('Connection lost · reconnecting')).toBeVisible({ timeout: 15_000 });
@@ -492,7 +493,6 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
         heldReconnect,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out holding reconnect SSE request')), 15_000)),
       ]);
-      expectedManagedSseUrls.add(reconnectRequest.url());
       expect(new URL(reconnectRequest.url()).searchParams.get('cursor')).toBeTruthy();
       const replayMarker = `#3858 cursor replay ${crypto.randomUUID()}`;
       await addAcceptanceComment(taskId, replayMarker, databasePath);
@@ -515,7 +515,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       expect(rawReplayEvent, 'The raw replayed SSE payload must be captured').toBeDefined();
       expectCredentialRedaction(rawReplayEvent, credential, 'raw replayed SSE payload');
       expect(objectKeys(rawReplayEvent).map((key) => key.toLowerCase())).not.toContain('authorization');
-      captureManagedSseRequests = false;
+      expect(expectedManagedSseFailures.size, 'The deliberate SSE failure allowance must be consumed').toBe(0);
       networkPhase = 'post-replay';
       for (const viewport of [
         { width: 390, height: 844 },
@@ -524,7 +524,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       ]) {
         await page.setViewportSize(viewport);
         await expectNoHorizontalOverflow(page);
-        await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm', level: 1 })).toBeVisible();
+        await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm', level: 2 })).toBeVisible();
       }
 
       expectCredentialRedaction(await page.content(), credential, 'rendered DOM');
