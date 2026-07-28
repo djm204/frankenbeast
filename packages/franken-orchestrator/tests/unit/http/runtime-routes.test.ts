@@ -2180,8 +2180,9 @@ describe('smart-swarm runtime routes', () => {
     await reader.cancel();
   });
 
-  it('accepts large cursors that a runtime adapter can emit', async () => {
+  it('accepts large opaque request cursors when provider prevalidation allows them', async () => {
     const { app, adapter } = createRoutes();
+    vi.mocked(adapter.getEvents).mockResolvedValue({ events: [], nextCursor: null });
     const cursor = 'x'.repeat(70_000);
     const response = await app.request(`/v1/smart-swarm/providers/hermes/events?cursor=${cursor}`, {
       headers: authHeaders(),
@@ -2192,35 +2193,35 @@ describe('smart-swarm runtime routes', () => {
     }));
   });
 
-  it('rejects cursors too large for a replay-safe SSE id before writing', async () => {
+  it('rejects oversized adapter checkpoints before writing an SSE frame', async () => {
     const adapter = runtimeAdapter();
-    vi.mocked(adapter.getEvents).mockResolvedValue(RuntimeEventPageSchema.parse({
+    vi.mocked(adapter.getEvents).mockResolvedValue({
       events: [],
       nextCursor: 'x'.repeat(5_000),
-    }));
+    });
     const stream = { pipe: vi.fn(), onAbort: vi.fn() };
 
     await expect(runRuntimeEventStream(adapter, stream as never, {
       heartbeatIntervalMs: 1_000,
       pollIntervalMs: 1_000,
-    })).rejects.toThrow('transport-safe');
+    })).rejects.toThrow('nextCursor');
     expect(stream.pipe).not.toHaveBeenCalled();
   });
 
-  it('measures replay-safe SSE cursor limits in UTF-8 bytes', async () => {
+  it('measures adapter checkpoint limits in UTF-8 bytes', async () => {
     const adapter = runtimeAdapter();
     vi.mocked(adapter.getEvents)
-      .mockResolvedValueOnce(RuntimeEventPageSchema.parse({
+      .mockResolvedValueOnce({
         events: [],
         nextCursor: '界'.repeat(2_000),
-      }))
+      })
       .mockRejectedValue(new Error('permanent poll failure'));
     const stream = { pipe: vi.fn(), onAbort: vi.fn() };
 
     await expect(runRuntimeEventStream(adapter, stream as never, {
       heartbeatIntervalMs: 1_000,
       pollIntervalMs: 1,
-    })).rejects.toThrow('transport-safe');
+    })).rejects.toThrow('UTF-8 transport byte limit');
     expect(stream.pipe).not.toHaveBeenCalled();
   });
 });
