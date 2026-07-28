@@ -92,13 +92,13 @@ export function RuntimeBrainPulse({
         <p className="runtime-brain-pulse__state runtime-brain-pulse__state--unsupported" role="status">
           <strong>Unsupported</strong> · {unsupportedReason}
         </p>
-      ) : connection === 'reconnecting' || connection === 'unavailable' ? (
-        <p className="runtime-brain-pulse__state runtime-brain-pulse__state--disconnected" role="alert">
-          <strong>Disconnected</strong> · {connection === 'reconnecting' ? 'Reconnecting to normalized runtime events.' : 'Live runtime events are unavailable.'}
-        </p>
       ) : runtimeUnavailable ? (
         <p className="runtime-brain-pulse__state runtime-brain-pulse__state--disconnected" role="alert">
           <strong>Unavailable</strong> · {runtimeUnavailableReason}
+        </p>
+      ) : connection === 'reconnecting' || connection === 'unavailable' ? (
+        <p className="runtime-brain-pulse__state runtime-brain-pulse__state--disconnected" role="alert">
+          <strong>Disconnected</strong> · {connection === 'reconnecting' ? 'Reconnecting to normalized runtime events.' : 'Live runtime events are unavailable.'}
         </p>
       ) : snapshot.state === 'degraded' || provider.health.state === 'degraded' ? (
         <p className="runtime-brain-pulse__state runtime-brain-pulse__state--degraded" role="status">

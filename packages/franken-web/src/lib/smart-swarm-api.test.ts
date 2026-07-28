@@ -85,6 +85,34 @@ describe('SmartSwarmApiClient', () => {
     await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
   });
 
+  it('rejects runtime event cursors that exceed the UTF-8 transport byte limit', async () => {
+    const snapshot = {
+      providerId: 'hermes',
+      state: 'ready',
+      capturedAt: '2026-07-26T18:00:01.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [{
+        id: 'event-1',
+        cursor: '🚀'.repeat(1_025),
+        workspaceId: 'board-main',
+        taskId: null,
+        runId: null,
+        type: 'log',
+        occurredAt: '2026-07-26T18:00:02.000Z',
+        summary: 'Oversized transport cursor',
+      }] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'available', data: [] },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+    const client = new SmartSwarmApiClient(BASE_URL);
+
+    await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+  });
+
   it('rejects parseable timestamps that are not normalized ISO datetimes', async () => {
     const snapshot = {
       providerId: 'hermes',
@@ -112,6 +140,37 @@ describe('SmartSwarmApiClient', () => {
 
     await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
   });
+
+  it.each(['2026-02-29T12:00:00Z', '2026-02-31T12:00:00Z'])(
+    'rejects impossible calendar timestamp %s',
+    async (occurredAt) => {
+      const snapshot = {
+        providerId: 'hermes',
+        state: 'ready',
+        capturedAt: '2026-07-26T18:00:01.000Z',
+        workspaces: { status: 'available', data: [] },
+        agents: { status: 'available', data: [] },
+        tasks: { status: 'available', data: [] },
+        runs: { status: 'available', data: [] },
+        events: { status: 'available', data: [{
+          id: 'event-1',
+          cursor: 'cursor-1',
+          workspaceId: 'board-main',
+          taskId: null,
+          runId: null,
+          type: 'log',
+          occurredAt,
+          summary: 'Impossible calendar date',
+        }] },
+        blockers: { status: 'available', data: [] },
+        approvals: { status: 'available', data: [] },
+      };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: snapshot })));
+      const client = new SmartSwarmApiClient(BASE_URL);
+
+      await expect(client.fetchSnapshot('hermes')).rejects.toThrow('Malformed runtime event');
+    },
+  );
 
   it('rejects malformed runtime event section discriminants', async () => {
     const snapshot = {
@@ -392,7 +451,7 @@ describe('SmartSwarmApiClient', () => {
     unsubscribe();
   });
 
-  it('reconnects after a malformed activity event from the last validated cursor', async () => {
+  it('quarantines a malformed activity frame by reconnecting after its SSE cursor', async () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const sources: Array<Record<string, (event: MessageEvent) => void>> = [];
@@ -421,7 +480,7 @@ describe('SmartSwarmApiClient', () => {
 
     expect(EventSourceMock).toHaveBeenNthCalledWith(
       2,
-      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-2?cursor=validated-checkpoint`,
+      `${BASE_URL}/v1/smart-swarm/providers/hermes/events/stream-2?cursor=poisonous-cursor`,
       { withCredentials: true },
     );
     unsubscribe();

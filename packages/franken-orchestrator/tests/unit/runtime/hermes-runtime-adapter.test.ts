@@ -2280,6 +2280,28 @@ if (args.includes('show')) {
     ]));
   });
 
+  it('bounds unconstrained Hermes task and run metadata before shared schema parsing', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'kanban.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('s'.repeat(4_097), 't_parent');
+    db.prepare('UPDATE task_runs SET status = ?, outcome = ? WHERE id = ?')
+      .run('r'.repeat(4_097), 'o'.repeat(4_097), 1);
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({ hermesHome: home }).getSnapshot();
+    if (snapshot.tasks.status !== 'available' || snapshot.runs.status !== 'available') {
+      throw new Error('Expected tasks and runs');
+    }
+
+    const task = snapshot.tasks.data.find((candidate) => candidate.id === 'hermes:global:t_parent')!;
+    const run = snapshot.runs.data.find((candidate) => candidate.id === 'hermes:global:run:1')!;
+    expect(String(task.metadata?.['runtimeStatus']).length).toBeLessThanOrEqual(4_096);
+    expect(String(run.metadata?.['runtimeStatus']).length).toBeLessThanOrEqual(4_096);
+    expect(String(run.metadata?.['outcome']).length).toBeLessThanOrEqual(4_096);
+  });
+
   it('discovers configured databases read-only and normalizes live task topology without leaking storage fields', async () => {
     const home = await createHome();
     await mkdir(join(home, 'kanban', 'boards', 'alpha'), { recursive: true });

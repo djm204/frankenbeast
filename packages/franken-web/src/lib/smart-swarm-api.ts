@@ -190,6 +190,21 @@ function isBoundedString(value: unknown, maximum: number, allowEmpty = false): v
   return typeof value === 'string' && (allowEmpty || value.length > 0) && value.length <= maximum;
 }
 
+function isBoundedUtf8String(value: unknown, maximum: number): value is string {
+  return isBoundedString(value, maximum) && new TextEncoder().encode(value).byteLength <= maximum;
+}
+
+function hasValidCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T/u.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]!;
+}
+
 function isRuntimeEventMetadata(value: unknown): value is RuntimeEvent['metadata'] {
   if (value === undefined) return true;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -214,13 +229,14 @@ function parseRuntimeEvent(value: unknown): RuntimeEvent {
   if (
     Object.keys(value).some((key) => !RUNTIME_EVENT_KEYS.has(key))
     || !isBoundedString(candidate.id, MAX_RUNTIME_EVENT_ID_LENGTH)
-    || !isBoundedString(candidate.cursor, MAX_RUNTIME_EVENT_CURSOR_LENGTH)
+    || !isBoundedUtf8String(candidate.cursor, MAX_RUNTIME_EVENT_CURSOR_LENGTH)
     || !isBoundedString(candidate.workspaceId, MAX_RUNTIME_EVENT_ID_LENGTH)
     || (candidate.taskId !== null && !isBoundedString(candidate.taskId, MAX_RUNTIME_EVENT_ID_LENGTH))
     || (candidate.runId !== null && !isBoundedString(candidate.runId, MAX_RUNTIME_EVENT_ID_LENGTH))
     || typeof candidate.type !== 'string' || !RUNTIME_EVENT_TYPES.has(candidate.type as RuntimeEvent['type'])
     || !isBoundedString(candidate.occurredAt, 64)
     || !NORMALIZED_TIMESTAMP_PATTERN.test(candidate.occurredAt)
+    || !hasValidCalendarDate(candidate.occurredAt)
     || !Number.isFinite(Date.parse(candidate.occurredAt))
     || !isBoundedString(candidate.summary, MAX_RUNTIME_EVENT_SUMMARY_LENGTH, true)
     || !isRuntimeEventMetadata(candidate.metadata)
@@ -376,7 +392,7 @@ export class SmartSwarmApiClient {
         if (source !== activeSource || closed) return;
         const lastEventId = (rawEvent as MessageEvent<string>).lastEventId;
         if (!lastEventId) return;
-        if (!isBoundedString(lastEventId, MAX_RUNTIME_EVENT_CURSOR_LENGTH)) {
+        if (!isBoundedUtf8String(lastEventId, MAX_RUNTIME_EVENT_CURSOR_LENGTH)) {
           handlers.error?.(new Error('Malformed checkpoint cursor: value exceeds safe limits.'));
           scheduleReconnect();
           return;
@@ -395,6 +411,10 @@ export class SmartSwarmApiClient {
           handlers.event(event);
         } catch (error) {
           handlers.error?.(error instanceof Error ? error : new Error('Unable to parse smart-swarm activity.'));
+          const rejectedCursor = (rawEvent as MessageEvent<unknown>).lastEventId;
+          if (rejectedCursor && isBoundedUtf8String(rejectedCursor, MAX_RUNTIME_EVENT_CURSOR_LENGTH)) {
+            cursor = rejectedCursor;
+          }
           scheduleReconnect();
         }
       });

@@ -1279,7 +1279,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         priority: typeof task['priority'] === 'number' && Number.isSafeInteger(task['priority']) ? task['priority'] : null,
         createdAt: requiredTimestamp(task['created_at']),
         updatedAt,
-        metadata: { runtimeStatus: String(task['status']) },
+        metadata: { runtimeStatus: boundedText(String(task['status'])) },
       };
     });
     const sessionByRunId = new Map<string, string>();
@@ -1329,8 +1329,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         lastActiveAt: latestTimestamp(run['last_heartbeat_at'], run['ended_at'], run['started_at']),
         summary: typeof run['summary'] === 'string' ? boundedText(run['summary']) : null,
         metadata: {
-          runtimeStatus: String(run['status']),
-          ...(typeof run['outcome'] === 'string' ? { outcome: run['outcome'] } : {}),
+          runtimeStatus: boundedText(String(run['status'])),
+          ...(typeof run['outcome'] === 'string' ? { outcome: boundedText(run['outcome']) } : {}),
         },
       };
     });

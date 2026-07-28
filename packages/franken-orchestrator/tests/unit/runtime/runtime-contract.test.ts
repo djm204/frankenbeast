@@ -215,6 +215,7 @@ describe('provider-neutral runtime contract', () => {
     expect(RuntimeEventSchema.safeParse({ ...event, taskId: `${event.taskId}x` }).success).toBe(false);
     expect(RuntimeEventSchema.safeParse({ ...event, runId: `${event.runId}x` }).success).toBe(false);
     expect(RuntimeEventSchema.safeParse({ ...event, cursor: `${event.cursor}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, cursor: '🚀'.repeat(1_025) }).success).toBe(false);
   });
 
   it('bounds normalized metadata consistently with browser validation', () => {

@@ -312,6 +312,24 @@ describe('RuntimeBrainPulse', () => {
     expect(alert.textContent).not.toContain('No activity');
   });
 
+  it('prioritizes a known runtime failure while the event transport reconnects', () => {
+    render(
+      <RuntimeBrainPulse
+        connection="reconnecting"
+        events={[]}
+        onOpenTask={() => undefined}
+        provider={provider}
+        snapshot={{ ...snapshot, state: 'schema-incompatible', message: 'Hermes schema version is incompatible.' }}
+      />,
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Unavailable');
+    expect(alert.textContent).toContain('Hermes schema version is incompatible.');
+    expect(alert.textContent).not.toContain('Disconnected');
+    expect(alert.textContent).not.toContain('Reconnecting');
+  });
+
   it('discloses when the displayed event count reaches its retention limit', () => {
     const now = new Date();
     const events = Array.from({ length: 100 }, (_, index): RuntimeEvent => ({
