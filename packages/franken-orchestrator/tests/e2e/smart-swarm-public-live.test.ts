@@ -252,6 +252,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
     const pageErrors: string[] = [];
     const unexpectedNetworkFailures: string[] = [];
     const expectedManagedSseFailures = new Map<string, number>();
+    let initialSseAllowanceAssigned = false;
     let networkPhase = 'initial';
     let latestSseRequest: Request | undefined;
 
@@ -273,6 +274,10 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
 
       page.on('request', (request) => {
         if (!isSmartSwarmSseRequest(request)) return;
+        if (networkPhase === 'initial' && !initialSseAllowanceAssigned) {
+          expectedManagedSseFailures.set(request.url(), 1);
+          initialSseAllowanceAssigned = true;
+        }
         latestSseRequest = request;
       });
       page.on('console', (message) => {
@@ -289,8 +294,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       page.on('requestfailed', (request) => {
         const errorText = request.failure()?.errorText ?? 'request failed';
         const expectedFailureCount = expectedManagedSseFailures.get(request.url()) ?? 0;
-        const expectedInitialSseFailure = networkPhase === 'initial' && isSmartSwarmSseRequest(request);
-        if ((expectedInitialSseFailure || expectedFailureCount > 0) && [
+        if (expectedFailureCount > 0 && [
           'net::ERR_ABORTED',
           'net::ERR_INCOMPLETE_CHUNKED_ENCODING',
         ].includes(errorText)) {
@@ -353,6 +357,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
         });
       }
       networkPhase = 'live';
+      expectedManagedSseFailures.clear();
       await expectBrowser(page.getByRole('region', { name: 'Runtime brain pulse' })).toBeVisible();
       expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
@@ -515,7 +520,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       expect(rawReplayEvent, 'The raw replayed SSE payload must be captured').toBeDefined();
       expectCredentialRedaction(rawReplayEvent, credential, 'raw replayed SSE payload');
       expect(objectKeys(rawReplayEvent).map((key) => key.toLowerCase())).not.toContain('authorization');
-      expect(expectedManagedSseFailures.size, 'The deliberate SSE failure allowance must be consumed').toBe(0);
+      expect(expectedManagedSseFailures.size, 'Every bounded SSE failure allowance must be consumed').toBe(0);
       networkPhase = 'post-replay';
       for (const viewport of [
         { width: 390, height: 844 },
