@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from 'node:http';
+import { connect } from 'node:net';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
+import WebSocket, { WebSocketServer } from 'ws';
 import { createDashboardStaticResponse, parseCliArgs, resolveDashboardOperatorToken, startDashboardStaticServer } from '../../../src/http/dashboard-static-server.js';
 import { createSecretStore } from '../../../src/network/secret-store.js';
 
 import { testCredential } from '../../support/test-credentials.js';
 
 const TEST_OPERATOR_TOKEN = testCredential('TEST_OPERATOR_TOKEN');
+const TEST_PROXY_TOKEN = testCredential('TEST_PROXY_TOKEN');
 async function createDashboardDist(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'franken-dashboard-dist-'));
   await mkdir(join(dir, 'assets'), { recursive: true });
@@ -25,6 +28,7 @@ describe('dashboard static server', () => {
   const originalConfigFile = process.env.FRANKENBEAST_CONFIG_FILE;
   const originalConfigPath = process.env.FRANKENBEAST_CONFIG_PATH;
   const originalPassphrase = process.env.FRANKENBEAST_PASSPHRASE;
+  const originalTrustedProxyToken = process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN;
 
   afterEach(async () => {
     await Promise.all(dirs.map((dir) => rm(dir, { recursive: true, force: true })));
@@ -37,6 +41,8 @@ describe('dashboard static server', () => {
     else process.env.FRANKENBEAST_CONFIG_PATH = originalConfigPath;
     if (originalPassphrase === undefined) delete process.env.FRANKENBEAST_PASSPHRASE;
     else process.env.FRANKENBEAST_PASSPHRASE = originalPassphrase;
+    if (originalTrustedProxyToken === undefined) delete process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN;
+    else process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN = originalTrustedProxyToken;
     vi.restoreAllMocks();
   });
 
@@ -150,6 +156,60 @@ describe('dashboard static server', () => {
     expect(headers.get('authorization')).toBe(`Bearer ${TEST_OPERATOR_TOKEN}`);
     expect(headers.get('x-forwarded-host')).toBe('dashboard.local');
     expect(headers.get('x-forwarded-proto')).toBe('http');
+  });
+
+  it('accepts same-origin browser requests forwarded by the authenticated HTTPS tunnel', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    globalThis.fetch = fetchMock;
+
+    const proxied = await createDashboardStaticResponse(
+      new Request('http://127.0.0.1:5190/v1/smart-swarm/providers', {
+        headers: {
+          origin: 'https://dashboard.example.com',
+          'x-forwarded-host': 'dashboard.example.com',
+          'x-forwarded-proto': 'https',
+          'x-frankenbeast-proxy-token': TEST_PROXY_TOKEN,
+          'x-frankenbeast-remote-address': '127.0.0.1',
+        },
+      }),
+      staticDir,
+      {
+        apiTarget: 'http://127.0.0.1:4242',
+        operatorToken: TEST_OPERATOR_TOKEN,
+        trustedProxyOrigin: 'https://dashboard.example.com',
+        trustedProxyToken: TEST_PROXY_TOKEN,
+      },
+    );
+
+    expect(proxied.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('rejects spoofed forwarded origins without a trusted loopback proxy peer', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"ok":true}'));
+    globalThis.fetch = fetchMock;
+
+    const proxied = await createDashboardStaticResponse(
+      new Request('http://127.0.0.1:5190/v1/smart-swarm/providers', {
+        headers: {
+          origin: 'https://dashboard.example.com',
+          'x-forwarded-host': 'dashboard.example.com',
+          'x-forwarded-proto': 'https',
+        },
+      }),
+      staticDir,
+      { apiTarget: 'http://127.0.0.1:4242', operatorToken: TEST_OPERATOR_TOKEN },
+    );
+
+    expect(proxied.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('forwards the static dashboard origin headers without requiring an operator token', async () => {
@@ -354,6 +414,8 @@ describe('dashboard static server', () => {
       staticDir,
       apiTarget: `http://127.0.0.1:${backendAddress.port}`,
       operatorToken: TEST_OPERATOR_TOKEN,
+      trustedProxyOrigin: 'https://dashboard.example.com',
+      trustedProxyToken: TEST_PROXY_TOKEN,
     });
     const dashboardAddress = dashboard.address();
     if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
@@ -363,8 +425,10 @@ describe('dashboard static server', () => {
         method: 'PATCH',
         headers: {
           'content-type': 'application/json',
-          origin: `https://127.0.0.1:${dashboardAddress.port}`,
+          origin: 'https://dashboard.example.com',
+          'x-forwarded-host': 'dashboard.example.com',
           'x-forwarded-proto': 'https',
+          'x-frankenbeast-proxy-token': TEST_PROXY_TOKEN,
         },
         body: JSON.stringify({ hello: 'world' }),
       });
@@ -373,6 +437,169 @@ describe('dashboard static server', () => {
       expect(receivedBody).toBe('{"hello":"world"}');
     } finally {
       await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+      await new Promise<void>((resolveClose) => backend.close(() => resolveClose()));
+    }
+  });
+
+  it('rejects forwarded WebSocket origins unless the public proxy origin is explicitly trusted', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const dashboard = await startDashboardStaticServer({
+      host: '127.0.0.1',
+      port: 0,
+      staticDir,
+      apiTarget: 'http://127.0.0.1:1',
+      operatorToken: TEST_OPERATOR_TOKEN,
+      trustedProxyOrigin: 'https://dashboard.example.com',
+    });
+    const dashboardAddress = dashboard.address();
+    if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
+
+    const client = new WebSocket(`ws://127.0.0.1:${dashboardAddress.port}/v1/chat/ws`, {
+      headers: {
+        origin: 'https://dashboard.example.com',
+        'x-forwarded-host': 'dashboard.example.com',
+        'x-forwarded-proto': 'https',
+      },
+    });
+    try {
+      const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+        client.once('unexpected-response', (_request, response) => resolveStatus(response.statusCode ?? 0));
+        client.once('error', rejectStatus);
+      });
+      expect(status).toBe(403);
+    } finally {
+      client.close();
+      await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+    }
+  });
+
+  it('rejects malformed forwarded WebSocket hosts without crashing the dashboard server', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const dashboard = await startDashboardStaticServer({
+      host: '127.0.0.1',
+      port: 0,
+      staticDir,
+      apiTarget: 'http://127.0.0.1:1',
+      operatorToken: TEST_OPERATOR_TOKEN,
+      trustedProxyOrigin: 'https://dashboard.example.com',
+    });
+    const dashboardAddress = dashboard.address();
+    if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
+
+    const client = new WebSocket(`ws://127.0.0.1:${dashboardAddress.port}/v1/chat/ws`, {
+      headers: {
+        origin: 'https://dashboard.example.com',
+        'x-forwarded-host': '[',
+        'x-forwarded-proto': 'https',
+      },
+    });
+    try {
+      const status = await new Promise<number>((resolveStatus, rejectStatus) => {
+        client.once('unexpected-response', (_request, response) => resolveStatus(response.statusCode ?? 0));
+        client.once('error', rejectStatus);
+      });
+      expect(status).toBe(403);
+      await expect(fetch(`http://127.0.0.1:${dashboardAddress.port}/`)).resolves.toMatchObject({ status: 200 });
+    } finally {
+      client.close();
+      await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+    }
+  });
+
+  it('rejects malformed WebSocket Host headers without crashing the dashboard server', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const dashboard = await startDashboardStaticServer({
+      host: '127.0.0.1',
+      port: 0,
+      staticDir,
+      apiTarget: 'http://127.0.0.1:1',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    });
+    const dashboardAddress = dashboard.address();
+    if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
+
+    const statusLine = await new Promise<string>((resolveStatus, rejectStatus) => {
+      const socket = connect(dashboardAddress.port, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.once('connect', () => {
+        socket.write('GET /v1/chat/ws HTTP/1.1\r\nHost: [\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+      });
+      socket.on('data', (chunk) => {
+        response += chunk;
+        if (response.includes('\r\n')) {
+          socket.destroy();
+          resolveStatus(response.split('\r\n')[0] ?? '');
+        }
+      });
+      socket.once('error', rejectStatus);
+    });
+
+    try {
+      expect(statusLine).toBe('HTTP/1.1 400 Bad Request');
+      await expect(fetch(`http://127.0.0.1:${dashboardAddress.port}/`)).resolves.toMatchObject({ status: 200 });
+    } finally {
+      await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+    }
+  });
+
+  it('proxies same-origin WebSocket upgrades forwarded by the authenticated HTTPS tunnel', async () => {
+    const staticDir = await createDashboardDist();
+    dirs.push(staticDir);
+    const backend = createServer();
+    const websocketServer = new WebSocketServer({ noServer: true });
+    let forwardedHost: string | undefined;
+    let forwardedProto: string | undefined;
+    let authorization: string | undefined;
+    backend.on('upgrade', (request, socket, head) => {
+      forwardedHost = request.headers['x-forwarded-host'] as string | undefined;
+      forwardedProto = request.headers['x-forwarded-proto'] as string | undefined;
+      authorization = request.headers.authorization;
+      websocketServer.handleUpgrade(request, socket, head, (websocket) => {
+        websocket.send('ready');
+      });
+    });
+    await new Promise<void>((resolveListen) => backend.listen(0, '127.0.0.1', resolveListen));
+    const backendAddress = backend.address();
+    if (!backendAddress || typeof backendAddress === 'string') throw new Error('backend listen failed');
+
+    const dashboard = await startDashboardStaticServer({
+      host: '127.0.0.1',
+      port: 0,
+      staticDir,
+      apiTarget: `http://127.0.0.1:${backendAddress.port}`,
+      operatorToken: TEST_OPERATOR_TOKEN,
+      trustedProxyOrigin: 'https://dashboard.example.com',
+      trustedProxyToken: TEST_PROXY_TOKEN,
+    });
+    const dashboardAddress = dashboard.address();
+    if (!dashboardAddress || typeof dashboardAddress === 'string') throw new Error('dashboard listen failed');
+
+    const client = new WebSocket(`ws://127.0.0.1:${dashboardAddress.port}/v1/chat/ws`, {
+      headers: {
+        origin: 'https://dashboard.example.com',
+        'x-forwarded-host': 'dashboard.example.com',
+        'x-forwarded-proto': 'https',
+        'x-frankenbeast-proxy-token': TEST_PROXY_TOKEN,
+      },
+    });
+    try {
+      const message = await new Promise<string>((resolveMessage, rejectMessage) => {
+        client.once('message', (data) => resolveMessage(data.toString()));
+        client.once('error', rejectMessage);
+      });
+
+      expect(message).toBe('ready');
+      expect(forwardedHost).toBe('dashboard.example.com');
+      expect(forwardedProto).toBe('https');
+      expect(authorization).toBe(`Bearer ${TEST_OPERATOR_TOKEN}`);
+    } finally {
+      client.close();
+      await new Promise<void>((resolveClose) => dashboard.close(() => resolveClose()));
+      websocketServer.close();
       await new Promise<void>((resolveClose) => backend.close(() => resolveClose()));
     }
   });
@@ -467,5 +694,31 @@ describe('dashboard static server', () => {
     await expect(parseCliArgs([])).resolves.toMatchObject({ port: 5173 });
     await expect(parseCliArgs(['--port', '5173'])).resolves.toMatchObject({ port: 5173 });
     await expect(parseCliArgs(['--port', '0'])).resolves.toMatchObject({ port: 0 });
+  });
+
+  it('requires a valid origin when the public reverse proxy is explicitly trusted', async () => {
+    process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN = TEST_PROXY_TOKEN;
+    await expect(parseCliArgs([
+      '--trusted-proxy-origin',
+      'https://dashboard.example.com',
+    ])).resolves.toMatchObject({
+      trustedProxyOrigin: 'https://dashboard.example.com',
+      trustedProxyToken: TEST_PROXY_TOKEN,
+    });
+    await expect(parseCliArgs([
+      '--trusted-proxy-origin',
+      'https://dashboard.example.com/path',
+    ])).rejects.toThrow(/Invalid --trusted-proxy-origin value/);
+  });
+
+  it('requires the trusted proxy origin and token to be configured together', async () => {
+    delete process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN;
+    await expect(parseCliArgs([
+      '--trusted-proxy-origin',
+      'https://dashboard.example.com',
+    ])).rejects.toThrow(/trusted proxy origin and token must be configured together/i);
+
+    process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN = TEST_PROXY_TOKEN;
+    await expect(parseCliArgs([])).rejects.toThrow(/trusted proxy origin and token must be configured together/i);
   });
 });

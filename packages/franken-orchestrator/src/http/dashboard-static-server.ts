@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { timingSafeEqual } from 'node:crypto';
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server as HttpServer, type ServerResponse } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { readFile, stat } from 'node:fs/promises';
@@ -12,6 +13,7 @@ const SERVICE_IDENTITY = 'dashboard-web';
 const LOCAL_HTTP_PROTOCOL = 'http:';
 const RESERVED_PREFIXES = ['/api', '/v1', '/webhooks', '/comms'];
 const TRUSTED_REMOTE_ADDRESS_HEADER = 'x-frankenbeast-remote-address';
+const TRUSTED_PROXY_TOKEN_HEADER = 'x-frankenbeast-proxy-token';
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.gif': 'image/gif',
@@ -47,6 +49,8 @@ const HOP_BY_HOP_HEADERS = [
 export interface DashboardStaticResponseOptions {
   apiTarget?: string | undefined;
   operatorToken?: string | undefined;
+  trustedProxyOrigin?: string | undefined;
+  trustedProxyToken?: string | undefined;
   signal?: AbortSignal | undefined;
   buildStatus?: DashboardBuildStatus | undefined;
 }
@@ -94,16 +98,74 @@ function removeHopByHopHeaders(headers: Headers): void {
   }
 }
 
-function isSameOriginProxyRequest(request: Request): boolean {
+function firstForwardedValue(value: string | null | undefined): string | undefined {
+  return value?.split(',')[0]?.trim() || undefined;
+}
+
+function parseTrustedProxyOrigin(value: string | undefined): URL | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)
+      || parsed.username
+      || parsed.password
+      || parsed.pathname !== '/'
+      || parsed.search
+      || parsed.hash) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLoopbackAddress(value: string | null): boolean {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase().replace(/^\[|\]$/gu, '');
+  if (normalized === 'localhost' || normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
+  const ipv4 = normalized.replace(/^::ffff:/u, '');
+  return /^127(?:\.\d{1,3}){3}$/u.test(ipv4)
+    && ipv4.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
+}
+
+function secretsMatch(actual: string | null, expected: string | undefined): boolean {
+  if (!actual || !expected) return false;
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes);
+}
+
+function trustedForwardedOrigin(
+  request: Request,
+  configuredOrigin: string | undefined,
+  configuredToken: string | undefined,
+): URL | undefined {
+  const forwardedHost = firstForwardedValue(request.headers.get('x-forwarded-host'));
+  const forwardedProto = firstForwardedValue(request.headers.get('x-forwarded-proto'));
+  if (!forwardedHost && !forwardedProto) return undefined;
+  const trustedOrigin = parseTrustedProxyOrigin(configuredOrigin);
+  if (!trustedOrigin
+    || !isLoopbackAddress(request.headers.get(TRUSTED_REMOTE_ADDRESS_HEADER))
+    || !secretsMatch(request.headers.get(TRUSTED_PROXY_TOKEN_HEADER), configuredToken)
+    || forwardedHost !== trustedOrigin.host
+    || `${forwardedProto}:` !== trustedOrigin.protocol) return undefined;
+  return trustedOrigin;
+}
+
+function isSameOriginProxyRequest(
+  request: Request,
+  trustedProxyOrigin?: string,
+  trustedProxyToken?: string,
+): boolean {
   const fetchSite = request.headers.get('sec-fetch-site');
   if (fetchSite && !['none', 'same-origin'].includes(fetchSite)) {
     return false;
   }
 
+  const hasForwardedOrigin = request.headers.has('x-forwarded-host') || request.headers.has('x-forwarded-proto');
+  const forwardedOrigin = trustedForwardedOrigin(request, trustedProxyOrigin, trustedProxyToken);
+  if (hasForwardedOrigin && !forwardedOrigin) return false;
+
   const origin = request.headers.get('origin');
-  if (!origin && !fetchSite) {
-    return false;
-  }
   if (!origin) {
     return fetchSite === 'same-origin';
   }
@@ -111,7 +173,9 @@ function isSameOriginProxyRequest(request: Request): boolean {
   try {
     const originUrl = new URL(origin);
     const requestUrl = new URL(request.url);
-    return originUrl.protocol === requestUrl.protocol && originUrl.host === requestUrl.host;
+    const effectiveProtocol = forwardedOrigin?.protocol ?? requestUrl.protocol;
+    const effectiveHost = forwardedOrigin?.host ?? requestUrl.host;
+    return originUrl.protocol === effectiveProtocol && originUrl.host === effectiveHost;
   } catch {
     return false;
   }
@@ -126,7 +190,9 @@ async function createProxyResponse(
   if (!apiTarget || !isReservedBackendPath(sourceUrl.pathname)) {
     return undefined;
   }
-  if (options.operatorToken && !isPublicWebhookPath(sourceUrl.pathname) && !isSameOriginProxyRequest(request)) {
+  if (options.operatorToken
+    && !isPublicWebhookPath(sourceUrl.pathname)
+    && !isSameOriginProxyRequest(request, options.trustedProxyOrigin, options.trustedProxyToken)) {
     return response('Forbidden', { status: 403, headers: { 'content-type': 'text/plain; charset=utf-8' } });
   }
 
@@ -134,8 +200,10 @@ async function createProxyResponse(
   const headers = new Headers(request.headers);
   removeHopByHopHeaders(headers);
   const hadUpstreamProxyMetadata = headers.has('x-forwarded-host') || headers.has('x-forwarded-proto');
+  const forwardedOrigin = trustedForwardedOrigin(request, options.trustedProxyOrigin, options.trustedProxyToken);
   const trustedRemoteAddress = headers.get(TRUSTED_REMOTE_ADDRESS_HEADER);
   headers.delete(TRUSTED_REMOTE_ADDRESS_HEADER);
+  headers.delete(TRUSTED_PROXY_TOKEN_HEADER);
   if (trustedRemoteAddress
     && (headers.has('x-forwarded-for') || headers.has('x-real-ip') || !hadUpstreamProxyMetadata)) {
     const forwardedFor = headers.get('x-forwarded-for');
@@ -143,8 +211,8 @@ async function createProxyResponse(
       ? `${forwardedFor}, ${trustedRemoteAddress}`
       : trustedRemoteAddress);
   }
-  headers.set('x-forwarded-host', sourceUrl.host);
-  headers.set('x-forwarded-proto', sourceUrl.protocol.replace(/:$/, ''));
+  headers.set('x-forwarded-host', forwardedOrigin?.host ?? sourceUrl.host);
+  headers.set('x-forwarded-proto', forwardedOrigin?.protocol.replace(/:$/, '') ?? sourceUrl.protocol.replace(/:$/, ''));
   if (options.operatorToken) {
     headers.set('authorization', `Bearer ${options.operatorToken}`);
   }
@@ -371,25 +439,42 @@ function attachBackendUpgradeProxy(server: HttpServer, options: DashboardStaticS
   server.on('upgrade', (req, socket, head) => {
     const apiTarget = normalizeBaseUrl(options.apiTarget);
     const host = req.headers.host ?? `${options.host}:${options.port}`;
-    const requestUrl = new URL(req.url ?? '/', requestBaseUrlFromIncoming(req.headers, host));
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(req.url ?? '/', requestBaseUrlFromIncoming(req.headers, host));
+    } catch {
+      sendUpgradeFailure(socket, 400, 'Bad Request');
+      return;
+    }
     if (!apiTarget || !isReservedBackendPath(requestUrl.pathname)) {
       sendUpgradeFailure(socket, 404, 'Not Found');
       return;
     }
 
-    const sameOriginProbe = new Request(requestUrl, { headers: headersFromIncoming(req.headers), method: 'GET' });
-    if (options.operatorToken && !isSameOriginProxyRequest(sameOriginProbe)) {
+    const incomingHeaders = headersFromIncoming(req.headers);
+    if (req.socket.remoteAddress) {
+      incomingHeaders.set(TRUSTED_REMOTE_ADDRESS_HEADER, req.socket.remoteAddress);
+    }
+    const sameOriginProbe = new Request(requestUrl, { headers: incomingHeaders, method: 'GET' });
+    if (options.operatorToken
+      && !isSameOriginProxyRequest(sameOriginProbe, options.trustedProxyOrigin, options.trustedProxyToken)) {
       sendUpgradeFailure(socket, 403, 'Forbidden');
       return;
     }
+    const forwardedOrigin = trustedForwardedOrigin(
+      sameOriginProbe,
+      options.trustedProxyOrigin,
+      options.trustedProxyToken,
+    );
 
     const targetUrl = resolveProxyTargetUrl(apiTarget, requestUrl);
-    const headers = {
+    const headers: IncomingHttpHeaders = {
       ...req.headers,
       host: targetUrl.host,
-      'x-forwarded-host': requestUrl.host,
-      'x-forwarded-proto': requestUrl.protocol.replace(/:$/, ''),
+      'x-forwarded-host': forwardedOrigin?.host ?? requestUrl.host,
+      'x-forwarded-proto': forwardedOrigin?.protocol.replace(/:$/, '') ?? requestUrl.protocol.replace(/:$/, ''),
     };
+    delete headers[TRUSTED_PROXY_TOKEN_HEADER];
     if (options.operatorToken) {
       headers.authorization = `Bearer ${options.operatorToken}`;
     }
@@ -559,6 +644,16 @@ export async function parseCliArgs(argv: string[]): Promise<DashboardStaticServe
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`Invalid --port value: ${rawPort ?? ''}`);
   }
+  const rawTrustedProxyOrigin = readValue('--trusted-proxy-origin')
+    ?? process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_ORIGIN;
+  const trustedProxyOrigin = parseTrustedProxyOrigin(rawTrustedProxyOrigin)?.origin;
+  if (rawTrustedProxyOrigin && !trustedProxyOrigin) {
+    throw new Error(`Invalid --trusted-proxy-origin value: ${rawTrustedProxyOrigin}`);
+  }
+  const trustedProxyToken = process.env.FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN?.trim() || undefined;
+  if (Boolean(trustedProxyOrigin) !== Boolean(trustedProxyToken)) {
+    throw new Error('Trusted proxy origin and token must be configured together');
+  }
   const buildArgStart = argv.indexOf('--build-args');
   return {
     host,
@@ -566,6 +661,8 @@ export async function parseCliArgs(argv: string[]): Promise<DashboardStaticServe
     staticDir,
     apiTarget: readValue('--api-target') ?? process.env.FRANKENBEAST_DASHBOARD_API_URL,
     operatorToken: await resolveDashboardOperatorToken(),
+    trustedProxyOrigin,
+    trustedProxyToken,
     buildCommand: readValue('--build-command'),
     buildArgs: buildArgStart >= 0 ? argv.slice(buildArgStart + 1) : undefined,
   };
