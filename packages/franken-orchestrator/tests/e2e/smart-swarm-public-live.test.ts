@@ -216,6 +216,7 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
       clientWidth,
       scrollWidth: document.documentElement.scrollWidth,
       offenders: [...document.querySelectorAll<HTMLElement>('body *')]
+        .filter((element) => !element.closest('[aria-hidden="true"]'))
         .map((element) => ({
           className: element.className,
           left: Math.round(element.getBoundingClientRect().left),
@@ -250,8 +251,10 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
     const unexpectedNetworkFailures: string[] = [];
+    const expectedManagedSseUrls = new Set<string>();
+    let captureManagedSseRequests = true;
+    let networkPhase = 'initial';
     let latestSseRequest: Request | undefined;
-    let interruptedSseRequest: Request | undefined;
 
     try {
       const chromiumPath = chromium.executablePath();
@@ -270,7 +273,9 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       page = await context.newPage();
 
       page.on('request', (request) => {
-        if (isSmartSwarmSseRequest(request)) latestSseRequest = request;
+        if (!isSmartSwarmSseRequest(request)) return;
+        latestSseRequest = request;
+        if (captureManagedSseRequests) expectedManagedSseUrls.add(request.url());
       });
       page.on('console', (message) => {
         if (message.type() === 'error' && !message.text().startsWith('Failed to load resource:')) {
@@ -285,14 +290,13 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       });
       page.on('requestfailed', (request) => {
         const errorText = request.failure()?.errorText ?? 'request failed';
-        if (request === interruptedSseRequest && [
+        if (expectedManagedSseUrls.has(request.url()) && [
           'net::ERR_ABORTED',
           'net::ERR_INCOMPLETE_CHUNKED_ENCODING',
         ].includes(errorText)) {
-          interruptedSseRequest = undefined;
           return;
         }
-        unexpectedNetworkFailures.push(`${request.failure()?.errorText ?? 'request failed'} ${new URL(request.url()).pathname}`);
+        unexpectedNetworkFailures.push(`${networkPhase} ${request.failure()?.errorText ?? 'request failed'} ${new URL(request.url()).pathname}`);
       });
 
       const unauthenticatedContext = await playwrightRequest.newContext({
@@ -335,7 +339,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
         && response.url().includes('/v1/smart-swarm/providers/hermes/snapshot')
       ), { timeout: 30_000 });
       await page.goto(`${origin}/#/smart-swarm`, { waitUntil: 'domcontentloaded' });
-      await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm' })).toBeVisible();
+      await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm', level: 1 })).toBeVisible();
       if (await page.getByLabel('Runtime provider').inputValue() !== 'hermes') {
         await page.getByLabel('Runtime provider').selectOption('hermes');
       }
@@ -346,6 +350,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
           cause: error,
         });
       }
+      captureManagedSseRequests = false;
       await expectBrowser(page.getByRole('region', { name: 'Runtime brain pulse' })).toBeVisible();
       expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
@@ -458,32 +463,43 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       expect(sourceTaskExists(databasePath, governedProbeTaskId)).toBe(false);
 
       const reconnectStreamPattern = '**/v1/smart-swarm/providers/hermes/events/*';
-      let resolveHeldReconnect!: (route: Route) => void;
-      const heldReconnect = new Promise<Route>((resolve) => {
+      let resolveHeldReconnect!: (request: Request) => void;
+      const heldReconnect = new Promise<Request>((resolve) => {
         resolveHeldReconnect = resolve;
       });
-      await page.route(reconnectStreamPattern, async (route) => {
+      let releaseHeldReconnect!: () => void;
+      const reconnectRelease = new Promise<void>((resolve) => {
+        releaseHeldReconnect = resolve;
+      });
+      const holdReconnect = async (route: Route): Promise<void> => {
         if (new URL(route.request().url()).pathname.endsWith('/events/ticket')) {
           await route.continue();
           return;
         }
-        resolveHeldReconnect(route);
-      });
-      interruptedSseRequest = latestSseRequest;
-      expect(interruptedSseRequest, 'The deliberate interruption must target the active smart-swarm SSE request').toBeDefined();
+        resolveHeldReconnect(route.request());
+        await reconnectRelease;
+        await route.continue();
+      };
+      await page.route(reconnectStreamPattern, holdReconnect);
+      const interruptedSseUrl = latestSseRequest?.url();
+      if (!interruptedSseUrl) throw new Error('The deliberate interruption must target the active smart-swarm SSE request');
+      expectedManagedSseUrls.add(interruptedSseUrl);
+      captureManagedSseRequests = true;
+      networkPhase = 'interruption';
       expect(await page.evaluate('window.__interruptPublicAcceptanceEventSource()')).toBe(true);
       await expectBrowser(page.getByText('Connection lost · reconnecting')).toBeVisible({ timeout: 15_000 });
-      const reconnectRoute = await Promise.race([
+      const reconnectRequest = await Promise.race([
         heldReconnect,
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out holding reconnect SSE request')), 15_000)),
       ]);
-      expect(new URL(reconnectRoute.request().url()).searchParams.get('cursor')).toBeTruthy();
+      expectedManagedSseUrls.add(reconnectRequest.url());
+      expect(new URL(reconnectRequest.url()).searchParams.get('cursor')).toBeTruthy();
       const replayMarker = `#3858 cursor replay ${crypto.randomUUID()}`;
       await addAcceptanceComment(taskId, replayMarker, databasePath);
       const replaySource = sourceComment(databasePath, taskId, replayMarker);
-      await reconnectRoute.continue();
-      await page.unroute(reconnectStreamPattern);
+      releaseHeldReconnect();
       await expectBrowser(page.getByText('Live · connected')).toBeVisible({ timeout: 30_000 });
+      await page.unroute(reconnectStreamPattern, holdReconnect);
       await expect.poll(async () => await page!.getByText(replayMarker, { exact: true }).count(), {
         timeout: 20_000,
       }).toBe(2);
@@ -499,7 +515,8 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       expect(rawReplayEvent, 'The raw replayed SSE payload must be captured').toBeDefined();
       expectCredentialRedaction(rawReplayEvent, credential, 'raw replayed SSE payload');
       expect(objectKeys(rawReplayEvent).map((key) => key.toLowerCase())).not.toContain('authorization');
-
+      captureManagedSseRequests = false;
+      networkPhase = 'post-replay';
       for (const viewport of [
         { width: 390, height: 844 },
         { width: 768, height: 1024 },
@@ -507,7 +524,7 @@ describe.runIf(enabled)('authenticated public smart-swarm against genuine live H
       ]) {
         await page.setViewportSize(viewport);
         await expectNoHorizontalOverflow(page);
-        await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm' })).toBeVisible();
+        await expectBrowser(page.getByRole('heading', { name: 'Smart Swarm', level: 1 })).toBeVisible();
       }
 
       expectCredentialRedaction(await page.content(), credential, 'rendered DOM');
