@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   RuntimeConnectionState,
   RuntimeEvent,
@@ -8,6 +8,10 @@ import type {
 
 const PULSE_WINDOW_MS = 60_000;
 const MAX_FUTURE_SKEW_MS = 60_000;
+
+function eventReceiptKey(event: RuntimeEvent): string {
+  return `${event.id}\u0000${event.occurredAt}`;
+}
 
 interface RuntimeBrainPulseProps {
   provider: RuntimeProvider;
@@ -27,11 +31,25 @@ export function RuntimeBrainPulse({
   onOpenTask,
 }: RuntimeBrainPulseProps) {
   const [now, setNow] = useState(() => Date.now());
+  const knownEventKeys = useRef(new Set(events.map(eventReceiptKey)));
+  const receivedAtByEvent = useRef(new Map<string, number>());
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 5_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const currentKeys = new Set(events.map(eventReceiptKey));
+    const receivedAt = Date.now();
+    for (const key of currentKeys) {
+      if (!knownEventKeys.current.has(key)) receivedAtByEvent.current.set(key, receivedAt);
+    }
+    for (const key of receivedAtByEvent.current.keys()) {
+      if (!currentKeys.has(key)) receivedAtByEvent.current.delete(key);
+    }
+    knownEventKeys.current = currentKeys;
+  }, [events]);
 
   const recentEvents = useMemo(() => {
     const unique = new Map<string, RuntimeEvent>();
@@ -43,9 +61,13 @@ export function RuntimeBrainPulse({
     }, now);
     for (const event of events) {
       const occurredAt = Date.parse(event.occurredAt);
+      const receivedAt = receivedAtByEvent.current.get(eventReceiptKey(event));
       if (
         !Number.isFinite(occurredAt)
-        || occurredAt < pulseNow - PULSE_WINDOW_MS
+        || (
+          occurredAt < pulseNow - PULSE_WINDOW_MS
+          && (receivedAt === undefined || receivedAt < now - PULSE_WINDOW_MS)
+        )
         || occurredAt > now + MAX_FUTURE_SKEW_MS
       ) continue;
       const current = unique.get(event.id);

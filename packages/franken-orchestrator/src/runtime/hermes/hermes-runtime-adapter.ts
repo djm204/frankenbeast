@@ -153,6 +153,12 @@ function hasBoundedTaskId(workspaceId: string, value: unknown): boolean {
     && taskId(workspaceId, value).length <= RUNTIME_EVENT_ID_MAX_LENGTH;
 }
 
+function boundedEventRunId(workspaceId: string, value: unknown): string | null {
+  if (value == null) return null;
+  const normalized = `${workspaceId}:run:${String(value)}`;
+  return normalized.length <= RUNTIME_EVENT_ID_MAX_LENGTH ? normalized : null;
+}
+
 function agentId(workspaceId: string, id: string): string {
   return prefixed(workspaceId, id);
 }
@@ -1168,7 +1174,15 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           )
           ORDER BY run.started_at, run.id
         `).all(activityLimit) as RuntimeRow[];
-        const eventRows = db.prepare('SELECT * FROM task_events ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[];
+        const eventRows = this.readActivityRows(
+          db,
+          'task_events',
+          'event',
+          source.workspaceId,
+          undefined,
+          activityLimit,
+          (row) => row['task_id'] === null || hasBoundedTaskId(source.workspaceId, row['task_id']),
+        );
         const blockerEventRows = db.prepare(`
           SELECT event.*
           FROM task_events event
@@ -1183,11 +1197,17 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
               LIMIT 1
             )
         `).all() as RuntimeRow[];
-        const commentRows = commentTable === 'comments'
-          ? db.prepare('SELECT id, task_id, NULL AS author, body, created_at FROM comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
-          : commentTable === 'task_comments'
-            ? db.prepare('SELECT id, task_id, author, body, created_at FROM task_comments ORDER BY created_at DESC, id DESC LIMIT ?').all(activityLimit) as RuntimeRow[]
-            : [];
+        const commentRows = commentTable
+          ? this.readActivityRows(
+              db,
+              commentTable,
+              'comment',
+              source.workspaceId,
+              undefined,
+              activityLimit,
+              (row) => hasBoundedTaskId(source.workspaceId, row['task_id']),
+            )
+          : [];
         return this.normalizeRows(
           source, taskRows, linkRows, runRows, eventRows, commentRows, activityLimit, blockerEventRows,
         );
@@ -1452,7 +1472,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         cursor,
         workspaceId: source.workspaceId,
         taskId: event['task_id'] === null ? null : taskId(source.workspaceId, event['task_id']),
-        runId: event['run_id'] == null ? null : `${source.workspaceId}:run:${String(event['run_id'])}`,
+        runId: boundedEventRunId(source.workspaceId, event['run_id']),
         type: event['kind'] === 'blocked' ? 'blocker' : 'lifecycle',
         occurredAt,
         summary: `${boundedText(event['kind']) || 'unknown'} task event`,

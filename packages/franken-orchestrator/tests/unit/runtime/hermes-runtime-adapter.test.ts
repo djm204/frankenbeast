@@ -159,6 +159,52 @@ describe('HermesRuntimeAdapter', () => {
     expect(page.events.map((event) => event.id)).toEqual(['hermes:global:event:300']);
   });
 
+  it('backfills snapshot activity after quarantining the newest Hermes events', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 102; index += 1) {
+        insert.run(100 + index, `t_${'x'.repeat(1_100)}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+    })();
+    db.close();
+
+    const snapshot = await new HermesRuntimeAdapter({
+      env: { HERMES_KANBAN_DB: dbPath },
+    }).getSnapshot({ activityLimit: 100 });
+
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data.map((event) => event.id)).toContain('hermes:global:event:10');
+  });
+
+  it('quarantines oversized Hermes event run identifiers without rejecting activity', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const db = new Database(dbPath);
+    db.prepare('UPDATE task_events SET run_id = ? WHERE id = ?').run(`r_${'x'.repeat(1_100)}`, 10);
+    db.close();
+
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const snapshot = await adapter.getSnapshot();
+    const eventPage = await adapter.getEvents();
+
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:event:10', runId: null }),
+    ]));
+    expect(eventPage.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'hermes:global:event:10', runId: null }),
+    ]));
+  });
+
   it('preserves HERMES_KANBAN_DB when an explicit Hermes home is configured', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');

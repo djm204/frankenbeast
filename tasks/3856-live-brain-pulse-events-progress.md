@@ -16,5 +16,6 @@
 - [x] Address the tier-12 follow-up finding with RED/GREEN coverage by bounding Ollama installed/loaded model-name metadata before shared snapshot parsing.
 - [x] Address all three replacement-head Codex findings with RED/GREEN coverage: bounded Ollama version metadata, clock-skew-tolerant pulse freshness, and consistent quarantine of oversized Hermes task IDs.
 - [x] Address all three tier-12 follow-up findings with RED/GREEN coverage: replay progress past quarantined Hermes rows, bounded future clock skew, and bounded checkpoint-only cursors.
+- [x] Address the final tier-12 findings round with RED/GREEN coverage: snapshot backfill after quarantine, bounded Hermes event run references, and full-minute retention for newly received negative-skew activity.
 - [ ] Push remediation and complete fresh exact-head Codex/CI/thread gates.
 - [ ] Guarded squash merge exact reviewed head, verify issue closure/deployment/public authenticated browser evidence, and record terminal Kanban handoff.

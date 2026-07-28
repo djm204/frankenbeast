@@ -110,6 +110,41 @@ describe('RuntimeBrainPulse', () => {
     expect(pulse.textContent).not.toContain('Corrupt future activity');
   });
 
+  it('retains newly received activity for a full minute when the provider clock trails', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    const event: RuntimeEvent = {
+      id: 'event-provider-behind',
+      cursor: 'cursor-provider-behind',
+      workspaceId: 'board-main',
+      taskId: 'task-1',
+      runId: 'run-1',
+      type: 'lifecycle',
+      occurredAt: '2026-07-27T23:59:30.000Z',
+      summary: 'Provider clock trails browser',
+    };
+    const props = {
+      connection: 'connected' as const,
+      onOpenTask: () => undefined,
+      provider,
+      snapshot,
+    };
+    const { rerender } = render(<RuntimeBrainPulse {...props} events={[]} />);
+
+    rerender(<RuntimeBrainPulse {...props} events={[event]} />);
+    expect(screen.getByText('Provider clock trails browser')).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(35_000);
+    });
+    expect(screen.getByText('Provider clock trails browser')).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.queryByText('Provider clock trails browser')).toBeNull();
+  });
+
   it('prunes pulses when their source timestamp leaves the one-minute window', async () => {
     vi.useFakeTimers();
     const now = new Date('2026-07-28T00:01:00.000Z');
