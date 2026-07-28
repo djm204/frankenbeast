@@ -32,8 +32,16 @@ export function RuntimeBrainPulse({
   onOpenTask,
 }: RuntimeBrainPulseProps) {
   const [now, setNow] = useState(() => Date.now());
+  const [receiptRevision, setReceiptRevision] = useState(0);
   const knownEventKeys = useRef(new Set(events.map(eventReceiptKey)));
-  const receivedAtByEvent = useRef(new Map<string, number>());
+  const receivedAtByEvent = useRef(new Map(events.flatMap((event) => {
+    const occurredAt = Date.parse(event.occurredAt);
+    return Number.isFinite(occurredAt)
+      && occurredAt > now
+      && occurredAt <= now + MAX_FUTURE_SKEW_MS
+      ? [[eventReceiptKey(event), now] as const]
+      : [];
+  })));
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 5_000);
@@ -43,6 +51,7 @@ export function RuntimeBrainPulse({
   useEffect(() => {
     const currentKeys = new Set(events.map(eventReceiptKey));
     const receivedAt = Date.now();
+    let receiptAdded = false;
     for (const event of events) {
       const key = eventReceiptKey(event);
       if (knownEventKeys.current.has(key)) continue;
@@ -51,31 +60,27 @@ export function RuntimeBrainPulse({
         Number.isFinite(occurredAt)
         && occurredAt >= receivedAt - MAX_PAST_SKEW_MS
         && occurredAt <= receivedAt + MAX_FUTURE_SKEW_MS
-      ) receivedAtByEvent.current.set(key, receivedAt);
+      ) {
+        receivedAtByEvent.current.set(key, receivedAt);
+        receiptAdded = true;
+      }
     }
     for (const key of receivedAtByEvent.current.keys()) {
       if (!currentKeys.has(key)) receivedAtByEvent.current.delete(key);
     }
     knownEventKeys.current = currentKeys;
+    if (receiptAdded) setReceiptRevision((current) => current + 1);
   }, [events]);
 
   const recentEvents = useMemo(() => {
     const unique = new Map<string, RuntimeEvent>();
-    const pulseNow = events.reduce((latest, event) => {
-      const occurredAt = Date.parse(event.occurredAt);
-      return Number.isFinite(occurredAt) && occurredAt <= now + MAX_FUTURE_SKEW_MS
-        ? Math.max(latest, occurredAt)
-        : latest;
-    }, now);
     for (const event of events) {
       const occurredAt = Date.parse(event.occurredAt);
       const receivedAt = receivedAtByEvent.current.get(eventReceiptKey(event));
+      const freshnessAt = receivedAt ?? occurredAt;
       if (
         !Number.isFinite(occurredAt)
-        || (
-          occurredAt < pulseNow - PULSE_WINDOW_MS
-          && (receivedAt === undefined || receivedAt < now - PULSE_WINDOW_MS)
-        )
+        || freshnessAt < now - PULSE_WINDOW_MS
         || occurredAt > now + MAX_FUTURE_SKEW_MS
       ) continue;
       const current = unique.get(event.id);
@@ -85,7 +90,7 @@ export function RuntimeBrainPulse({
       Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
       || left.id.localeCompare(right.id)
     ));
-  }, [events, now]);
+  }, [events, now, receiptRevision]);
   const unsupportedReason = provider.capabilities.streaming.status === 'unsupported'
     ? provider.capabilities.streaming.reason
     : null;

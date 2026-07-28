@@ -159,6 +159,33 @@ describe('HermesRuntimeAdapter', () => {
     expect(page.events.map((event) => event.id)).toEqual(['hermes:global:event:300']);
   });
 
+  it('bounds quarantined replay scans and checkpoints inspected malformed rows', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const before = await adapter.getEvents({ limit: 100 });
+    if (!before.nextCursor) throw new Error('Expected an initial replay cursor');
+    const db = new Database(dbPath);
+    const insert = db.prepare(
+      'INSERT INTO task_events (id,task_id,run_id,kind,payload,created_at) VALUES (?,?,?,?,?,?)',
+    );
+    db.transaction(() => {
+      for (let index = 0; index < 2_001; index += 1) {
+        insert.run(1_000 + index, `t_${'x'.repeat(1_100)}_${index}`, null, 'progress', null, 1_785_081_700 + index);
+      }
+      insert.run(4_000, 't_parent', null, 'completed', null, 1_785_084_000);
+    })();
+    db.close();
+
+    const quarantinedPage = await adapter.getEvents({ cursor: before.nextCursor, limit: 100 });
+    expect(quarantinedPage.events).toEqual([]);
+    expect(quarantinedPage.nextCursor).not.toBe(before.nextCursor);
+
+    const recoveredPage = await adapter.getEvents({ cursor: quarantinedPage.nextCursor ?? undefined, limit: 100 });
+    expect(recoveredPage.events.map((event) => event.id)).toContain('hermes:global:event:4000');
+  });
+
   it('backfills snapshot activity after quarantining the newest Hermes events', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');

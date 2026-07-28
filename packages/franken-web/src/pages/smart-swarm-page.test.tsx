@@ -656,6 +656,70 @@ describe('SmartSwarmPage', () => {
     expect(retryKey).toBe(firstKey);
   });
 
+  it('isolates pending actions for the same task id across workspaces', async () => {
+    const workspaceCatalog = [
+      { id: 'board-main', name: 'Main board', kind: 'workspace' as const, state: 'available' as const },
+      { id: 'board-other', name: 'Other board', kind: 'workspace' as const, state: 'available' as const },
+    ];
+    const snapshotFor = (selectedWorkspace: string): RuntimeSnapshot => ({
+      ...snapshot,
+      workspaces: { status: 'available', data: workspaceCatalog },
+      tasks: {
+        status: 'available',
+        data: snapshot.tasks.status === 'available'
+          ? snapshot.tasks.data.map((task) => task.id === 'task-live'
+            ? { ...task, workspaceId: selectedWorkspace, title: `${selectedWorkspace} live task` }
+            : { ...task, workspaceId: selectedWorkspace })
+          : [],
+      },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: {
+        status: 'available',
+        data: [{
+          id: `${selectedWorkspace}-blocker`, workspaceId: selectedWorkspace, taskId: 'task-live',
+          category: 'dependency', summary: 'Waiting', createdAt: '2026-07-26T17:50:00.000Z',
+        }],
+      },
+      approvals: { status: 'available', data: [] },
+    });
+    const executeAction = vi.fn()
+      .mockRejectedValueOnce(new TypeError('workspace A response lost'))
+      .mockResolvedValue({
+        status: 'applied',
+        providerId: 'hermes',
+        correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+        audit: {
+          requestedBy: 'authenticated-operator',
+          actionType: 'blocker.resolve',
+          targetId: 'task-live',
+          outcome: 'applied',
+        },
+      });
+    const fetchSnapshot = vi.fn().mockImplementation(async (_providerId, options) => (
+      snapshotFor(options?.workspaceId === 'board-other' ? 'board-other' : 'board-main')
+    ));
+    render(<SmartSwarmPage client={createClient({ executeAction, fetchSnapshot })} />);
+    await screen.findByText('board-main live task');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect board-main live task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resolve blocker' }));
+    await screen.findByText('workspace A response lost');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), {
+      target: { value: 'board-other' },
+    });
+    await screen.findByText('board-other live task');
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect board-other live task' }));
+    const otherResolve = screen.getByRole('button', { name: 'Resolve blocker' });
+    expect(otherResolve).toHaveProperty('disabled', false);
+    fireEvent.click(otherResolve);
+    await waitFor(() => expect(executeAction).toHaveBeenCalledTimes(2));
+
+    expect(executeAction.mock.calls[1]?.[1].idempotencyKey)
+      .not.toBe(executeAction.mock.calls[0]?.[1].idempotencyKey);
+  });
+
   it('retains an uncertain blocker key while the task remains blocked without blocker evidence', async () => {
     let handlers!: Parameters<SmartSwarmApiClient['subscribe']>[2];
     const blockerlessSnapshot = {

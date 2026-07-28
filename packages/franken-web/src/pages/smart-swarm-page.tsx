@@ -23,6 +23,7 @@ interface SmartSwarmPageProps {
 interface PendingActionIntent {
   idempotencyKey: string;
   providerId: string;
+  workspaceId: string;
   taskId: string;
   action: RuntimeAction['type'];
   inFlight: boolean;
@@ -34,6 +35,15 @@ const MAX_VISIBLE_EVIDENCE = 100;
 const STREAM_REFRESH_DEBOUNCE_MS = 250;
 const TOPOLOGY_REFRESH_INTERVAL_MS = 5_000;
 const TERMINAL_RUN_STATES = new Set(['succeeded', 'failed', 'cancelled']);
+
+function actionIntentKey(
+  providerId: string,
+  workspaceId: string,
+  taskId: string,
+  action: RuntimeAction['type'],
+): string {
+  return `${providerId}:${workspaceId}:${taskId}:${action}`;
+}
 
 function available<T>(section: RuntimeSection<T>): T | null {
   return section.status === 'available' ? section.data : null;
@@ -50,13 +60,15 @@ function capabilityReason(capability: RuntimeCapability): string | null {
 function actionPostconditionConfirmed(
   intent: PendingActionIntent,
   task: RuntimeTask,
-  blockers: Array<{ taskId: string }> | null,
+  blockers: Array<{ workspaceId: string; taskId: string }> | null,
 ): boolean {
   switch (intent.action) {
     case 'blocker.resolve':
       return task.state !== 'blocked'
         && blockers !== null
-        && !blockers.some((blocker) => blocker.taskId === intent.taskId);
+        && !blockers.some((blocker) => (
+          blocker.workspaceId === intent.workspaceId && blocker.taskId === intent.taskId
+        ));
     case 'task.cancel':
       return task.state === 'cancelled';
     case 'policy.apply':
@@ -359,6 +371,7 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   const selectedTaskActionPending = selectedTask
     ? [...actionIdempotencyKeys.current.values()].some((intent) => (
         intent.providerId === providerId
+        && intent.workspaceId === selectedTask.workspaceId
         && intent.taskId === selectedTask.id
         && (intent.inFlight || intent.awaitingConfirmation)
         && !actionPostconditionConfirmed(intent, selectedTask, confirmedBlockers)
@@ -368,7 +381,9 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   useEffect(() => {
     for (const [key, intent] of actionIdempotencyKeys.current) {
       if (intent.providerId !== providerId) continue;
-      const currentTask = tasks.find((task) => task.id === intent.taskId);
+      const currentTask = tasks.find((task) => (
+        task.workspaceId === intent.workspaceId && task.id === intent.taskId
+      ));
       if (currentTask && actionPostconditionConfirmed(intent, currentTask, confirmedBlockers)) {
         actionIdempotencyKeys.current.delete(key);
       }
@@ -973,26 +988,27 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
             taskId: task.id,
             reason,
           };
-      const actionIntentKey = `${provider.id}:${task.id}:${action}`;
-      const pendingIntent = actionIdempotencyKeys.get(actionIntentKey);
+      const intentKey = actionIntentKey(provider.id, task.workspaceId, task.id, action);
+      const pendingIntent = actionIdempotencyKeys.get(intentKey);
       const idempotencyKey = pendingIntent?.idempotencyKey ?? `${action}:${crypto.randomUUID()}`;
       const actionIntent = pendingIntent ?? {
         idempotencyKey,
         providerId: provider.id,
+        workspaceId: task.workspaceId,
         taskId: task.id,
         action,
         inFlight: true,
         awaitingConfirmation: false,
       };
       actionIntent.inFlight = true;
-      actionIdempotencyKeys.set(actionIntentKey, actionIntent);
+      actionIdempotencyKeys.set(intentKey, actionIntent);
       const result = await client.executeAction(provider.id, {
         correlationId: crypto.randomUUID(),
         idempotencyKey,
         action: runtimeAction,
       });
       if (result.status === 'applied') {
-        const appliedIntent = actionIdempotencyKeys.get(actionIntentKey);
+        const appliedIntent = actionIdempotencyKeys.get(intentKey);
         if (appliedIntent) {
           appliedIntent.awaitingConfirmation = true;
           awaitingConfirmation = true;
@@ -1000,19 +1016,21 @@ function TaskDetail({ task, provider, runs, client, returnFocus, actionIdempoten
         setActionStatus(successMessage);
         onActionApplied();
       } else if (result.status === 'rejected') {
-        actionIdempotencyKeys.delete(actionIntentKey);
+        actionIdempotencyKeys.delete(intentKey);
         setActionStatus(`rejected: ${result.reason}`);
       } else if (result.status === 'failed') {
-        actionIdempotencyKeys.delete(actionIntentKey);
+        actionIdempotencyKeys.delete(intentKey);
         setActionStatus(`failed: ${result.reason}`);
       } else {
-        actionIdempotencyKeys.delete(actionIntentKey);
+        actionIdempotencyKeys.delete(intentKey);
         setActionStatus(`unsupported: ${result.reason}`);
       }
     } catch (error) {
       setActionStatus(errorMessage(error));
     } finally {
-      const pendingIntent = actionIdempotencyKeys.get(`${provider.id}:${task.id}:${action}`);
+      const pendingIntent = actionIdempotencyKeys.get(
+        actionIntentKey(provider.id, task.workspaceId, task.id, action),
+      );
       if (pendingIntent) pendingIntent.inFlight = false;
       if (!awaitingConfirmation) setActionPending(false);
     }

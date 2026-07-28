@@ -88,6 +88,12 @@ interface RequestCursorState {
   positions: Map<string, CursorPosition>;
 }
 
+interface ActivityRead {
+  rows: RuntimeRow[];
+  checkpoint?: CursorValue | undefined;
+  truncated?: boolean | undefined;
+}
+
 const REQUIRED_SCHEMA: Record<string, string[]> = {
   tasks: ['id', 'title', 'status', 'created_at', 'workspace_kind'],
   task_runs: ['id', 'task_id', 'status', 'started_at'],
@@ -95,6 +101,7 @@ const REQUIRED_SCHEMA: Record<string, string[]> = {
 };
 const DEFAULT_ACTIVITY_LIMIT = 100;
 const MAX_ACTIVITY_LIMIT = 500;
+const MAX_ACTIVITY_SCAN_ROWS = 2_000;
 const MAX_CURSOR_CHARS = 4 * 1024;
 const MAX_SUMMARY_CHARS = 512;
 const MISSING_WORKSPACE_GRACE_POLLS = 1;
@@ -663,7 +670,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       throwIfAborted(request.signal);
       const after = cursorState.positions.get(source.workspaceId) ?? cursorState.legacy;
       try {
-        const events = this.readEvents(source, after, limit + 1);
+        const activity = this.readEvents(source, after, limit + 1);
+        const events = activity.events;
         successfulReads += 1;
         for (const event of events) {
           const decoded = parseCursor(event.cursor);
@@ -672,6 +680,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         const latest = events.at(-1);
         const latestCursor = latest ? parseCursor(latest.cursor) : undefined;
         if (latestCursor) sourceLatest.set(source.workspaceId, latestCursor);
+        else if (activity.checkpoint) sourceLatest.set(source.workspaceId, activity.checkpoint);
       } catch {
         // Preserve healthy workspace activity across transient or corrupt sibling sources.
       }
@@ -711,6 +720,14 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           ...cursorState.legacy,
           missingPolls: selectedWorkspaceIds.has(cursorState.legacy.workspaceId) ? undefined : 1,
         });
+      }
+    }
+    if (request.cursor) {
+      const pageWorkspaces = new Set(page.map((entry) => entry.cursor.workspaceId));
+      for (const [workspaceId, latest] of sourceLatest) {
+        if (pageWorkspaces.has(workspaceId)) continue;
+        const current = positions.get(workspaceId);
+        if (!current || eventOrder(latest, current) > 0) positions.set(workspaceId, latest);
       }
     }
     if (!request.cursor) {
@@ -1182,7 +1199,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           undefined,
           activityLimit,
           (row) => row['task_id'] === null || hasBoundedTaskId(source.workspaceId, row['task_id']),
-        );
+        ).rows;
         const blockerEventRows = db.prepare(`
           SELECT event.*
           FROM task_events event
@@ -1206,7 +1223,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
               undefined,
               activityLimit,
               (row) => hasBoundedTaskId(source.workspaceId, row['task_id']),
-            )
+            ).rows
           : [];
         return this.normalizeRows(
           source, taskRows, linkRows, runRows, eventRows, commentRows, activityLimit, blockerEventRows,
@@ -1217,12 +1234,16 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     }
   }
 
-  private readEvents(source: DatabaseSource, after: CursorValue | undefined, limit: number): RuntimeEvent[] {
+  private readEvents(
+    source: DatabaseSource,
+    after: CursorValue | undefined,
+    limit: number,
+  ): { events: RuntimeEvent[]; checkpoint?: CursorValue | undefined } {
     const db = this.open(source.path);
     try {
       return db.transaction(() => {
         const commentTable = this.commentTable(db);
-        const eventRows = this.readActivityRows(
+        const eventActivity = this.readActivityRows(
           db,
           'task_events',
           'event',
@@ -1231,7 +1252,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
           limit,
           (row) => row['task_id'] === null || hasBoundedTaskId(source.workspaceId, row['task_id']),
         );
-        const commentRows = commentTable === 'comments'
+        const commentActivity = commentTable === 'comments'
           ? this.readActivityRows(
               db,
               'comments',
@@ -1251,8 +1272,29 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
                 limit,
                 (row) => hasBoundedTaskId(source.workspaceId, row['task_id']),
               )
-            : [];
-        return this.normalizeRows(source, [], [], [], eventRows, commentRows, limit * 2).events;
+            : { rows: [] };
+        const checkpoints = [eventActivity.checkpoint, commentActivity.checkpoint]
+          .filter((checkpoint): checkpoint is CursorValue => checkpoint !== undefined)
+          .sort(eventOrder);
+        const truncatedCheckpoints = [eventActivity, commentActivity]
+          .filter((activity) => activity.truncated && activity.checkpoint)
+          .map((activity) => activity.checkpoint as CursorValue)
+          .sort(eventOrder);
+        const safeThrough = truncatedCheckpoints.at(0);
+        const normalizedEvents = this.normalizeRows(
+          source, [], [], [], eventActivity.rows, commentActivity.rows, limit * 2,
+        ).events;
+        return {
+          events: safeThrough
+            ? normalizedEvents.filter((event) => {
+                const cursor = parseCursor(event.cursor);
+                return cursor !== undefined && eventOrder(cursor, safeThrough) <= 0;
+              })
+            : normalizedEvents,
+          ...(checkpoints.length > 0 ? {
+            checkpoint: safeThrough ?? checkpoints.at(-1),
+          } : {}),
+        };
       }).deferred();
     } finally {
       db.close();
@@ -1267,23 +1309,41 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     after: CursorValue | undefined,
     limit: number,
     acceptRow?: ((row: RuntimeRow) => boolean) | undefined,
-  ): RuntimeRow[] {
-    const acceptedRows = (readBatch: (offset: number) => RuntimeRow[]): RuntimeRow[] => {
-      if (!acceptRow) return readBatch(0);
+  ): ActivityRead {
+    const acceptedRows = (
+      readBatch: (offset: number, batchSize: number) => RuntimeRow[],
+    ): ActivityRead => {
+      if (!acceptRow) return { rows: readBatch(0, limit) };
       const accepted: RuntimeRow[] = [];
       let offset = 0;
-      while (accepted.length < limit) {
-        const batch = readBatch(offset);
+      let lastInspected: RuntimeRow | undefined;
+      let scanLimitReached = false;
+      while (accepted.length < limit && offset < MAX_ACTIVITY_SCAN_ROWS) {
+        const batchSize = Math.min(limit, MAX_ACTIVITY_SCAN_ROWS - offset);
+        const batch = readBatch(offset, batchSize);
         if (batch.length === 0) break;
+        lastInspected = batch.at(-1);
         accepted.push(...batch.filter(acceptRow));
         offset += batch.length;
-        if (batch.length < limit) break;
+        if (batch.length < batchSize) break;
+        if (offset >= MAX_ACTIVITY_SCAN_ROWS && accepted.length < limit) scanLimitReached = true;
       }
-      return accepted.slice(0, limit);
+      return {
+        rows: accepted.slice(0, limit),
+        ...(lastInspected ? {
+          checkpoint: {
+            occurredAt: requiredTimestamp(lastInspected['created_at']),
+            workspaceId,
+            source: activitySource,
+            sourceId: Number(lastInspected['id']),
+          },
+        } : {}),
+        ...(scanLimitReached ? { truncated: true } : {}),
+      };
     };
     if (!after) {
       const statement = db.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`);
-      return acceptedRows((offset) => statement.all(limit, offset) as RuntimeRow[]);
+      return acceptedRows((offset, batchSize) => statement.all(batchSize, offset) as RuntimeRow[]);
     }
 
     const sample = db.prepare(`SELECT created_at FROM ${table} WHERE created_at IS NOT NULL LIMIT 1`).get() as RuntimeRow | undefined;
@@ -1301,8 +1361,8 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
         ORDER BY created_at, id
         LIMIT ? OFFSET ?
       `);
-      return acceptedRows((offset) => statement.all(
-        threshold, threshold, after.sourceId, limit, offset,
+      return acceptedRows((offset, batchSize) => statement.all(
+        threshold, threshold, after.sourceId, batchSize, offset,
       ) as RuntimeRow[]);
     }
     const includeSameTimestamp = workspaceOrder > 0 || (workspaceOrder === 0 && sourceOrder > 0);
@@ -1312,7 +1372,7 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
       ORDER BY created_at, id
       LIMIT ? OFFSET ?
     `);
-    return acceptedRows((offset) => statement.all(threshold, limit, offset) as RuntimeRow[]);
+    return acceptedRows((offset, batchSize) => statement.all(threshold, batchSize, offset) as RuntimeRow[]);
   }
 
   private normalizeRows(

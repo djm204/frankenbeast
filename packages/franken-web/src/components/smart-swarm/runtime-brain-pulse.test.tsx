@@ -145,6 +145,53 @@ describe('RuntimeBrainPulse', () => {
     expect(screen.queryByText('Provider clock trails browser')).toBeNull();
   });
 
+  it('renders modest negative-skew activity immediately alongside allowed future skew', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    const props = {
+      connection: 'connected' as const,
+      onOpenTask: () => undefined,
+      provider,
+      snapshot,
+    };
+    const { rerender } = render(<RuntimeBrainPulse {...props} events={[]} />);
+
+    rerender(<RuntimeBrainPulse {...props} events={[
+      {
+        id: 'event-behind-now', cursor: 'cursor-behind-now', workspaceId: 'board-main',
+        taskId: 'task-1', runId: 'run-1', type: 'lifecycle',
+        occurredAt: '2026-07-27T23:59:30.000Z', summary: 'Behind but live',
+      },
+      {
+        id: 'event-ahead-now', cursor: 'cursor-ahead-now', workspaceId: 'board-main',
+        taskId: 'task-1', runId: 'run-1', type: 'lifecycle',
+        occurredAt: '2026-07-28T00:00:55.000Z', summary: 'Ahead but allowed',
+      },
+    ]} />);
+
+    expect(screen.getByText('Behind but live')).toBeTruthy();
+  });
+
+  it('expires allowed future-skew activity one minute after browser receipt', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    render(<RuntimeBrainPulse
+      connection="connected"
+      events={[{
+        id: 'event-ahead-expiry', cursor: 'cursor-ahead-expiry', workspaceId: 'board-main',
+        taskId: 'task-1', runId: 'run-1', type: 'lifecycle',
+        occurredAt: '2026-07-28T00:00:55.000Z', summary: 'Ahead expires',
+      }]}
+      onOpenTask={() => undefined}
+      provider={provider}
+      snapshot={snapshot}
+    />);
+
+    expect(screen.getByText('Ahead expires')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(65_000); });
+    expect(screen.queryByText('Ahead expires')).toBeNull();
+  });
+
   it('prunes pulses when their source timestamp leaves the one-minute window', async () => {
     vi.useFakeTimers();
     const now = new Date('2026-07-28T00:01:00.000Z');
