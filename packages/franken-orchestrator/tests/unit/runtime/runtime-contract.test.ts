@@ -6,6 +6,7 @@ import {
   RuntimeApprovalSchema,
   RuntimeBlockerSchema,
   RuntimeCursorError,
+  RuntimeEventSchema,
   RuntimeHealthSchema,
   RuntimeMetadataSchema,
   OllamaRuntimeAdapter,
@@ -178,6 +179,22 @@ describe('provider-neutral runtime contract', () => {
       createdAt: '2026-07-26T12:00:00.000Z',
       updatedAt: null,
     })).toEqual(expect.objectContaining({ id: 't'.repeat(201) }));
+  });
+
+  it('bounds normalized event summaries consistently with browser validation', () => {
+    const event = {
+      id: 'event-1',
+      cursor: 'cursor-1',
+      workspaceId: 'workspace-1',
+      taskId: null,
+      runId: null,
+      type: 'log',
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      summary: 'x'.repeat(16_384),
+    } as const;
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(RuntimeEventSchema.safeParse({ ...event, summary: `${event.summary}x` }).success).toBe(false);
   });
 
   it('requires every capability to declare supported or unsupported state', async () => {

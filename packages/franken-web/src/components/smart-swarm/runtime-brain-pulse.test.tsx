@@ -249,4 +249,24 @@ describe('RuntimeBrainPulse', () => {
     expect(status.textContent).toContain('This runtime has no event stream.');
     expect(status.textContent).not.toContain('No activity');
   });
+
+  it('keeps a supported live stream available when event history is unsupported', () => {
+    render(
+      <RuntimeBrainPulse
+        connection="connected"
+        events={[]}
+        onOpenTask={() => undefined}
+        provider={provider}
+        snapshot={{
+          ...snapshot,
+          events: { status: 'unsupported', reason: 'This runtime has no event history.' },
+        }}
+      />,
+    );
+
+    const status = screen.getByRole('status');
+    expect(status.textContent).toContain('No activity');
+    expect(status.textContent).not.toContain('Unsupported');
+    expect(status.textContent).not.toContain('event history');
+  });
 });

@@ -49,9 +49,7 @@ export function RuntimeBrainPulse({
   }, [events, now]);
   const unsupportedReason = provider.capabilities.streaming.status === 'unsupported'
     ? provider.capabilities.streaming.reason
-    : snapshot.events.status === 'unsupported'
-      ? snapshot.events.reason
-      : null;
+    : null;
   const pulseState = recentEvents.length === 0
     ? 'idle'
     : connection === 'connected'

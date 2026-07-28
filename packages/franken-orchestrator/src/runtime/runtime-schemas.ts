@@ -190,7 +190,7 @@ export const RuntimeEventSchema = z.object({
   runId: z.string().min(1).nullable(),
   type: z.enum(['lifecycle', 'comment', 'log', 'audit', 'blocker', 'approval', 'unknown']),
   occurredAt: TimestampSchema,
-  summary: z.string(),
+  summary: z.string().max(16_384),
   metadata: RuntimeMetadataSchema.optional(),
 }).strict();
 

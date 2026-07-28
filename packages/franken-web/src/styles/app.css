@@ -2579,7 +2579,8 @@ button {
 @media (prefers-reduced-motion: reduce) {
   .smart-swarm-connection,
   .smart-swarm-task,
-  .runtime-brain-pulse {
+  .runtime-brain-pulse,
+  .runtime-brain-pulse[data-pulse-state="active"] {
     animation: none;
     transition: none;
   }

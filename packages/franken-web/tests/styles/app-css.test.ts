@@ -23,5 +23,6 @@ describe('app.css smart-swarm dashboard', () => {
     expect(appCss).toMatch(/\.smart-swarm-layout\s*\{[\s\S]*?grid-template-columns:/m);
     expect(appCss).toMatch(/@media\s*\(max-width:\s*1100px\)\s*\{[\s\S]*?\.smart-swarm-layout\s*\{\s*grid-template-columns:\s*1fr;/m);
     expect(appCss).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.smart-swarm-connection/m);
+    expect(appCss).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\.runtime-brain-pulse\[data-pulse-state="active"\][\s\S]*?animation:\s*none;/m);
   });
 });

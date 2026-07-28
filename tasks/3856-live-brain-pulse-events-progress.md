@@ -8,5 +8,7 @@
 - [x] Run focused tests, lint, typecheck, build, and relevant full suites.
 - [x] Independently review the diff and remediate findings.
 - [x] Update architecture docs with source, cursor, validation, state, motion, and drill-down behavior.
-- [ ] Commit as David Mendez, push, open a linked PR, and complete exact-head Codex/CI/thread gates.
+- [x] Commit as David Mendez, push, and open linked PR #3872.
+- [x] Address all three first-round current-head Codex findings with focused RED/GREEN coverage.
+- [ ] Push remediation and complete fresh exact-head Codex/CI/thread gates.
 - [ ] Guarded squash merge exact reviewed head, verify issue closure/deployment/public authenticated browser evidence, and record terminal Kanban handoff.
