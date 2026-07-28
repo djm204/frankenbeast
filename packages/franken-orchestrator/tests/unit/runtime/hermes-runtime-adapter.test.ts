@@ -108,6 +108,34 @@ describe('HermesRuntimeAdapter', () => {
     }));
   });
 
+  it('quarantines oversized Hermes task identifiers before normalizing topology and events', async () => {
+    const home = await createHome();
+    const dbPath = join(home, 'configured.db');
+    createCurrentKanban(dbPath);
+    const oversizedTaskId = `t_${'x'.repeat(1_100)}`;
+    const db = new Database(dbPath);
+    db.transaction(() => {
+      db.prepare('UPDATE tasks SET id = ? WHERE id = ?').run(oversizedTaskId, 't_child');
+      db.prepare('UPDATE task_links SET child_id = ? WHERE child_id = ?').run(oversizedTaskId, 't_child');
+      db.prepare('UPDATE task_events SET task_id = ? WHERE task_id = ?').run(oversizedTaskId, 't_child');
+      db.prepare('UPDATE task_comments SET task_id = ? WHERE task_id = ?').run(oversizedTaskId, 't_child');
+    })();
+    db.close();
+
+    const adapter = new HermesRuntimeAdapter({ env: { HERMES_KANBAN_DB: dbPath } });
+    const snapshot = await adapter.getSnapshot();
+    const eventPage = await adapter.getEvents();
+
+    expect(snapshot.tasks.status).toBe('available');
+    if (snapshot.tasks.status !== 'available') throw new Error('expected available tasks');
+    expect(snapshot.tasks.data).toHaveLength(1);
+    expect(snapshot.tasks.data[0]?.id).toBe('hermes:global:t_parent');
+    expect(snapshot.events.status).toBe('available');
+    if (snapshot.events.status !== 'available') throw new Error('expected available events');
+    expect(snapshot.events.data).toHaveLength(0);
+    expect(eventPage.events).toHaveLength(0);
+  });
+
   it('preserves HERMES_KANBAN_DB when an explicit Hermes home is configured', async () => {
     const home = await createHome();
     const dbPath = join(home, 'configured.db');

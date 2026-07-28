@@ -44,6 +44,35 @@ afterEach(() => {
 });
 
 describe('RuntimeBrainPulse', () => {
+  it('keeps fresh runtime events visible when the browser clock is behind', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-28T00:00:00.000Z'));
+    const event: RuntimeEvent = {
+      id: 'event-clock-skew',
+      cursor: 'cursor-clock-skew',
+      workspaceId: 'board-main',
+      taskId: 'task-1',
+      runId: 'run-1',
+      type: 'lifecycle',
+      occurredAt: '2026-07-28T00:00:30.000Z',
+      summary: 'Runtime host is ahead',
+    };
+
+    render(
+      <RuntimeBrainPulse
+        connection="connected"
+        events={[event]}
+        onOpenTask={() => undefined}
+        provider={provider}
+        snapshot={snapshot}
+      />,
+    );
+
+    const pulse = screen.getByRole('region', { name: 'Runtime brain pulse' });
+    expect(pulse.getAttribute('data-pulse-state')).toBe('active');
+    expect(pulse.textContent).toContain('Runtime host is ahead');
+  });
+
   it('prunes pulses when their source timestamp leaves the one-minute window', async () => {
     vi.useFakeTimers();
     const now = new Date('2026-07-28T00:01:00.000Z');

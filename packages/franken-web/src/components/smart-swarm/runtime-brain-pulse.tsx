@@ -34,12 +34,15 @@ export function RuntimeBrainPulse({
 
   const recentEvents = useMemo(() => {
     const unique = new Map<string, RuntimeEvent>();
+    const pulseNow = events.reduce((latest, event) => {
+      const occurredAt = Date.parse(event.occurredAt);
+      return Number.isFinite(occurredAt) ? Math.max(latest, occurredAt) : latest;
+    }, now);
     for (const event of events) {
       const occurredAt = Date.parse(event.occurredAt);
       if (
         !Number.isFinite(occurredAt)
-        || occurredAt < now - PULSE_WINDOW_MS
-        || occurredAt > now + 5_000
+        || occurredAt < pulseNow - PULSE_WINDOW_MS
       ) continue;
       const current = unique.get(event.id);
       if (!current || occurredAt > Date.parse(current.occurredAt)) unique.set(event.id, event);

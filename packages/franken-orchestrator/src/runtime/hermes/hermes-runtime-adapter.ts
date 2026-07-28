@@ -13,6 +13,7 @@ import {
 } from '../runtime-adapter.js';
 import {
   RuntimeActionResultSchema,
+  RUNTIME_EVENT_ID_MAX_LENGTH,
   RuntimeEventPageSchema,
   RuntimeProviderSchema,
   RuntimeSnapshotSchema,
@@ -1256,6 +1257,20 @@ export class HermesRuntimeAdapter implements RuntimeAdapter {
     activityLimit: number,
     blockerEventRows: RuntimeRow[] = eventRows,
   ) {
+    const hasBoundedTaskId = (value: unknown): boolean => (
+      value !== null && value !== undefined
+      && taskId(source.workspaceId, value).length <= RUNTIME_EVENT_ID_MAX_LENGTH
+    );
+    taskRows = taskRows.filter((task) => hasBoundedTaskId(task['id']));
+    linkRows = linkRows.filter((link) => (
+      hasBoundedTaskId(link['parent_id']) && hasBoundedTaskId(link['child_id'])
+    ));
+    runRows = runRows.filter((run) => hasBoundedTaskId(run['task_id']));
+    eventRows = eventRows.filter((event) => (
+      event['task_id'] === null || hasBoundedTaskId(event['task_id'])
+    ));
+    commentRows = commentRows.filter((comment) => hasBoundedTaskId(comment['task_id']));
+    blockerEventRows = blockerEventRows.filter((event) => hasBoundedTaskId(event['task_id']));
     const dependencies = new Map<string, string[]>();
     for (const link of linkRows) {
       const child = String(link['child_id']);

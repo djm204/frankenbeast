@@ -18,7 +18,8 @@ const IdempotencyKeySchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+
 const RuntimeWorkspaceIdSchema = z.string().min(1);
 const RuntimeTaskIdSchema = z.string().min(1);
 const RuntimeApprovalIdSchema = z.string().min(1);
-const RuntimeEventIdSchema = z.string().min(1).max(1_024);
+export const RUNTIME_EVENT_ID_MAX_LENGTH = 1_024;
+const RuntimeEventIdSchema = z.string().min(1).max(RUNTIME_EVENT_ID_MAX_LENGTH);
 const RuntimeEventCursorSchema = z.string().min(1).max(4_096).refine(
   (cursor) => new TextEncoder().encode(cursor).byteLength <= 4_096,
   'Runtime event cursor exceeds the UTF-8 transport byte limit',

@@ -244,7 +244,7 @@ describe('OllamaRuntimeAdapter', () => {
     }));
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(input instanceof Request ? input.url : input.toString()).pathname;
-      if (path === '/api/version') return Response.json({ version: '0.11.4' });
+      if (path === '/api/version') return Response.json({ version: `v-${'x'.repeat(5_000)}` });
       if (path === '/api/tags') return Response.json({ models });
       if (path === '/api/ps') return Response.json({ models });
       return Response.json({ error: 'not found' }, { status: 404 });
@@ -257,6 +257,7 @@ describe('OllamaRuntimeAdapter', () => {
     const snapshot = await adapter.getSnapshot();
     expect(snapshot.workspaces.status).toBe('available');
     if (snapshot.workspaces.status !== 'available') throw new Error('expected available workspaces');
+    expect(String(snapshot.workspaces.data[0]?.metadata?.['version']).length).toBeLessThanOrEqual(4_096);
     expect(snapshot.workspaces.data[0]?.metadata?.['installedModels']).toEqual(expect.any(String));
     expect(String(snapshot.workspaces.data[0]?.metadata?.['installedModels']).length).toBeLessThanOrEqual(4_096);
     expect(String(snapshot.workspaces.data[0]?.metadata?.['loadedModels']).length).toBeLessThanOrEqual(4_096);
