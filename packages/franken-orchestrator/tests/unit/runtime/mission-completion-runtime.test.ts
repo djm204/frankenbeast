@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,8 +28,10 @@ describe('production mission completion dependencies', () => {
     roots.push(root);
     const inputPath = join(root, '.fbeast', 'mission-completion.json');
     mkdirSync(join(root, '.fbeast'));
+    chmodSync(join(root, '.fbeast'), 0o700);
     const mission = otherwiseCompleteMission();
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,
@@ -63,6 +65,27 @@ describe('production mission completion dependencies', () => {
     await expect(deps.getInput()).rejects.toThrow('mission completion input must be a regular file');
   });
 
+  it('rejects external evidence that is writable by untrusted users', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    writeFileSync(inputPath, JSON.stringify(otherwiseCompleteMission()));
+    chmodSync(inputPath, 0o666);
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
+    });
+
+    await expect(deps.getInput()).rejects.toThrow(
+      'mission completion input is writable by untrusted users',
+    );
+  });
+
   it('injects the server-configured required external gate inventory', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
@@ -70,6 +93,7 @@ describe('production mission completion dependencies', () => {
     const inputPath = join(evidenceRoot, 'mission.json');
     const mission = otherwiseCompleteMission();
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const deps = createProductionMissionCompletionDeps({
       root,
       env: {
@@ -96,6 +120,7 @@ describe('production mission completion dependencies', () => {
       trigger: 'deployment verified', nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
     }];
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,
@@ -125,12 +150,118 @@ describe('production mission completion dependencies', () => {
     });
   });
 
+  it('stops terminal mission jobs from the server monitor without dashboard polling', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+    roots.push(root, evidenceRoot);
+    const inputPath = join(evidenceRoot, 'mission.json');
+    const mission = otherwiseCompleteMission();
+    mission.externalGates = [{
+      id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker',
+      head: '3333333333333333333333333333333333333333', trigger: 'deployment verified',
+      nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+    }];
+    writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const deps = createProductionMissionCompletionDeps({
+      root,
+      env: {
+        FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+        FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+        FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+      },
+      fetchImpl: fetchMock,
+      now: () => new Date(mission.checkedAt),
+    });
+
+    await deps.startMonitoring();
+    await deps.stopMonitoring();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('polls within half of a short evidence freshness window', async () => {
+    vi.useFakeTimers();
+    try {
+      const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+      const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+      roots.push(root, evidenceRoot);
+      const inputPath = join(evidenceRoot, 'mission.json');
+      const mission = otherwiseCompleteMission();
+      mission.evidenceMaxAgeMs = 2_000;
+      mission.externalGates = [];
+      writeFileSync(inputPath, JSON.stringify(mission));
+      chmodSync(inputPath, 0o600);
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+      const deps = createProductionMissionCompletionDeps({
+        root,
+        env: {
+          FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+          FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+          FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+        },
+        fetchImpl: fetchMock,
+        now: () => new Date(mission.checkedAt),
+      });
+      await deps.startMonitoring();
+      mission.externalGates = [{
+        id: 'public-acceptance', state: 'passed', owner: 'acceptance-worker',
+        head: '3333333333333333333333333333333333333333', trigger: 'deployment verified',
+        nextTransition: 'terminalize mission', scope: { kind: 'deployed-sha' },
+      }];
+      writeFileSync(inputPath, JSON.stringify(mission));
+      chmodSync(inputPath, 0o600);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await deps.stopMonitoring();
+
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invalidates cached completion status when a later monitor cycle fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
+      const evidenceRoot = mkdtempSync(join(tmpdir(), 'mission-evidence-'));
+      roots.push(root, evidenceRoot);
+      const inputPath = join(evidenceRoot, 'mission.json');
+      const mission = otherwiseCompleteMission();
+      mission.evidenceMaxAgeMs = 2_000;
+      writeFileSync(inputPath, JSON.stringify(mission));
+      chmodSync(inputPath, 0o600);
+      const deps = createProductionMissionCompletionDeps({
+        root,
+        env: {
+          FRANKENBEAST_MISSION_COMPLETION_INPUT: inputPath,
+          FRANKENBEAST_MISSION_COMPLETION_REQUIRED_GATES: 'public-acceptance',
+          FRANKENBEAST_MISSION_COMPLETION_STOP_URL: 'https://control.example.invalid/stop',
+        },
+        now: () => new Date(mission.checkedAt),
+      });
+      await deps.startMonitoring();
+      writeFileSync(inputPath, '{malformed');
+      chmodSync(inputPath, 0o600);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await expect(deps.getStatus()).rejects.toThrow();
+      await deps.stopMonitoring();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('evaluates file evidence against server time instead of a stale self-reported check time', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mission-completion-'));
     roots.push(root);
     const inputPath = join(root, 'mission.json');
     const mission = otherwiseCompleteMission();
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const deps = createProductionMissionCompletionDeps({
       root,
       env: {
@@ -153,6 +284,7 @@ describe('production mission completion dependencies', () => {
     const inputPath = join(evidenceRoot, 'mission.json');
     const mission = otherwiseCompleteMission();
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,
@@ -177,6 +309,7 @@ describe('production mission completion dependencies', () => {
     const inputPath = join(evidenceRoot, 'mission.json');
     const mission = otherwiseCompleteMission();
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const deps = createProductionMissionCompletionDeps({
       root,

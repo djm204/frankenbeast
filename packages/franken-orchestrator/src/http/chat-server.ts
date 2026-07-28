@@ -461,11 +461,13 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
         resolve();
       });
     });
+    await options.missionCompletion?.startMonitoring?.();
     address = createdServer.address();
     if (!address || typeof address === 'string') {
       throw new Error('Chat server did not bind to a TCP address');
     }
   } catch (error) {
+    await Promise.resolve(options.missionCompletion?.stopMonitoring?.()).catch(() => undefined);
     server?.closeAllConnections();
     webSocketServer?.close();
     ownedRuntimeActionStore?.beginShutdown();
@@ -491,6 +493,12 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
     url,
     wsUrl,
     close: async () => {
+      let monitorShutdownError: unknown;
+      try {
+        await options.missionCompletion?.stopMonitoring?.();
+      } catch (error) {
+        monitorShutdownError = error;
+      }
       const closedServer = closeHttpServer(server);
       let shutdownFenceError: unknown;
       try {
@@ -516,6 +524,7 @@ export async function startChatServer(options: StartChatServerOptions): Promise<
       ownedBrainRegistry?.close();
       options.analyticsDeps?.analytics.close?.();
       if (shutdownFenceError) throw shutdownFenceError;
+      if (monitorShutdownError) throw monitorShutdownError;
     },
   };
 }

@@ -16,7 +16,7 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProductionMissionCompletionDeps } from '../../../src/runtime/mission-completion-runtime.js';
@@ -36,6 +36,7 @@ describe('production mission completion bounded reads', () => {
     const inputPath = join(evidenceRoot, 'mission.json');
     const mission = otherwiseCompleteMission();
     writeFileSync(inputPath, JSON.stringify(mission));
+    chmodSync(inputPath, 0o600);
     const deps = createProductionMissionCompletionDeps({
       root,
       env: {

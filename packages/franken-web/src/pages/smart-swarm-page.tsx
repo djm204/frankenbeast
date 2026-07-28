@@ -462,8 +462,8 @@ export function SmartSwarmPage({ client }: SmartSwarmPageProps) {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let intervalMs = DEFAULT_COMPLETION_POLL_INTERVAL_MS;
     const pollCompletion = async (): Promise<void> => {
-      let intervalMs = DEFAULT_COMPLETION_POLL_INTERVAL_MS;
       try {
         const completion = await client.fetchMissionCompletion();
         if (cancelled) return;

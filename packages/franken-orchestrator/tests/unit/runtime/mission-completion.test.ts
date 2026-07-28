@@ -286,6 +286,7 @@ describe('smart-swarm mission completion', () => {
     const result = evaluateMissionCompletion(mission);
 
     expect(result.terminal).toBe(false);
+    expect(result.stages.implementation).toBe('pending');
     expect(result.blockers).toEqual(expect.arrayContaining([
       'canonical canonical-3812 is running (owner worker-a)',
       'issue #3812 canonical work item canonical-3812 is not done',

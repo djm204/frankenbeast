@@ -159,7 +159,15 @@ export function evaluateMissionCompletion(input: MissionCompletionInput): Missio
   const acceptanceTimestampValid = timestampIsFresh(acceptanceVerifiedAtMs)
     && acceptanceVerifiedAtMs >= deploymentVerifiedAtMs;
   const implementation = input.scopedIssues.length > 0
-    && input.scopedIssues.every((issue) => issue.implementationState === 'implemented');
+    && input.scopedIssues.every((issue) => {
+      if (issue.implementationState !== 'implemented' || !hasText(issue.canonicalWorkItemId)) {
+        return false;
+      }
+      const canonical = input.workItems.find((item) => (
+        item.id === issue.canonicalWorkItemId && item.kind === 'canonical'
+      ));
+      return canonical?.status === 'done';
+    });
   const reviewed = input.scopedIssues.length > 0
     && input.scopedIssues.every((issue) => isGitOid(issue.reviewedHead));
   const merged = input.scopedIssues.length > 0

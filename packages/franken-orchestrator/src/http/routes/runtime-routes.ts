@@ -13,6 +13,7 @@ import type { RuntimeAdapterRegistry } from '../../runtime/runtime-adapter-regis
 import {
   evaluateMissionCompletion,
   type MissionCompletionInput,
+  type MissionCompletionResult,
 } from '../../runtime/mission-completion.js';
 import {
   RuntimeActionUncertainError,
@@ -56,6 +57,9 @@ export interface RuntimeRouteDeps {
 export interface MissionCompletionRouteDeps {
   getInput(): MissionCompletionInput | Promise<MissionCompletionInput>;
   stopJobs(jobIds: string[], stopOnceKey: string): void | Promise<void>;
+  getStatus?(): MissionCompletionResult | Promise<MissionCompletionResult>;
+  startMonitoring?(): void | Promise<void>;
+  stopMonitoring?(): void | Promise<void>;
 }
 
 const BASE_PATH = '/v1/smart-swarm/providers';
@@ -530,6 +534,9 @@ export function createRuntimeRoutes(deps: RuntimeRouteDeps): Hono {
 
   if (deps.missionCompletion) {
     app.get('/v1/smart-swarm/completion', async (c) => {
+      if (deps.missionCompletion!.getStatus) {
+        return c.json({ data: runtimeResponse(await deps.missionCompletion!.getStatus()) });
+      }
       const result = evaluateMissionCompletion(await deps.missionCompletion!.getInput());
       if (result.shouldStopJobs && result.stopOnceKey) {
         const stopOnceKey = result.stopOnceKey;

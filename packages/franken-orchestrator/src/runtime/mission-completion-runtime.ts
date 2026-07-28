@@ -1,7 +1,11 @@
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
-import type { MissionCompletionInput } from './mission-completion.js';
+import {
+  evaluateMissionCompletion,
+  type MissionCompletionInput,
+  type MissionCompletionResult,
+} from './mission-completion.js';
 
 const MAX_INPUT_BYTES = 1_048_576;
 const STOP_REQUEST_TIMEOUT_MS = 10_000;
@@ -74,6 +78,9 @@ export interface ProductionMissionCompletionOptions {
 export interface ProductionMissionCompletionDeps {
   getInput(): Promise<MissionCompletionInput>;
   stopJobs(jobIds: string[], stopOnceKey: string): Promise<void>;
+  getStatus(): Promise<MissionCompletionResult>;
+  startMonitoring(): Promise<void>;
+  stopMonitoring(): Promise<void>;
 }
 
 function pendingInput(now: Date): MissionCompletionInput {
@@ -119,6 +126,30 @@ function readBoundedRegularFile(path: string): string {
   try {
     const stat = fstatSync(descriptor);
     if (!stat.isFile()) throw new Error('mission completion input must be a regular file');
+    const expectedUid = process.getuid?.();
+    if (expectedUid !== undefined && stat.uid !== expectedUid) {
+      throw new Error('mission completion input is not owned by the expected account');
+    }
+    if (expectedUid !== undefined && (stat.mode & 0o022) !== 0) {
+      throw new Error('mission completion input is writable by untrusted users');
+    }
+    if (expectedUid !== undefined) {
+      let ancestor = dirname(path);
+      for (;;) {
+        const ancestorStat = statSync(ancestor);
+        const writableByUntrusted = (ancestorStat.mode & 0o022) !== 0;
+        const stickyDirectory = ancestorStat.isDirectory() && (ancestorStat.mode & 0o1000) !== 0;
+        if (!ancestorStat.isDirectory()) {
+          throw new Error('mission completion input ancestor is not a directory');
+        }
+        if (writableByUntrusted && !stickyDirectory) {
+          throw new Error('mission completion input ancestor is writable by untrusted users');
+        }
+        const parent = dirname(ancestor);
+        if (parent === ancestor) break;
+        ancestor = parent;
+      }
+    }
     if (stat.size > MAX_INPUT_BYTES) {
       throw new Error(`mission completion input exceeds ${MAX_INPUT_BYTES} bytes`);
     }
@@ -161,8 +192,14 @@ export function createProductionMissionCompletionDeps(
       .filter((id) => id.length > 0),
   )].sort();
   let trustedEvidenceLoaded = false;
+  let monitorTimer: ReturnType<typeof setTimeout> | undefined;
+  let monitoring = false;
+  let monitorInFlight: Promise<MissionCompletionResult> | undefined;
+  let latestResult: MissionCompletionResult | undefined;
+  let latestError: unknown;
+  let completedStopKey: string | undefined;
 
-  return {
+  const deps: ProductionMissionCompletionDeps = {
     async getInput() {
       trustedEvidenceLoaded = false;
       let input: MissionCompletionInput;
@@ -240,5 +277,74 @@ export function createProductionMissionCompletionDeps(
       });
       if (!response.ok) throw new Error(`mission completion stop endpoint returned HTTP ${response.status}`);
     },
+
+    async getStatus() {
+      if (latestError !== undefined) throw latestError;
+      return latestResult ?? runMonitorCycle();
+    },
+
+    async startMonitoring() {
+      if (monitoring) return;
+      monitoring = true;
+      const result = await runMonitorCycle().catch(() => undefined);
+      scheduleMonitorCycle(result);
+    },
+
+    async stopMonitoring() {
+      monitoring = false;
+      if (monitorTimer) clearTimeout(monitorTimer);
+      monitorTimer = undefined;
+      await monitorInFlight?.catch(() => undefined);
+    },
   };
+
+  const runMonitorCycle = (): Promise<MissionCompletionResult> => {
+    if (monitorInFlight) return monitorInFlight;
+    monitorInFlight = (async () => {
+      const result = evaluateMissionCompletion(await deps.getInput());
+      let status = result;
+      if (result.shouldStopJobs && result.stopOnceKey && completedStopKey !== result.stopOnceKey) {
+        try {
+          await deps.stopJobs(result.jobsToStop, result.stopOnceKey);
+          completedStopKey = result.stopOnceKey;
+        } catch {
+          status = {
+            ...result,
+            terminal: false,
+            shouldStopJobs: false,
+            health: 'attention-required',
+            summary: 'Mission completion job stop failed; retry pending.',
+            stages: { ...result.stages, completion: 'pending' },
+            blockers: [...result.blockers, 'completion job stop failed; retry pending'],
+          };
+        }
+      }
+      latestResult = status;
+      latestError = undefined;
+      return status;
+    })().catch((error: unknown) => {
+      latestResult = undefined;
+      latestError = error;
+      throw error;
+    }).finally(() => {
+      monitorInFlight = undefined;
+    });
+    return monitorInFlight;
+  };
+
+  const scheduleMonitorCycle = (result?: MissionCompletionResult): void => {
+    if (!monitoring) return;
+    const evidenceMaxAgeMs = result?.evidenceMaxAgeMs ?? latestResult?.evidenceMaxAgeMs;
+    const intervalMs = evidenceMaxAgeMs === undefined
+      ? 30_000
+      : Math.max(100, Math.min(30_000, evidenceMaxAgeMs / 2));
+    monitorTimer = setTimeout(() => {
+      void runMonitorCycle()
+        .then((nextResult) => { scheduleMonitorCycle(nextResult); })
+        .catch(() => { scheduleMonitorCycle(); });
+    }, intervalMs);
+    monitorTimer.unref();
+  };
+
+  return deps;
 }

@@ -513,6 +513,40 @@ describe('SmartSwarmPage', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('Mission completion unavailable.');
   });
 
+  it('retains the freshness-based interval after a completion poll fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const completion = {
+        missionId: 'smart-swarm-runtime',
+        checkedAt: '2026-07-28T03:00:00.000Z',
+        evidenceMaxAgeMs: 2_000,
+        terminal: false,
+        shouldStopJobs: false,
+        jobsToStop: [],
+        blockers: ['deployment evidence is incomplete'],
+        stages: {
+          implementation: 'passed' as const, reviewed: 'passed' as const, merged: 'passed' as const,
+          deployed: 'pending' as const, realDataAccepted: 'pending' as const, completion: 'pending' as const,
+        },
+      };
+      const fetchMissionCompletion = vi.fn()
+        .mockResolvedValueOnce(completion)
+        .mockRejectedValueOnce(new Error('completion unavailable'))
+        .mockResolvedValueOnce(completion);
+      render(<SmartSwarmPage client={createClient({ fetchMissionCompletion })} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(1);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+
+      expect(fetchMissionCompletion).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('renders external gate ownership, trigger, and next transition', async () => {
     render(<SmartSwarmPage client={createClient({
       fetchMissionCompletion: vi.fn().mockResolvedValue({
