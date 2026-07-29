@@ -110,7 +110,11 @@ function uninstallJsonClient(options: { root: string; claudeDir: string; client:
 function pruneFbeastMcpServers(settingsPath: string): Record<string, unknown> {
   if (!existsSync(settingsPath)) return {};
 
-  const settings = readJsonObjectFileOrRecover(settingsPath, readFileSync(settingsPath, 'utf-8'));
+  const settings = readJsonObjectFileOrRecover(
+    settingsPath,
+    readFileSync(settingsPath, 'utf-8'),
+    { reportRecovery: false },
+  );
   const mcpServers = (settings['mcpServers'] as Record<string, unknown>) ?? {};
   for (const key of Object.keys(mcpServers)) {
     if (key.startsWith('fbeast-')) delete mcpServers[key];
@@ -381,19 +385,23 @@ function hasProjectFbeastJsonConfig(client: McpClient, root: string, projectDir:
 
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
-  const root = process.cwd();
-  const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
-  const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
-  const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
-  const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-  const purge = process.argv.includes('--purge') ? true : undefined;
-  runUninstall({ root, claudeDir, jsonConfigDirs, client, purge }).catch(() => {
+  runUninstallEntrypoint().catch(() => {
     // Uninstall errors can contain config contents, command output, paths, or
     // credentials. Keep the CLI boundary stable and actionable without
     // serializing the rejected value.
     console.error('fbeast-uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.');
     process.exit(1);
   });
+}
+
+async function runUninstallEntrypoint(): Promise<void> {
+  const root = process.cwd();
+  const clientArg = parseMcpClient(process.argv.find((a) => a.startsWith('--client='))?.split('=')[1]);
+  const client = clientArg ?? detectMcpClient({ cwd: root, homeDir: homedir(), exists: existsSync });
+  const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
+  const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+  const purge = process.argv.includes('--purge') ? true : undefined;
+  await runUninstall({ root, claudeDir, jsonConfigDirs, client, purge });
 }
 
 function defaultAsk(question: string): Promise<string> {

@@ -188,13 +188,17 @@ describe('fbeast-uninstall entrypoint', () => {
     dirs.push(root);
     vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     process.chdir(root);
     process.argv = ['node', 'fbeast-uninstall', '--client=codez', '--purge'];
 
-    await expect(import('./uninstall.js')).rejects.toThrow(
-      'Invalid --client value "codez". Expected claude, gemini, or codex.',
-    );
+    await import('./uninstall.js');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
 
+    expect(error).toHaveBeenCalledWith(
+      'fbeast-uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.',
+    );
     expect(console.info).not.toHaveBeenCalledWith('fbeast uninstalled.');
   });
 
@@ -225,5 +229,55 @@ describe('fbeast-uninstall entrypoint', () => {
     expect(error).toHaveBeenCalledWith(
       'fbeast-uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.',
     );
+  });
+
+  it('sanitizes failures raised while discovering client configuration', async () => {
+    const parent = tmpDir();
+    const secret = ['discovery', 'secret', 'value'].join('-');
+    const root = join(parent, `api-token=${secret}`);
+    dirs.push(parent);
+    mkdirSync(join(root, '.mcp.json'), { recursive: true });
+
+    vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    process.chdir(root);
+    process.argv = ['node', 'fbeast-uninstall', '--client=claude', '--purge'];
+
+    await import('./uninstall.js');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+
+    expect(error).toHaveBeenCalledWith(
+      'fbeast-uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.',
+    );
+    expect(error.mock.calls.flat().map(String).join('\n')).not.toContain(secret);
+  });
+
+  it('does not expose recovery diagnostics for malformed uninstall configuration', async () => {
+    const parent = tmpDir();
+    const secret = ['recovery', 'secret', 'value'].join('-');
+    const root = join(parent, `api-token=${secret}`);
+    dirs.push(parent);
+    mkdirSync(join(root, '.claude'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'settings.json'), '{ "token": "private-value", } trailing');
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({
+      mcpServers: { 'fbeast-memory': { command: 'fbeast-memory' } },
+    }));
+
+    vi.doMock('../shared/is-main.js', () => ({ isMain: () => true }));
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    process.chdir(root);
+    process.argv = ['node', 'fbeast-uninstall', '--client=claude', '--purge'];
+
+    await import('./uninstall.js');
+    await vi.waitFor(() => expect(info).toHaveBeenCalledWith('fbeast uninstalled.'));
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+    const logged = [...info.mock.calls, ...warn.mock.calls, ...error.mock.calls].flat().map(String).join('\n');
+    expect(logged).not.toContain(secret);
+    expect(logged).not.toContain('private-value');
   });
 });
