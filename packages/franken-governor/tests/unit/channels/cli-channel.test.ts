@@ -237,7 +237,17 @@ describe('CliChannel', () => {
       'client_secret=\'val\\\'s secret\' ' +
       'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY DATABASE_PASSWORD=my_db_pass_123 ' +
       'TOKEN=$(cat</etc/shadow) ./deploy.sh TOKEN=my_literal_secret_123 --password hunter2 --verbose --token opaque-secret-token next-arg ' +
+      'curl -H \'Authorization: Bearer my_arg_bearer_secret_123\' https://safe.example && rm -rf /arg_target ' +
+      'SECRET1=abc&&rm -rf /ctrl_target SECRET2=def||echo fail SECRET3=ghi|tee out SECRET4=jkl>out.txt ' +
+      '--password \'my "quoted" pass\' --verbose --token "my \'quoted\' token" --debug ' +
+      '--token flag_secret_val&&rm -rf /flag_target ' +
+      'yaml_password: hash#secret_val\nyaml_secret: simple_val # yaml inline comment\n' +
+      'bypass=true compass: north tokenize=false ' +
+      '\\u001b[31mPASSWORD\\u001b[0m=ansi_secret_hunter ' +
       'database_password: my secret pass phrase # inline comment\n' +
+      '-----BEGIN CERTIFICATE-----\nMIICXzCCAcgCAQAwDQYJKoZIhvcNAQEEBQAw\n-----END CERTIFICATE-----\n' +
+      '-----BEGIN RSA PRIVATE KEY-----\nrm -rf /mismatched_target\n-----END OPENSSH PRIVATE KEY-----\n' +
+      '-----BEGIN RSA PRIVATE KEY-----\n' + 'KEY_LEAK_BODY_'.repeat(200) + '\n' +
       'Step 1: Check system metrics. '.repeat(50);
 
     const sensitivePlanDiff =
@@ -256,7 +266,7 @@ describe('CliChannel', () => {
       trigger: {
         triggered: true,
         triggerId: 'budget',
-        reason: 'Triggered with sensitive trigger_secret=my_trigger_secret_val',
+        reason: 'Triggered with sensitive trigger_secret=my_trigger_secret_val\n-----BEGIN RSA PRIVATE KEY-----\n' + 'TRIGGER_KEY_LEAK_'.repeat(200),
         severity: 'critical',
       },
       summary: sensitiveSummary,
@@ -265,7 +275,7 @@ describe('CliChannel', () => {
 
     const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
 
-    // Sensitive values and suffixes must not be present raw
+    // Sensitive values and secrets must not be present raw
     expect(prompt).not.toContain('sk-proj-secret12345');
     expect(prompt).not.toContain('escaped\\" secret value');
     expect(prompt).not.toContain('val\\\'s secret');
@@ -274,13 +284,31 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain('my_literal_secret_123');
     expect(prompt).not.toContain('hunter2');
     expect(prompt).not.toContain('opaque-secret-token');
+    expect(prompt).not.toContain('flag_secret_val');
     expect(prompt).not.toContain('my secret pass phrase');
+    expect(prompt).not.toContain('my_arg_bearer_secret_123');
+    expect(prompt).not.toContain('my "quoted" pass');
+    expect(prompt).not.toContain("my 'quoted' token");
+    expect(prompt).not.toContain('hash#secret_val');
+    expect(prompt).not.toContain('simple_val');
+    expect(prompt).not.toContain('ansi_secret_hunter');
+    expect(prompt).not.toContain('KEY_LEAK_BODY_');
+    expect(prompt).not.toContain('TRIGGER_KEY_LEAK_');
     expect(prompt).not.toContain('dXNlcjpwYXNz');
     expect(prompt).not.toContain('AKIAIOSFODNN7EXAMPLE');
     expect(prompt).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret');
-    expect(prompt).not.toContain('BEGIN PGP PRIVATE KEY BLOCK');
-    expect(prompt).not.toContain('BEGIN RSA PRIVATE KEY');
+    expect(prompt).not.toContain('Version: PGP');
+    expect(prompt).not.toContain('MIIEowIBAAKCAQEA0Z1');
     expect(prompt).not.toContain('my_trigger_secret_val');
+
+    // Benign settings, CERTIFICATE block, and executable shell context must be preserved
+    expect(prompt).toContain('bypass=true');
+    expect(prompt).toContain('compass: north');
+    expect(prompt).toContain('tokenize=false');
+    expect(prompt).toContain('BEGIN CERTIFICATE');
+    expect(prompt).toContain('MIICXzCCAcgCAQAwDQYJKoZIhvcNAQEEBQAw');
+    expect(prompt).toContain('END CERTIFICATE');
+    expect(prompt).toContain('rm -rf /mismatched_target');
 
     // Redaction and truncation markers must be present
     expect(prompt).toContain('[REDACTED]');
@@ -298,8 +326,17 @@ describe('CliChannel', () => {
     expect(prompt).toContain('DATABASE_PASSWORD=[REDACTED]');
     expect(prompt).toContain('TOKEN=$(cat</etc/shadow) ./deploy.sh');
     expect(prompt).toContain('TOKEN=[REDACTED] --password');
-    expect(prompt).toContain('--password [REDACTED] --verbose');
-    expect(prompt).toContain('--token [REDACTED] next-arg');
+    expect(prompt).toContain('curl -H \'Authorization: [REDACTED]\' https://safe.example && rm -rf /arg_target');
+    expect(prompt).toContain('SECRET1=[REDACTED]&&rm -rf /ctrl_target');
+    expect(prompt).toContain('SECRET2=[REDACTED]||echo fail');
+    expect(prompt).toContain('SECRET3=[REDACTED]|tee out');
+    expect(prompt).toContain('SECRET4=[REDACTED]>out.txt');
+    expect(prompt).toContain('--password \'[REDACTED]\' --verbose');
+    expect(prompt).toContain('--token "[REDACTED]" --debug');
+    expect(prompt).toContain('--token [REDACTED]&&rm -rf /flag_target');
+    expect(prompt).toContain('yaml_password: [REDACTED]');
+    expect(prompt).toContain('yaml_secret: [REDACTED] # yaml inline comment');
+    expect(prompt).toContain('\\u001b[31mPASSWORD\\u001b[0m=[REDACTED]');
     expect(prompt).toContain('database_password: [REDACTED] # inline comment');
     expect(prompt).toContain('Authorization: [REDACTED]');
     expect(prompt).toContain('+ Safe diff line 1');
