@@ -8,9 +8,9 @@
 - [x] Run the focused regression test with the read-only-cache-safe Vitest config loader.
 - [x] Run the complete `adapter-llm-client` unit test file with the read-only-cache-safe Vitest config loader.
 - [x] Run focused tests and package lint; attempt full tests, typecheck, and build (blocked only by unrelated current-main failures documented in the PR).
-- [ ] Commit the issue changes.
-- [ ] Push the issue branch.
-- [ ] Open the pull request.
+- [x] Commit the issue changes.
+- [x] Push the issue branch.
+- [x] Open pull request #3894 linked to issue #3830.
 - [ ] Obtain exact-head CI and Codex review.
 - [ ] Merge the pull request.
 - [ ] Close issue #3830.
