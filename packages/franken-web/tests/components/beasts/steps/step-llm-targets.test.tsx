@@ -91,6 +91,27 @@ describe('StepLlmTargets', () => {
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
   });
 
+  it('populates the model list for a configured CLI provider with no pinned model override', () => {
+    // Regression test for #3820: a provider that is configured and available but has no
+    // explicit `model` override (the common case for CLI-based providers like codex/claude,
+    // which default to whatever the CLI itself resolves) must still offer selectable models
+    // instead of leaving the Model dropdown empty.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'codex' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.queryAllByRole('option').length).toBeGreaterThan(1);
+  });
+
   it('clearly shows provider load errors without fallback options', () => {
     useDashboardStore.getState().setSnapshot({
       skills: [],
