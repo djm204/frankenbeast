@@ -2006,6 +2006,55 @@ describe('ProcessBeastExecutor', () => {
   });
 
   describe('spawn failure handling', () => {
+    it('persists launch preparation failures to the system log', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+      const invalidDefinition = {
+        ...martinLoopDefinition,
+        buildProcessSpec: () => {
+          throw new Error('invalid launch config');
+        },
+      } satisfies BeastDefinition;
+
+      await expect(executor.start(run, invalidDefinition)).rejects.toThrow('invalid launch config');
+
+      const systemLogs = await logs.read(run.id, 'system');
+      expect(systemLogs).toContainEqual(
+        expect.stringContaining('process launch preparation failed: invalid launch config'),
+      );
+      expect(supervisor.spawn).not.toHaveBeenCalled();
+    });
+
+    it('persists output emitted before a spawn failure to the system log', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          const cb = callbacks as ProcessCallbacks;
+          cb.onStdout('pre-spawn stdout');
+          cb.onStderr('pre-spawn stderr');
+          throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
+
+      const systemLogs = await logs.read(run.id, 'system');
+      expect(systemLogs).toEqual(expect.arrayContaining([
+        expect.stringContaining('pre-spawn stdout'),
+        expect.stringContaining('pre-spawn stderr'),
+      ]));
+    });
+
     it('sets run to failed with spawn_failed stop reason', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
