@@ -7,7 +7,7 @@
 - [x] Implement the minimal sanitized CLI error boundary.
 - [x] Run focused package tests, typecheck, and build.
 - [x] Self-review the diff and commit with the required Git identity.
-- [ ] Push and open one PR linked with `Closes #3735`.
+- [x] Push and open one PR linked with `Closes #3735`.
 - [ ] Reach clean current-head GitHub Codex review with zero unresolved threads.
 - [ ] Verify current-head CI, squash merge safely, and confirm issue closure/current main.
 - [ ] Record reusable lessons and complete the Kanban handoff.
