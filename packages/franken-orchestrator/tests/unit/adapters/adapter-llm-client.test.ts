@@ -1,6 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AdapterLlmClient, AdapterLlmError, type IAdapter, type ILlmObserver } from '../../../src/adapters/adapter-llm-client.js';
 
+const { randomUUID } = vi.hoisted(() => ({
+  randomUUID: vi.fn(() => '123e4567-e89b-42d3-a456-426614174000'),
+}));
+
+vi.mock('node:crypto', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:crypto')>(),
+  randomUUID,
+}));
+
 function makeAdapter(overrides: Partial<IAdapter> = {}): IAdapter {
   return {
     transformRequest: vi.fn((req) => req),
@@ -22,6 +31,18 @@ function makeObserver(): ILlmObserver {
 }
 
 describe('AdapterLlmClient', () => {
+  it('uses randomUUID for the prefixed request ID and response correlation', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await client.complete('prompt');
+
+    const requestId = 'llm-123e4567-e89b-42d3-a456-426614174000';
+    expect(randomUUID).toHaveBeenCalledOnce();
+    expect(adapter.transformRequest).toHaveBeenCalledWith(expect.objectContaining({ id: requestId }));
+    expect(adapter.transformResponse).toHaveBeenCalledWith({ raw: true }, requestId);
+  });
+
   it('returns adapter content on success', async () => {
     const client = new AdapterLlmClient(makeAdapter());
     await expect(client.complete('prompt')).resolves.toBe('hello');

@@ -1,5 +1,5 @@
 import type { ILlmClient, LlmCompletionOptions, LlmCompletionResult, ProviderContext, TokenUsage } from '@franken/types';
-import { now as deterministicNow, seededRandom } from '@franken/types';
+import { randomUUID } from 'node:crypto';
 
 type UnifiedRequest = {
   id: string;
@@ -100,7 +100,7 @@ export class AdapterLlmClient implements ILlmClient {
     prompt: string,
     options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
   ): Promise<{ content: string; usage?: TokenUsage; providerContext?: ProviderContext }> {
-    const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
+    const requestId = `llm-${randomUUID()}`;
     const model = this.defaultModel;
 
     const request: UnifiedRequest = {
