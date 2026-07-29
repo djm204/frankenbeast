@@ -794,6 +794,11 @@ function resolveMissingSafetyModule<T>(moduleName: string, stub: T, logger: Beas
   );
 }
 
+// TokenBudgetBreaker requires a finite, positive tokenBudget (Infinity is
+// rejected as a fail-open bypass), so a cost-only budget needs a finite
+// sentinel that no real token count will reach.
+const EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET = Number.MAX_SAFE_INTEGER;
+
 async function createCritiqueDeps(
   options: CliDepOptions,
   config: EffectiveCliConfig,
@@ -832,9 +837,9 @@ async function createCritiqueDeps(
     config: {
       maxIterations: options.critiqueMaxIterations ?? 3,
       // `config.budget` is the CLI `--budget <usd>` dollar limit, so enforce it
-      // as a cost budget. The token budget is left unbounded; the dollar budget
-      // is the single budget the CLI exposes.
-      tokenBudget: Number.POSITIVE_INFINITY,
+      // as a cost budget. The token budget is left effectively unbounded; the
+      // dollar budget is the single budget the CLI exposes.
+      tokenBudget: EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET,
       costBudgetUsd: config.budget,
       consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
       sessionId: `cli-critique-${deterministicNow()}`,

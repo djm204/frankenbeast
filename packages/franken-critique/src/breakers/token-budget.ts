@@ -1,5 +1,6 @@
 import type { CircuitBreaker, CircuitBreakerResult, LoopState, LoopConfig } from './circuit-breaker.js';
 import type { ObservabilityPort } from '../types/contracts.js';
+import { ConfigurationError } from '../errors/index.js';
 
 export class TokenBudgetBreaker implements CircuitBreaker {
   readonly name = 'token-budget';
@@ -15,6 +16,17 @@ export class TokenBudgetBreaker implements CircuitBreaker {
   }
 
   async check(_state: LoopState, config: LoopConfig): Promise<CircuitBreakerResult> {
+    // tokenBudget must always be finite and positive, even when costBudgetUsd
+    // is also set — a non-finite value must never be usable as an "unbounded"
+    // sentinel (see dep-factory.ts, which now uses a finite effectively-
+    // unbounded sentinel instead of Infinity for that case).
+    if (!Number.isFinite(config.tokenBudget) || config.tokenBudget <= 0) {
+      throw new ConfigurationError(
+        `tokenBudget must be a finite positive number, got ${config.tokenBudget}`,
+        { context: { tokenBudget: config.tokenBudget } },
+      );
+    }
+
     const spend = await this.observability.getTokenSpend(config.sessionId);
 
     // A dollar-denominated budget (e.g. the CLI `--budget <usd>` flag) must be
