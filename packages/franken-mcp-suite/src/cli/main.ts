@@ -137,6 +137,11 @@ function reportMcpInitError(error: unknown): never {
   process.exit(1);
 }
 
+function reportMcpUninstallError(): never {
+  console.error('fbeast mcp uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.');
+  process.exit(1);
+}
+
 function passthrough(): never {
   const passthroughArgs = process.argv.slice(2);
   const { command, args, windowsVerbatimArguments } = resolveCommand('frankenbeast', passthroughArgs);
@@ -229,13 +234,17 @@ switch (subcommand) {
     break;
   }
   case 'uninstall': {
-    const { runUninstall } = await import('./uninstall.js');
-    const root = process.cwd();
-    const client = resolveClient();
-    const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
-    const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
-    const purge = process.argv.includes('--purge') ? true : undefined;
-    await runUninstall({ root, claudeDir, jsonConfigDirs, client, purge });
+    try {
+      const { runUninstall } = await import('./uninstall.js');
+      const root = process.cwd();
+      const client = resolveClient();
+      const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
+      const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
+      const purge = process.argv.includes('--purge') ? true : undefined;
+      await runUninstall({ root, claudeDir, jsonConfigDirs, client, purge });
+    } catch {
+      reportMcpUninstallError();
+    }
     break;
   }
   case 'beast': {
