@@ -108,9 +108,21 @@ const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
  * PEM private-key blocks are handled separately, below, via a linear scan
  * rather than a regex here — see `redactPemPrivateKeyBlocks` /
  * `containsPemPrivateKeyBlock`.
+ *
+ * The sk-/pk-/rk- pattern requires a 20+ char suffix (real OpenAI/Anthropic/
+ * Stripe-style keys are typically 40-100+ chars) rather than the 8-char floor
+ * the other patterns use, because "sk-"/"pk-"/"rk-" are common 2-letter
+ * prefixes that legitimate short structured identifiers can coincidentally
+ * start with (e.g. an `agentId` of "sk-platform"). Those identifiers flow
+ * through this same value-shape check via `redactSecrets` on the pre-tool
+ * governor context (`hookArgsFromContext`), and audit tooling elsewhere
+ * (`brain-adapter.ts`) filters on their *exact* value, so over-redacting one
+ * silently breaks that attribution — a higher floor for this specific prefix
+ * trades a little recall on unusually short real keys (none of the vendors
+ * above issue keys that short) for not corrupting unrelated identifiers.
  */
 const KNOWN_SECRET_VALUE_PATTERNS: RegExp[] = [
-  /\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}(?![A-Za-z0-9_-])/g,
+  /\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{19,}(?![A-Za-z0-9_-])/g,
   /\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{8,}\b/g,
   /\b(?:gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_-]{12,}(?![A-Za-z0-9_-])/g,
@@ -147,7 +159,29 @@ function pemMarkerEnd(text: string, start: number): number {
  * anywhere after it, `indexOf` has already scanned to the end of the text
  * exactly once, and we stop immediately rather than repeating that scan for
  * every remaining header — bounding total work to O(n).
+ *
+ * A block can contain an unrelated "-----END X-----" marker before its real
+ * footer (e.g. a certificate embedded between a PRIVATE KEY header and
+ * footer). `findPemFooter` keeps advancing past each non-matching "-----END "
+ * occurrence in an inner loop rather than falling back out to the outer
+ * header search — abandoning the header there would orphan it and miss the
+ * real footer that follows. The inner loop still only ever moves forward, so
+ * this stays O(n) overall: once no valid footer exists anywhere in the rest
+ * of the text (for *any* candidate footer position), none of the remaining
+ * text can contain one for a later header either, so both callers return/stop
+ * immediately instead of continuing to search.
  */
+function findPemFooter(text: string, searchFrom: number): number {
+  let cursor = searchFrom;
+  for (;;) {
+    const footerIdx = text.indexOf('-----END ', cursor);
+    if (footerIdx === -1) return -1;
+    const footerEnd = pemMarkerEnd(text, footerIdx);
+    if (footerEnd !== -1) return footerEnd;
+    cursor = footerIdx + 9;
+  }
+}
+
 function containsPemPrivateKeyBlock(text: string): boolean {
   if (!text.includes('PRIVATE KEY-----')) return false;
   let cursor = 0;
@@ -159,13 +193,7 @@ function containsPemPrivateKeyBlock(text: string): boolean {
       cursor = headerIdx + 11;
       continue;
     }
-    const footerIdx = text.indexOf('-----END ', headerEnd);
-    if (footerIdx === -1) return false;
-    const footerEnd = pemMarkerEnd(text, footerIdx);
-    if (footerEnd === -1) {
-      cursor = footerIdx + 9;
-      continue;
-    }
+    if (findPemFooter(text, headerEnd) === -1) return false;
     return true;
   }
 }
@@ -184,14 +212,8 @@ function redactPemPrivateKeyBlocks(text: string): string {
       cursor = headerIdx + 11;
       continue;
     }
-    const footerIdx = text.indexOf('-----END ', headerEnd);
-    if (footerIdx === -1) break;
-    const footerEnd = pemMarkerEnd(text, footerIdx);
-    if (footerEnd === -1) {
-      result += text.slice(cursor, footerIdx + 9);
-      cursor = footerIdx + 9;
-      continue;
-    }
+    const footerEnd = findPemFooter(text, headerEnd);
+    if (footerEnd === -1) break;
     result += text.slice(cursor, headerIdx) + '[REDACTED]';
     cursor = footerEnd;
   }
@@ -223,13 +245,75 @@ function containsRawSecretHint(text: string): boolean {
     || CREDENTIAL_URL_HINT.test(text);
 }
 
+// Defensive cap on the number of JSON.parse tree nodes the oversized-payload
+// scan below will visit. A legitimate tool payload will not nest this deeply
+// or this wide; this exists purely to bound worst-case work (proportional to
+// node count, itself bounded by text length) rather than to reject anything
+// real.
+const MAX_OVERSIZED_JSON_SCAN_NODES = 200_000;
+
+/**
+ * Walks a JSON.parse()'d value looking for a secret-shaped string, either as
+ * a leaf value or (mirroring the JSON-property-name fix in redactJsonSecrets)
+ * as an object key. Iterative (explicit stack) rather than recursive so a
+ * maliciously deep payload can't blow the call stack.
+ */
+function containsSecretInParsedJson(root: unknown): boolean {
+  const stack: unknown[] = [root];
+  let visited = 0;
+  while (stack.length > 0) {
+    if (++visited > MAX_OVERSIZED_JSON_SCAN_NODES) return false;
+    const value = stack.pop();
+    if (typeof value === 'string') {
+      if (containsKnownSecretPattern(value)) return true;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) stack.push(item);
+      continue;
+    }
+    if (value !== null && typeof value === 'object') {
+      for (const [entryKey, entryValue] of Object.entries(value as Record<string, unknown>)) {
+        if (containsKnownSecretPattern(entryKey)) return true;
+        stack.push(entryValue);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * For oversized payloads, `containsOversizedSecretIndicator` otherwise only
+ * pattern-matches the raw source text. A credential can be written with valid
+ * JSON string escapes (e.g. `"ghp_aa..."`), which decode to the
+ * secret's real characters but contain no contiguous alphanumeric run in the
+ * raw source — so it matches none of `KNOWN_SECRET_VALUE_PATTERNS` and, with
+ * no key-label hint either, evades detection entirely and the whole payload
+ * is persisted. Attempting `JSON.parse` here and scanning the *decoded*
+ * string values closes that gap; parse failures (non-JSON oversized payloads,
+ * the majority case — plain tool output) just fall through to the existing
+ * raw-text heuristics below, unchanged. `JSON.parse` and the node-count-bounded
+ * walk above are both O(n) in the payload size, so this preserves the linear
+ * cost this fast path exists to guarantee.
+ */
+function containsOversizedJsonEscapedSecret(text: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  return containsSecretInParsedJson(parsed);
+}
+
 function containsOversizedSecretIndicator(text: string): boolean {
   if (/\bauthorization\b\s*[:=]/i.test(text)
     || /\\*["']authorization\\*["']\s*,/i.test(text)
     || /\bbearer\s+\S+/i.test(text)
     || /--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+\S+/i.test(text)
     || CREDENTIAL_URL_HINT.test(text)
-    || containsKnownSecretPattern(text)) {
+    || containsKnownSecretPattern(text)
+    || containsOversizedJsonEscapedSecret(text)) {
     return true;
   }
 

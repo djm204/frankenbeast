@@ -124,6 +124,46 @@ describe('runHook', () => {
     expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('private memory payload');
   });
 
+  it('preserves a legitimate agentId that happens to look like a short secret-shaped value', async () => {
+    const { deps, log } = hookDeps();
+    deps.readContext = () => JSON.stringify({
+      args: {
+        agentId: 'sk-platform',
+        profile: 'default',
+        repo: 'djm204/frankenbeast',
+        type: 'working',
+      },
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'fbeast_memory_query',
+      '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    // "sk-platform" is a plausible real agentId, not a secret; audit tooling
+    // elsewhere (brain-adapter.ts) filters access reports by its *exact*
+    // value, so over-redacting it would silently break attribution.
+    expect(metadata.args.agentId).toBe('sk-platform');
+  });
+
+  it('still redacts a genuine long sk-prefixed secret in a post-tool payload (regression guard for the agentId fix)', async () => {
+    const { deps, log } = hookDeps();
+    const secret = `sk-${'a'.repeat(40)}`;
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ result: secret }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain(secret);
+  });
+
   it('uses the hook tool name to redact direct memory args without type hints', async () => {
     const { deps, log } = hookDeps();
     deps.readContext = () => JSON.stringify({

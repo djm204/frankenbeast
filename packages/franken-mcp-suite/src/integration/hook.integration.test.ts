@@ -662,6 +662,46 @@ describe('fbeast-hook runtime', () => {
     expect(result.observerLogs[0]!.metadata).not.toContain(keyBody);
   });
 
+  it('detects an oversized PEM private-key block with an unrelated END marker before its real footer', async () => {
+    // A certificate (or any other "-----END X-----" marker) embedded between a
+    // PRIVATE KEY header and its real footer must not cause the scanner to
+    // abandon the header it already found. Regression test for a Codex
+    // finding on PR #3891 (issue #3838).
+    const certBody = Array.from({ length: 10 }, (_, i) => `certline${i}`).join('\n');
+    const keyBody = Array.from({ length: 40 }, (_, i) => `line${i}base64`).join('\n');
+    const pemBlock = [
+      '-----BEGIN PRIVATE KEY-----',
+      keyBody,
+      '-----BEGIN CERTIFICATE-----',
+      certBody,
+      '-----END CERTIFICATE-----',
+      '-----END PRIVATE KEY-----',
+    ].join('\n');
+    const payload = JSON.stringify({ output: 'x'.repeat(70_000), key: pemBlock });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(keyBody);
+  });
+
+  it('detects a JSON-unicode-escaped credential in an oversized payload', async () => {
+    // The raw source bytes of a `\uXXXX`-escaped secret contain no contiguous
+    // alphanumeric run, so they match no KNOWN_SECRET_VALUE_PATTERNS entry —
+    // decoding via JSON.parse before scanning is required to catch this.
+    // Regression test for a Codex finding on PR #3891 (issue #3838).
+    const secret = `ghp_${'a'.repeat(24)}`;
+    const escapedSecret = secret.replace(/./g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+    const payload = `{"result":"${escapedSecret}","padding":"${'x'.repeat(70_000)}"}`;
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
   it('redacts a Google API key that legally ends in a hyphen even with no key-label context', async () => {
     // Google API keys are "AIza" + 35 chars from [0-9A-Za-z_-], which can
     // legally end in '-'. A trailing `\b` requires a word/non-word
