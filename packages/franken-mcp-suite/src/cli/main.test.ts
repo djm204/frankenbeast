@@ -38,6 +38,24 @@ describe('fbeast main CLI', () => {
     expect(runUninstall).toHaveBeenCalledWith(expect.objectContaining({ client: 'codex' }));
   });
 
+  it('sanitizes failures from the primary uninstall command', async () => {
+    const secret = ['primary', 'uninstall', 'secret'].join('-');
+    const runUninstall = vi.fn().mockRejectedValue(new Error(secret));
+    vi.doMock('./uninstall.js', () => ({ runUninstall }));
+
+    process.argv = ['node', 'fbeast', 'mcp', 'uninstall', '--client=codex', '--purge'];
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+    await import('./main.js');
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+
+    expect(error).toHaveBeenCalledWith(
+      'fbeast mcp uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.',
+    );
+    expect(error.mock.calls.flat().map(String).join('\n')).not.toContain(secret);
+  });
+
   it('reports invalid init mode as a clean CLI error without a stack trace', async () => {
     const runInit = vi.fn();
     vi.doMock('./init.js', () => ({ runInit }));
