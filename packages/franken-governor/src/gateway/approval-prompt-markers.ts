@@ -31,21 +31,23 @@ export function redactSecrets(text: string): string {
 
   // 1. Private Key Blocks (PEM / OpenSSH / PGP / etc.)
   result = result.replace(
-    /-----BEGIN [A-Z0-9\s_-]+PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9\s_-]+PRIVATE KEY-----/gu,
+    /-----BEGIN [^\r\n]*PRIVATE KEY[^\r\n]*-----[\s\S]*?-----END [^\r\n]*PRIVATE KEY[^\r\n]*-----/gu,
     '[REDACTED]',
   );
 
-  // 2. Authorization / Bearer headers and tokens
+  // 2. Authorization headers (entire value through line end for all schemes)
   result = result.replace(
-    /\b(Authorization\s*:\s*(?:Bearer\s+)?)[^\s"'\r\n;]+/giu,
+    /\b(Authorization\s*:\s*)[^\r\n]+/giu,
     '$1[REDACTED]',
   );
+
+  // 3. Standalone Bearer tokens outside Authorization header
   result = result.replace(
     /\b(Bearer\s+)[A-Za-z0-9_.~+/\-]{10,}/giu,
     '$1[REDACTED]',
   );
 
-  // 3. Explicit token formats (GitHub, OpenAI sk- keys, JWTs)
+  // 4. Explicit token formats (GitHub tokens, OpenAI sk- keys, JWTs)
   result = result.replace(
     /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{30,})\b/gu,
     '[REDACTED]',
@@ -59,20 +61,53 @@ export function redactSecrets(text: string): string {
     '[REDACTED]',
   );
 
-  // 4. Key-value assignments and JSON fields for secrets/passwords/keys/tokens
-  const secretKeysPattern =
-    '\\b(?:password|pass|passwd|secret|token|api[-_]?key|auth[-_]?token|access[-_]?token|private[-_]?key|client[-_]?secret)\\b';
+  const secretKeyToken =
+    '[A-Za-z0-9_]*?(?:password|pass|passwd|secret|token|api[-_]?key|auth[-_]?token|access[-_]?token|access[-_]?key|private[-_]?key|client[-_]?secret)[A-Za-z0-9_]*';
+  const flagToken =
+    '--(?:password|secret|token|api[-_]?key|access[-_]?key)';
 
-  // 4a. Quoted values (single or double quotes, matching multi-word values within quotes)
-  const quotedKeyValRegex = new RegExp(
-    `((?:["']?${secretKeysPattern}["']?|--${secretKeysPattern})\\s*[:=]\\s*)(["'])([\\s\\S]*?)\\2`,
+  // 5. Quoted key-value assignments and JSON fields (handling escaped quotes inside values)
+  const doubleQuotedRegex = new RegExp(
+    `((?:["']?${secretKeyToken}["']?|${flagToken})\\s*[:=]\\s*)"((?:\\\\.|[^"\\\\])*)"`,
     'giu',
   );
-  result = result.replace(quotedKeyValRegex, '$1$2[REDACTED]$2');
+  result = result.replace(doubleQuotedRegex, '$1"[REDACTED]"');
 
-  // 4b. Unquoted values
+  const singleQuotedRegex = new RegExp(
+    `((?:["']?${secretKeyToken}["']?|${flagToken})\\s*[:=]\\s*)'((?:\\\\.|[^'\\\\])*)'`,
+    'giu',
+  );
+  result = result.replace(singleQuotedRegex, "$1'[REDACTED]'");
+
+  // 6. Space-separated CLI flags (e.g., --password hunter2 or --token "opaque value")
+  const spaceFlagQuotedRegex = new RegExp(
+    `(${flagToken}\\s+)(["'])((?:\\\\.|[^"\\\\])*)\\2`,
+    'giu',
+  );
+  result = result.replace(spaceFlagQuotedRegex, '$1$2[REDACTED]$2');
+
+  const spaceFlagUnquotedRegex = new RegExp(
+    `(${flagToken}\\s+)(?!\`|\\$\\(|\\$\\{|<\\(|>\\()([^\\s"']+)`,
+    'giu',
+  );
+  result = result.replace(spaceFlagUnquotedRegex, '$1[REDACTED]');
+
+  // Negative lookahead for values beginning with shell control expressions / substitutions
+  const shellExprLookahead = '(?!\\\[REDACTED\\\]|\`|\\$\\(|\\$\\{|<\\(|>\\()';
+
+  // 7. YAML / unquoted key-value assignments (up to inline comments # or line boundary)
+  const yamlKeyValRegex = new RegExp(
+    `(\\b${secretKeyToken}\\s*:\\s*)(?!["'\\s])${shellExprLookahead}([^"\\s'\\r\\n#][^\\r\\n#]*?)(\\s*#.*)?$`,
+    'gimu',
+  );
+  result = result.replace(
+    yamlKeyValRegex,
+    (_match, p1, _p2, p3 = '') => `${p1}[REDACTED]${p3.trimEnd()}`,
+  );
+
+  // 8. Standard unquoted key-value assignments (e.g. KEY=VAL), preserving shell control/substitutions
   const unquotedKeyValRegex = new RegExp(
-    `((?:["']?${secretKeysPattern}["']?|--${secretKeysPattern})\\s*[:=]\\s*)([^\\s"',;}\\]\\r\\n]+)`,
+    `(\\b${secretKeyToken}\\s*[:=]\\s*)${shellExprLookahead}([^\\s"',;}\\]\\r\\n]+)`,
     'giu',
   );
   result = result.replace(unquotedKeyValRegex, '$1[REDACTED]');
@@ -130,6 +165,11 @@ export function formatApprovalPromptWithBoundaries(
     lines.push('SECURITY NOTICE (trusted):', formatUntrustedApprovalText(trustedNotice, '> '));
   }
 
+  let triggerReason = request.trigger.reason ?? 'No reason';
+  if (doRedact) {
+    triggerReason = redactSecrets(triggerReason);
+  }
+
   lines.push(
     'Request ID (untrusted):',
     formatUntrustedApprovalText(request.requestId, untrustedPrefix),
@@ -138,7 +178,7 @@ export function formatApprovalPromptWithBoundaries(
     'Project ID (untrusted):',
     formatUntrustedApprovalText(request.projectId, untrustedPrefix),
     'Trigger (untrusted):',
-    formatUntrustedApprovalText(`[${request.trigger.triggerId}] ${request.trigger.reason ?? 'No reason'}`, untrustedPrefix),
+    formatUntrustedApprovalText(`[${request.trigger.triggerId}] ${triggerReason}`, untrustedPrefix),
   );
 
   let summaryText = request.summary;

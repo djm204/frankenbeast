@@ -233,12 +233,18 @@ describe('CliChannel', () => {
     const channel = new CliChannel({ readline, operatorName: 'dev' });
 
     const sensitiveSummary =
-      'Deploy service with api_key=sk-proj-secret12345 and password="my super secret multi-word password!" ' +
-      'client_secret=\'multi word secret phrase\' ' +
+      'Deploy service with api_key=sk-proj-secret12345 and password="my \\"escaped\\" secret value" ' +
+      'client_secret=\'val\\\'s secret\' ' +
+      'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY DATABASE_PASSWORD=my_db_pass_123 ' +
+      'TOKEN=$(cat</etc/shadow) ./deploy.sh TOKEN=my_literal_secret_123 --password hunter2 --verbose --token opaque-secret-token next-arg ' +
+      'database_password: my secret pass phrase # inline comment\n' +
       'Step 1: Check system metrics. '.repeat(50);
 
     const sensitivePlanDiff =
+      'Authorization: Basic dXNlcjpwYXNz\n' +
+      'Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request\n' +
       'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret\n' +
+      '-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: PGP\n...\n-----END PGP PRIVATE KEY BLOCK-----\n' +
       '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Z1...\n-----END RSA PRIVATE KEY-----\n' +
       '+ Safe diff line 1\n' +
       '+ Safe plan step '.repeat(100);
@@ -247,6 +253,12 @@ describe('CliChannel', () => {
       requestId: 'req-xyz',
       taskId: 'task-001',
       projectId: 'proj-001',
+      trigger: {
+        triggered: true,
+        triggerId: 'budget',
+        reason: 'Triggered with sensitive trigger_secret=my_trigger_secret_val',
+        severity: 'critical',
+      },
       summary: sensitiveSummary,
       planDiff: sensitivePlanDiff,
     }));
@@ -255,25 +267,41 @@ describe('CliChannel', () => {
 
     // Sensitive values and suffixes must not be present raw
     expect(prompt).not.toContain('sk-proj-secret12345');
-    expect(prompt).not.toContain('my super secret multi-word password!');
-    expect(prompt).not.toContain('super secret');
-    expect(prompt).not.toContain('multi-word password!');
-    expect(prompt).not.toContain('multi word secret phrase');
+    expect(prompt).not.toContain('escaped\\" secret value');
+    expect(prompt).not.toContain('val\\\'s secret');
+    expect(prompt).not.toContain('wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
+    expect(prompt).not.toContain('my_db_pass_123');
+    expect(prompt).not.toContain('my_literal_secret_123');
+    expect(prompt).not.toContain('hunter2');
+    expect(prompt).not.toContain('opaque-secret-token');
+    expect(prompt).not.toContain('my secret pass phrase');
+    expect(prompt).not.toContain('dXNlcjpwYXNz');
+    expect(prompt).not.toContain('AKIAIOSFODNN7EXAMPLE');
     expect(prompt).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret');
-    expect(prompt).not.toContain('-----BEGIN RSA PRIVATE KEY-----');
+    expect(prompt).not.toContain('BEGIN PGP PRIVATE KEY BLOCK');
+    expect(prompt).not.toContain('BEGIN RSA PRIVATE KEY');
+    expect(prompt).not.toContain('my_trigger_secret_val');
 
     // Redaction and truncation markers must be present
     expect(prompt).toContain('[REDACTED]');
     expect(prompt).toContain('[TRUNCATED]');
 
-    // Essential benign approval context must be retained
+    // Essential benign approval context and shell expressions must be retained
     expect(prompt).toContain('Request ID (untrusted):\n| req-xyz');
     expect(prompt).toContain('Task ID (untrusted):\n| task-001');
     expect(prompt).toContain('Project ID (untrusted):\n| proj-001');
-    expect(prompt).toContain('[budget] Over budget');
+    expect(prompt).toContain('Trigger (untrusted):\n| [budget] Triggered with sensitive trigger_secret=[REDACTED]');
     expect(prompt).toContain('Deploy service with api_key=[REDACTED]');
     expect(prompt).toContain('password="[REDACTED]"');
     expect(prompt).toContain("client_secret='[REDACTED]'");
+    expect(prompt).toContain('AWS_SECRET_ACCESS_KEY=[REDACTED]');
+    expect(prompt).toContain('DATABASE_PASSWORD=[REDACTED]');
+    expect(prompt).toContain('TOKEN=$(cat</etc/shadow) ./deploy.sh');
+    expect(prompt).toContain('TOKEN=[REDACTED] --password');
+    expect(prompt).toContain('--password [REDACTED] --verbose');
+    expect(prompt).toContain('--token [REDACTED] next-arg');
+    expect(prompt).toContain('database_password: [REDACTED] # inline comment');
+    expect(prompt).toContain('Authorization: [REDACTED]');
     expect(prompt).toContain('+ Safe diff line 1');
   });
 });
