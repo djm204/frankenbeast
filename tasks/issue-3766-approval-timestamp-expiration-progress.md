@@ -8,7 +8,7 @@
 - [x] Add and run focused failing regression tests (RED).
 - [x] Implement the minimal root-cause fix and pass focused tests (GREEN).
 - [x] Run relevant governor tests, typecheck, lint, root checks/build, and inspect final diff. (Governor: 339 tests, typecheck/build/lint pass; root test/typecheck/build reached unrelated current-main orchestrator failures documented in the PR.)
-- [ ] Commit conventionally, push, and open one PR linked to #3766.
+- [x] Commit conventionally, push, and open one PR linked to #3766 (PR #3895).
 - [ ] Obtain current-head GitHub Codex clean result, zero unresolved Codex threads, and green exact-head CI.
 - [ ] Squash merge safely and verify issue closure plus current-main integration.
 - [ ] Append reusable lesson(s), publish Kanban/root handoff, and complete the card.
