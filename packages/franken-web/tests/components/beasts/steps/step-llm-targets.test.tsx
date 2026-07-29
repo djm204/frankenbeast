@@ -93,9 +93,32 @@ describe('StepLlmTargets', () => {
 
   it('populates the model list for a configured CLI provider with no pinned model override', () => {
     // Regression test for #3820: a provider that is configured and available but has no
-    // explicit `model` override (the common case for CLI-based providers like codex/claude,
+    // explicit `model` override (the common case for CLI-based providers like claude,
     // which default to whatever the CLI itself resolves) must still offer selectable models
     // instead of leaving the Model dropdown empty.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'claude' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.queryAllByRole('option').length).toBeGreaterThan(1);
+  });
+
+  it('leaves the Model dropdown empty for an unpinned codex-cli provider instead of guessing a model', () => {
+    // codex-cli deliberately never gets a guessed fallback model: CodexProvider (see
+    // packages/franken-orchestrator/src/skills/providers/codex-provider.ts, #3412, #3424)
+    // intentionally leaves the model unset so `codex exec` resolves the account's current
+    // default, which is newer than any version string this codebase could hardcode. A
+    // wizard-suggested model here would let a user pin the same kind of stale value that
+    // policy exists to avoid.
     useDashboardStore.getState().setSnapshot({
       skills: [],
       security: snapshotSecurity,
@@ -109,7 +132,7 @@ describe('StepLlmTargets', () => {
     fireEvent.click(screen.getByRole('option', { name: 'codex' }));
 
     fireEvent.click(screen.getAllByLabelText('Model')[0]!);
-    expect(screen.queryAllByRole('option').length).toBeGreaterThan(1);
+    expect(screen.queryAllByRole('option').length).toBe(1);
   });
 
   it('clearly shows provider load errors without fallback options', () => {
