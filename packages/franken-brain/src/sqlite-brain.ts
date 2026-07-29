@@ -2381,9 +2381,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const entries = new Map<string, { key: string; value: unknown; updatedAt: string }>();
     for (const row of rows) {
       const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      const value = parseStoredWorkingMemoryValue(serialized);
+      // Reads directly from the DB and can observe a row written by another
+      // connection after this instance started, so it doesn't pass through
+      // prepareEntry() — guard it before it's exposed to the caller.
+      assertNoUnsafeWorkingMemoryValue(row.key, value);
       entries.set(row.key, {
         key: row.key,
-        value: parseStoredWorkingMemoryValue(serialized),
+        value,
         updatedAt: row.updatedAt,
       });
     }
@@ -10608,22 +10613,35 @@ function chunkArray<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
-/** Object keys that can be used to reach or replace the prototype chain. */
-const UNSAFE_OBJECT_KEYS: ReadonlySet<string> = new Set([
-  '__proto__',
-  'constructor',
-  'prototype',
-]);
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
 /**
- * Recursively scans an already-parsed JSON value for own object keys that
- * could be used for prototype pollution (`__proto__`, `constructor`,
- * `prototype`) if the value were later merged, spread, or assigned into
- * another object by a downstream consumer. Returns the first unsafe key
- * found, or undefined if the value is safe.
+ * Recursively scans an already-parsed JSON value for the specific own-key
+ * shapes that can actually be used for prototype pollution if the value
+ * were later merged, spread, or assigned into another object by a
+ * downstream consumer:
+ *
+ * - an own `__proto__` key, at any depth, with any value — assigning
+ *   `target[key] = value` for a literal "__proto__" key reassigns
+ *   `target`'s prototype via the inherited accessor.
+ * - an own `constructor` key whose value is itself a plain object with an
+ *   own `prototype` key — the `constructor.prototype` path is how a
+ *   recursive merge reaches a class's (or `Object`'s) actually-shared
+ *   prototype object.
+ *
+ * Deliberately narrower than "any key named __proto__/constructor/prototype
+ * anywhere": working-memory values are unrestricted `unknown`, and ordinary
+ * fields like `{"constructor":"Widget"}` or `{"prototype":"v2"}` are
+ * legitimate data that cannot pollute anything on their own — rejecting
+ * them outright would make upgrading reject/orphan pre-existing rows for no
+ * security benefit.
+ *
+ * Returns the first unsafe key found, or undefined if the value is safe.
  */
 function findUnsafeObjectKey(value: unknown, seen: Set<unknown> = new Set()): string | undefined {
-  if (value === null || typeof value !== 'object') return undefined;
+  if (!isPlainObjectRecord(value) && !Array.isArray(value)) return undefined;
   if (seen.has(value)) return undefined;
   seen.add(value);
   if (Array.isArray(value)) {
@@ -10633,9 +10651,18 @@ function findUnsafeObjectKey(value: unknown, seen: Set<unknown> = new Set()): st
     }
     return undefined;
   }
-  for (const key of Object.keys(value as Record<string, unknown>)) {
-    if (UNSAFE_OBJECT_KEYS.has(key)) return key;
-    const found = findUnsafeObjectKey((value as Record<string, unknown>)[key], seen);
+  const record = value;
+  const keys = Object.keys(record);
+  if (keys.includes('__proto__')) return '__proto__';
+  if (
+    keys.includes('constructor')
+    && isPlainObjectRecord(record.constructor)
+    && Object.keys(record.constructor).includes('prototype')
+  ) {
+    return 'constructor';
+  }
+  for (const key of keys) {
+    const found = findUnsafeObjectKey(record[key], seen);
     if (found) return found;
   }
   return undefined;

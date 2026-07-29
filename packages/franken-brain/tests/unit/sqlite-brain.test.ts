@@ -4324,6 +4324,99 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('rejects an unsafe row inserted by another connection when read via retentionEntries()', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-retention-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+      let otherConnection: Database.Database | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        brainInstance.working.set('healthy', { enabled: true });
+        brainInstance.flush();
+
+        otherConnection = new Database(dbPath);
+        otherConnection
+          .prepare(
+            `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          )
+          .run('malicious', '{"__proto__":{"polluted":true}}', new Date().toISOString());
+        otherConnection.close();
+        otherConnection = undefined;
+
+        expect(() => brainInstance!.working.retentionEntries()).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        otherConnection?.close();
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not reject ordinary values that merely use "constructor" or "prototype" as field names', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-false-positive-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+
+        // Neither shape can pollute anything: "constructor" here is just a
+        // plain string field, and "prototype" isn't paired with
+        // "constructor" at all. Only __proto__ (any value) and a
+        // constructor value that itself has an own "prototype" key are
+        // unsafe.
+        brainInstance.working.set('widget', { constructor: 'Widget', version: 1 });
+        brainInstance.working.set('release', { prototype: 'v2', channel: 'stable' });
+        brainInstance.working.set('component', {
+          constructor: { name: 'Widget', args: ['a', 'b'] },
+        });
+
+        expect(brainInstance.working.get('widget')).toEqual({ constructor: 'Widget', version: 1 });
+        expect(brainInstance.working.get('release')).toEqual({ prototype: 'v2', channel: 'stable' });
+        expect(brainInstance.working.get('component')).toEqual({
+          constructor: { name: 'Widget', args: ['a', 'b'] },
+        });
+
+        brainInstance.flush();
+        brainInstance.close();
+        const reopened = new SqliteBrain(dbPath);
+        try {
+          expect(reopened.working.get('widget')).toEqual({ constructor: 'Widget', version: 1 });
+          expect(reopened.working.get('release')).toEqual({ prototype: 'v2', channel: 'stable' });
+        } finally {
+          reopened.close();
+        }
+        brainInstance = undefined;
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still rejects the genuinely dangerous constructor.prototype nesting', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-ctor-proto-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        expect(() =>
+          brainInstance!.working.set('malicious', {
+            constructor: { prototype: { polluted: true } },
+          }),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('keeps startup hydration budgets separate from working-memory write limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-write-limit-'));
       const dbPath = join(dir, 'brain.db');
