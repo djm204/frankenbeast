@@ -27,6 +27,85 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/approval/request', () => {
+    it('rejects an approval request without a timestamp', async () => {
+      const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+      const res = await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: 'req-missing-timestamp',
+          taskId: 'task-1',
+          summary: 'Deploy to production',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: {
+          code: 'invalid_approval_request_timestamp',
+          message: 'Approval request timestamp must be a valid ISO-8601 string',
+        },
+      });
+    });
+
+    it('rejects a date-only approval request timestamp as invalid', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-29T00:01:00.000Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-date-only',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-07-29',
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+          error: {
+            code: 'invalid_approval_request_timestamp',
+            message: 'Approval request timestamp must be a valid ISO-8601 string',
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects an approval request older than the configured timeout window', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-29T12:00:00.000Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-stale',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-07-29T11:54:59.999Z',
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+          error: {
+            code: 'approval_request_expired',
+            message: 'Approval request timestamp is outside the allowed window',
+          },
+        });
+        const healthBody = await (await app.request('/health')).json();
+        expect(healthBody.pendingApprovals).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('creates approval request', async () => {
       const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
       const res = await app.request('/v1/approval/request', {
@@ -36,6 +115,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-1',
           taskId: 'task-1',
           summary: 'Deploy to production',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -50,6 +130,7 @@ describe('Governor Hono Server', () => {
         requestId: 'req-signed',
         taskId: 'task-1',
         summary: 'Deploy to production',
+        timestamp: new Date().toISOString(),
       });
 
       const res = await app.request('/v1/approval/request', {
@@ -75,6 +156,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-unsigned',
           taskId: 'task-1',
           summary: 'Deploy to production',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -123,7 +205,12 @@ describe('Governor Hono Server', () => {
         const accepted = await app.request('/v1/approval/request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, taskId: 'task-1', summary: 'Deploy' }),
+          body: JSON.stringify({
+            requestId,
+            taskId: 'task-1',
+            summary: 'Deploy',
+            timestamp: new Date().toISOString(),
+          }),
         });
         expect(accepted.status).toBe(201);
       }
@@ -131,7 +218,12 @@ describe('Governor Hono Server', () => {
       const rejected = await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'req-3', taskId: 'task-1', summary: 'Deploy' }),
+        body: JSON.stringify({
+          requestId: 'req-3',
+          taskId: 'task-1',
+          summary: 'Deploy',
+          timestamp: new Date().toISOString(),
+        }),
       });
 
       expect(rejected.status).toBe(429);
@@ -161,14 +253,24 @@ describe('Governor Hono Server', () => {
       const created = await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'req-1', taskId: 'task-1', summary: 'Deploy' }),
+        body: JSON.stringify({
+          requestId: 'req-1',
+          taskId: 'task-1',
+          summary: 'Deploy',
+          timestamp: new Date().toISOString(),
+        }),
       });
       expect(created.status).toBe(201);
 
       const refreshed = await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'req-1', taskId: 'task-1', summary: 'Updated summary' }),
+        body: JSON.stringify({
+          requestId: 'req-1',
+          taskId: 'task-1',
+          summary: 'Updated summary',
+          timestamp: new Date().toISOString(),
+        }),
       });
 
       expect(refreshed.status).toBe(201);
@@ -187,6 +289,7 @@ describe('Governor Hono Server', () => {
         requestId,
         taskId: 'task-1',
         summary: 'Deploy',
+        timestamp: new Date().toISOString(),
       });
       await app.request('/v1/approval/request', {
         method: 'POST',
@@ -209,6 +312,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-1',
           taskId: 'task-1',
           summary: 'Deploy',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -236,6 +340,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-invalid',
           taskId: 'task-1',
           summary: 'Deploy',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -644,7 +749,12 @@ describe('Governor Hono Server', () => {
       await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, taskId: 'task-1', summary: 'Deploy' }),
+        body: JSON.stringify({
+          requestId,
+          taskId: 'task-1',
+          summary: 'Deploy',
+          timestamp: new Date().toISOString(),
+        }),
       });
     }
 

@@ -8,8 +8,10 @@ import {
 } from '../security/signature-verifier.js';
 import { now as deterministicNow } from '@franken/types';
 import { SessionTokenStore } from '../security/session-token-store.js';
+import { normalizeGovernorConfig } from '../core/config.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
+const ISO_8601_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export interface SlackEphemeralResponse {
   readonly response_type: 'ephemeral';
@@ -31,6 +33,8 @@ export interface GovernorAppOptions {
   slackResponsePoster?: SlackResponsePoster;
   slackWebhookUrl?: string;
   allowUnsignedApprovalsForTests?: boolean;
+  /** Maximum accepted age/skew for inbound approval-request timestamps. */
+  timeoutMs?: number;
   /**
    * Shared registry of pending approval waiters. Pass the same instance to
    * an `HttpApprovalChannel` (used by `ApprovalGateway`) so that a caller
@@ -259,6 +263,9 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
   const slackResponsePoster = options.slackResponsePoster ?? DEFAULT_SLACK_RESPONSE_POSTER;
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
+  const approvalRequestTimeoutMs = normalizeGovernorConfig(
+    options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+  ).timeoutMs;
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
     try {
@@ -342,6 +349,27 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         { error: { message: 'Missing required fields: requestId, taskId, summary' } },
         400,
       );
+    }
+
+    const timestampMs = typeof body.timestamp === 'string'
+      && ISO_8601_TIMESTAMP.test(body.timestamp)
+      ? Date.parse(body.timestamp)
+      : Number.NaN;
+    if (!Number.isFinite(timestampMs)) {
+      return c.json({
+        error: {
+          code: 'invalid_approval_request_timestamp',
+          message: 'Approval request timestamp must be a valid ISO-8601 string',
+        },
+      }, 400);
+    }
+    if (Math.abs(deterministicNow() - timestampMs) > approvalRequestTimeoutMs) {
+      return c.json({
+        error: {
+          code: 'approval_request_expired',
+          message: 'Approval request timestamp is outside the allowed window',
+        },
+      }, 400);
     }
 
     if (
