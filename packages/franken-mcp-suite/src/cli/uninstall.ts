@@ -387,8 +387,11 @@ if (isMain) {
   const jsonConfigDirs = resolveUninstallClientConfigDirs(client, root);
   const claudeDir = jsonConfigDirs[0] ?? resolveClientConfigDir({ client, cwd: root, homeDir: homedir(), exists: existsSync });
   const purge = process.argv.includes('--purge') ? true : undefined;
-  runUninstall({ root, claudeDir, jsonConfigDirs, client, purge }).catch((err) => {
-    console.error('fbeast-uninstall failed:', err);
+  runUninstall({ root, claudeDir, jsonConfigDirs, client, purge }).catch(() => {
+    // Uninstall errors can contain config contents, command output, paths, or
+    // credentials. Keep the CLI boundary stable and actionable without
+    // serializing the rejected value.
+    console.error('fbeast-uninstall failed [FBEAST_UNINSTALL_FAILED]. Check client configuration permissions and retry.');
     process.exit(1);
   });
 }
