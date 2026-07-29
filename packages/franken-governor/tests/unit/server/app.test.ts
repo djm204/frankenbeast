@@ -104,6 +104,28 @@ describe('Governor Hono Server', () => {
       }
     });
 
+    it('accepts an approval request timestamp with microsecond precision', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-29T12:00:00.123Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-microseconds',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-07-29T12:00:00.123456Z',
+          }),
+        });
+
+        expect(res.status).toBe(201);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('rejects an approval request older than the configured timeout window', async () => {
       vi.useFakeTimers();
       try {
@@ -150,6 +172,29 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.status).toBe('pending');
+    });
+
+    it('uses the wall clock for request freshness in deterministic mode', async () => {
+      const previousSeed = process.env.FRANKENBEAST_SEED;
+      process.env.FRANKENBEAST_SEED = 'approval-freshness-test';
+      try {
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-deterministic-mode',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: new Date().toISOString(),
+          }),
+        });
+
+        expect(res.status).toBe(201);
+      } finally {
+        if (previousSeed === undefined) delete process.env.FRANKENBEAST_SEED;
+        else process.env.FRANKENBEAST_SEED = previousSeed;
+      }
     });
 
     it('creates a signed approval request when a signing secret is configured', async () => {

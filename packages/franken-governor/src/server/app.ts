@@ -6,12 +6,12 @@ import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
-import { now as deterministicNow } from '@franken/types';
+import { now as deterministicNow, wallClockNow } from '@franken/types';
 import { SessionTokenStore } from '../security/session-token-store.js';
 import { normalizeGovernorConfig } from '../core/config.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
-const ISO_8601_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
+const ISO_8601_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 function parseIso8601Timestamp(value: unknown): number {
   if (typeof value !== 'string') return Number.NaN;
@@ -39,7 +39,7 @@ function parseIso8601Timestamp(value: unknown): number {
     && local.getUTCHours() === Number(hour)
     && local.getUTCMinutes() === Number(minute)
     && local.getUTCSeconds() === Number(second)
-    && local.getUTCMilliseconds() === Number(fraction.padEnd(3, '0'))
+    && local.getUTCMilliseconds() === Number(fraction.slice(0, 3).padEnd(3, '0'))
     ? timestampMs
     : Number.NaN;
 }
@@ -391,7 +391,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         },
       }, 400);
     }
-    if (Math.abs(deterministicNow() - timestampMs) > approvalRequestTimeoutMs) {
+    if (Math.abs(wallClockNow() - timestampMs) > approvalRequestTimeoutMs) {
       return c.json({
         error: {
           code: 'approval_request_expired',
