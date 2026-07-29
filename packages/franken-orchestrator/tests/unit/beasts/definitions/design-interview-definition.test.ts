@@ -38,6 +38,17 @@ describe('designInterviewDefinition', () => {
       expect(spec.args[idx + 1]).toBe('/tmp/design-doc.md');
     });
 
+    it('passes the configured base branch to avoid prompting in a spawned run', () => {
+      const spec = designInterviewDefinition.buildProcessSpec({
+        ...validConfig,
+        gitConfig: { baseBranch: 'develop' },
+      });
+      const idx = spec.args.indexOf('--base-branch');
+
+      expect(idx).toBeGreaterThan(-1);
+      expect(spec.args[idx + 1]).toBe('develop');
+    });
+
     it('sets FRANKENBEAST_SPAWNED=1 in env', () => {
       const spec = designInterviewDefinition.buildProcessSpec(validConfig);
       expect(spec.env).toEqual({ FRANKENBEAST_SPAWNED: '1' });

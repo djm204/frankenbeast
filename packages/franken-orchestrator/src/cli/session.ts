@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, ftruncateSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { relative } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { resolveContainedExistingPath } from '@franken/types/path-containment';
 import { tmpdir } from 'node:os';
 import { ZodError } from 'zod';
@@ -47,6 +47,40 @@ export type SessionPhase = 'interview' | 'plan' | 'execute';
 function appendPromptContext(value: string, promptText: string | undefined): string {
   if (!promptText || promptText.trim().length === 0) return value;
   return `${value}\n\nAdditional prompt context:\n${promptText.trim()}`;
+}
+
+function writeContainedDesignDoc(root: string, requestedPath: string, content: string): string {
+  const outputDirectory = resolveContainedExistingPath(
+    root,
+    dirname(requestedPath),
+    'interviewOutputDirectory',
+  );
+  const noFollow = 'O_NOFOLLOW' in constants ? constants.O_NOFOLLOW : 0;
+  const directoryOnly = 'O_DIRECTORY' in constants ? constants.O_DIRECTORY : 0;
+  const directoryFd = openSync(outputDirectory, constants.O_RDONLY | noFollow | directoryOnly);
+
+  try {
+    resolveContainedExistingPath(root, `/proc/self/fd/${directoryFd}`, 'interviewOutputDirectory');
+    const outputName = basename(requestedPath);
+    const designPath = resolve(outputDirectory, outputName);
+    const anchoredPath = `/proc/self/fd/${directoryFd}/${outputName}`;
+    const outputFd = openSync(
+      anchoredPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_NONBLOCK | noFollow,
+      0o600,
+    );
+    try {
+      if (!fstatSync(outputFd).isFile()) throw new Error('interviewOutput must be a regular file');
+      resolveContainedExistingPath(root, `/proc/self/fd/${directoryFd}`, 'interviewOutputDirectory');
+      ftruncateSync(outputFd, 0);
+      writeFileSync(outputFd, content, 'utf-8');
+    } finally {
+      closeSync(outputFd);
+    }
+    return designPath;
+  } finally {
+    closeSync(directoryFd);
+  }
 }
 
 function shellQuote(value: string): string {
@@ -96,6 +130,10 @@ export interface SessionConfig {
   exitAfter?: SessionPhase;
   /** Pre-existing design doc path (--design-doc flag) */
   designDocPath?: string;
+  /** Goal supplied to the non-interactive interview subcommand. */
+  interviewGoal?: string | undefined;
+  /** Output path for a non-interactive interview design document. */
+  interviewOutput?: string | undefined;
   /** Pre-existing plan dir (--plan-dir flag) */
   planDirOverride?: string;
   /** Maximum plan-critique iterations before escalation */
@@ -257,6 +295,7 @@ export class Session {
     const { paths, io } = this.config;
     const interviewOpts = this.buildDepOptions();
     interviewOpts.adapterWorkingDir = tmpdir();
+    interviewOpts.chatMode = true;
     const { cliLlmAdapter, finalize } = await createCliDeps(interviewOpts);
 
     try {
@@ -284,11 +323,23 @@ export class Session {
       };
 
       const promptConfig = loadPromptConfigFromEnv();
-      const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
-      await capturingInterview.build({ goal: appendPromptContext('Gather requirements', promptConfig?.text) });
+      if (this.config.interviewGoal) {
+        capturedDesignDoc = await progressLlm.complete(appendPromptContext(
+          `Generate a complete design document for the following goal. Include Problem, Goal, Architecture, Components, Data Flow, and Success Criteria sections.\n\nGoal: ${this.config.interviewGoal}`,
+          promptConfig?.text,
+        ));
+      } else {
+        const capturingInterview = new InterviewLoop(progressLlm, interviewIo, capturingGraphBuilder);
+        await capturingInterview.build({ goal: appendPromptContext('Gather requirements', promptConfig?.text) });
+      }
 
       const displayDesignCard = (designDoc: string): string => {
-        const designPath = writeDesignDoc(paths, designDoc);
+        let designPath: string;
+        if (this.config.interviewOutput) {
+          designPath = writeContainedDesignDoc(paths.root, this.config.interviewOutput, designDoc);
+        } else {
+          designPath = writeDesignDoc(paths, designDoc);
+        }
         io.display(formatDesignCard({
           ...extractDesignSummary(designDoc),
           filePath: designPath,
@@ -297,6 +348,8 @@ export class Session {
       };
 
       displayDesignCard(capturedDesignDoc);
+
+      if (this.config.interviewGoal) return 'exit';
 
       while (true) {
         const noOp = isNoOpDesign(capturedDesignDoc);
