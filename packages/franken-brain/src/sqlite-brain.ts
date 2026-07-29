@@ -2167,6 +2167,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
     value: unknown,
   ): { normalized: unknown; serialized: string; size: number } {
     validateWorkingMemoryKey(key);
+    // All working-memory writes funnel through here (set, persistKey,
+    // persistKeyAfterCommit, restore, and DB-driven hydration), so this is
+    // the single place to reject values that could pollute the prototype
+    // chain if a downstream consumer ever merges or spreads them.
+    const unsafeKey = findUnsafeObjectKey(value);
+    if (unsafeKey) {
+      throw new UnsafeWorkingMemoryValueError(key, unsafeKey);
+    }
     const serialized = stringifyWorkingMemoryValue(key, value);
     const valueBytes = Buffer.byteLength(serialized, 'utf8');
     if (valueBytes > this.limits.maxValueBytes) {
@@ -2677,10 +2685,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
     for (const [key, value] of entries) {
       deniedKey = key;
       try {
-        const unsafeKey = findUnsafeObjectKey(value);
-        if (unsafeKey) {
-          throw new UnsafeWorkingMemoryValueError(key, unsafeKey);
-        }
+        // prepareEntry() rejects values containing prototype-pollution-prone
+        // keys (__proto__, constructor, prototype) for every write path,
+        // restore() included.
         const { normalized, serialized, size } = this.prepareEntry(key, value);
         assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
         total += size;
@@ -10632,15 +10639,12 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
 }
 
 function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
+  // Prototype-pollution-prone keys (__proto__, constructor, prototype) are
+  // rejected uniformly in prepareEntry(), which every hydrated row passes
+  // through via prepareRow() below — no need to duplicate the check here.
   try {
-    const parsed = JSON.parse(value) as unknown;
-    const unsafeKey = findUnsafeObjectKey(parsed);
-    if (unsafeKey) {
-      throw new UnsafeWorkingMemoryValueError(key, unsafeKey);
-    }
-    return parsed;
-  } catch (error) {
-    if (error instanceof UnsafeWorkingMemoryValueError) throw error;
+    return JSON.parse(value) as unknown;
+  } catch {
     const trimmed = value.trimStart();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       throw new CorruptWorkingMemoryRowError(key);

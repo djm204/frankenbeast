@@ -4198,6 +4198,62 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('rejects unsafe keys on ordinary set()/persistKey() writes, not just restore() and hydration', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-set-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+
+        expect(() =>
+          brainInstance!.working.set('malicious', JSON.parse('{"__proto__":{"polluted":true}}')),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(brainInstance.working.has('malicious')).toBe(false);
+
+        expect(() =>
+          brainInstance!.working.persistKey(
+            'malicious',
+            JSON.parse('{"constructor":{"prototype":{"polluted":true}}}'),
+          ),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(brainInstance.working.has('malicious')).toBe(false);
+
+        expect(() =>
+          brainInstance!.working.persistKeyAfterCommit(
+            'malicious',
+            JSON.parse('{"__proto__":{"polluted":true}}'),
+          ),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(brainInstance.working.has('malicious')).toBe(false);
+
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+
+        // The invariant this closes: a value rejected by set()/persistKey()
+        // must never reach the DB, so a fresh reopen of the same database
+        // must succeed cleanly (previously, an unsafe value that slipped
+        // past set() could be flushed successfully and only surface as an
+        // UnsafeWorkingMemoryValueError on the *next* startup, leaving the
+        // caller with a database it could no longer reopen).
+        brainInstance.working.set('healthy', { enabled: true });
+        brainInstance.flush();
+        brainInstance.close();
+        brainInstance = undefined;
+
+        const reopened = new SqliteBrain(dbPath);
+        try {
+          expect(reopened.working.has('malicious')).toBe(false);
+          expect(reopened.working.get('healthy')).toEqual({ enabled: true });
+        } finally {
+          reopened.close();
+        }
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('keeps startup hydration budgets separate from working-memory write limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-write-limit-'));
       const dbPath = join(dir, 'brain.db');
