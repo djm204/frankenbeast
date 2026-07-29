@@ -168,5 +168,57 @@ describe('TokenBudgetBreaker', () => {
       });
       expect(result.tripped).toBe(false);
     });
+
+    // Regression for #3843: a non-finite costBudgetUsd (e.g. Infinity) silently
+    // disabled cost-budget enforcement, since `spend.estimatedCostUsd > Infinity`
+    // never trips. Reject non-finite / negative values up front instead.
+    it('rejects with ConfigurationError when costBudgetUsd is Infinity', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_000_000_000));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(Number.POSITIVE_INFINITY),
+          costBudgetUsd: Number.POSITIVE_INFINITY,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('rejects with ConfigurationError when costBudgetUsd is -Infinity', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: Number.NEGATIVE_INFINITY,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('rejects with ConfigurationError when costBudgetUsd is NaN', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: Number.NaN,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('rejects with ConfigurationError when costBudgetUsd is negative', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: -1,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('does not reject a valid finite non-negative costBudgetUsd', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      const result = await breaker.check(createState(1), {
+        ...createConfig(10000),
+        costBudgetUsd: 5,
+      });
+      expect(result.tripped).toBe(false);
+    });
   });
 });
