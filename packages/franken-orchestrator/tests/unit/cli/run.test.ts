@@ -1397,6 +1397,22 @@ describe('main() execution', () => {
     expect(mockSessionStart).toHaveBeenCalled();
   });
 
+  it('passes interview goal and output arguments into the Session config', async () => {
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'interview',
+      interviewGoal: 'Create a todo list',
+      interviewOutput: '/mock/project/.fbeast/design-docs/run.md',
+    } as unknown as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      interviewGoal: 'Create a todo list',
+      interviewOutput: '/mock/project/.fbeast/design-docs/run.md',
+    }));
+  });
+
   it('closes the session readline interface after successful execution', async () => {
     await main();
 

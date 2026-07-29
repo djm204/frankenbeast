@@ -506,6 +506,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
+    let prepared: PreparedBeastStartResources;
+    try {
+      prepared = this.prepareStartResources(run, definition);
+    } catch (error) {
+      const configuredSecrets = collectConfiguredSecretValues(run.configSnapshot);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.appendSystemLogSafely(
+        run.id,
+        'stderr',
+        `process launch preparation failed: ${redactSpawnErrorMessage(errorMessage, configuredSecrets)}`,
+      );
+      throw error;
+    }
     const {
       processSpec,
       worktree,
@@ -513,7 +526,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       configManifestPath,
       spawnedSpec,
       configuredSecrets,
-    } = this.prepareStartResources(run, definition);
+    } = prepared;
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -565,6 +578,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCode = normalizeSpawnErrorCode(error);
       const failedAt = new Date(wallClockNow()).toISOString();
+
+      for (const line of earlyOutputLines(earlyStdout)) {
+        await this.appendSystemLogSafely(run.id, 'stdout', line, failedAt);
+      }
+      for (const line of earlyOutputLines(earlyStderr)) {
+        await this.appendSystemLogSafely(run.id, 'stderr', line, failedAt);
+      }
+      await this.appendSystemLogSafely(
+        run.id,
+        'stderr',
+        `process spawn failed before attempt creation (code=${errorCode})`,
+        failedAt,
+      );
 
       try {
         this.options.onSpawnFailureDebug?.({
@@ -785,6 +811,23 @@ export class ProcessBeastExecutor implements BeastExecutor {
       data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
     });
     return attempt;
+  }
+
+  private async appendSystemLogSafely(
+    runId: string,
+    stream: 'stdout' | 'stderr',
+    line: string,
+    createdAt = new Date(wallClockNow()).toISOString(),
+  ): Promise<void> {
+    try {
+      await this.logs.append(runId, 'system', stream, line, createdAt);
+      this.options.eventBus?.publish({
+        type: 'run.log',
+        data: { runId, attemptId: 'system', stream, line, createdAt },
+      });
+    } catch {
+      // Startup logging is best-effort and must never prevent process launch.
+    }
   }
 
   async cleanupPendingRun(runId: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -206,6 +206,74 @@ describe('Session interview UX', () => {
     expect(askRaw).toHaveBeenCalledWith('Approve?');
     expect(io.ask).not.toHaveBeenCalledWith('Approve?');
     expect(io.cancelQuestion).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses chat-mode provider arguments for interview prompts from the isolated working directory', async () => {
+    const io = createIO(['x']);
+    const { Session } = await import('../../../src/cli/session.js');
+    const { createCliDeps } = await import('../../../src/cli/dep-factory.js');
+
+    await new Session(createConfig(paths, io, { provider: 'codex', exitAfter: 'interview' })).start();
+
+    expect(vi.mocked(createCliDeps).mock.calls[0]?.[0]).toMatchObject({
+      adapterWorkingDir: tmpdir(),
+      chatMode: true,
+    });
+  });
+
+  it('generates a design without stdin prompts when an interview goal is provided', async () => {
+    const io = createIO([]);
+    mkdirSync(resolve(testDir, '.fbeast', 'design-docs'), { recursive: true });
+    const outputPath = resolve(testDir, '.fbeast', 'design-docs', 'run.md');
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await new Session(createConfig(paths, io, {
+      interviewGoal: 'Create a todo list',
+      interviewOutput: outputPath,
+      exitAfter: 'interview',
+    })).start();
+
+    expect(mockAdapterComplete).toHaveBeenCalledWith(expect.stringContaining('Create a todo list'));
+    expect(io.ask).not.toHaveBeenCalled();
+    expect(readFileSync(outputPath, 'utf-8')).toBe(currentDesignDoc);
+  });
+
+  it('refuses a symlink output for a non-interactive interview', async () => {
+    const io = createIO([]);
+    const outputDirectory = resolve(testDir, '.fbeast', 'design-docs');
+    const outsidePath = resolve(testDir, 'outside.md');
+    const outputPath = resolve(outputDirectory, 'run.md');
+    mkdirSync(outputDirectory, { recursive: true });
+    writeFileSync(outsidePath, 'original', 'utf-8');
+    symlinkSync(outsidePath, outputPath);
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await expect(new Session(createConfig(paths, io, {
+      interviewGoal: 'Create a todo list',
+      interviewOutput: outputPath,
+      exitAfter: 'interview',
+    })).start()).rejects.toThrow();
+
+    expect(readFileSync(outsidePath, 'utf-8')).toBe('original');
+  });
+
+  it('refuses a same-directory symlink output for a non-interactive interview', async () => {
+    const io = createIO([]);
+    const outputDirectory = resolve(testDir, '.fbeast', 'design-docs');
+    const victimPath = resolve(outputDirectory, 'victim.md');
+    const outputPath = resolve(outputDirectory, 'run.md');
+    mkdirSync(outputDirectory, { recursive: true });
+    writeFileSync(victimPath, 'original', 'utf-8');
+    symlinkSync(victimPath, outputPath);
+    const { Session } = await import('../../../src/cli/session.js');
+
+    await expect(new Session(createConfig(paths, io, {
+      interviewGoal: 'Create a todo list',
+      interviewOutput: outputPath,
+      exitAfter: 'interview',
+    })).start()).rejects.toThrow();
+
+    expect(readFileSync(victimPath, 'utf-8')).toBe('original');
   });
 
   it('wraps AdapterLlmClient with ProgressLlmClient and shows a summary card', async () => {

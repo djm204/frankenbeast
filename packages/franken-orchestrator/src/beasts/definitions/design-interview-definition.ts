@@ -33,17 +33,28 @@ export const designInterviewDefinition: BeastDefinition = {
       required: true,
     },
   ],
-  buildProcessSpec: (config) => ({
-    command: process.execPath,
-    args: [
-      resolveCliEntrypoint(),
-      'interview',
-      '--goal', String(config.goal),
-      '--output', String(config.outputPath),
-    ],
-    env: spawnedCliEnv(),
-    cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
-  }),
+  buildProcessSpec: (config) => {
+    const gitConfig = config.gitConfig;
+    const baseBranch = typeof gitConfig === 'object'
+      && gitConfig !== null
+      && 'baseBranch' in gitConfig
+      && typeof gitConfig.baseBranch === 'string'
+      ? gitConfig.baseBranch.trim()
+      : '';
+
+    return {
+      command: process.execPath,
+      args: [
+        resolveCliEntrypoint(),
+        'interview',
+        '--goal', String(config.goal),
+        '--output', String(config.outputPath),
+        ...(baseBranch ? ['--base-branch', baseBranch] : []),
+      ],
+      env: spawnedCliEnv(),
+      cwd: String(config.projectRoot ?? process.env.FBEAST_ROOT ?? process.cwd()),
+    };
+  },
   telemetryLabels: {
     family: 'design-interview',
   },

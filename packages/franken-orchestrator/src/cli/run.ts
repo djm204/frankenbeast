@@ -1803,6 +1803,8 @@ export async function main(): Promise<void> {
     entryPhase,
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
+    ...(args.interviewGoal !== undefined ? { interviewGoal: args.interviewGoal } : {}),
+    ...(args.interviewOutput !== undefined ? { interviewOutput: args.interviewOutput } : {}),
     ...(planDirOverride !== undefined
       ? { planDirOverride }
       : {}),
