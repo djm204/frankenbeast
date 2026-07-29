@@ -4254,6 +4254,76 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('rejects a value whose toJSON() smuggles an unsafe key past the own-key scan', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-tojson-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+
+        // No unsafe own key on the input object itself — the payload only
+        // appears once JSON.stringify() invokes toJSON() during
+        // serialization, which is what actually gets persisted.
+        const sneaky = {
+          safe: true,
+          toJSON(): unknown {
+            return JSON.parse('{"__proto__":{"polluted":true}}');
+          },
+        };
+
+        expect(() => brainInstance!.working.set('malicious', sneaky)).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(brainInstance.working.has('malicious')).toBe(false);
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects an unsafe row inserted by another connection when read via reviewValueState()', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-review-state-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+      let otherConnection: Database.Database | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        brainInstance.working.set('healthy', { enabled: true });
+        brainInstance.flush();
+
+        // Simulate a compromised sync source or another process inserting a
+        // malicious row directly into the DB after this instance started —
+        // it never passes through this instance's set()/prepareEntry().
+        otherConnection = new Database(dbPath);
+        otherConnection
+          .prepare(
+            `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          )
+          .run('malicious', '{"__proto__":{"polluted":true}}', new Date().toISOString());
+        otherConnection.close();
+        otherConnection = undefined;
+
+        expect(() => brainInstance!.working.reviewValueState('malicious')).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+        // A legitimate, already-known key must remain readable.
+        expect(brainInstance.working.reviewValueState('healthy')).toEqual({
+          state: 'present',
+          value: { enabled: true },
+        });
+      } finally {
+        otherConnection?.close();
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('keeps startup hydration budgets separate from working-memory write limits', () => {
       const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-hydration-write-limit-'));
       const dbPath = join(dir, 'brain.db');
