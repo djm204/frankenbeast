@@ -91,15 +91,35 @@ describe('StepLlmTargets', () => {
     expect(screen.queryByText('Claude Sonnet 4.6')).toBeNull();
   });
 
-  it('populates the model list for a configured CLI provider with no pinned model override', () => {
+  // The following tests cover the Model fallback catalog's contract with
+  // `DashboardProvider.executionProvider` — the CLI identity (claude/codex/gemini/
+  // aider) franken-orchestrator's own resolveWizardExecutionProvider (providers/
+  // provider-config.ts) already resolved a provider to, included directly in the
+  // dashboard snapshot by buildDashboardProviderSnapshot (cli/run.ts).
+  //
+  // Three earlier revisions of this fallback tried to re-derive that same CLI
+  // identity client-side from a provider's raw `type` and/or `name` instead, and
+  // each one diverged from the backend's actual resolution in a different way
+  // (#3820, #3888 — keying by type mismatched API-typed entries that actually
+  // launch a CLI; keying by name alone missed custom-named consolidated aliases;
+  // name-first-then-type still diverged whenever a consolidated provider's name
+  // coincided with a recognized alias but its configured type disagreed). Reading
+  // the backend-resolved `executionProvider` directly — tested here — eliminates
+  // that whole class of bug: the scenarios that exposed each divergence (custom
+  // aliases, mismatched name/type pairs, legacy generic types) are now covered as
+  // backend unit tests against resolveWizardExecutionProvider itself (see
+  // packages/franken-orchestrator/tests/unit/providers/provider-config.test.ts),
+  // since the frontend no longer re-derives anything to get wrong.
+
+  it('populates the model list for a provider the backend resolved to the claude CLI', () => {
     // Regression test for #3820: a provider that is configured and available but has no
-    // explicit `model` override (the common case for CLI-based providers like claude,
-    // which default to whatever the CLI itself resolves) must still offer selectable models
-    // instead of leaving the Model dropdown empty.
+    // explicit `model` override (the common case for CLI-based providers, which default to
+    // whatever the CLI itself resolves) must still offer selectable models instead of
+    // leaving the Model dropdown empty.
     useDashboardStore.getState().setSnapshot({
       skills: [],
       security: snapshotSecurity,
-      providers: [{ name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 }],
+      providers: [{ name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, executionProvider: 'claude' }],
     });
 
     render(<StepLlmTargets />);
@@ -109,41 +129,43 @@ describe('StepLlmTargets', () => {
     fireEvent.click(screen.getByRole('option', { name: 'claude' }));
 
     fireEvent.click(screen.getAllByLabelText('Model')[0]!);
-    expect(screen.queryAllByRole('option').length).toBeGreaterThan(1);
+    expect(screen.getByRole('option', { name: 'claude-opus-4-8' })).toBeTruthy();
   });
 
-  it('leaves the Model dropdown empty for an unpinned codex-cli provider instead of guessing a model', () => {
-    // codex-cli deliberately never gets a guessed fallback model: CodexProvider (see
+  it('leaves the Model dropdown empty for a provider the backend resolved to the codex CLI', () => {
+    // codex deliberately never gets a guessed fallback model: CodexProvider (see
     // packages/franken-orchestrator/src/skills/providers/codex-provider.ts, #3412, #3424)
     // intentionally leaves the model unset so `codex exec` resolves the account's current
     // default, which is newer than any version string this codebase could hardcode. A
     // wizard-suggested model here would let a user pin the same kind of stale value that
-    // policy exists to avoid.
+    // policy exists to avoid. This must hold regardless of which dashboard `name`/`type`
+    // the backend resolved to 'codex' from (openai, openai-api, codex-cli, ...).
     useDashboardStore.getState().setSnapshot({
       skills: [],
       security: snapshotSecurity,
-      providers: [{ name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0 }],
+      providers: [{ name: 'openai', type: 'openai-api', available: true, failoverOrder: 0, executionProvider: 'codex' }],
     });
 
     render(<StepLlmTargets />);
 
     const providerSelect = screen.getAllByLabelText('Provider')[0]!;
     fireEvent.click(providerSelect);
-    fireEvent.click(screen.getByRole('option', { name: 'codex' }));
+    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
 
     fireEvent.click(screen.getAllByLabelText('Model')[0]!);
     expect(screen.queryAllByRole('option').length).toBe(1);
+    expect(screen.queryByText('gpt-4o')).toBeNull();
+    expect(screen.queryByText('claude-opus-4-8')).toBeNull();
   });
 
-  it('offers aider its own fallback model instead of the Claude default it is type-mapped to', () => {
-    // Regression test for #3888 finding 1: franken-orchestrator's buildDashboardProviderSnapshot
-    // deliberately reports legacy `aider` providers as `{ name: 'aider', type: 'claude-cli' }` for
-    // lookup purposes, but AiderProvider is a distinct CLI with its own default model ('sonnet').
-    // A type-keyed fallback would incorrectly offer/pin a Claude model id onto `aider --model`.
+  it('offers aider its own fallback model', () => {
+    // Regression test for #3888: AiderProvider is a distinct CLI with its own default
+    // model ('sonnet'), even though legacy aider providers are reported with a misleading
+    // `type: 'claude-cli'` for lookup purposes elsewhere in franken-orchestrator.
     useDashboardStore.getState().setSnapshot({
       skills: [],
       security: snapshotSecurity,
-      providers: [{ name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 }],
+      providers: [{ name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0, executionProvider: 'aider' }],
     });
 
     render(<StepLlmTargets />);
@@ -157,92 +179,24 @@ describe('StepLlmTargets', () => {
     expect(screen.queryByText('claude-opus-4-8')).toBeNull();
   });
 
-  it('does not offer an API-adapter model fallback for a provider that launches via a different CLI', () => {
-    // Regression test for #3888 finding 2: buildWizardLaunchConfig normalizes every selected
-    // provider down to the CLI that actually executes the Beast Loop (claude/codex/gemini/aider).
-    // An `openai`/`openai-api` dashboard entry always launches the Codex CLI, never a direct
-    // OpenAI API call, so it must not be offered the OpenAI API adapter's own default model
-    // (e.g. gpt-4o) — that value would get pinned onto the Codex CLI's --model flag instead.
+  it('leaves the Model dropdown empty when the backend could not resolve an execution provider', () => {
+    // A provider whose identity the backend couldn't map to a known CLI (unrecognized
+    // type/name combination) must not fall back to guessing — same "no fallback options"
+    // discipline as the loading/error/empty-provider-list states below.
     useDashboardStore.getState().setSnapshot({
       skills: [],
       security: snapshotSecurity,
-      providers: [{ name: 'openai', type: 'openai-api', available: true, failoverOrder: 0 }],
+      providers: [{ name: 'custom-thing', type: 'llm', available: true, failoverOrder: 0 }],
     });
 
     render(<StepLlmTargets />);
 
     const providerSelect = screen.getAllByLabelText('Provider')[0]!;
     fireEvent.click(providerSelect);
-    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
+    fireEvent.click(screen.getByRole('option', { name: 'custom-thing' }));
 
     fireEvent.click(screen.getAllByLabelText('Model')[0]!);
     expect(screen.queryAllByRole('option').length).toBe(1);
-    expect(screen.queryByText('gpt-4o')).toBeNull();
-  });
-
-  it('resolves the model fallback for a custom-named consolidated provider by its type', () => {
-    // Regression test for #3888 follow-up finding: a consolidated provider configured with a
-    // custom name (e.g. an operator running two Claude accounts as 'prod-claude'/'dev-claude')
-    // is not a recognized wizard alias by name, so name-only resolution left it with no fallback
-    // models. franken-orchestrator's own resolveCliRegistryName (cli/dep-factory.ts) resolves such
-    // a provider by its configured `type`, not its name — the fallback catalog must match that.
-    useDashboardStore.getState().setSnapshot({
-      skills: [],
-      security: snapshotSecurity,
-      providers: [{ name: 'prod-claude', type: 'claude-cli', available: true, failoverOrder: 0 }],
-    });
-
-    render(<StepLlmTargets />);
-
-    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
-    fireEvent.click(providerSelect);
-    fireEvent.click(screen.getByRole('option', { name: 'prod-claude' }));
-
-    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
-    expect(screen.getByRole('option', { name: 'claude-opus-4-8' })).toBeTruthy();
-  });
-
-  it('resolves by name over type when a provider name is itself a recognized wizard alias', () => {
-    // Regression test for #3888 follow-up finding: buildLlmConfig submits the selected
-    // provider's *name* (never its type) at launch, so name must win over type whenever the
-    // name is itself a recognized alias. A provider named 'openai' always launches Codex (the
-    // 'openai' -> 'codex' alias), regardless of what its dashboard `type` happens to say, so it
-    // must not be offered a Claude model just because its type resolves to 'claude'.
-    useDashboardStore.getState().setSnapshot({
-      skills: [],
-      security: snapshotSecurity,
-      providers: [{ name: 'openai', type: 'claude-cli', available: true, failoverOrder: 0 }],
-    });
-
-    render(<StepLlmTargets />);
-
-    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
-    fireEvent.click(providerSelect);
-    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
-
-    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
-    expect(screen.queryAllByRole('option').length).toBe(1);
-    expect(screen.queryByText('claude-opus-4-8')).toBeNull();
-  });
-
-  it('falls back to the recognized provider name even when the reported type is generic', () => {
-    // Regression test for #3888 follow-up finding: the explicitly supported legacy shape
-    // { name: 'claude', type: 'llm' } must still resolve via the recognized name 'claude', not
-    // get stuck with no fallback just because 'llm' isn't a specific CLI/API type.
-    useDashboardStore.getState().setSnapshot({
-      skills: [],
-      security: snapshotSecurity,
-      providers: [{ name: 'claude', type: 'llm', available: true, failoverOrder: 0 }],
-    });
-
-    render(<StepLlmTargets />);
-
-    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
-    fireEvent.click(providerSelect);
-    fireEvent.click(screen.getByRole('option', { name: 'claude' }));
-
-    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
-    expect(screen.getByRole('option', { name: 'claude-opus-4-8' })).toBeTruthy();
   });
 
   it('clearly shows provider load errors without fallback options', () => {

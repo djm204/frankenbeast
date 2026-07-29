@@ -6,6 +6,18 @@ export interface DashboardProviderSnapshot {
   available: boolean;
   failoverOrder: number;
   model?: string | undefined;
+  /**
+   * The CLI registry name (claude/codex/gemini/aider) this provider actually
+   * executes as when selected as a Beast's default/override provider —
+   * i.e. the result of `resolveWizardExecutionProvider` (providers/
+   * provider-config.ts), which mirrors the real launch-resolution pipeline
+   * (`resolveCliRegistryName` in cli/dep-factory.ts). Undefined when this
+   * provider identity does not resolve to a known CLI-executable provider.
+   * Consumers (e.g. the Beast Wizard's LLM Targets model fallback) should
+   * key off this field directly rather than re-deriving it from `name`/`type`
+   * themselves — see #3820/#3888 for the class of bug that caused.
+   */
+  executionProvider?: string | undefined;
 }
 
 export interface DashboardDependencySnapshot {

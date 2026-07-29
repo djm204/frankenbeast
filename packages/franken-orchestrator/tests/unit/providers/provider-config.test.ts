@@ -5,7 +5,7 @@ import { CodexCliAdapter } from '../../../src/providers/codex-cli-adapter.js';
 import { GeminiApiAdapter } from '../../../src/providers/gemini-api-adapter.js';
 import { GeminiCliAdapter } from '../../../src/providers/gemini-cli-adapter.js';
 import { OpenAiApiAdapter } from '../../../src/providers/openai-api-adapter.js';
-import { buildProviderConfig, createLlmProvider, type ProviderConfig } from '../../../src/providers/provider-config.js';
+import { buildProviderConfig, createLlmProvider, resolveWizardExecutionProvider, type ProviderConfig } from '../../../src/providers/provider-config.js';
 
 const request = {
   messages: [],
@@ -163,5 +163,53 @@ describe('createLlmProvider', () => {
     expect(optionsOf<{ egressAudit?: unknown }>(anthropic).egressAudit).toBe(egressAudit);
     expect(optionsOf<{ egressAudit?: unknown }>(openai).egressAudit).toBe(egressAudit);
     expect(optionsOf<{ egressAudit?: unknown }>(gemini).egressAudit).toBe(egressAudit);
+  });
+});
+
+describe('resolveWizardExecutionProvider', () => {
+  // This is the single source of truth for "what CLI will a Beast Wizard-selected
+  // provider actually execute as", mirroring the real two-stage launch pipeline: the
+  // wizard's own short-alias normalization (mirrored here as WIZARD_PROVIDER_ALIASES),
+  // then franken-orchestrator's resolveCliRegistryName (cli/dep-factory.ts) resolution
+  // against any configured consolidatedProviders. Every scenario below was, at some
+  // point, a real divergence between the Beast Wizard's LLM Targets Model dropdown and
+  // what actually launched (#3820, #3888) — this suite pins the correct answer for each.
+
+  it('resolves a recognized short alias with no consolidated providers configured', () => {
+    expect(resolveWizardExecutionProvider('openai')).toBe('codex');
+    expect(resolveWizardExecutionProvider('anthropic')).toBe('claude');
+    expect(resolveWizardExecutionProvider('gemini')).toBe('gemini');
+    expect(resolveWizardExecutionProvider('claude')).toBe('claude');
+    expect(resolveWizardExecutionProvider('codex')).toBe('codex');
+  });
+
+  it('resolves aider unconditionally, independent of any consolidatedProviders entries', () => {
+    expect(resolveWizardExecutionProvider('aider')).toBe('aider');
+    expect(resolveWizardExecutionProvider('aider', [{ name: 'aider', type: 'claude-cli' }])).toBe('aider');
+  });
+
+  it('resolves an unrecognized custom-named consolidated provider via its configured type', () => {
+    // e.g. an operator running two Claude accounts as 'prod-claude'/'dev-claude'.
+    expect(
+      resolveWizardExecutionProvider('prod-claude', [{ name: 'prod-claude', type: 'claude-cli' }]),
+    ).toBe('claude');
+  });
+
+  it('prefers a matching consolidated provider entry\'s own type over a coincidental name alias', () => {
+    // The exact #3888 counterexample: a consolidated provider named after a recognized
+    // short alias ('claude') but configured with a *different* type ('codex-cli') must
+    // resolve as Codex, not Claude — matching resolveCliRegistryName finding the
+    // consolidated entry by name and using its type, which always wins.
+    expect(
+      resolveWizardExecutionProvider('claude', [{ name: 'claude', type: 'codex-cli' }]),
+    ).toBe('codex');
+  });
+
+  it('still resolves a recognized alias when no consolidated entry overrides it', () => {
+    expect(resolveWizardExecutionProvider('claude', [{ name: 'prod-claude', type: 'gemini-cli' }])).toBe('claude');
+  });
+
+  it('returns undefined for a provider identity that resolves to no known CLI', () => {
+    expect(resolveWizardExecutionProvider('totally-unknown-provider')).toBeUndefined();
   });
 });

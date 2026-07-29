@@ -587,8 +587,8 @@ describe('dashboard provider snapshots', () => {
     } as any);
 
     expect(providers).toEqual([
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'claude-sonnet-4' },
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'claude-sonnet-4', executionProvider: 'claude' },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5', executionProvider: 'codex' },
     ]);
   });
 
@@ -606,9 +606,9 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any, ['codex', 'claude']);
 
     expect(providers).toEqual([
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex' },
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 1 },
-      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2 },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex', executionProvider: 'codex' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 1, executionProvider: 'claude' },
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2, executionProvider: 'gemini' },
     ]);
   });
 
@@ -626,7 +626,7 @@ describe('dashboard provider snapshots', () => {
     } as any);
 
     expect(providers).toEqual([
-      { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0, executionProvider: 'aider' },
     ]);
   });
 
@@ -643,8 +643,8 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
-      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1 },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, executionProvider: 'claude' },
+      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1, executionProvider: 'codex' },
     ]);
   });
 
@@ -662,8 +662,8 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
-      { name: 'backup-codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
+      { name: 'backup-codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark', executionProvider: 'codex' },
     ]);
   });
 
@@ -677,8 +677,8 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
-      { name: 'backup-claude', type: 'claude-cli', available: true, failoverOrder: 1 },
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
+      { name: 'backup-claude', type: 'claude-cli', available: true, failoverOrder: 1, executionProvider: 'claude' },
     ]);
   });
 
@@ -695,7 +695,7 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'prod-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'prod-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
     ]);
   });
 
@@ -712,7 +712,7 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'prod-claude-default', type: 'claude-cli', available: commandHealthyForTest('claude'), failoverOrder: 0 },
+      { name: 'prod-claude-default', type: 'claude-cli', available: commandHealthyForTest('claude'), failoverOrder: 0, executionProvider: 'claude' },
     ]);
   });
 
@@ -733,7 +733,7 @@ describe('dashboard provider snapshots', () => {
     const providers = buildDashboardProviderSnapshot(config, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'broken-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'broken-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
     ]);
   });
 
@@ -747,7 +747,7 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'aider', type: 'claude-cli', available: commandHealthyForTest('aider'), failoverOrder: 0 },
+      { name: 'aider', type: 'claude-cli', available: commandHealthyForTest('aider'), failoverOrder: 0, executionProvider: 'aider' },
     ]);
   });
 
@@ -786,7 +786,7 @@ describe('dashboard provider snapshots', () => {
       } as any, { getProviders: () => [] } as any);
 
       expect(providers).toEqual([
-        { name: 'gemini-api', type: 'gemini-api', available: true, failoverOrder: 0 },
+        { name: 'gemini-api', type: 'gemini-api', available: true, failoverOrder: 0, executionProvider: 'gemini' },
       ]);
     } finally {
       if (geminiApiKey === undefined) delete process.env.GEMINI_API_KEY;
@@ -2258,8 +2258,8 @@ describe('main() execution', () => {
       customRules: [{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }],
     }));
     expect(startOptions.dashboardDeps?.getProviders()).toEqual([
-      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0, model: 'gemini-2.5-pro' },
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1 },
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0, model: 'gemini-2.5-pro', executionProvider: 'gemini' },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, executionProvider: 'codex' },
     ]);
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));

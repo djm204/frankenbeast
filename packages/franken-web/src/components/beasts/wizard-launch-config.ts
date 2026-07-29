@@ -19,14 +19,7 @@ const MODULE_NUMBER_BOUNDS = {
   },
 } as const;
 
-/**
- * Recognized wizard/dashboard provider aliases mapped to the CLI identity that
- * actually executes the Beast Loop. Exported so other wizard code (e.g.
- * provider-catalog.ts) can check *membership* — not just call
- * `normalizeWizardProvider`, whose passthrough-when-unrecognized return value
- * can't be distinguished from a real alias hit by itself (see #3888).
- */
-export const CLI_PROVIDER_BY_WIZARD_PROVIDER: Record<string, string> = {
+const CLI_PROVIDER_BY_WIZARD_PROVIDER: Record<string, string> = {
   anthropic: 'claude',
   'anthropic-api': 'claude',
   'claude-cli': 'claude',
@@ -218,17 +211,7 @@ function buildSelectedSkills(skills: Record<string, unknown> | undefined): strin
   return skills.selectedSkills.filter((skill): skill is string => typeof skill === 'string' && skill.trim().length > 0);
 }
 
-/**
- * Resolve a dashboard/wizard provider name to the CLI provider that actually
- * executes the Beast Loop for it (`claude` | `codex` | `gemini` | `aider`, or the
- * raw name unchanged for an unrecognized/custom provider). This is the single
- * source of truth other wizard code (e.g. provider-catalog.ts's known-model
- * fallback) must use when deciding what a selected provider will really run as —
- * see #3888, where a model fallback keyed by the dashboard-reported type/name
- * instead of this resolved CLI identity offered model ids that didn't match what
- * `buildWizardLaunchConfig` actually invokes.
- */
-export function normalizeWizardProvider(provider: unknown): string | undefined {
+function normalizeWizardProvider(provider: unknown): string | undefined {
   if (typeof provider !== 'string') return undefined;
   const trimmed = provider.trim();
   if (trimmed.length === 0) return undefined;
