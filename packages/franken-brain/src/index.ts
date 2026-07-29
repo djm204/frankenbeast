@@ -5,6 +5,7 @@ export {
   WorkingMemoryKeyError,
   WorkingMemoryHydrationLimitError,
   CorruptWorkingMemoryRowError,
+  UnsafeWorkingMemoryValueError,
   MemoryDeletionGuardError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,

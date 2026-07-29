@@ -1056,6 +1056,28 @@ export class CorruptWorkingMemoryRowError extends Error {
   }
 }
 
+/**
+ * Thrown when a persisted or restored working-memory value contains an
+ * object key (`__proto__`, `constructor`, or `prototype`) that could be used
+ * to pollute the JavaScript prototype chain if the parsed value were later
+ * merged or spread by a downstream consumer. Rejected fail-closed, the same
+ * way a corrupt-JSON row is rejected, so untrusted persisted data can never
+ * become part of in-memory state.
+ */
+export class UnsafeWorkingMemoryValueError extends Error {
+  readonly code = 'UNSAFE_WORKING_MEMORY_VALUE';
+
+  constructor(
+    readonly key: string,
+    readonly unsafeKey: string,
+  ) {
+    super(
+      `Persisted working memory row "${key}" contains a "${unsafeKey}" property, which could be used for prototype pollution, and was not hydrated; the row was preserved for recovery`,
+    );
+    this.name = 'UnsafeWorkingMemoryValueError';
+  }
+}
+
 export class MemoryDeletionGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -2655,6 +2677,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
     for (const [key, value] of entries) {
       deniedKey = key;
       try {
+        const unsafeKey = findUnsafeObjectKey(value);
+        if (unsafeKey) {
+          throw new UnsafeWorkingMemoryValueError(key, unsafeKey);
+        }
         const { normalized, serialized, size } = this.prepareEntry(key, value);
         assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
         total += size;
@@ -10564,6 +10590,39 @@ function chunkArray<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
+/** Object keys that can be used to reach or replace the prototype chain. */
+const UNSAFE_OBJECT_KEYS: ReadonlySet<string> = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+]);
+
+/**
+ * Recursively scans an already-parsed JSON value for own object keys that
+ * could be used for prototype pollution (`__proto__`, `constructor`,
+ * `prototype`) if the value were later merged, spread, or assigned into
+ * another object by a downstream consumer. Returns the first unsafe key
+ * found, or undefined if the value is safe.
+ */
+function findUnsafeObjectKey(value: unknown, seen: Set<unknown> = new Set()): string | undefined {
+  if (value === null || typeof value !== 'object') return undefined;
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findUnsafeObjectKey(item, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    if (UNSAFE_OBJECT_KEYS.has(key)) return key;
+    const found = findUnsafeObjectKey((value as Record<string, unknown>)[key], seen);
+    if (found) return found;
+  }
+  return undefined;
+}
+
 function parseStoredWorkingMemoryValue(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
@@ -10574,8 +10633,14 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
 
 function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
   try {
-    return JSON.parse(value) as unknown;
-  } catch {
+    const parsed = JSON.parse(value) as unknown;
+    const unsafeKey = findUnsafeObjectKey(parsed);
+    if (unsafeKey) {
+      throw new UnsafeWorkingMemoryValueError(key, unsafeKey);
+    }
+    return parsed;
+  } catch (error) {
+    if (error instanceof UnsafeWorkingMemoryValueError) throw error;
     const trimmed = value.trimStart();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       throw new CorruptWorkingMemoryRowError(key);
