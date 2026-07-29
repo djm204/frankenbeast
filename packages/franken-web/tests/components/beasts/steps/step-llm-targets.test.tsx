@@ -202,6 +202,49 @@ describe('StepLlmTargets', () => {
     expect(screen.getByRole('option', { name: 'claude-opus-4-8' })).toBeTruthy();
   });
 
+  it('resolves by name over type when a provider name is itself a recognized wizard alias', () => {
+    // Regression test for #3888 follow-up finding: buildLlmConfig submits the selected
+    // provider's *name* (never its type) at launch, so name must win over type whenever the
+    // name is itself a recognized alias. A provider named 'openai' always launches Codex (the
+    // 'openai' -> 'codex' alias), regardless of what its dashboard `type` happens to say, so it
+    // must not be offered a Claude model just because its type resolves to 'claude'.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'openai', type: 'claude-cli', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.queryAllByRole('option').length).toBe(1);
+    expect(screen.queryByText('claude-opus-4-8')).toBeNull();
+  });
+
+  it('falls back to the recognized provider name even when the reported type is generic', () => {
+    // Regression test for #3888 follow-up finding: the explicitly supported legacy shape
+    // { name: 'claude', type: 'llm' } must still resolve via the recognized name 'claude', not
+    // get stuck with no fallback just because 'llm' isn't a specific CLI/API type.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'claude', type: 'llm', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'claude' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.getByRole('option', { name: 'claude-opus-4-8' })).toBeTruthy();
+  });
+
   it('clearly shows provider load errors without fallback options', () => {
     useDashboardStore.getState().setSnapshot({
       skills: [],

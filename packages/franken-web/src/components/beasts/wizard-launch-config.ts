@@ -19,7 +19,14 @@ const MODULE_NUMBER_BOUNDS = {
   },
 } as const;
 
-const CLI_PROVIDER_BY_WIZARD_PROVIDER: Record<string, string> = {
+/**
+ * Recognized wizard/dashboard provider aliases mapped to the CLI identity that
+ * actually executes the Beast Loop. Exported so other wizard code (e.g.
+ * provider-catalog.ts) can check *membership* — not just call
+ * `normalizeWizardProvider`, whose passthrough-when-unrecognized return value
+ * can't be distinguished from a real alias hit by itself (see #3888).
+ */
+export const CLI_PROVIDER_BY_WIZARD_PROVIDER: Record<string, string> = {
   anthropic: 'claude',
   'anthropic-api': 'claude',
   'claude-cli': 'claude',
