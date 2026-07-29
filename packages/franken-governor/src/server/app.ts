@@ -6,10 +6,43 @@ import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
-import { now as deterministicNow } from '@franken/types';
+import { now as deterministicNow, wallClockNow } from '@franken/types';
 import { SessionTokenStore } from '../security/session-token-store.js';
+import { normalizeGovernorConfig } from '../core/config.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
+const ISO_8601_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function parseIso8601Timestamp(value: unknown): number {
+  if (typeof value !== 'string') return Number.NaN;
+  const match = ISO_8601_TIMESTAMP.exec(value);
+  if (!match) return Number.NaN;
+
+  const [
+    , year, month, day, hour, minute, second, fraction = '', zone,
+    offsetSign = '+', offsetHour = '0', offsetMinute = '0',
+  ] = match;
+  const timestampMs = Date.parse(value);
+  if (!Number.isFinite(timestampMs)) return Number.NaN;
+
+  const offsetHours = Number(offsetHour);
+  const offsetMinutes = Number(offsetMinute);
+  if (offsetHours > 23 || offsetMinutes > 59) return Number.NaN;
+  const signedOffsetMinutes = zone === 'Z'
+    ? 0
+    : (offsetSign === '-' ? -1 : 1) * (offsetHours * 60 + offsetMinutes);
+  const local = new Date(timestampMs + signedOffsetMinutes * 60_000);
+
+  return local.getUTCFullYear() === Number(year)
+    && local.getUTCMonth() + 1 === Number(month)
+    && local.getUTCDate() === Number(day)
+    && local.getUTCHours() === Number(hour)
+    && local.getUTCMinutes() === Number(minute)
+    && local.getUTCSeconds() === Number(second)
+    && local.getUTCMilliseconds() === Number(fraction.slice(0, 3).padEnd(3, '0'))
+    ? timestampMs
+    : Number.NaN;
+}
 
 export interface SlackEphemeralResponse {
   readonly response_type: 'ephemeral';
@@ -31,6 +64,8 @@ export interface GovernorAppOptions {
   slackResponsePoster?: SlackResponsePoster;
   slackWebhookUrl?: string;
   allowUnsignedApprovalsForTests?: boolean;
+  /** Maximum accepted age/skew for inbound approval-request timestamps. */
+  timeoutMs?: number;
   /**
    * Shared registry of pending approval waiters. Pass the same instance to
    * an `HttpApprovalChannel` (used by `ApprovalGateway`) so that a caller
@@ -259,6 +294,9 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
   const slackResponsePoster = options.slackResponsePoster ?? DEFAULT_SLACK_RESPONSE_POSTER;
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
+  const approvalRequestTimeoutMs = normalizeGovernorConfig(
+    options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+  ).timeoutMs;
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
     try {
@@ -342,6 +380,24 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         { error: { message: 'Missing required fields: requestId, taskId, summary' } },
         400,
       );
+    }
+
+    const timestampMs = parseIso8601Timestamp(body.timestamp);
+    if (!Number.isFinite(timestampMs)) {
+      return c.json({
+        error: {
+          code: 'invalid_approval_request_timestamp',
+          message: 'Approval request timestamp must be a valid ISO-8601 string',
+        },
+      }, 400);
+    }
+    if (Math.abs(wallClockNow() - timestampMs) > approvalRequestTimeoutMs) {
+      return c.json({
+        error: {
+          code: 'approval_request_expired',
+          message: 'Approval request timestamp is outside the allowed window',
+        },
+      }, 400);
     }
 
     if (

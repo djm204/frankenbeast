@@ -289,6 +289,7 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
         requestId: 'req-early-backpressure-1',
         taskId: 'task-1',
         summary: 'Deploy retry',
+        timestamp: new Date().toISOString(),
       }),
     });
     expect(retry.status).toBe(201);
