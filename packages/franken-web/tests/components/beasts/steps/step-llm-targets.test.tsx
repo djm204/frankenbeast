@@ -135,6 +135,51 @@ describe('StepLlmTargets', () => {
     expect(screen.queryAllByRole('option').length).toBe(1);
   });
 
+  it('offers aider its own fallback model instead of the Claude default it is type-mapped to', () => {
+    // Regression test for #3888 finding 1: franken-orchestrator's buildDashboardProviderSnapshot
+    // deliberately reports legacy `aider` providers as `{ name: 'aider', type: 'claude-cli' }` for
+    // lookup purposes, but AiderProvider is a distinct CLI with its own default model ('sonnet').
+    // A type-keyed fallback would incorrectly offer/pin a Claude model id onto `aider --model`.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'aider' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.getByRole('option', { name: 'sonnet' })).toBeTruthy();
+    expect(screen.queryByText('claude-opus-4-8')).toBeNull();
+  });
+
+  it('does not offer an API-adapter model fallback for a provider that launches via a different CLI', () => {
+    // Regression test for #3888 finding 2: buildWizardLaunchConfig normalizes every selected
+    // provider down to the CLI that actually executes the Beast Loop (claude/codex/gemini/aider).
+    // An `openai`/`openai-api` dashboard entry always launches the Codex CLI, never a direct
+    // OpenAI API call, so it must not be offered the OpenAI API adapter's own default model
+    // (e.g. gpt-4o) — that value would get pinned onto the Codex CLI's --model flag instead.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'openai', type: 'openai-api', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'openai' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.queryAllByRole('option').length).toBe(1);
+    expect(screen.queryByText('gpt-4o')).toBeNull();
+  });
+
   it('clearly shows provider load errors without fallback options', () => {
     useDashboardStore.getState().setSnapshot({
       skills: [],

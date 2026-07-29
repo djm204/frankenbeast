@@ -211,7 +211,17 @@ function buildSelectedSkills(skills: Record<string, unknown> | undefined): strin
   return skills.selectedSkills.filter((skill): skill is string => typeof skill === 'string' && skill.trim().length > 0);
 }
 
-function normalizeWizardProvider(provider: unknown): string | undefined {
+/**
+ * Resolve a dashboard/wizard provider name to the CLI provider that actually
+ * executes the Beast Loop for it (`claude` | `codex` | `gemini` | `aider`, or the
+ * raw name unchanged for an unrecognized/custom provider). This is the single
+ * source of truth other wizard code (e.g. provider-catalog.ts's known-model
+ * fallback) must use when deciding what a selected provider will really run as —
+ * see #3888, where a model fallback keyed by the dashboard-reported type/name
+ * instead of this resolved CLI identity offered model ids that didn't match what
+ * `buildWizardLaunchConfig` actually invokes.
+ */
+export function normalizeWizardProvider(provider: unknown): string | undefined {
   if (typeof provider !== 'string') return undefined;
   const trimmed = provider.trim();
   if (trimmed.length === 0) return undefined;
