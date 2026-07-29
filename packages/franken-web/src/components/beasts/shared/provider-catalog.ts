@@ -60,8 +60,33 @@ const KNOWN_MODELS_BY_CLI_PROVIDER: Record<string, readonly ModelOption[]> = {
   aider: [{ id: 'sonnet', name: 'sonnet' }],
 };
 
+/**
+ * Resolve the CLI identity a dashboard provider entry will actually execute as.
+ *
+ * Resolves by `type` rather than `name`: every real `ProviderType`
+ * (claude-cli/codex-cli/gemini-cli/anthropic-api/openai-api/gemini-api) is a
+ * recognized `normalizeWizardProvider` key, so this reliably identifies the real
+ * executing CLI even for a consolidated provider with a custom `name` (e.g.
+ * `{ name: 'prod-claude', type: 'claude-cli' }`), matching how
+ * franken-orchestrator's `resolveCliRegistryName` (cli/dep-factory.ts) resolves a
+ * custom-named provider — by looking up its configured `type`, not its name.
+ * Resolving by name alone (the prior revision of this helper) returned an
+ * unrecognized custom name unchanged and silently produced no fallback models
+ * (#3888).
+ *
+ * `aider` is the one deliberate exception: it is always literally named `aider`
+ * but reported with `type: 'claude-cli'` purely for franken-orchestrator's
+ * CLI-availability lookup (see `resolveDashboardProviderType` in cli/run.ts), so
+ * it must be resolved by name — exactly like `resolveCliRegistryName`'s own
+ * `if (providerName === 'aider') return 'aider'` carve-out.
+ */
+function resolveCliProvider(provider: DashboardProvider): string | undefined {
+  if (provider.name === 'aider') return 'aider';
+  return normalizeWizardProvider(provider.type);
+}
+
 function modelsForProvider(provider: DashboardProvider): ModelOption[] {
-  const cliProvider = normalizeWizardProvider(provider.name);
+  const cliProvider = resolveCliProvider(provider);
   const known = (cliProvider && KNOWN_MODELS_BY_CLI_PROVIDER[cliProvider]) || [];
   if (!provider.model) return [...known];
   if (known.some((model) => model.id === provider.model)) return [...known];

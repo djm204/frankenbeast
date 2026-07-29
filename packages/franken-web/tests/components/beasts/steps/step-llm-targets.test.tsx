@@ -180,6 +180,28 @@ describe('StepLlmTargets', () => {
     expect(screen.queryByText('gpt-4o')).toBeNull();
   });
 
+  it('resolves the model fallback for a custom-named consolidated provider by its type', () => {
+    // Regression test for #3888 follow-up finding: a consolidated provider configured with a
+    // custom name (e.g. an operator running two Claude accounts as 'prod-claude'/'dev-claude')
+    // is not a recognized wizard alias by name, so name-only resolution left it with no fallback
+    // models. franken-orchestrator's own resolveCliRegistryName (cli/dep-factory.ts) resolves such
+    // a provider by its configured `type`, not its name — the fallback catalog must match that.
+    useDashboardStore.getState().setSnapshot({
+      skills: [],
+      security: snapshotSecurity,
+      providers: [{ name: 'prod-claude', type: 'claude-cli', available: true, failoverOrder: 0 }],
+    });
+
+    render(<StepLlmTargets />);
+
+    const providerSelect = screen.getAllByLabelText('Provider')[0]!;
+    fireEvent.click(providerSelect);
+    fireEvent.click(screen.getByRole('option', { name: 'prod-claude' }));
+
+    fireEvent.click(screen.getAllByLabelText('Model')[0]!);
+    expect(screen.getByRole('option', { name: 'claude-opus-4-8' })).toBeTruthy();
+  });
+
   it('clearly shows provider load errors without fallback options', () => {
     useDashboardStore.getState().setSnapshot({
       skills: [],
