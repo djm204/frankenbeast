@@ -87,6 +87,43 @@ const CREDENTIAL_URL_HINT = /\b[a-z][a-z0-9+.-]{0,31}:\/\/[^\s:/@]+:[^\s@/]+@/i;
 const CAMEL_CASE_SECRET_KEY_HINT = /[A-Za-z0-9](?:Authorization|Password|Passwd|Pwd|Secret|Token|Key|Cookie|Credentials?|Passphrase)\b/;
 const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
 
+/**
+ * Value-shape patterns for common credential formats (GitHub PATs, OpenAI/
+ * Anthropic/Stripe-style `sk-`/`pk-`/`rk-` keys, GitLab/Slack tokens, AWS access
+ * key IDs, Google API keys, PEM private key blocks). Unlike the redaction rules
+ * above, these match on the *value itself* rather than a nearby key label, so
+ * they catch secrets embedded under an innocuous key (e.g. `{"result":
+ * "ghp_..."}`) or in free-form text with no `token=`/`key:` hint at all. Mirrors
+ * the value-shape patterns already used for memory export redaction in
+ * `brain-adapter.ts` (`SECRET_EXPORT_VALUES`) so the two redaction paths agree
+ * on what counts as a secret-shaped value.
+ */
+const KNOWN_SECRET_VALUE_PATTERNS: RegExp[] = [
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+  /\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g,
+  /\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{8,}\b/g,
+  /\b(?:gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_-]{12,}\b/g,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+];
+
+function containsKnownSecretPattern(text: string): boolean {
+  return KNOWN_SECRET_VALUE_PATTERNS.some((pattern) => {
+    pattern.lastIndex = 0;
+    return pattern.test(text);
+  });
+}
+
+function redactKnownSecretValues(text: string): string {
+  let redacted = text;
+  for (const pattern of KNOWN_SECRET_VALUE_PATTERNS) {
+    pattern.lastIndex = 0;
+    redacted = redacted.replace(pattern, '[REDACTED]');
+  }
+  return redacted;
+}
+
 function containsRawSecretHint(text: string): boolean {
   const lowerText = text.toLowerCase();
   return RAW_SECRET_HINTS.some((hint) => lowerText.includes(hint))
@@ -99,7 +136,8 @@ function containsOversizedSecretIndicator(text: string): boolean {
     || /\\*["']authorization\\*["']\s*,/i.test(text)
     || /\bbearer\s+\S+/i.test(text)
     || /--(?:authorization|password|passwd|pwd|secret|token|cookie|credentials|passphrase|api-?key|client-?secret|(?:access|refresh|id)-?token|access-?key)\s+\S+/i.test(text)
-    || CREDENTIAL_URL_HINT.test(text)) {
+    || CREDENTIAL_URL_HINT.test(text)
+    || containsKnownSecretPattern(text)) {
     return true;
   }
 
@@ -119,7 +157,8 @@ function containsOversizedSecretIndicator(text: string): boolean {
   return false;
 }
 
-function redactRawSecrets(text: string, preserveShellCommands = false): string {
+function redactRawSecrets(rawText: string, preserveShellCommands = false): string {
+  const text = redactKnownSecretValues(rawText);
   if (!containsRawSecretHint(text)) return text;
   let redacted = text
     .replace(/(authorization\s*:\s*)("(?:\\.|[^"\\$`]|\$(?!\())*"|'(?:\\.|[^'\\$`]|\$(?!\())*')/gi, '$1[REDACTED]')

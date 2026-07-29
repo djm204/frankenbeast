@@ -240,4 +240,49 @@ describe('runHook', () => {
     expect(metadata.decision).toBe('unknown');
     expect(JSON.stringify(metadata)).not.toContain('token=secret-value');
   });
+
+  it('redacts bare credential-shaped values from post-tool payloads with no secret-labeled key', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    // "result" is not a recognized credential label, so this only gets caught by
+    // value-shape (not key-label) detection. Regression test for #3838.
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ result: 'ghp_1234567890abcdefghijklmnopqrstuvwxyz' }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain('ghp_1234567890abcdefghijklmnopqrstuvwxyz');
+    expect(metadata.payload).toContain('[REDACTED]');
+  });
+
+  it('redacts credential-shaped values embedded in free-form post-tool text', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ message: 'here is AKIAIOSFODNN7EXAMPLE for aws access' }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain('AKIAIOSFODNN7EXAMPLE');
+  });
+
+  it('redacts sk-prefixed API keys nested under an unlabeled field', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ output: 'sk-abcdefghijklmnopqrstuvwxyz1234567890ABCDEF' }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain('sk-abcdefghijklmnopqrstuvwxyz1234567890ABCDEF');
+  });
 });
