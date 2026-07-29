@@ -76,6 +76,34 @@ describe('Governor Hono Server', () => {
       }
     });
 
+    it('rejects an impossible calendar date in an approval request timestamp', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-invalid-calendar-date',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-02-29T00:00:00.000Z',
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+          error: {
+            code: 'invalid_approval_request_timestamp',
+            message: 'Approval request timestamp must be a valid ISO-8601 string',
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('rejects an approval request older than the configured timeout window', async () => {
       vi.useFakeTimers();
       try {

@@ -11,7 +11,38 @@ import { SessionTokenStore } from '../security/session-token-store.js';
 import { normalizeGovernorConfig } from '../core/config.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
-const ISO_8601_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_8601_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function parseIso8601Timestamp(value: unknown): number {
+  if (typeof value !== 'string') return Number.NaN;
+  const match = ISO_8601_TIMESTAMP.exec(value);
+  if (!match) return Number.NaN;
+
+  const [
+    , year, month, day, hour, minute, second, fraction = '', zone,
+    offsetSign = '+', offsetHour = '0', offsetMinute = '0',
+  ] = match;
+  const timestampMs = Date.parse(value);
+  if (!Number.isFinite(timestampMs)) return Number.NaN;
+
+  const offsetHours = Number(offsetHour);
+  const offsetMinutes = Number(offsetMinute);
+  if (offsetHours > 23 || offsetMinutes > 59) return Number.NaN;
+  const signedOffsetMinutes = zone === 'Z'
+    ? 0
+    : (offsetSign === '-' ? -1 : 1) * (offsetHours * 60 + offsetMinutes);
+  const local = new Date(timestampMs + signedOffsetMinutes * 60_000);
+
+  return local.getUTCFullYear() === Number(year)
+    && local.getUTCMonth() + 1 === Number(month)
+    && local.getUTCDate() === Number(day)
+    && local.getUTCHours() === Number(hour)
+    && local.getUTCMinutes() === Number(minute)
+    && local.getUTCSeconds() === Number(second)
+    && local.getUTCMilliseconds() === Number(fraction.padEnd(3, '0'))
+    ? timestampMs
+    : Number.NaN;
+}
 
 export interface SlackEphemeralResponse {
   readonly response_type: 'ephemeral';
@@ -351,10 +382,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       );
     }
 
-    const timestampMs = typeof body.timestamp === 'string'
-      && ISO_8601_TIMESTAMP.test(body.timestamp)
-      ? Date.parse(body.timestamp)
-      : Number.NaN;
+    const timestampMs = parseIso8601Timestamp(body.timestamp);
     if (!Number.isFinite(timestampMs)) {
       return c.json({
         error: {
