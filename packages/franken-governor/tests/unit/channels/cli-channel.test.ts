@@ -227,4 +227,53 @@ describe('CliChannel', () => {
       expect.stringContaining('Please answer a/approve/y/yes, r/regenerate, x/abort/n/no, or d/debug.'),
     );
   });
+
+  it('redacts sensitive credentials and truncates overlong text in approval prompts', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    const sensitiveSummary =
+      'Deploy service with api_key=sk-proj-secret12345 and password="my super secret multi-word password!" ' +
+      'client_secret=\'multi word secret phrase\' ' +
+      'Step 1: Check system metrics. '.repeat(50);
+
+    const sensitivePlanDiff =
+      'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret\n' +
+      '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Z1...\n-----END RSA PRIVATE KEY-----\n' +
+      '+ Safe diff line 1\n' +
+      '+ Safe plan step '.repeat(100);
+
+    await channel.requestApproval(makeRequest({
+      requestId: 'req-xyz',
+      taskId: 'task-001',
+      projectId: 'proj-001',
+      summary: sensitiveSummary,
+      planDiff: sensitivePlanDiff,
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+
+    // Sensitive values and suffixes must not be present raw
+    expect(prompt).not.toContain('sk-proj-secret12345');
+    expect(prompt).not.toContain('my super secret multi-word password!');
+    expect(prompt).not.toContain('super secret');
+    expect(prompt).not.toContain('multi-word password!');
+    expect(prompt).not.toContain('multi word secret phrase');
+    expect(prompt).not.toContain('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret');
+    expect(prompt).not.toContain('-----BEGIN RSA PRIVATE KEY-----');
+
+    // Redaction and truncation markers must be present
+    expect(prompt).toContain('[REDACTED]');
+    expect(prompt).toContain('[TRUNCATED]');
+
+    // Essential benign approval context must be retained
+    expect(prompt).toContain('Request ID (untrusted):\n| req-xyz');
+    expect(prompt).toContain('Task ID (untrusted):\n| task-001');
+    expect(prompt).toContain('Project ID (untrusted):\n| proj-001');
+    expect(prompt).toContain('[budget] Over budget');
+    expect(prompt).toContain('Deploy service with api_key=[REDACTED]');
+    expect(prompt).toContain('password="[REDACTED]"');
+    expect(prompt).toContain("client_secret='[REDACTED]'");
+    expect(prompt).toContain('+ Safe diff line 1');
+  });
 });
