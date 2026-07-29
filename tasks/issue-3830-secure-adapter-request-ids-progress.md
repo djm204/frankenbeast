@@ -1,0 +1,18 @@
+- [x] Read repository guidance, the adapter implementation, and its unit test.
+- [x] Confirm issue scope and acceptance criteria for secure adapter request IDs.
+- [x] Add one behavior-focused regression test for `randomUUID` request IDs and correlation.
+- [x] Run only the focused regression test and independently confirm the expected RED-phase failure (`randomUUID` received 0 calls).
+- [x] Replace deterministic request-ID generation with Node's cryptographically secure `randomUUID`.
+- [x] Retain the `llm-` prefix and reuse the same request ID through request transformation, response transformation, observer spans, and errors.
+- [x] Remove imports made unused by the production change without altering deterministic utilities globally.
+- [x] Run the focused regression test with the read-only-cache-safe Vitest config loader.
+- [x] Run the complete `adapter-llm-client` unit test file with the read-only-cache-safe Vitest config loader.
+- [x] Run focused tests and package lint; attempt full tests, typecheck, and build (blocked only by unrelated current-main failures documented in the PR).
+- [ ] Commit the issue changes.
+- [ ] Push the issue branch.
+- [ ] Open the pull request.
+- [ ] Obtain exact-head CI and Codex review.
+- [ ] Merge the pull request.
+- [ ] Close issue #3830.
+- [ ] Record durable lessons in `tasks/lessons.md`.
+- [ ] Complete the Kanban handoff.
