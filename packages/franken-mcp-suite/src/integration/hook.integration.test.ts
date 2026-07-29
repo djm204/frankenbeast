@@ -621,6 +621,80 @@ describe('fbeast-hook runtime', () => {
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
   });
 
+  it('scans oversized payloads with many unterminated PEM markers in linear time', async () => {
+    // Many "-----BEGIN ... PRIVATE KEY-----" markers with no matching END
+    // anywhere (so there is no complete key to redact — this payload is
+    // correctly left untouched by both the pre-fix and post-fix scanner).
+    // What differs is the cost of reaching that answer: a lazy `[\s\S]*?`
+    // regex re-scans from every marker out to the end of the string before
+    // failing, making the check itself O(n^2) on this input shape — at
+    // 15,000 markers over ~440KB the pre-fix scanner took just over 3s, and
+    // at 30,000 markers over ~860KB it took nearly 12s (verified locally by
+    // timing `containsOversizedSecretIndicator`'s regex directly), scaling
+    // to a genuine hang on a crafted payload. This runs on the *unbounded*
+    // oversized-payload fast path (before observer logging), so an attacker
+    // controlling tool output could use it to stall the hook. Regression
+    // test for a Codex finding on PR #3891 (issue #3838); the fixed scanner
+    // does the same 15,000-marker check in low single-digit milliseconds.
+    const beginMarker = '-----BEGIN PRIVATE KEY-----';
+    const payload = `${Array.from({ length: 15_000 }, () => beginMarker).join(' ')} ${'x'.repeat(20_000)}`;
+
+    const start = Date.now();
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const elapsedMs = Date.now() - start;
+
+    // No complete BEGIN...END block exists, so nothing gets redacted — the
+    // point of this test is that the check completes quickly regardless.
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+    expect(metadata.payload).toBe(payload);
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
+
+  it('redacts a complete oversized PEM private-key block', async () => {
+    const keyBody = Array.from({ length: 40 }, (_, i) => `line${i}base64`).join('\n');
+    const pemBlock = `-----BEGIN RSA PRIVATE KEY-----\n${keyBody}\n-----END RSA PRIVATE KEY-----`;
+    const payload = JSON.stringify({ output: 'x'.repeat(70_000), key: pemBlock });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(keyBody);
+  });
+
+  it('redacts a Google API key that legally ends in a hyphen even with no key-label context', async () => {
+    // Google API keys are "AIza" + 35 chars from [0-9A-Za-z_-], which can
+    // legally end in '-'. A trailing `\b` requires a word/non-word
+    // transition, so when the key is immediately followed by another
+    // non-word character (e.g. the closing '"' here) no boundary exists and
+    // the match silently fails. Regression test for a Codex finding on PR
+    // #3891 (issue #3838).
+    const key = `AIza${'x'.repeat(34)}-`;
+    const payload = JSON.stringify({ result: key });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).not.toContain(key);
+  });
+
+  it('redacts a credential-shaped JSON property name even when another field also triggers redaction', async () => {
+    // The key-label allowlist only redacts a *value* under a recognized key
+    // name; a credential used as the property name itself (e.g.
+    // `{"ghp_...": "active"}`) was never checked. Once another field (here,
+    // "password") already flips state.changed, the raw-text fallback that
+    // would otherwise have caught it via substring matching is skipped, so
+    // the key survived untouched. Regression test for a Codex finding on PR
+    // #3891 (issue #3838).
+    const secretKeyName = `ghp_${'a'.repeat(20)}`;
+    const payload = JSON.stringify({ password: 'unrelated-secret', [secretKeyName]: 'active' });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).not.toContain(secretKeyName);
+  });
+
   it('preserves raw non-JSON pre-tool whitespace for governor policy matching', async () => {
     const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
       context: 'rm\t-rf /tmp/nope',

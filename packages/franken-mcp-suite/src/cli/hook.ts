@@ -90,33 +90,125 @@ const MAX_POST_TOOL_SECRET_SCAN_CHARS = 64 * 1024;
 /**
  * Value-shape patterns for common credential formats (GitHub PATs, OpenAI/
  * Anthropic/Stripe-style `sk-`/`pk-`/`rk-` keys, GitLab/Slack tokens, AWS access
- * key IDs, Google API keys, PEM private key blocks). Unlike the redaction rules
- * above, these match on the *value itself* rather than a nearby key label, so
- * they catch secrets embedded under an innocuous key (e.g. `{"result":
- * "ghp_..."}`) or in free-form text with no `token=`/`key:` hint at all. Mirrors
- * the value-shape patterns already used for memory export redaction in
- * `brain-adapter.ts` (`SECRET_EXPORT_VALUES`) so the two redaction paths agree
- * on what counts as a secret-shaped value.
+ * key IDs, Google API keys). Unlike the redaction rules above, these match on
+ * the *value itself* rather than a nearby key label, so they catch secrets
+ * embedded under an innocuous key (e.g. `{"result": "ghp_..."}`) or in
+ * free-form text with no `token=`/`key:` hint at all. Mirrors the value-shape
+ * patterns already used for memory export redaction in `brain-adapter.ts`
+ * (`SECRET_EXPORT_VALUES`) so the two redaction paths agree on what counts as
+ * a secret-shaped value.
+ *
+ * A trailing `(?![0-9A-Za-z_-])` guard is used instead of `\b` wherever the
+ * value's own charset includes `-`/`_`: `\b` requires a word/non-word
+ * transition, so it silently fails to match when a legitimately
+ * hyphen/underscore-terminated key (e.g. a Google API key ending in `-`) is
+ * itself followed by a non-word character such as `"` or whitespace — both
+ * sides are then non-word and no boundary exists, leaving the key unredacted.
+ *
+ * PEM private-key blocks are handled separately, below, via a linear scan
+ * rather than a regex here — see `redactPemPrivateKeyBlocks` /
+ * `containsPemPrivateKeyBlock`.
  */
 const KNOWN_SECRET_VALUE_PATTERNS: RegExp[] = [
-  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
-  /\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g,
+  /\b(?:sk|pk|rk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}(?![A-Za-z0-9_-])/g,
   /\b(?:sk|gh[opusr])_[A-Za-z0-9_]{8,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{8,}\b/g,
-  /\b(?:gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_-]{12,}\b/g,
+  /\b(?:gho|ghp|glpat|xox[baprs])-[A-Za-z0-9_-]{12,}(?![A-Za-z0-9_-])/g,
   /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
-  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /\bAIza[0-9A-Za-z_-]{35}(?![A-Za-z0-9_-])/g,
 ];
 
+const PEM_MARKER_WINDOW = /^-----(?:BEGIN|END) [A-Z0-9 ]{0,32}PRIVATE KEY-----/;
+
+/**
+ * Finds the end index of a "-----BEGIN|END ...PRIVATE KEY-----" marker
+ * starting exactly at `start`, bounded to a short fixed-size lookahead window
+ * so matching never scans a span of text proportional to the overall input.
+ */
+function pemMarkerEnd(text: string, start: number): number {
+  const window = text.slice(start, start + 60);
+  const match = PEM_MARKER_WINDOW.exec(window);
+  return match ? start + match[0].length : -1;
+}
+
+/**
+ * Linear-time (single forward pass) detection of a PEM private-key block.
+ *
+ * The straightforward regex for this, `-----BEGIN...[\s\S]*?...END-----`, is
+ * quadratic on adversarial input: when a `-----BEGIN ... PRIVATE KEY-----`
+ * marker has no matching END anywhere in the text, the lazy `[\s\S]*?` scans
+ * all the way to the end of the string before failing, and a global regex
+ * then repeats that full scan from every subsequent BEGIN marker. A payload
+ * with many BEGIN markers and no END markers turns an O(n) check into O(n²) —
+ * a real DoS risk, since this runs on the unbounded oversized-payload fast
+ * path before observer logging (`containsOversizedSecretIndicator`).
+ *
+ * This scans forward with `indexOf` instead: once a header has no footer
+ * anywhere after it, `indexOf` has already scanned to the end of the text
+ * exactly once, and we stop immediately rather than repeating that scan for
+ * every remaining header — bounding total work to O(n).
+ */
+function containsPemPrivateKeyBlock(text: string): boolean {
+  if (!text.includes('PRIVATE KEY-----')) return false;
+  let cursor = 0;
+  for (;;) {
+    const headerIdx = text.indexOf('-----BEGIN ', cursor);
+    if (headerIdx === -1) return false;
+    const headerEnd = pemMarkerEnd(text, headerIdx);
+    if (headerEnd === -1) {
+      cursor = headerIdx + 11;
+      continue;
+    }
+    const footerIdx = text.indexOf('-----END ', headerEnd);
+    if (footerIdx === -1) return false;
+    const footerEnd = pemMarkerEnd(text, footerIdx);
+    if (footerEnd === -1) {
+      cursor = footerIdx + 9;
+      continue;
+    }
+    return true;
+  }
+}
+
+/** Redacting counterpart of `containsPemPrivateKeyBlock`; same linear-scan shape. */
+function redactPemPrivateKeyBlocks(text: string): string {
+  if (!text.includes('PRIVATE KEY-----')) return text;
+  let result = '';
+  let cursor = 0;
+  for (;;) {
+    const headerIdx = text.indexOf('-----BEGIN ', cursor);
+    if (headerIdx === -1) break;
+    const headerEnd = pemMarkerEnd(text, headerIdx);
+    if (headerEnd === -1) {
+      result += text.slice(cursor, headerIdx + 11);
+      cursor = headerIdx + 11;
+      continue;
+    }
+    const footerIdx = text.indexOf('-----END ', headerEnd);
+    if (footerIdx === -1) break;
+    const footerEnd = pemMarkerEnd(text, footerIdx);
+    if (footerEnd === -1) {
+      result += text.slice(cursor, footerIdx + 9);
+      cursor = footerIdx + 9;
+      continue;
+    }
+    result += text.slice(cursor, headerIdx) + '[REDACTED]';
+    cursor = footerEnd;
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
 function containsKnownSecretPattern(text: string): boolean {
-  return KNOWN_SECRET_VALUE_PATTERNS.some((pattern) => {
-    pattern.lastIndex = 0;
-    return pattern.test(text);
-  });
+  return containsPemPrivateKeyBlock(text)
+    || KNOWN_SECRET_VALUE_PATTERNS.some((pattern) => {
+      pattern.lastIndex = 0;
+      return pattern.test(text);
+    });
 }
 
 function redactKnownSecretValues(text: string): string {
-  let redacted = text;
+  let redacted = redactPemPrivateKeyBlocks(text);
   for (const pattern of KNOWN_SECRET_VALUE_PATTERNS) {
     pattern.lastIndex = 0;
     redacted = redacted.replace(pattern, '[REDACTED]');
@@ -217,15 +309,27 @@ function redactJsonSecrets(value: unknown, state: { changed: boolean }, key?: st
       .find((candidate): candidate is string => typeof candidate === 'string' && isSensitiveAssignmentKey(candidate));
     return Object.fromEntries(
       Object.entries(record)
-        .map(([entryKey, entryValue]) => [
-          entryKey,
-          redactJsonSecrets(
-            entryValue,
-            state,
-            entryKey === 'value' && pairName ? pairName : entryKey,
-            preserveShellCommands,
-          ),
-        ]),
+        .map(([entryKey, entryValue]) => {
+          // The key label allowlist above (isSensitiveAssignmentKey) only
+          // catches secrets carried in a *value* under a recognized key name.
+          // A credential can also be used as the property name itself, e.g.
+          // `{"ghp_...": "active"}` — that literal key is otherwise never
+          // passed through any redaction pass and would survive untouched in
+          // the reconstructed object (independent of whatever the value is).
+          const redactedKey = containsKnownSecretPattern(entryKey)
+            ? redactKnownSecretValues(entryKey)
+            : entryKey;
+          if (redactedKey !== entryKey) state.changed = true;
+          return [
+            redactedKey,
+            redactJsonSecrets(
+              entryValue,
+              state,
+              entryKey === 'value' && pairName ? pairName : entryKey,
+              preserveShellCommands,
+            ),
+          ];
+        }),
     );
   }
   return value;
