@@ -21,6 +21,7 @@ export class ProviderRegistryIAdapter implements IAdapter {
     const req = request as {
       messages: Array<{ role: string; content: string }>;
       system?: string;
+      signal?: AbortSignal;
     };
     const raw: LlmRequest = {
       systemPrompt: req.system ?? '',
@@ -29,12 +30,15 @@ export class ProviderRegistryIAdapter implements IAdapter {
         content: m.content,
       })),
       tools: [],
+      ...(req.signal ? { signal: req.signal } : {}),
     };
-    return this.middleware ? this.middleware.processRequest(raw) : raw;
+    const processed = this.middleware ? this.middleware.processRequest(raw) : raw;
+    return req.signal ? { ...processed, signal: req.signal } : processed;
   }
 
-  async execute(providerRequest: unknown): Promise<string> {
-    const request = providerRequest as LlmRequest;
+  async execute(providerRequest: unknown, signal?: AbortSignal): Promise<string> {
+    const originalRequest = providerRequest as LlmRequest;
+    const request: LlmRequest = signal ? { ...originalRequest, signal } : originalRequest;
     const chunks: string[] = [];
     for await (const event of this.registry.execute(request)) {
       if (event.type === 'text') chunks.push(event.content);

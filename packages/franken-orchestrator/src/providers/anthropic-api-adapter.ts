@@ -59,6 +59,7 @@ export class AnthropicApiAdapter implements ILlmProvider {
       request.maxTokens ?? this.options.maxTokens ?? 4096;
 
     try {
+      request.signal?.throwIfAborted();
       const params: Anthropic.MessageStreamParams = {
         model,
         max_tokens: maxTokens,
@@ -71,10 +72,14 @@ export class AnthropicApiAdapter implements ILlmProvider {
       if (request.temperature !== undefined) {
         params.temperature = request.temperature;
       }
-      const stream = this.client.messages.stream(params);
+      const stream = this.client.messages.stream(
+        params,
+        request.signal ? { signal: request.signal } : undefined,
+      );
       const translate = this.createEventTranslator();
 
       for await (const event of stream) {
+        request.signal?.throwIfAborted();
         const translated = translate(event);
         if (translated) yield translated;
       }

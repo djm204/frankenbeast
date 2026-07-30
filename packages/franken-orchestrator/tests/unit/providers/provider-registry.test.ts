@@ -933,6 +933,77 @@ describe('ProviderRegistry', () => {
       expect(registry.getProviderHealth('primary')).toMatchObject({ halfOpenProbeCount: 1 });
     });
 
+    it('releases a half-open probe when cancellation interrupts availability checking', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      let availabilityResolve: ((available: boolean) => void) | undefined;
+      const p1 = mockProvider('primary', { failOnExecute: new Error('outage') });
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      vi.mocked(p1.isAvailable).mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+        availabilityResolve = resolve;
+      }));
+      const controller = new AbortController();
+      const completion = collectEvents(registry.execute({ ...makeRequest(), signal: controller.signal }))
+        .catch((error: unknown) => error);
+      await vi.waitFor(() => expect(p1.isAvailable).toHaveBeenCalledTimes(2));
+
+      controller.abort(new Error('deadline reached'));
+
+      await expect(completion).resolves.toEqual(expect.objectContaining({ message: 'deadline reached' }));
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'half-open',
+        halfOpenProbeCount: 0,
+      });
+      availabilityResolve?.(true);
+    });
+
+    it('releases a half-open probe without a health penalty when its stream is cancelled', async () => {
+      let now = Date.UTC(2026, 0, 1);
+      let mode: 'outage' | 'pending' = 'outage';
+      const p1: ILlmProvider = {
+        ...mockProvider('primary'),
+        execute: vi.fn(async function* (request: LlmRequest) {
+          if (mode === 'outage') throw new Error('outage');
+          await new Promise<void>((_resolve, reject) => {
+            request.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true });
+          });
+          yield { type: 'text' as const, content: 'unreachable' };
+        }),
+      };
+      const p2 = mockProvider('fallback');
+      const registry = new ProviderRegistry([p1, p2], mockBrain(), {
+        circuitBreakerFailureThreshold: 1,
+        circuitBreakerCooldownMs: 10_000,
+        circuitBreakerCooldownJitterRatio: 0,
+        now: () => now,
+      });
+
+      await collectEvents(registry.execute(makeRequest()));
+      now += 10_001;
+      mode = 'pending';
+      const controller = new AbortController();
+      const completion = collectEvents(registry.execute({ ...makeRequest(), signal: controller.signal }))
+        .catch((error: unknown) => error);
+      await vi.waitFor(() => expect(p1.execute).toHaveBeenCalledTimes(2));
+
+      controller.abort(new Error('deadline reached'));
+
+      await expect(completion).resolves.toEqual(expect.objectContaining({ message: 'deadline reached' }));
+      expect(registry.getProviderHealth('primary')).toMatchObject({
+        state: 'half-open',
+        halfOpenProbeCount: 0,
+        failures: 1,
+      });
+    });
+
     it('releases request-error event probes and reschedules idle half-open providers', async () => {
       let now = Date.UTC(2026, 0, 1);
       let mode: 'outage' | 'request-error' | 'success' = 'outage';

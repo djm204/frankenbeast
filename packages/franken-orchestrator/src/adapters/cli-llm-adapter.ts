@@ -93,6 +93,7 @@ export interface CliLlmAdapterOpts {
 }
 
 export class CliLlmAdapter implements IAdapter {
+  readonly managesRequestTimeout = true;
   private readonly provider: ICliProvider;
   private readonly opts: {
     workingDir: string;
@@ -179,7 +180,7 @@ export class CliLlmAdapter implements IAdapter {
     return transformed;
   }
 
-  async execute(providerRequest: unknown): Promise<string> {
+  async execute(providerRequest: unknown, _executionSignal?: AbortSignal): Promise<string> {
     const {
       prompt,
       maxTurns,

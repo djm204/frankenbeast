@@ -44,8 +44,23 @@ describe('AdapterLlmClient', () => {
   });
 
   it('returns adapter content on success', async () => {
-    const client = new AdapterLlmClient(makeAdapter());
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
     await expect(client.complete('prompt')).resolves.toBe('hello');
+    expect(adapter.transformRequest).toHaveBeenCalledWith(expect.objectContaining({
+      signal: expect.any(AbortSignal),
+      timeoutMs: 30_000,
+    }));
+  });
+
+  it('rejects timeout overrides above the Node timer limit', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await expect(client.complete('prompt', { timeoutMs: 2_147_483_648 })).rejects.toThrow(
+      'timeoutMs must be less than or equal to 2147483647',
+    );
+    expect(adapter.execute).not.toHaveBeenCalled();
   });
 
   it('forwards cancellation and deadline options to the adapter request', async () => {
@@ -56,9 +71,77 @@ describe('AdapterLlmClient', () => {
     await client.complete('prompt', { signal: controller.signal, timeoutMs: 42 });
 
     expect(adapter.transformRequest).toHaveBeenCalledWith(expect.objectContaining({
-      signal: controller.signal,
+      signal: expect.any(AbortSignal),
       timeoutMs: 42,
     }));
+    const transformedRequest = vi.mocked(adapter.transformRequest).mock.calls[0]![0];
+    expect(adapter.execute).toHaveBeenCalledWith(
+      transformedRequest,
+      (transformedRequest as { signal: AbortSignal }).signal,
+    );
+  });
+
+  it('rejects at the requested deadline and cancels adapter work that would otherwise never settle', async () => {
+    vi.useFakeTimers();
+    let workCancelled = false;
+    const adapter = makeAdapter({
+      execute: vi.fn((_request: unknown, signal?: AbortSignal) => new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          workCancelled = true;
+          reject(signal.reason);
+        }, { once: true });
+      })),
+    });
+    const client = new AdapterLlmClient(adapter);
+
+    try {
+      const completion = client.complete('prompt', { timeoutMs: 10 })
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(10);
+      const outcome = await completion;
+
+      expect(outcome).toBeInstanceOf(AdapterLlmError);
+      expect((outcome as AdapterLlmError).message).toContain('timeout after 10ms');
+      expect(workCancelled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not add a second timer when the adapter manages request deadlines', async () => {
+    const adapter = makeAdapter({ managesRequestTimeout: true });
+    const client = new AdapterLlmClient(adapter);
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+
+    try {
+      await client.complete('prompt', { timeoutMs: 42 });
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+  });
+
+  it('preserves a timeout-managing adapter default when no request override is supplied', async () => {
+    const adapter = makeAdapter({ managesRequestTimeout: true });
+    const client = new AdapterLlmClient(adapter);
+
+    await client.complete('prompt');
+
+    expect(adapter.transformRequest).toHaveBeenCalledWith(
+      expect.not.objectContaining({ timeoutMs: expect.anything() }),
+    );
+  });
+
+  it('does not start adapter work when the caller signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('cancel before start'));
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await expect(client.complete('prompt', { signal: controller.signal }))
+      .rejects.toThrow('cancel before start');
+    expect(adapter.transformRequest).not.toHaveBeenCalled();
+    expect(adapter.execute).not.toHaveBeenCalled();
   });
 
   it('wraps adapter execute() failures in AdapterLlmError with the cause attached', async () => {
@@ -206,6 +289,23 @@ describe('AdapterLlmClient', () => {
     await expect(client.complete('prompt')).rejects.toThrow(AdapterLlmError);
     expect(observer.endSpan).toHaveBeenCalledWith({ id: 'span-1' }, { status: 'error' });
     expect(observer.recordTokenUsage).not.toHaveBeenCalled();
+  });
+
+  it('cleans up its deadline when observer span creation throws', async () => {
+    vi.useFakeTimers();
+    try {
+      const observer = makeObserver();
+      vi.mocked(observer.startSpan).mockImplementation(() => {
+        throw new Error('trace ended');
+      });
+      const client = new AdapterLlmClient(makeAdapter(), observer);
+
+      await expect(client.complete('prompt')).rejects.toThrow('trace ended');
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ends the observer span with completed status and records usage on success', async () => {

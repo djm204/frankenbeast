@@ -67,6 +67,8 @@ export interface LlmRequest {
   tools?: ToolDefinition[];
   maxTokens?: number;
   temperature?: number;
+  /** Cancels provider retries, streams, and subprocesses for this request. */
+  signal?: AbortSignal;
 }
 
 export interface LlmMessage {
