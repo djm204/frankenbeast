@@ -1291,11 +1291,11 @@ export function createBrainAdapter(
       }
 
       const ttlMs = resolveOperationalTtlMs(input.ttlMs);
-      brain.working.set(
-        scopedWorkingKey(input.key, input.agentId),
+      const key = scopedWorkingKey(input.key, input.agentId);
+      brain.working.setAndFlush(
+        key,
         scopedWorkingValue(input.value, input.agentId, ttlMs),
       );
-      brain.flush();
     },
 
     async frontload(input = {}) {

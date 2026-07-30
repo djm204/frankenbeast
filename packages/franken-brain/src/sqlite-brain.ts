@@ -1766,6 +1766,54 @@ class SqliteWorkingMemory implements IWorkingMemory {
     return finalizeFlush;
   }
 
+  /** Persist one value atomically without exposing uncommitted runtime state. */
+  setAndFlush(key: string, value: unknown): void {
+    const previousState = {
+      store: new Map(this.store),
+      sizes: new Map(this.sizes),
+      serialized: new Map(this.serialized),
+      persistedSerialized: new Map(this.persistedSerialized),
+      dirtyKeys: new Set(this.dirtyKeys),
+      deletedKeys: new Set(this.deletedKeys),
+      replacePersistedState: this.replacePersistedState,
+      totalBytes: this.totalBytes,
+    };
+    let stage: 'set' | 'flush' = 'set';
+    let finalizeFlush: (() => void) | undefined;
+    const tx = this.db.transaction(() => {
+      this.set(key, value);
+      stage = 'flush';
+      finalizeFlush = this.flushToDb() ?? undefined;
+    });
+
+    try {
+      tx.immediate();
+    } catch (error) {
+      this.store = previousState.store;
+      this.sizes = previousState.sizes;
+      this.serialized = previousState.serialized;
+      this.persistedSerialized = previousState.persistedSerialized;
+      this.dirtyKeys = previousState.dirtyKeys;
+      this.deletedKeys = previousState.deletedKeys;
+      this.replacePersistedState = previousState.replacePersistedState;
+      this.totalBytes = previousState.totalBytes;
+      try {
+        this.audit?.({
+          operation: stage === 'set' ? 'working.set' : 'working.flush',
+          store: 'working',
+          key,
+          outcome: 'error',
+          details: { errorName: error instanceof Error ? error.name : 'Error' },
+        });
+      } catch {
+        // Audit failures must not replace the original persistence failure.
+      }
+      throw error;
+    }
+
+    finalizeFlush?.();
+  }
+
   persistKey(key: string, value: unknown): (() => void) | void {
     this.set(key, value);
     const serialized = this.serialized.get(key);

@@ -2758,6 +2758,52 @@ describe('SqliteBrain', () => {
       expect(brain.working.get('key')).toBe('value');
     });
 
+    it('keeps failed atomic stores clean without overwriting concurrent values later', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-atomic-store-'));
+      const dbPath = join(dir, 'brain.db');
+      let stale: SqliteBrain | undefined;
+      let concurrent: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+
+      try {
+        stale = new SqliteBrain(dbPath);
+        stale.working.set('shared', 'initial value');
+        stale.flush();
+        concurrent = new SqliteBrain(dbPath);
+        concurrent.working.set('shared', 'concurrent value');
+        concurrent.flush();
+
+        const staleDb = (stale as unknown as { db: Database.Database }).db;
+        staleDb.exec(`
+          CREATE TRIGGER fail_atomic_working_store
+          BEFORE UPDATE ON working_memory
+          WHEN NEW.key = 'shared'
+          BEGIN
+            SELECT RAISE(ABORT, 'simulated atomic working store failure');
+          END;
+        `);
+
+        expect(() =>
+          stale!.working.setAndFlush('shared', 'rejected value'),
+        ).toThrow('simulated atomic working store failure');
+        expect(stale.working.snapshot()).toMatchObject({ shared: 'initial value' });
+
+        staleDb.exec('DROP TRIGGER fail_atomic_working_store');
+        stale!.working.setAndFlush('local', 'successful value');
+        stale.close();
+        stale = undefined;
+
+        reopened = new SqliteBrain(dbPath);
+        expect(reopened.working.get('shared')).toBe('concurrent value');
+        expect(reopened.working.get('local')).toBe('successful value');
+      } finally {
+        reopened?.close();
+        concurrent?.close();
+        stale?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     it('accepts bounded printable working-memory keys', () => {
       const key = 'project:tenant/α β_1-@';
 
