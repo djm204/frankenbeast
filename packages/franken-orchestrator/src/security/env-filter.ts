@@ -22,7 +22,7 @@
  * safe below.
  */
 const SECRET_ENV_NAME_PATTERN =
-  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK|PWD|PAT)(?:_|$)/i;
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK|PWD|PAT|JWT)(?:_|$)/i;
 
 /**
  * Catches common secret-name segments written without a delimiter (e.g.
@@ -83,7 +83,11 @@ const SAFE_ENV_NAME_EXCEPTIONS = new Set([
  * runs. Exempt the whole indexed tuple by name shape rather than by value,
  * since the mechanism is inherently non-secret.
  */
-const SAFE_ENV_NAME_PATTERNS: readonly RegExp[] = [/^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/i];
+const GIT_CONFIG_FAMILY_NAME_PATTERN = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/i;
+const SAFE_ENV_NAME_PATTERNS: readonly RegExp[] = [GIT_CONFIG_FAMILY_NAME_PATTERN];
+
+/** Matches just the `GIT_CONFIG_VALUE_<n>` half of the tuple, to scan for a secret-shaped value. */
+const GIT_CONFIG_VALUE_NAME_PATTERN = /^GIT_CONFIG_VALUE_\d+$/i;
 
 /**
  * Matches connection-string *values* with embedded `user:password@` userinfo
@@ -113,6 +117,14 @@ const AUTH_HEADER_VALUE_PATTERN = /^(?:authorization|proxy-authorization)\s*:\s*
 /** Matches a bare `Bearer <token>` / `Basic <token>` value (no header name prefix). */
 const BEARER_TOKEN_VALUE_PATTERN = /^(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}$/i;
 
+/**
+ * Matches a raw JWT value (three base64url segments joined by `.`) — e.g. CI
+ * systems commonly export a live credential under a name with no secret-shaped
+ * segment, like `CI_JOB_JWT`/`CI_JOB_JWT_V2`. Same three-segment shape this
+ * repo already treats as sensitive in `issues/issue-runner.ts`.
+ */
+const JWT_VALUE_PATTERN = /^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}$/;
+
 /** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
 export function isSecretEnvVarName(name: string): boolean {
   if (SAFE_ENV_NAME_EXCEPTIONS.has(name.toUpperCase())) return false;
@@ -122,11 +134,12 @@ export function isSecretEnvVarName(name: string): boolean {
   return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
 }
 
-/** True if an env var's *value* looks like a connection string or auth header carrying embedded credentials. */
+/** True if an env var's *value* looks like a connection string, auth header, or raw JWT carrying embedded credentials. */
 export function isSecretEnvVarValue(value: string): boolean {
   return CREDENTIAL_URL_VALUE_PATTERN.test(value)
     || AUTH_HEADER_VALUE_PATTERN.test(value)
-    || BEARER_TOKEN_VALUE_PATTERN.test(value);
+    || BEARER_TOKEN_VALUE_PATTERN.test(value)
+    || JWT_VALUE_PATTERN.test(value);
 }
 
 /**
@@ -141,21 +154,37 @@ export function isSecretEnvVarValue(value: string): boolean {
  * here) means custom providers registered via `ProviderRegistry.register()`
  * can preserve their own credentials too.
  *
- * `exemptNames` is matched case-sensitively (unlike the general secret-name
- * detection above): env var names are case-sensitive on POSIX, and each
- * `exemptNames` entry names one specific, exact-case var the CLI actually
- * reads for auth — a differently-cased var of the same spelling is a
- * distinct variable that provider didn't declare and must still be filtered
- * on its own merits.
+ * `exemptNames` matching follows the OS's own env var name semantics: exact
+ * case on POSIX, where env var names are case-sensitive and a
+ * differently-cased var of the same spelling is a genuinely distinct
+ * variable the provider didn't declare; case-insensitive on Windows, where
+ * env var names themselves are case-insensitive (`OpenAI_API_Key` and
+ * `OPENAI_API_KEY` name the same variable, and the CLI would read either).
  */
 export function filterSecretEnvVars(
   env: Record<string, string>,
   exemptNames?: readonly string[],
 ): Record<string, string> {
-  const exempt = new Set(exemptNames ?? []);
+  const caseInsensitiveExempt = process.platform === 'win32';
+  const normalize = (name: string): string => (caseInsensitiveExempt ? name.toUpperCase() : name);
+  const exempt = new Set((exemptNames ?? []).map(normalize));
+
+  // GIT_CONFIG_KEY_<n>/VALUE_<n>/COUNT is git's genuine indexed
+  // config-injection mechanism (see SAFE_ENV_NAME_PATTERNS above) — but if
+  // any GIT_CONFIG_VALUE_<n> turns out to be secret-shaped (e.g. a smuggled
+  // Authorization header), dropping only that VALUE_<n> leaves a malformed
+  // tuple (COUNT and KEY_<n> present, VALUE_<n> missing) that makes git
+  // itself error out ("missing config value") on every command the CLI
+  // runs. Drop the whole GIT_CONFIG_* family atomically instead, so git
+  // simply doesn't see the mechanism at all rather than seeing it broken.
+  const dropGitConfigFamily = Object.entries(env).some(
+    ([key, value]) => GIT_CONFIG_VALUE_NAME_PATTERN.test(key) && isSecretEnvVarValue(value),
+  );
+
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (exempt.has(key)) {
+    if (dropGitConfigFamily && GIT_CONFIG_FAMILY_NAME_PATTERN.test(key)) continue;
+    if (exempt.has(normalize(key))) {
       filtered[key] = value;
       continue;
     }

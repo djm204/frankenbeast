@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
+import { filterSecretEnvVars } from '../security/env-filter.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
@@ -753,7 +754,13 @@ function scheduleDashboardCommandHealthProbe(command: string): void {
     checking: true,
   });
   try {
-    const proc = spawn(command, ['--version'], { stdio: 'ignore', timeout: 5_000 });
+    const proc = spawn(command, ['--version'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+      // A --version probe never needs to authenticate, so no provider auth
+      // exemption — just strip anything secret-shaped from the ambient env.
+      env: filterSecretEnvVars(process.env as Record<string, string>),
+    });
     const finish = (available: boolean) => {
       dashboardCommandHealthCache.set(command, { available, checkedAt: Date.now(), checking: false });
     };

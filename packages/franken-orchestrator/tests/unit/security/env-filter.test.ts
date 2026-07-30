@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   filterSecretEnvVars,
   isSecretEnvVarName,
@@ -31,6 +31,8 @@ describe('isSecretEnvVarName', () => {
       'MYSQL_PWD',
       'GITHUB_PAT',
       'SERVICE_PAT',
+      'CI_JOB_JWT',
+      'CI_JOB_JWT_V2',
     ];
     for (const name of secretNames) {
       expect(isSecretEnvVarName(name), `expected ${name} to be flagged as secret`).toBe(true);
@@ -130,6 +132,16 @@ describe('isSecretEnvVarValue', () => {
     expect(isSecretEnvVarValue('/workspace')).toBe(false);
     expect(isSecretEnvVarValue('1')).toBe(false);
   });
+
+  it('flags raw JWT-shaped values (three base64url segments)', () => {
+    const fakeJwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U';
+    expect(isSecretEnvVarValue(fakeJwt)).toBe(true);
+  });
+
+  it('does not flag ordinary dotted values that are not JWT-shaped', () => {
+    expect(isSecretEnvVarValue('1.2.3')).toBe(false);
+    expect(isSecretEnvVarValue('en_US.UTF-8')).toBe(false);
+  });
 });
 
 describe('filterSecretEnvVars', () => {
@@ -197,21 +209,33 @@ describe('filterSecretEnvVars', () => {
     });
   });
 
-  it('strips a credential smuggled through the git-config-tuple name exemption via its value', () => {
+  it('drops the whole GIT_CONFIG_* family atomically when a credential is smuggled through it', () => {
     // GIT_CONFIG_KEY_<n>/VALUE_<n>/COUNT are exempt by name (git's own
     // indexed config-injection mechanism), but git supports
     // `http.extraHeader`, so GIT_CONFIG_VALUE_<n> could carry a live
-    // Authorization header. The name exemption must not blind the
-    // value-based check.
+    // Authorization header. Dropping only VALUE_0 would leave a malformed
+    // tuple (COUNT says 1, KEY_0 present, VALUE_0 missing) that makes git
+    // itself error with "missing config value" on every command — so the
+    // whole family must go together, not just the offending value.
     const input = {
+      PATH: '/usr/bin',
       GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'http.extraHeader',
       GIT_CONFIG_VALUE_0: 'Authorization: Bearer super-secret-live-token',
     };
-    const filtered = filterSecretEnvVars(input);
-    expect(filtered['GIT_CONFIG_COUNT']).toBe('1');
-    expect(filtered['GIT_CONFIG_KEY_0']).toBe('http.extraHeader');
-    expect(filtered['GIT_CONFIG_VALUE_0']).toBeUndefined();
+    expect(filterSecretEnvVars(input)).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('drops every indexed pair in the family, not just the offending index, when count > 1', () => {
+    const input = {
+      PATH: '/usr/bin',
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'safe.directory',
+      GIT_CONFIG_VALUE_0: '/workspace',
+      GIT_CONFIG_KEY_1: 'http.extraHeader',
+      GIT_CONFIG_VALUE_1: 'Authorization: Bearer super-secret-live-token',
+    };
+    expect(filterSecretEnvVars(input)).toEqual({ PATH: '/usr/bin' });
   });
 
   it('still preserves an ordinary (non-credential) git-config tuple', () => {
@@ -221,5 +245,32 @@ describe('filterSecretEnvVars', () => {
       GIT_CONFIG_VALUE_0: '/workspace',
     };
     expect(filterSecretEnvVars(input)).toEqual(input);
+  });
+
+  describe('exemptNames matching follows OS env-var case semantics', () => {
+    const originalPlatform = process.platform;
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+      vi.restoreAllMocks();
+    });
+
+    it('on Windows, exemptNames matches case-insensitively', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const input = {
+        PATH: 'C:\\bin',
+        OpenAI_API_Key: 'openai-secret',
+      };
+      expect(filterSecretEnvVars(input, ['OPENAI_API_KEY'])).toEqual(input);
+    });
+
+    it('on POSIX platforms, exemptNames still matches exact-case only', () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const input = {
+        PATH: '/usr/bin',
+        OpenAI_API_Key: 'openai-secret',
+      };
+      expect(filterSecretEnvVars(input, ['OPENAI_API_KEY'])).toEqual({ PATH: '/usr/bin' });
+    });
   });
 });
