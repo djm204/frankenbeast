@@ -159,34 +159,42 @@ function createUniquePlanId(store: ReturnType<typeof createSqliteStore>): string
 const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
- * Recursively scans an already-parsed JSON value for own keys named
- * `__proto__`, `constructor`, or `prototype` at any depth. These keys are
- * broadly safe as JSON.parse output (JSON.parse never mutates the real
- * prototype chain), but rejecting them defensively — mirroring the
- * @franken/brain working-memory hydration guard — protects any downstream
- * consumer that might later merge or spread this value unsafely.
+ * Scans an already-parsed JSON value for own keys named `__proto__`,
+ * `constructor`, or `prototype` at any depth. These keys are broadly safe
+ * as JSON.parse output (JSON.parse never mutates the real prototype
+ * chain), but rejecting them defensively — mirroring the @franken/brain
+ * working-memory hydration guard — protects any downstream consumer that
+ * might later merge or spread this value unsafely.
+ *
+ * Uses an explicit work stack instead of function recursion: a tampered
+ * row can be JSON-valid but thousands of arrays deep (JSON.parse itself
+ * has no meaningful nesting limit), and a JS-recursive walk over that
+ * shape would blow the call stack — turning a malformed-storage case that
+ * must fail closed into an uncaught `RangeError` instead.
  */
-function findUnsafeObjectKey(value: unknown): string | null {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findUnsafeObjectKey(item);
-      if (found !== null) {
-        return found;
+function findUnsafeObjectKey(root: unknown): string | null {
+  const stack: unknown[] = [root];
+
+  while (stack.length > 0) {
+    const value = stack.pop();
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        stack.push(item);
+      }
+      continue;
+    }
+
+    if (isRecord(value)) {
+      for (const key of Object.keys(value)) {
+        if (UNSAFE_OBJECT_KEYS.has(key)) {
+          return key;
+        }
+        stack.push(value[key]);
       }
     }
-    return null;
   }
-  if (isRecord(value)) {
-    for (const key of Object.keys(value)) {
-      if (UNSAFE_OBJECT_KEYS.has(key)) {
-        return key;
-      }
-      const found = findUnsafeObjectKey(value[key]);
-      if (found !== null) {
-        return found;
-      }
-    }
-  }
+
   return null;
 }
 
@@ -287,27 +295,44 @@ function describeStoredPlanIssue(issue: StoredPlanIssueLike): string {
   return `stored plan DAG${path ? ` ${path}` : ''} is invalid: ${issue.message}`;
 }
 
+/**
+ * Escapes ASCII control characters (0x00-0x1F, 0x7F) — newlines, carriage
+ * returns, ANSI/terminal escape sequences, etc. — before untrusted text
+ * reaches a log call. `reason` strings can embed raw field names or values
+ * copied directly out of a tampered stored plan row (e.g. a duplicate task
+ * id or an unrecognized field name), so logging them verbatim would let a
+ * crafted payload forge multiline log entries or inject terminal control
+ * sequences into server logs. This only affects what is written to stderr;
+ * the structured `reason` returned to callers is left untouched.
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(
+    /[\x00-\x1f\x7f]/g,
+    (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`,
+  );
+}
+
 function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawDag);
   } catch (error) {
     const reason = `stored plan DAG is not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
-    console.error(`[planner-adapter] failed to parse stored plan DAG; aborting: ${reason}`);
+    console.error(`[planner-adapter] failed to parse stored plan DAG; aborting: ${sanitizeForLog(reason)}`);
     return { kind: 'corrupt', reason };
   }
 
   const unsafeKey = findUnsafeObjectKey(parsed);
   if (unsafeKey !== null) {
     const reason = `stored plan DAG contains unsafe key "${unsafeKey}" and was rejected`;
-    console.error(`[planner-adapter] rejected malformed stored plan DAG; aborting: ${reason}`);
+    console.error(`[planner-adapter] rejected malformed stored plan DAG; aborting: ${sanitizeForLog(reason)}`);
     return { kind: 'corrupt', reason };
   }
 
   const result = storedPlanSchema.safeParse(parsed);
   if (!result.success) {
     const reason = describeStoredPlanIssue(result.error.issues[0] as StoredPlanIssueLike);
-    console.error(`[planner-adapter] rejected malformed stored plan DAG; aborting: ${reason}`);
+    console.error(`[planner-adapter] rejected malformed stored plan DAG; aborting: ${sanitizeForLog(reason)}`);
     return { kind: 'corrupt', reason };
   }
 

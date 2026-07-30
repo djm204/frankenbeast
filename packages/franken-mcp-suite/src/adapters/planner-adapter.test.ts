@@ -23,6 +23,11 @@ function replaceStoredDag(dbPath: string, planId: string, dag: string): void {
   }
 }
 
+/** Builds a JSON-valid but arbitrarily deep array literal under an unexpected top-level field. */
+function buildDeeplyNestedArrayDag(depth: number): string {
+  return `{"objective":"ship","constraints":null,"tasks":[],"deep":${'['.repeat(depth)}${']'.repeat(depth)}}`;
+}
+
 describe('createPlannerAdapter', () => {
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -128,6 +133,45 @@ describe('createPlannerAdapter', () => {
       reason: expect.stringMatching(/unsafe key.*constructor/i),
     });
     expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+  }));
+
+  it('returns corrupt instead of crashing on a JSON-valid payload deep enough to overflow a recursive scan', async () => withTempDb(async (dbPath) => {
+    const adapter = createPlannerAdapter(dbPath);
+    const { planId } = await adapter.decompose({ objective: 'ship a memory search feature' });
+    replaceStoredDag(dbPath, planId, buildDeeplyNestedArrayDag(20000));
+
+    await expect(adapter.visualize(planId)).resolves.toMatchObject({ kind: 'corrupt' });
+    await expect(adapter.validate(planId)).resolves.toMatchObject({ verdict: 'invalid' });
+  }));
+
+  it('escapes control characters from attacker-controlled text before logging a rejection', async () => withTempDb(async (dbPath) => {
+    const adapter = createPlannerAdapter(dbPath);
+    const { planId } = await adapter.decompose({ objective: 'ship a memory search feature' });
+    // A duplicate task id containing a newline and a CR — if logged verbatim
+    // this could forge a fake second stderr line or a fake log entry.
+    const maliciousId = 't1\nFAKE LOG LINE: everything is fine\r';
+    replaceStoredDag(dbPath, planId, JSON.stringify({
+      objective: 'ship',
+      constraints: null,
+      tasks: [
+        { id: maliciousId, title: 'first', deps: [], status: 'pending' },
+        { id: maliciousId, title: 'second', deps: [], status: 'pending' },
+      ],
+    }));
+
+    await adapter.visualize(planId);
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const loggedMessage = consoleErrorSpy.mock.calls[0]?.[0] as string;
+    expect(loggedMessage).not.toContain('\n');
+    expect(loggedMessage).not.toContain('\r');
+    expect(loggedMessage).toContain('\\x0a');
+    expect(loggedMessage).toContain('\\x0d');
+    // The structured `reason` returned to callers is unaffected — only the log is sanitized.
+    await expect(adapter.visualize(planId)).resolves.toMatchObject({
+      kind: 'corrupt',
+      reason: expect.stringContaining(maliciousId),
+    });
   }));
 
   it('accepts valid stored DAGs whose dependencies appear later in the task list', async () => withTempDb(async (dbPath) => {
