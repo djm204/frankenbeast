@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-30 — Maintained-docs conflict-marker integrity
+- A docs integrity regression should combine a real repository scan with an isolated marker fixture so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots and explicitly skip generated/vendor directories instead of scanning dependency or generated artifacts.
+
 ## 2026-07-30 — Evaluator severity must agree with blocking verdicts
 - A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
 - Informational evaluator findings must not return a blocking `fail` verdict when the pipeline contract treats `pass` plus `info` as non-blocking. Preserve the finding and score signal, and fix the verdict/severity drift instead of adding environment configuration to pure evaluator logic.
