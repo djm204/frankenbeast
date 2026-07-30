@@ -417,7 +417,6 @@ describe('CliLlmAdapter', () => {
           ...originalEnv,
           SOME_API_KEY: 'sk-super-secret-value',
           AWS_SECRET_ACCESS_KEY: 'aws-secret-value',
-          ANTHROPIC_API_KEY: 'anthropic-secret-value',
           GITHUB_TOKEN: 'ghp_leaked_token',
           DATABASE_PASSWORD: 'hunter2',
           NPM_TOKEN: 'npm-secret-token',
@@ -433,7 +432,6 @@ describe('CliLlmAdapter', () => {
           const env = calls[0]!.options.env as Record<string, string>;
           expect(env['SOME_API_KEY']).toBeUndefined();
           expect(env['AWS_SECRET_ACCESS_KEY']).toBeUndefined();
-          expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
           expect(env['GITHUB_TOKEN']).toBeUndefined();
           expect(env['DATABASE_PASSWORD']).toBeUndefined();
           expect(env['NPM_TOKEN']).toBeUndefined();
@@ -466,6 +464,111 @@ describe('CliLlmAdapter', () => {
           expect(env['LANG']).toBe('en_US.UTF-8');
           expect(env['TERM']).toBe('xterm-256color');
           expect(env['npm_config_registry']).toBe('https://registry.npmjs.org/');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves ANTHROPIC_API_KEY for the claude provider (its own required auth var)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          ANTHROPIC_API_KEY: 'anthropic-secret-value',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret-value',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['ANTHROPIC_API_KEY']).toBe('anthropic-secret-value');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves OPENAI_API_KEY for the codex provider (its own required auth var)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          OPENAI_API_KEY: 'openai-secret-value',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret-value',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['OPENAI_API_KEY']).toBe('openai-secret-value');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('does not leak OPENAI_API_KEY to the claude provider (not its required auth var)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          OPENAI_API_KEY: 'openai-secret-value',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['OPENAI_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('filters undelimited PGPASSWORD and MYSQL_PWD but keeps plain PWD', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          PGPASSWORD: 'pg-secret-value',
+          MYSQL_PWD: 'mysql-secret-value',
+          PWD: '/home/test/project',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['PGPASSWORD']).toBeUndefined();
+          expect(env['MYSQL_PWD']).toBeUndefined();
+          expect(env['PWD']).toBe('/home/test/project');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves SSH_AUTH_SOCK and SSL_CERT_FILE (capability/config paths, not secrets)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          SSH_AUTH_SOCK: '/tmp/ssh-agent.sock',
+          SSL_CERT_FILE: '/etc/ssl/certs/ca-bundle.crt',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['SSH_AUTH_SOCK']).toBe('/tmp/ssh-agent.sock');
+          expect(env['SSL_CERT_FILE']).toBe('/etc/ssl/certs/ca-bundle.crt');
         } finally {
           process.env = originalEnv;
         }
@@ -1668,6 +1771,8 @@ describe('CliLlmAdapter', () => {
         'TLS_CERTIFICATE',
         'SLACK_WEBHOOK_URL',
         'GOOGLE_APPLICATION_CREDENTIALS',
+        'PGPASSWORD',
+        'MYSQL_PWD',
       ];
       for (const name of secretNames) {
         expect(isSecretEnvVarName(name), `expected ${name} to be flagged as secret`).toBe(true);
@@ -1693,6 +1798,11 @@ describe('CliLlmAdapter', () => {
         'npm_config_registry',
         'KEYBOARD_LAYOUT',
         'XDG_CONFIG_HOME',
+        'SSH_AUTH_SOCK',
+        'SSH_AGENT_PID',
+        'SSL_CERT_FILE',
+        'SSL_CERT_DIR',
+        'NODE_EXTRA_CA_CERTS',
       ];
       for (const name of safeNames) {
         expect(isSecretEnvVarName(name), `expected ${name} to NOT be flagged as secret`).toBe(false);
@@ -1708,6 +1818,16 @@ describe('CliLlmAdapter', () => {
       };
       const filtered = filterSecretEnvVars(input);
       expect(filtered).toEqual({ PATH: '/usr/bin', HOME: '/home/test' });
+    });
+
+    it('filterSecretEnvVars preserves keys listed in exemptNames despite looking secret-shaped', () => {
+      const input = {
+        PATH: '/usr/bin',
+        ANTHROPIC_API_KEY: 'anthropic-secret',
+        OPENAI_API_KEY: 'openai-secret',
+      };
+      const filtered = filterSecretEnvVars(input, ['ANTHROPIC_API_KEY']);
+      expect(filtered).toEqual({ PATH: '/usr/bin', ANTHROPIC_API_KEY: 'anthropic-secret' });
     });
   });
 });

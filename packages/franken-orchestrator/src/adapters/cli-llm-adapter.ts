@@ -18,7 +18,10 @@ import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 /**
  * Matches env var names that look like they carry a secret (API keys, tokens,
  * passwords, credentials, certs, etc.), checked on underscore-delimited
- * segments so unrelated names like `KEYBOARD_LAYOUT` or `PWD` are left alone.
+ * segments so unrelated names like `KEYBOARD_LAYOUT` are left alone. `PWD`
+ * (the shell's present-working-directory var) is included as a segment so
+ * `MYSQL_PWD` is caught, but the bare `PWD` name itself is special-cased as
+ * safe below.
  *
  * This is a denylist rather than a hand-maintained allowlist: the spawned CLI
  * subprocesses (claude/codex/gemini/aider) need broad standard environment
@@ -28,26 +31,75 @@ import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
  * environment is handed to `spawn()`.
  */
 const SECRET_ENV_NAME_PATTERN =
-  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK)(?:_|$)/i;
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK|PWD)(?:_|$)/i;
 
-/** Catches common secret-name segments written without a delimiter (e.g. `APIKEY`). */
+/**
+ * Catches common secret-name segments written without a delimiter (e.g.
+ * `APIKEY`, `PGPASSWORD` — psql's undelimited password env var).
+ */
 const SECRET_ENV_NAME_COMPOUND_PATTERN =
-  /(?:APIKEY|ACCESSKEY|SECRETKEY|PRIVATEKEY|AUTHTOKEN|CLIENTSECRET)/i;
+  /(?:APIKEY|ACCESSKEY|SECRETKEY|PRIVATEKEY|AUTHTOKEN|CLIENTSECRET|PASSWORD)/i;
+
+/**
+ * Env var names that would otherwise match the patterns above but are
+ * capability/configuration pointers, not secrets themselves — e.g.
+ * `SSH_AUTH_SOCK` is a path to the running ssh-agent's socket, and
+ * `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS` point at CA bundle files. Stripping
+ * these breaks legitimate CLI behavior (git/ssh via the user's agent, TLS
+ * trust for provider HTTPS calls) without reducing secret exposure, since
+ * none of them carry credential material in the variable itself. `PWD`
+ * (present working directory) is included for the same reason.
+ */
+const SAFE_ENV_NAME_EXCEPTIONS = new Set([
+  'PWD',
+  'SSH_AUTH_SOCK',
+  'SSH_AGENT_PID',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+]);
 
 /** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
 export function isSecretEnvVarName(name: string): boolean {
+  if (SAFE_ENV_NAME_EXCEPTIONS.has(name.toUpperCase())) return false;
   return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
 }
 
-/** Returns a copy of `env` with any secret-shaped keys omitted. */
-export function filterSecretEnvVars(env: Record<string, string>): Record<string, string> {
+/**
+ * Returns a copy of `env` with any secret-shaped keys omitted, except for
+ * names in `exemptNames` (case-insensitive) — used to let the actively
+ * selected provider's own required auth var(s) (e.g. `ANTHROPIC_API_KEY` for
+ * `claude`, `OPENAI_API_KEY` for `codex`) survive even though they are
+ * themselves secret-shaped: they're the CLI's own designed auth channel, not
+ * an unrelated ambient secret leaking through.
+ */
+export function filterSecretEnvVars(
+  env: Record<string, string>,
+  exemptNames?: readonly string[],
+): Record<string, string> {
+  const exempt = new Set((exemptNames ?? []).map((name) => name.toUpperCase()));
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (isSecretEnvVarName(key)) continue;
-    filtered[key] = value;
+    if (exempt.has(key.toUpperCase()) || !isSecretEnvVarName(key)) {
+      filtered[key] = value;
+    }
   }
   return filtered;
 }
+
+/**
+ * Auth env var(s) each CLI provider needs preserved to authenticate itself,
+ * even though the names are secret-shaped. `gemini` is intentionally absent:
+ * its own `filterEnv()` already strips all `GEMINI*`/`GOOGLE*` vars, so it
+ * doesn't rely on env-based auth surviving this filter. `aider`'s default
+ * chat model runs on Claude but is user-configurable to any LiteLLM-backed
+ * model, so both common vendor keys are preserved for it.
+ */
+const PROVIDER_AUTH_ENV_VAR_ALLOWLIST: Record<string, readonly string[]> = {
+  claude: ['ANTHROPIC_API_KEY'],
+  codex: ['OPENAI_API_KEY'],
+  aider: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
+};
 
 type CliCacheSessionHint = {
   key: string;
@@ -296,7 +348,7 @@ export class CliLlmAdapter implements IAdapter {
               : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
-          env: provider.filterEnv(this.captureEnv()),
+          env: provider.filterEnv(this.captureEnv(activeProvider)),
           prompt,
           signal,
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
@@ -579,12 +631,12 @@ export class CliLlmAdapter implements IAdapter {
     return this.opts.providerOverrides?.[name]?.extraArgs;
   }
 
-  private captureEnv(): Record<string, string> {
+  private captureEnv(providerName: string): Record<string, string> {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
     }
-    const safeEnv = filterSecretEnvVars(rawEnv);
+    const safeEnv = filterSecretEnvVars(rawEnv, PROVIDER_AUTH_ENV_VAR_ALLOWLIST[providerName]);
     if (isPlainOutput()) {
       safeEnv.NO_COLOR = safeEnv.NO_COLOR ?? '1';
       safeEnv.FORCE_COLOR = '0';
