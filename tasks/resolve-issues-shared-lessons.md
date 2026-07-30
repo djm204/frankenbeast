@@ -569,3 +569,6 @@
 
 ## 2026-07-25 — Shared memory inherits local safety semantics
 - A cross-agent SQLite memory substrate needs more than namespace isolation: retain bounded rows, filter entry kinds before read limits, keep database metadata authoritative over payload fields, revoke rejected/never-store candidates, propagate right-to-forget for owned entries, avoid plaintext publication from encrypted brains, and include hive state in encrypted DR backups.
+
+## 2026-07-30 — Best-effort persistence diagnostics
+- Emit persistence-failure diagnostics only around the failing adapter call, keep diagnostic sinks best-effort, log bounded hashes instead of raw payloads/errors, and restore console spies so rejection tests remain isolated and warning-free.
