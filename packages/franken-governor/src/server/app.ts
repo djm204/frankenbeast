@@ -290,13 +290,17 @@ function extractSlackActionFeedback(actionId: unknown): string | undefined {
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
-  const registry = options.registry ?? new ApprovalWaiterRegistry();
   const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
   const slackResponsePoster = options.slackResponsePoster ?? DEFAULT_SLACK_RESPONSE_POSTER;
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
   const approvalRequestTimeoutMs = normalizeGovernorConfig(
     options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
   ).timeoutMs;
+  // Reuse the same timeoutMs for the registry's pending-approval TTL so
+  // "how stale may an inbound request be" and "how long may an approval sit
+  // unresolved before it expires and is purged" stay a single knob (#3736,
+  // #3751). An externally supplied registry manages its own timeoutMs.
+  const registry = options.registry ?? new ApprovalWaiterRegistry({ timeoutMs: approvalRequestTimeoutMs });
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
     try {
@@ -479,6 +483,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         },
         400,
       );
+    }
+
+    // Reject a decision for an approval past its TTL with a distinct error
+    // code before the generic `has()` lazy-eviction check below (which would
+    // otherwise report it identically to a requestId that never existed) —
+    // see #3736. Peeking via `isExpired` (non-mutating) rather than relying
+    // solely on `has`/`resolve` also lets the purge that follows be explicit.
+    if (registry.isExpired(body.requestId)) {
+      registry.delete(body.requestId);
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
     }
 
     if (!registry.has(body.requestId)) {
@@ -680,6 +699,18 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         response_type: 'ephemeral',
         text: denial.text,
       });
+    }
+
+    // Reject a Slack decision for an approval past its TTL with a distinct
+    // error code, same as the HTTP respond endpoint above (#3736).
+    if (registry.isExpired(requestId)) {
+      registry.delete(requestId);
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
     }
 
     // Look up the pending approval; unknown requests are rejected.

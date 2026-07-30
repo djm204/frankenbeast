@@ -372,4 +372,75 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  /**
+   * Coverage for #3736 / #3751: a placeholder registered via
+   * `POST /v1/approval/request` with nothing ever attaching a real waiter
+   * must not be resolvable indefinitely, and must not linger in memory
+   * forever.
+   */
+  it('rejects a decision made after the pending approval has passed its TTL, with a distinct error code, and purges it', async () => {
+    let currentTime = Date.now();
+    const registry = new ApprovalWaiterRegistry({ timeoutMs: 50, now: () => currentTime });
+    const app = createGovernorApp({ registry, allowUnsignedApprovalsForTests: true });
+
+    const createRes = await app.request('/v1/approval/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'req-expiring-1',
+        taskId: 'task-1',
+        summary: 'Deploy to production',
+        timestamp: new Date().toISOString(),
+      }),
+    });
+    expect(createRes.status).toBe(201);
+
+    currentTime += 200; // advance the registry's clock past timeoutMs
+
+    const res = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-expiring-1', decision: 'APPROVE' }),
+    });
+    expect(res.status).toBe(410);
+    const body = await res.json();
+    expect(body.error.code).toBe('approval_expired');
+
+    // The expired entry must not linger: it no longer counts as pending.
+    const health = await (await app.request('/health')).json();
+    expect(health.pendingApprovals).toBe(0);
+
+    // And it cannot be replayed by trying again either.
+    const replay = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-expiring-1', decision: 'APPROVE' }),
+    });
+    expect(replay.status).toBe(404);
+  });
+
+  it('createGovernorApp threads its timeoutMs into a default (auto-created) registry so pending approvals expire consistently', async () => {
+    const app = createGovernorApp({ allowUnsignedApprovalsForTests: true, timeoutMs: 60_000 });
+
+    const createRes = await app.request('/v1/approval/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'req-default-registry-1',
+        taskId: 'task-1',
+        summary: 'Deploy to production',
+        timestamp: new Date().toISOString(),
+      }),
+    });
+    expect(createRes.status).toBe(201);
+
+    // Not expired yet: a decision immediately after creation still succeeds.
+    const res = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-default-registry-1', decision: 'APPROVE' }),
+    });
+    expect(res.status).toBe(200);
+  });
 });
