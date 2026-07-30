@@ -14,6 +14,7 @@ interface MockSpawnCall {
   cmd: string;
   args: string[];
   options: SpawnOptions;
+  stdin: string;
 }
 
 interface MockSpawnResult {
@@ -35,12 +36,14 @@ function createMockSpawn(opts: {
   const calls: MockSpawnCall[] = [];
 
   const spawnFn = (cmd: string, args: readonly string[], options: SpawnOptions): ChildProcess => {
-    calls.push({ cmd, args: [...args], options });
+    const call: MockSpawnCall = { cmd, args: [...args], options, stdin: '' };
+    calls.push(call);
 
     const proc = new EventEmitter() as ChildProcess;
     const stdinStream = new PassThrough();
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();
+    stdinStream.on('data', (chunk: Buffer) => { call.stdin += chunk.toString(); });
 
     Object.defineProperty(proc, 'stdin', { value: stdinStream, writable: false });
     Object.defineProperty(proc, 'stdout', { value: stdoutStream, writable: false });
@@ -79,13 +82,15 @@ function createQueuedSpawn(results: MockSpawnResult[]): {
   let index = 0;
 
   const spawnFn = (cmd: string, args: readonly string[], options: SpawnOptions): ChildProcess => {
-    calls.push({ cmd, args: [...args], options });
+    const call: MockSpawnCall = { cmd, args: [...args], options, stdin: '' };
+    calls.push(call);
     const current = results[index++] ?? { stdout: '', stderr: 'unexpected spawn', exitCode: 1 };
 
     const proc = new EventEmitter() as ChildProcess;
     const stdinStream = new PassThrough();
     const stdoutStream = new PassThrough();
     const stderrStream = new PassThrough();
+    stdinStream.on('data', (chunk: Buffer) => { call.stdin += chunk.toString(); });
 
     Object.defineProperty(proc, 'stdin', { value: stdinStream, writable: false });
     Object.defineProperty(proc, 'stdout', { value: stdoutStream, writable: false });
@@ -190,6 +195,18 @@ describe('CliLlmAdapter', () => {
         sessionContinue: false,
         requestId: 'req-2',
       });
+    });
+
+    it('passes systemPromptAddendum through when present on the request', () => {
+      const adapter = new CliLlmAdapter(claudeProvider, baseOpts);
+      const result = adapter.transformRequest({
+        id: 'req-3',
+        provider: 'adapter',
+        model: 'adapter',
+        messages: [{ role: 'user', content: 'why are you claude?' }],
+        systemPromptAddendum: 'Runtime status: fallback in effect.',
+      });
+      expect(result.systemPromptAddendum).toBe('Runtime status: fallback in effect.');
     });
     it('honors explicit chat continuation overrides in chat mode', async () => {
       const { spawnFn } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
@@ -320,6 +337,25 @@ describe('CliLlmAdapter', () => {
         expect(calls[0]!.options.stdio).toEqual(['pipe', 'pipe', 'pipe']);
       });
 
+      it('delivers systemPromptAddendum via --append-system-prompt, not concatenated onto the piped prompt', async () => {
+        const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+        const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+        await adapter.execute({
+          prompt: 'why are you claude?',
+          maxTurns: 1,
+          systemPromptAddendum: 'Runtime status: fallback from codex in effect.',
+        });
+
+        const args = calls[0]!.args;
+        const idx = args.indexOf('--append-system-prompt');
+        expect(idx).toBeGreaterThanOrEqual(0);
+        expect(args[idx + 1]).toBe('Runtime status: fallback from codex in effect.');
+        // The user-turn prompt piped to stdin must stay exactly as given —
+        // concatenating the addendum here is what made it indistinguishable
+        // from injected content and get flagged/rejected by the model.
+        expect(calls[0]!.stdin).toBe('why are you claude?');
+      });
+
       it('persists and resumes the native Claude session for matching chat session ids', async () => {
         const firstStdout = '{"type":"result","session_id":"native-a","result":"first"}\n';
         const { spawnFn, calls } = createMockSpawn({ stdout: firstStdout, exitCode: 0 });
@@ -432,6 +468,21 @@ describe('CliLlmAdapter', () => {
         expect(args).toContain('--color');
         // prompt piped via stdin, not in args
         expect(args).not.toContain('test');
+      });
+
+      it('falls back to appending systemPromptAddendum onto the prompt when the provider has no system-prompt channel', async () => {
+        const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+        const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+        await adapter.execute({
+          prompt: 'why are you codex?',
+          maxTurns: 1,
+          systemPromptAddendum: 'Runtime status: served by codex.',
+        });
+
+        // Codex has no --append-system-prompt equivalent; args must not
+        // reference the addendum, and it lands appended to the stdin prompt.
+        expect(calls[0]!.args.join(' ')).not.toContain('Runtime status');
+        expect(calls[0]!.stdin).toBe('why are you codex?\n\nRuntime status: served by codex.');
       });
 
       it('does not filter CLAUDE* env vars (codex filterEnv passes through)', async () => {

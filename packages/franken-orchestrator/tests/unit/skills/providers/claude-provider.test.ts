@@ -56,6 +56,24 @@ describe('ClaudeProvider', () => {
     expect(args).toContain('opus');
   });
 
+  it('buildArgs includes --append-system-prompt when systemPromptAddendum is provided', () => {
+    const args = provider.buildArgs({ systemPromptAddendum: 'Runtime status: fallback in effect.' });
+    const idx = args.indexOf('--append-system-prompt');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe('Runtime status: fallback in effect.');
+  });
+
+  it('buildArgs omits --append-system-prompt when systemPromptAddendum is absent', () => {
+    const args = provider.buildArgs({});
+    expect(args).not.toContain('--append-system-prompt');
+  });
+
+  // -- supportsSystemPromptAddendum -----------------------------------------
+
+  it('supportsSystemPromptAddendum returns true — Claude Code CLI has a real system-prompt channel', () => {
+    expect(provider.supportsSystemPromptAddendum?.()).toBe(true);
+  });
+
   // -- supportsStreamJson --------------------------------------------------
 
   it('supportsStreamJson returns true', () => {
