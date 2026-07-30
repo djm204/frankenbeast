@@ -31,9 +31,27 @@ type UnifiedResponse = {
 const MAX_OUTWARD_ERROR_CONTEXT_LENGTH = 1_000;
 
 function safeAdapterErrorContext(error: unknown): string {
-  const errorClass = error instanceof Error ? error.name : typeof error;
-  const message = error instanceof Error ? error.message : String(error);
-  const safeClass = redactSensitiveText(errorClass).replace(/\s+/gu, ' ').trim().slice(0, 100);
+  let errorClass: string = typeof error;
+  let message = 'No diagnostic available';
+  if (error instanceof Error) {
+    try {
+      errorClass = String(error.name);
+    } catch {
+      errorClass = 'Error';
+    }
+    try {
+      message = String(error.message);
+    } catch {
+      // Keep the fixed safe fallback when an untrusted error getter throws.
+    }
+  } else {
+    try {
+      message = String(error);
+    } catch {
+      // Keep the fixed safe fallback when an untrusted conversion throws.
+    }
+  }
+  const safeClass = redactSensitiveText(errorClass.replace(/\s+/gu, ' ')).trim().slice(0, 100);
   const safeMessage = redactSensitiveText(message.replace(/\s+/gu, ' '))
     .trim()
     .slice(0, MAX_OUTWARD_ERROR_CONTEXT_LENGTH);
