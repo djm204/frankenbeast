@@ -12,6 +12,20 @@ const separatorMarkerPattern = /^(={1,})(?:\s.*)?$/u;
 const closingMarkerPattern = /^(>{1,})(?:\s.*)?$/u;
 const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
 
+async function readConfiguredNarrowMarkerWidths() {
+  try {
+    const attributes = await readFile(join(root, '.gitattributes'), 'utf8');
+    return new Set(
+      [...attributes.matchAll(/(?:^|\s)conflict-marker-size=(\d+)(?=\s|$)/gmu)]
+        .map((match) => Number(match[1]))
+        .filter((width) => width < 3),
+    );
+  } catch (error) {
+    if (error?.code === 'ENOENT') return new Set();
+    throw error;
+  }
+}
+
 function toRepoPath(path) {
   return relative(root, path).split(sep).join('/');
 }
@@ -37,7 +51,7 @@ async function* walkMarkdown(dir) {
   }
 }
 
-async function scanFile(path) {
+async function scanFile(path, configuredNarrowMarkerWidths) {
   const source = (await readFile(path, 'utf8')).replace(/^\uFEFF/u, '');
   const findings = [];
   const conflicts = new Map();
@@ -45,12 +59,14 @@ async function scanFile(path) {
   for (const [index, line] of source.split(/\r\n|\r|\n/u).entries()) {
     const openingMatch = openingMarkerPattern.exec(line);
     if (openingMatch) {
+      const width = openingMatch[1].length;
+      if (width < 3 && !configuredNarrowMarkerWidths.has(width)) continue;
       const finding = { path: toRepoPath(path), line: index + 1, marker: openingMatch[1] };
-      if (openingMatch[1].length >= 7) {
+      if (width >= 7) {
         findings.push(finding);
-      } else if (!conflicts.has(openingMatch[1].length)) {
-        conflicts.set(openingMatch[1].length, {
-          width: openingMatch[1].length,
+      } else if (!conflicts.has(width)) {
+        conflicts.set(width, {
+          width,
           sawSeparator: false,
           findings: [finding],
         });
@@ -103,8 +119,9 @@ async function scanFile(path) {
 }
 
 const findings = [];
+const configuredNarrowMarkerWidths = await readConfiguredNarrowMarkerWidths();
 for await (const path of walkMarkdown(docsRoot)) {
-  findings.push(...await scanFile(path));
+  findings.push(...await scanFile(path, configuredNarrowMarkerWidths));
 }
 findings.sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
 

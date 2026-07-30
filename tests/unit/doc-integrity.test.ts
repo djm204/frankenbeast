@@ -115,6 +115,7 @@ describe('maintained Markdown integrity', () => {
 
   it('rejects complete conflict blocks with one-character markers', () => {
     const root = makeFixtureRoot();
+    writeFixture(root, '.gitattributes', '*.md conflict-marker-size=1\n');
     writeFixture(root, 'docs/minimal.md', [
       '< HEAD',
       'current guide',
@@ -126,6 +127,20 @@ describe('maintained Markdown integrity', () => {
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
+  });
+
+  it('allows unrelated one-character Markdown constructs without a configured marker width', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/valid.md', [
+      '< less-than prose',
+      'Title',
+      '=',
+      '> quoted prose',
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
   });
 
   it('preserves a short conflict after an opening-like incoming line', () => {
