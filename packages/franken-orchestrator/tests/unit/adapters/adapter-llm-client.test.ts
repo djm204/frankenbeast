@@ -73,6 +73,35 @@ describe('AdapterLlmClient', () => {
     expect((err as AdapterLlmError).cause).toBe(boom);
   });
 
+  it('redacts secrets from outward adapter errors while preserving safe context', async () => {
+    const privateMaterial = ['ghp', '1234567890abcdef'].join('_');
+    const boom = new Error(`provider unavailable: API_TOKEN=${privateMaterial}`);
+    const client = new AdapterLlmClient(
+      makeAdapter({ execute: vi.fn(async () => { throw boom; }) }),
+    );
+
+    const err = await client.complete('prompt').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterLlmError);
+    expect((err as AdapterLlmError).message).toContain('provider unavailable');
+    expect((err as AdapterLlmError).message).toContain('API_TOKEN=<redacted>');
+    expect((err as AdapterLlmError).message).not.toContain(privateMaterial);
+    expect((err as AdapterLlmError).message).toContain((err as AdapterLlmError).requestId);
+    expect((err as AdapterLlmError).cause).toBe(boom);
+  });
+
+  it('bounds outward adapter diagnostics and identifies the error class', async () => {
+    const boom = new TypeError(`invalid response ${'x'.repeat(2_000)}`);
+    const client = new AdapterLlmClient(
+      makeAdapter({ execute: vi.fn(async () => { throw boom; }) }),
+    );
+
+    const err = await client.complete('prompt').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterLlmError);
+    expect((err as AdapterLlmError).message).toContain('TypeError: invalid response');
+    expect((err as AdapterLlmError).message.length).toBeLessThanOrEqual(1_100);
+    expect((err as AdapterLlmError).cause).toBe(boom);
+  });
+
   it('wraps transformRequest/transformResponse failures', async () => {
     const client = new AdapterLlmClient(
       makeAdapter({ transformResponse: vi.fn(() => { throw new Error('bad payload'); }) }),
