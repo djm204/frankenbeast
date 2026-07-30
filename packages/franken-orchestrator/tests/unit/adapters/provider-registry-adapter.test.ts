@@ -50,6 +50,14 @@ describe('ProviderRegistryIAdapter', () => {
       expect(adapter.transformRequest({ ...makeRequest(), signal })).toEqual(expect.objectContaining({ signal }));
     });
 
+    it('maps the unified max_tokens limit to the provider maxTokens field', () => {
+      const adapter = new ProviderRegistryIAdapter(makeRegistry(() => textEvents('hi')));
+
+      expect(adapter.transformRequest({ ...makeRequest(), max_tokens: 8_192 })).toEqual(
+        expect.objectContaining({ maxTokens: 8_192 }),
+      );
+    });
+
     it('applies middleware processRequest when provided', () => {
       const processRequest = vi.fn((req: any) => ({ ...req, systemPrompt: 'SANITIZED' }));
       const middleware = { processRequest, processResponse: vi.fn((r: any) => r) };

@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-30 — Completion token limits must cross every adapter boundary
+- Put provider-agnostic completion limits on the shared `LlmCompletionOptions` contract, reject non-positive or unsafe integers before adapter work starts, and explicitly map the unified request's `max_tokens` field into provider-facing `LlmRequest.maxTokens`; declaring a field on an intermediate request type alone neither validates nor forwards it.
+
 ## 2026-07-30 — Faculty clocks must be wired before adapter construction
 - Resolve the shared Beast clock before constructing any faculty adapter, then use that same source for lesson-consultation and every lifecycle timestamp. A frozen-clock dependency-factory regression should exercise planning, completion, and failure paths together so one remaining wall-clock call cannot hide behind otherwise deterministic reasoning/action behavior.
 

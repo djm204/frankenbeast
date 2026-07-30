@@ -63,6 +63,45 @@ describe('AdapterLlmClient', () => {
     expect(adapter.execute).not.toHaveBeenCalled();
   });
 
+  it('rejects a negative maxTokens value before starting adapter work', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await expect(client.complete('prompt', { maxTokens: -1 })).rejects.toThrow(
+      'maxTokens must be a positive safe integer',
+    );
+    expect(adapter.transformRequest).not.toHaveBeenCalled();
+    expect(adapter.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['zero', 0],
+    ['a fraction', 1.5],
+    ['NaN', Number.NaN],
+    ['positive infinity', Number.POSITIVE_INFINITY],
+    ['an unsafe integer', Number.MAX_SAFE_INTEGER + 1],
+  ])('rejects %s as maxTokens before starting adapter work', async (_description, maxTokens) => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await expect(client.complete('prompt', { maxTokens })).rejects.toThrow(
+      'maxTokens must be a positive safe integer',
+    );
+    expect(adapter.transformRequest).not.toHaveBeenCalled();
+    expect(adapter.execute).not.toHaveBeenCalled();
+  });
+
+  it('forwards a valid maxTokens value to the unified adapter request', async () => {
+    const adapter = makeAdapter();
+    const client = new AdapterLlmClient(adapter);
+
+    await client.complete('prompt', { maxTokens: 8_192 });
+
+    expect(adapter.transformRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ max_tokens: 8_192 }),
+    );
+  });
+
   it('forwards cancellation and deadline options to the adapter request', async () => {
     const adapter = makeAdapter();
     const client = new AdapterLlmClient(adapter);
