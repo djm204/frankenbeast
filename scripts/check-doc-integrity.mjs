@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,18 +13,29 @@ const separatorMarkerPattern = /^(={1,})(?:\s.*)?$/u;
 const closingMarkerPattern = /^(>{1,})(?:\s.*)?$/u;
 const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
 
-async function readConfiguredNarrowMarkerWidths() {
+function readConfiguredMarkerWidths(paths) {
+  const repoPaths = paths.map(toRepoPath);
+  if (repoPaths.length === 0) return new Map();
+
+  let output;
   try {
-    const attributes = await readFile(join(root, '.gitattributes'), 'utf8');
-    return new Set(
-      [...attributes.matchAll(/(?:^|\s)conflict-marker-size=(\d+)(?=\s|$)/gmu)]
-        .map((match) => Number(match[1]))
-        .filter((width) => width < 3),
+    output = execFileSync(
+      'git',
+      ['check-attr', '-z', 'conflict-marker-size', '--', ...repoPaths],
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     );
   } catch (error) {
-    if (error?.code === 'ENOENT') return new Set();
+    if (error?.status === 128) return new Map();
     throw error;
   }
+
+  const fields = output.split('\0');
+  const widths = new Map();
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const [path, , value] = fields.slice(index, index + 3);
+    if (/^\d+$/u.test(value)) widths.set(path, Number(value));
+  }
+  return widths;
 }
 
 function toRepoPath(path) {
@@ -51,7 +63,7 @@ async function* walkMarkdown(dir) {
   }
 }
 
-async function scanFile(path, configuredNarrowMarkerWidths) {
+async function scanFile(path, configuredMarkerWidth) {
   const source = (await readFile(path, 'utf8')).replace(/^\uFEFF/u, '');
   const findings = [];
   const conflicts = new Map();
@@ -60,7 +72,7 @@ async function scanFile(path, configuredNarrowMarkerWidths) {
     const openingMatch = openingMarkerPattern.exec(line);
     if (openingMatch) {
       const width = openingMatch[1].length;
-      if (width < 3 && !configuredNarrowMarkerWidths.has(width)) continue;
+      if (width < 7 && configuredMarkerWidth !== width) continue;
       const finding = { path: toRepoPath(path), line: index + 1, marker: openingMatch[1] };
       if (width >= 7) {
         findings.push(finding);
@@ -119,9 +131,11 @@ async function scanFile(path, configuredNarrowMarkerWidths) {
 }
 
 const findings = [];
-const configuredNarrowMarkerWidths = await readConfiguredNarrowMarkerWidths();
-for await (const path of walkMarkdown(docsRoot)) {
-  findings.push(...await scanFile(path, configuredNarrowMarkerWidths));
+const paths = [];
+for await (const path of walkMarkdown(docsRoot)) paths.push(path);
+const configuredMarkerWidths = readConfiguredMarkerWidths(paths);
+for (const path of paths) {
+  findings.push(...await scanFile(path, configuredMarkerWidths.get(toRepoPath(path))));
 }
 findings.sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
 

@@ -100,6 +100,8 @@ describe('maintained Markdown integrity', () => {
 
   it('rejects complete conflict blocks with marker widths below seven', () => {
     const root = makeFixtureRoot();
+    spawnSync('git', ['init', '--quiet'], { cwd: root });
+    writeFixture(root, '.gitattributes', '*.md conflict-marker-size=3\n');
     writeFixture(root, 'docs/guide.md', [
       `${shortConflictMarker('<')} HEAD`,
       'current guide',
@@ -113,8 +115,23 @@ describe('maintained Markdown integrity', () => {
     expect(result.status).toBe(1);
   });
 
+  it('allows three-character Markdown constructs without a configured marker width', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/valid.md', [
+      '<<< literal comparison notation',
+      'Architecture',
+      '===',
+      '>>> deeply nested quotation',
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
+  });
+
   it('rejects complete conflict blocks with one-character markers', () => {
     const root = makeFixtureRoot();
+    spawnSync('git', ['init', '--quiet'], { cwd: root });
     writeFixture(root, '.gitattributes', '*.md conflict-marker-size=1\n');
     writeFixture(root, 'docs/minimal.md', [
       '< HEAD',
@@ -127,6 +144,38 @@ describe('maintained Markdown integrity', () => {
     const result = runScanner(root);
 
     expect(result.status).toBe(1);
+  });
+
+  it('resolves configured narrow marker widths for each Markdown path', () => {
+    const root = makeFixtureRoot();
+    spawnSync('git', ['init', '--quiet'], { cwd: root });
+    writeFixture(root, 'docs/.gitattributes', 'nested-conflict.md conflict-marker-size=1\n');
+    writeFixture(root, 'docs/nested-conflict.md', [
+      '< HEAD',
+      'current guide',
+      '=',
+      'incoming guide',
+      '> feature/guide',
+    ].join('\n'));
+    writeFixture(root, 'docs/unconfigured/valid.md', [
+      '< less-than prose',
+      'Title',
+      '=',
+      '> quoted prose',
+    ].join('\n'));
+
+    const result = runScanner(root);
+    const report = JSON.parse(result.stdout) as {
+      findings: Array<{ path: string }>;
+    };
+
+    expect(result.status).toBe(1);
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      path: 'docs/nested-conflict.md',
+    }));
+    expect(report.findings).not.toContainEqual(expect.objectContaining({
+      path: 'docs/unconfigured/valid.md',
+    }));
   });
 
   it('allows unrelated one-character Markdown constructs without a configured marker width', () => {
@@ -145,6 +194,8 @@ describe('maintained Markdown integrity', () => {
 
   it('preserves a short conflict after an opening-like incoming line', () => {
     const root = makeFixtureRoot();
+    spawnSync('git', ['init', '--quiet'], { cwd: root });
+    writeFixture(root, '.gitattributes', '*.md conflict-marker-size=3\n');
     writeFixture(root, 'docs/guide.md', [
       `${shortConflictMarker('<')} HEAD`,
       'current guide',
@@ -160,6 +211,8 @@ describe('maintained Markdown integrity', () => {
 
   it('preserves an outer conflict before its separator', () => {
     const root = makeFixtureRoot();
+    spawnSync('git', ['init', '--quiet'], { cwd: root });
+    writeFixture(root, '.gitattributes', '*.md conflict-marker-size=4\n');
     writeFixture(root, 'docs/guide.md', [
       '<<<< HEAD',
       'current guide',
@@ -191,6 +244,8 @@ describe('maintained Markdown integrity', () => {
 
   it('rejects a conflict whose opening marker follows a UTF-8 BOM', () => {
     const root = makeFixtureRoot();
+    spawnSync('git', ['init', '--quiet'], { cwd: root });
+    writeFixture(root, '.gitattributes', '*.md conflict-marker-size=3\n');
     writeFixture(root, 'docs/bom.md', [
       `\uFEFF${shortConflictMarker('<')} HEAD`,
       'current guide',
