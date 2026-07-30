@@ -592,6 +592,91 @@ describe('Governor Hono Server', () => {
       const body = await res.json();
       expect(body.error.message).toBe('Missing signature');
     });
+
+    // Regression coverage for issue #3722: the raw request bytes must be
+    // authenticated with the governor signing secret BEFORE JSON.parse ever
+    // runs, so an unauthenticated caller cannot force parsing of arbitrary
+    // bytes. Each case below sends a body that is not valid JSON; if
+    // authentication happened first (as it must), the handler never reaches
+    // JSON.parse and returns the auth-specific 401 below instead of the
+    // generic "Malformed JSON body" 400 that parsing failure would produce.
+    describe('authenticates before JSON parsing', () => {
+      const MALFORMED_JSON = '{not valid json';
+
+      it('rejects an unsigned malformed-JSON body before parsing when no signing secret is configured', async () => {
+        const app = createGovernorApp();
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Signing secret required for approval responses');
+      });
+
+      it('rejects a malformed-JSON body with a missing signature before parsing', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Missing signature');
+      });
+
+      it('rejects a malformed-JSON body with a malformed signature header before parsing', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-governor-signature': 'sha256=not-hex',
+          },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Malformed signature');
+      });
+
+      it('rejects a malformed-JSON body with an invalid signature before parsing', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-governor-signature': `sha256=${'0'.repeat(64)}`,
+          },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Invalid signature');
+      });
+
+      it('never dispatches to the registry when authentication fails, even with well-formed JSON', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        await seedResponseApproval(app, 'req-auth-order', SIGNING_FIXTURE);
+
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: 'req-auth-order', decision: 'APPROVE' }),
+        });
+
+        expect(res.status).toBe(401);
+        const health = await app.request('/health');
+        const healthBody = await health.json();
+        expect(healthBody.pendingApprovals).toBe(1);
+      });
+    });
   });
 
   describe('POST /v1/approval/session/validate', () => {
