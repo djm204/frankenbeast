@@ -54,7 +54,10 @@ const SENSITIVE_VOCABULARY = [
   'passphrases',
   'credential',
   'credentials',
+  'auth',
+  'cookie',
   'authorization',
+  'personal_access_token',
   'ssh_key',
   'signing_key',
   'gpg_key',
@@ -99,6 +102,23 @@ export function isSensitiveKeyToken(token: string): boolean {
   return false;
 }
 
+function decodeJsonKeyEscapes(token: string): string {
+  const simpleEscapes: Record<string, string> = {
+    '"': '"',
+    '\\': '\\',
+    '/': '/',
+    b: '\b',
+    f: '\f',
+    n: '\n',
+    r: '\r',
+    t: '\t',
+  };
+  return token.replace(/\\(?:u([0-9A-Fa-f]{4})|(["\\/bfnrt]))/gu, (match, hex, simple) => {
+    if (typeof hex === 'string') return String.fromCharCode(Number.parseInt(hex, 16));
+    return typeof simple === 'string' ? simpleEscapes[simple] ?? match : match;
+  });
+}
+
 export function isShellExpression(val: string): boolean {
   const len = val.length;
   for (let i = 0; i < len; i++) {
@@ -134,7 +154,17 @@ export function isShellExpression(val: string): boolean {
 
 export function isPlausibleArmoredKeyBody(body: string): boolean {
   const normalizedBody = body.replace(/\\r\\n|\\n|\\r/gu, '\n');
-  const lines = normalizedBody.split(/\r\n|\n|\r/u).map((l) => l.trim()).filter((l) => l.length > 0);
+  const physicalLines = normalizedBody.split(/\r\n|\n|\r/u);
+  const prefixedLines = physicalLines.filter((line) => line.length > 0);
+  const diffPrefix = prefixedLines.length > 0
+    && prefixedLines.every((line) => line.startsWith(prefixedLines[0]?.[0] ?? '\0'))
+    && /^[ +\-]$/u.test(prefixedLines[0]?.[0] ?? '')
+    ? prefixedLines[0]?.[0] ?? ''
+    : '';
+  const lines = physicalLines
+    .map((line) => diffPrefix !== '' && line.startsWith(diffPrefix) ? line.slice(1) : line)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
   if (lines.length === 0) return true;
 
   let plausibleLineCount = 0;
@@ -220,18 +250,22 @@ function redactUrlPasswords(text: string, isTruncatedTail = false): string {
 }
 
 function redactUrlQueryParams(text: string): string {
-  return text.replace(
-    /([?&])([A-Za-z0-9_.-]+)(=)([^&\s"'\r\n#;|<>]*)?/giu,
-    (match, p1, key, p3, val) => {
-      if (isSensitiveKeyToken(key)) {
-        if (typeof val === 'string' && isShellExpression(val)) {
-          return `${p1}${key}${p3}${redactPasswordLiteralFragments(val)}`;
-        }
-        return `${p1}${key}${p3}[REDACTED]`;
-      }
-      return match;
-    },
-  );
+  const parameterStart = /([?&])([A-Za-z0-9_.-]+)(=)/giu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(parameterStart)) {
+    const key = match[2];
+    if (key === undefined || !isSensitiveKeyToken(key) || match.index < cursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(text, valueStart, /[&\s"'\r\n#;|<>]/u);
+    const value = text.slice(valueStart, valueEnd);
+    result += text.slice(cursor, match.index);
+    result += `${match[1] as string}${key}${match[3] as string}${
+      isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'
+    }`;
+    cursor = valueEnd;
+  }
+  return result + text.slice(cursor);
 }
 
 function redactCurlUserCredentials(text: string): string {
@@ -307,6 +341,94 @@ function shellExpressionSpans(val: string): Array<readonly [number, number]> {
   return spans;
 }
 
+function shellValueBoundary(text: string, start: number, boundary: RegExp): number {
+  const chunkSize = 65_536;
+  let expression: 'paren' | 'brace' | 'backtick' | undefined;
+  let parenDepth = 0;
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  let openingDelimiter = false;
+  let literalBackslashes = 0;
+  let firstExpressionBoundary: number | undefined;
+
+  for (let chunkStart = start; chunkStart < text.length; chunkStart += chunkSize) {
+    const chunkEnd = Math.min(text.length, chunkStart + chunkSize);
+    for (let index = chunkStart; index < chunkEnd; index++) {
+      const character = text[index] ?? '';
+
+      if (expression === undefined) {
+        const escapedOpener = literalBackslashes % 2 === 1;
+        const opener = text.slice(index, index + 2);
+        if (!escapedOpener && (opener === '$(' || opener === '<(' || opener === '>(')) {
+          expression = 'paren';
+          parenDepth = 1;
+          quote = undefined;
+          escaped = false;
+          openingDelimiter = true;
+          literalBackslashes = 0;
+          firstExpressionBoundary = undefined;
+          continue;
+        }
+        if (!escapedOpener && opener === '${') {
+          expression = 'brace';
+          openingDelimiter = true;
+          literalBackslashes = 0;
+          firstExpressionBoundary = undefined;
+          continue;
+        }
+        if (!escapedOpener && character === '`') {
+          expression = 'backtick';
+          escaped = false;
+          literalBackslashes = 0;
+          firstExpressionBoundary = undefined;
+          continue;
+        }
+        if (boundary.test(character)) return index;
+        literalBackslashes = character === '\\' ? literalBackslashes + 1 : 0;
+        continue;
+      }
+
+      if (openingDelimiter) {
+        openingDelimiter = false;
+        continue;
+      }
+      if (firstExpressionBoundary === undefined && boundary.test(character)) {
+        firstExpressionBoundary = index;
+      }
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (expression === 'backtick') {
+        if (character === '`') expression = undefined;
+        continue;
+      }
+      if (expression === 'brace') {
+        if (character === '}') expression = undefined;
+        continue;
+      }
+      if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+        continue;
+      }
+      if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '(') {
+        parenDepth++;
+      } else if (character === ')' && --parenDepth === 0) {
+        expression = undefined;
+      }
+    }
+  }
+  return expression !== undefined && firstExpressionBoundary !== undefined
+    ? firstExpressionBoundary
+    : text.length;
+}
+
 function redactHeaderLiteralFragments(val: string): string {
   const schemeNames = /^(?:Bearer|Basic|Digest|OAuth|HOBA|Mutual|Negotiate|VAPID|SCRAM-SHA-256|AWS4-HMAC-SHA256)$/i;
   const redactLiteral = (literal: string): string => literal.replace(/\S+/gu, (token) => {
@@ -338,13 +460,37 @@ function redactPasswordLiteralFragments(val: string): string {
 }
 
 function redactArrayLiteralFragments(body: string): string {
+  const redactUnquoted = (value: string): string => {
+    let redacted = '';
+    let lastIndex = 0;
+    for (const [start, end] of shellExpressionSpans(value)) {
+      redacted += value.slice(lastIndex, start).replace(/\S+/gu, '[REDACTED]');
+      redacted += value.slice(start, end);
+      lastIndex = end;
+    }
+    return redacted + value.slice(lastIndex).replace(/\S+/gu, '[REDACTED]');
+  };
   let result = '';
   let cursor = 0;
   let segmentStart = 0;
   let quote: '"' | "'" | undefined;
   let escaped = false;
+  const expressionSpans = shellExpressionSpans(body);
+  let expressionIndex = 0;
 
   for (let index = 0; index < body.length; index++) {
+    while ((expressionSpans[expressionIndex]?.[1] ?? body.length + 1) <= index) {
+      expressionIndex++;
+    }
+    const expressionSpan = expressionSpans[expressionIndex];
+    if (
+      quote !== "'"
+      && expressionSpan !== undefined
+      && expressionSpan[0] === index
+    ) {
+      index = expressionSpan[1] - 1;
+      continue;
+    }
     const character = body[index];
     if (quote !== undefined) {
       if (escaped) {
@@ -353,7 +499,7 @@ function redactArrayLiteralFragments(body: string): string {
         escaped = true;
       } else if (character === quote) {
         const content = body.slice(segmentStart + 1, index);
-        result += body.slice(cursor, segmentStart);
+        result += redactUnquoted(body.slice(cursor, segmentStart));
         result += quote === "'"
           ? `'${content.length > 0 ? '[REDACTED]' : ''}'`
           : `"${redactPasswordLiteralFragments(content)}"`;
@@ -366,7 +512,7 @@ function redactArrayLiteralFragments(body: string): string {
     }
   }
 
-  result += redactPasswordLiteralFragments(body.slice(cursor));
+  result += redactUnquoted(body.slice(cursor));
   return result;
 }
 
@@ -389,9 +535,6 @@ function redactSensitiveArrayAssignments(text: string): string {
     const scanEnd = Math.min(
       text.length,
       bodyStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH + 1,
-      ...['\r', '\n']
-        .map((newline) => text.indexOf(newline, bodyStart))
-        .filter((index) => index >= 0),
     );
     for (let index = bodyStart; index < scanEnd; index++) {
       const character = text[index];
@@ -412,7 +555,10 @@ function redactSensitiveArrayAssignments(text: string): string {
     }
     if (closingIndex < 0) continue;
     result += text.slice(cursor, openingIndex + 1);
-    result += redactArrayLiteralFragments(text.slice(openingIndex + 1, closingIndex));
+    const body = text.slice(openingIndex + 1, closingIndex);
+    result += /[\r\n]/u.test(body) || isShellExpression(body)
+      ? redactArrayLiteralFragments(body)
+      : '[REDACTED]';
     result += ')';
     cursor = closingIndex + 1;
   }
@@ -471,6 +617,43 @@ function containsSensitiveHeaderLabel(object: string): boolean {
   ).test(object);
 }
 
+function balancedStructuredValueEnd(value: string, start: number): number | undefined {
+  const opening = value[start];
+  if (opening !== '[' && opening !== '{') return undefined;
+  const stack = [opening];
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  const scanEnd = Math.min(value.length, start + MAX_STRUCTURED_HEADER_OBJECT_LENGTH);
+
+  for (let index = start + 1; index < scanEnd; index++) {
+    const character = value[index];
+    if (quote !== undefined) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '[' || character === '{') {
+      if (stack.length >= MAX_STRUCTURED_HEADER_OBJECT_DEPTH) return undefined;
+      stack.push(character);
+      continue;
+    }
+    if (character !== ']' && character !== '}') continue;
+    const expectedOpening = character === ']' ? '[' : '{';
+    if (stack.pop() !== expectedOpening) return undefined;
+    if (stack.length === 0) return index + 1;
+  }
+  return undefined;
+}
+
 function redactCompleteStructuredHeaderObject(object: string): string {
   const depthAt = new Uint8Array(object.length);
   let depth = 0;
@@ -502,16 +685,38 @@ function redactCompleteStructuredHeaderObject(object: string): string {
     .some((match) => depthAt[match.index] === 1);
   if (!hasDirectSensitiveHeader) return object;
 
-  const valueProperty = /(["']value["']\s*:\s*)("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*')/giu;
-  let result = '';
-  let cursor = 0;
+  const valueProperty = /(["']value["']\s*:\s*)("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)/giu;
+  const replacements: Array<{ start: number; end: number; value: string }> = [];
   for (const match of object.matchAll(valueProperty)) {
     if (depthAt[match.index] !== 1) continue;
     const prefix = match[1] as string;
-    const quotedValue = match[2] as string;
-    result += object.slice(cursor, match.index);
-    result += `${prefix}${quotedValue[0]}[REDACTED]${quotedValue[0]}`;
-    cursor = match.index + match[0].length;
+    const value = match[2] as string;
+    const quote = value[0] === '"' || value[0] === "'" ? value[0] : '';
+    replacements.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      value: `${prefix}${quote}[REDACTED]${quote}`,
+    });
+  }
+  const collectionProperty = /(["']value["']\s*:\s*)(?=[\[{])/giu;
+  for (const match of object.matchAll(collectionProperty)) {
+    if (depthAt[match.index] !== 1) continue;
+    const prefix = match[1] as string;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = balancedStructuredValueEnd(object, valueStart);
+    if (valueEnd === undefined) continue;
+    replacements.push({
+      start: match.index,
+      end: valueEnd,
+      value: `${prefix}"[REDACTED]"`,
+    });
+  }
+
+  let result = '';
+  let cursor = 0;
+  for (const replacement of replacements.sort((left, right) => left.start - right.start)) {
+    result += object.slice(cursor, replacement.start) + replacement.value;
+    cursor = replacement.end;
   }
   return result + object.slice(cursor);
 }
@@ -617,7 +822,14 @@ function redactAuthorizationHeaders(text: string): string {
   // Cookie separators are header syntax, not shell boundaries, on standalone lines.
   result = result.replace(
     /(^|\r\n|\n|\r)(\s*(?:[+-]\s*)?Cookie\s*:\s*)[^;\s=&|<>]+\s*=\s*(?:"(?:\\.|[^"\\\r\n])*"|[^;\s&|<>]*)(?:;\s*[^;\s=&|<>]+\s*=\s*(?:"(?:\\.|[^"\\\r\n])*"|[^;\s&|<>]*))*/giu,
-    '$1$2[REDACTED]',
+    (match, lineStart, prefix, offset, whole) => {
+      const lineEndMatch = (whole as string).slice(offset as number).search(/[\r\n]/u);
+      const lineEnd = lineEndMatch < 0 ? (whole as string).length : (offset as number) + lineEndMatch;
+      if (isShellExpression((whole as string).slice((offset as number) + (lineStart as string).length + (prefix as string).length, lineEnd))) {
+        return match;
+      }
+      return `${lineStart as string}${prefix as string}[REDACTED]`;
+    },
   );
 
   // 1. Standalone header lines at start of line: Authorization: Basic foo.
@@ -626,7 +838,7 @@ function redactAuthorizationHeaders(text: string): string {
   result = result.replace(/(^|\r\n|\n|\r)([^\r\n]*)/gu, (_match, lineStart, line) => {
     const headerMatch = (line as string).match(standaloneHeader);
     const prefix = headerMatch?.[1];
-    if (prefix === undefined || (line as string).slice(prefix.length).startsWith('[REDACTED]')) {
+    if (prefix === undefined) {
       return `${lineStart as string}${line as string}`;
     }
     const valueAndContext = (line as string).slice(prefix.length);
@@ -691,7 +903,11 @@ function redactAuthorizationHeaders(text: string): string {
   // 6. Inline unquoted header argument: Authorization:val, Cookie:val, etc.
   result = result.replace(
     new RegExp(`(?<!["'])(\\b${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^\\s"'\r\n&|><;]+)`, 'giu'),
-    '$1[REDACTED]',
+    (_match, prefix, val) => `${prefix as string}${
+      isShellExpression(val as string)
+        ? redactHeaderLiteralFragments(val as string)
+        : '[REDACTED]'
+    }`,
   );
 
   return result;
@@ -734,9 +950,10 @@ function redactYamlMultilineBlocks(text: string): string {
     if (line === undefined) continue;
 
     if (inRedactedBlock) {
-      const contentLine = blockDiffPrefix !== '' && line.startsWith(blockDiffPrefix)
-        ? line.slice(blockDiffPrefix.length)
-        : line;
+      const lineDiffPrefix = /^[+\-]/u.test(line) || (blockDiffPrefix === ' ' && line.startsWith(' '))
+        ? line[0] ?? ''
+        : '';
+      const contentLine = lineDiffPrefix !== '' ? line.slice(1) : line;
       if (contentLine.trim().length === 0) {
         out.push(line);
         continue;
@@ -751,20 +968,19 @@ function redactYamlMultilineBlocks(text: string): string {
         if (preserveShellContext) {
           const shellStructure = redactShellScalarLine(content, true);
           if (shellStructure !== undefined) {
-            out.push(`${blockDiffPrefix}${contentLine.slice(0, currentIndent)}${shellStructure}`);
+            out.push(`${lineDiffPrefix}${contentLine.slice(0, currentIndent)}${shellStructure}`);
           }
-        } else if (blockDiffPrefix !== '') {
-          out.push(`${blockDiffPrefix}${contentLine.slice(0, currentIndent)}[REDACTED]`);
+        } else {
+          out.push(`${lineDiffPrefix}${contentLine.slice(0, currentIndent)}[REDACTED]`);
         }
         continue;
       } else {
         inRedactedBlock = false;
-        blockDiffPrefix = '';
         preserveShellContext = false;
       }
     }
 
-    const yamlBlockMatch = line.match(/^([+-]?)(\s*)(["']?)([A-Za-z0-9_-]+)\3\s*:\s*[|>](?:[-+]?\d?|\d?[-+]?)(?:\s*#.*)?$/);
+    const yamlBlockMatch = line.match(/^([ +\-]?)(\s*)(["']?)([A-Za-z0-9_-]+)\3\s*:\s*[|>](?:[-+]?\d?|\d?[-+]?)(?:\s*#.*)?$/);
     if (yamlBlockMatch && yamlBlockMatch[2] !== undefined && yamlBlockMatch[4] !== undefined) {
       const diffPrefix = yamlBlockMatch[1] ?? '';
       const indentStr = yamlBlockMatch[2];
@@ -879,12 +1095,22 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // Treat shell operators (; && || | &), parenthesis, ?, and flow punctuation as key boundaries
   const keyBoundary = '(?:^[+-]?|(?:\\r\\n|\\n|\\r)[+-]?|\\s|[{,;(]|&&|\\|\\||[&|?])';
-  const ansiPattern = '(?:(?:\\\\u001b|\\u001b|\\x1b)\\[[0-9;]*m)*';
-  const keyTokenPattern = '([A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)';
+  const ansiSequencePattern = '(?:(?:\\\\u001b|\\u001b|\\x1b)\\[[0-9;]*m)';
+  const ansiPattern = `(?:${ansiSequencePattern})*`;
+  const keyTokenPattern = `((?:[A-Za-z0-9_.-]|${ansiSequencePattern})+)`;
 
   result = redactEscapedDoubleQuotedAssignments(result);
 
   // Quoted JSON properties: "key": "val" or unquoted key="val"
+  const escapedJsonAssignment = /("((?:[^"\\\r\n]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))+)"\s*:\s*)("(?:\\.|[^"\\\r\n])*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)/gu;
+  result = result.replace(escapedJsonAssignment, (match, prefix, key, value) => {
+    if (typeof key !== 'string' || !key.includes('\\') || !isSensitiveKeyToken(decodeJsonKeyEscapes(key))) {
+      return match;
+    }
+    const quote = typeof value === 'string' && value.startsWith('"') ? '"' : '';
+    return `${prefix as string}${quote}[REDACTED]${quote}`;
+  });
+
   const doubleQuotedAssignment = new RegExp(
     `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*[:=]\\s*)"((?:\\\\.|[^"\\r\\n\\\\])*)"`,
     'giu',
@@ -973,6 +1199,26 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   });
 
   // Standard unquoted assignments (key=val)
+  const dynamicUnquotedAssignmentStart = new RegExp(
+    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)`,
+    'giu',
+  );
+  let dynamicResult = '';
+  let dynamicCursor = 0;
+  for (const match of result.matchAll(dynamicUnquotedAssignmentStart)) {
+    const key = match[2];
+    if (key === undefined || !isSensitiveKeyToken(key) || match.index < dynamicCursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /[\s"';}\r\n&|><]/u);
+    const value = result.slice(valueStart, valueEnd);
+    if (value.startsWith('([REDACTED]')) continue;
+    if (!isShellExpression(value)) continue;
+    dynamicResult += result.slice(dynamicCursor, match.index);
+    dynamicResult += `${match[1] as string}${redactPasswordLiteralFragments(value)}`;
+    dynamicCursor = valueEnd;
+  }
+  result = dynamicResult + result.slice(dynamicCursor);
+
   const valToken = '((?:\\\\.|\\$\\{[^}\\r\\n]*\\}|[^\\s"\';}\\r\\n&|><]|<\\([^)]*\\)|>\\([^)]*\\))+)';
   const unquotedAssignment = new RegExp(
     `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)${valToken}`,
@@ -980,6 +1226,14 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   );
   result = result.replace(unquotedAssignment, (match, prefix, key, val, offset, whole) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    if (typeof val === 'string' && val.startsWith('([REDACTED]')) return match;
+    if (
+      typeof val === 'string'
+      && val.startsWith('[REDACTED]')
+      && isShellExpression(val)
+    ) {
+      return match;
+    }
     if (typeof val === 'string' && isShellExpression(val)) {
       return `${prefix}${redactPasswordLiteralFragments(val)}`;
     }

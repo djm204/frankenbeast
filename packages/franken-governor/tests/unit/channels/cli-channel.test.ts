@@ -915,6 +915,25 @@ describe('CliChannel', () => {
     expect(prompt).toContain('{"name":"Safe","value":"visible_sibling"}');
   });
 
+  it('redacts complete direct array and object values in sensitive structured headers', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary:
+        'headers=[{"name":"Authorization","value":["Bearer","opaque"],"safe":"visible_array_sibling"},' +
+        '{"name":"X-API-Key","value":{"token":"opaque"},"safe":"visible_object_sibling"},' +
+        '{"name":"Safe","value":["visible","collection"]}]',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('"Bearer","opaque"');
+    expect(prompt).not.toContain('"token":"opaque"');
+    expect(prompt).toContain('{"name":"Authorization","value":"[REDACTED]","safe":"visible_array_sibling"}');
+    expect(prompt).toContain('{"name":"X-API-Key","value":"[REDACTED]","safe":"visible_object_sibling"}');
+    expect(prompt).toContain('{"name":"Safe","value":["visible","collection"]}');
+  });
+
   it('redacts unterminated double-quoted X-Auth-Token header without swallowing line boundary', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -1166,6 +1185,20 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain('first_line');
     expect(prompt).not.toContain('second_line');
     expect(prompt).toContain('"password": [REDACTED]');
+    expect(prompt).toContain('safe: visible');
+  });
+
+  it('retains ordinary YAML indentation while redacting a one-space sensitive block body', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'password: |\n secret\nsafe: visible',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain(' secret');
+    expect(prompt).toContain('password: [REDACTED]\n|  [REDACTED]');
     expect(prompt).toContain('safe: visible');
   });
 
@@ -1849,6 +1882,20 @@ describe('CliChannel', () => {
     expect(prompt).toContain('PASSWORD=(\'[REDACTED]\' $(date) "[REDACTED]$(whoami)[REDACTED]") && echo visible_array_quote_context');
   });
 
+  it('preserves substitutions with quoted arguments inside unquoted sensitive array elements', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: "PASSWORD=(opaque-prefix$(printf '%s' harmless-argument)opaque-suffix) && echo visible_array_substitution_context",
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-prefix');
+    expect(prompt).not.toContain('opaque-suffix');
+    expect(prompt).toContain(
+      "PASSWORD=([REDACTED]$(printf '%s' harmless-argument)[REDACTED]) && echo visible_array_substitution_context",
+    );
+  });
+
   it('ignores quoted parentheses while balancing shell substitutions', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -1996,5 +2043,116 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain(discordWebhook);
     expect(prompt).toContain(`${ordinaryUrl} && echo visible_webhook_context`);
     expect(prompt.match(/\[REDACTED\]/gu)).toHaveLength(2);
+  });
+
+  it('preserves balanced substitutions containing operators in sensitive query values', async () => {
+    const redacted = redactSecrets('https://safe.example/?token=prefix$(reboot;shutdown)tail&safe=visible');
+    expect(redacted).toBe('https://safe.example/?token=[REDACTED]$(reboot;shutdown)[REDACTED]&safe=visible');
+  });
+
+  it('redacts over-cap sensitive query values through their real boundary', () => {
+    const overCapLiteral = 'x'.repeat(65_536);
+    const redacted = redactSecrets(
+      `https://safe.example/?token=${overCapLiteral}}violetquartz$(reboot;shutdown)amberstone&safe=visible`,
+    );
+    expect(redacted).toBe(
+      'https://safe.example/?token=[REDACTED]$(reboot;shutdown)[REDACTED]&safe=visible',
+    );
+
+    const splitExpression = redactSecrets(
+      `https://safe.example/?token=${'x'.repeat(65_535)}$(reboot;shutdown)}violetquartz&safe=visible`,
+    );
+    expect(splitExpression).toBe(
+      'https://safe.example/?token=[REDACTED]$(reboot;shutdown)[REDACTED]&safe=visible',
+    );
+  });
+
+  it('redacts non-string values in structured sensitive headers', () => {
+    const redacted = redactSecrets(
+      '[{"name":"Authorization","value":42,"safe":"visible"},{"key":"Cookie","value":false},{"name":"X-API-Key","value":null}]',
+    );
+    expect(redacted).toBe(
+      '[{"name":"Authorization","value":[REDACTED],"safe":"visible"},{"key":"Cookie","value":[REDACTED]},{"name":"X-API-Key","value":[REDACTED]}]',
+    );
+  });
+
+  it('preserves active substitutions while redacting standalone Cookie literals', () => {
+    const redacted = redactSecrets('Cookie: session=prefix$(reboot;shutdown)tail && echo visible_cookie_command');
+    expect(redacted).toBe('Cookie: [REDACTED]$(reboot;shutdown)[REDACTED] && echo visible_cookie_command');
+  });
+
+  it('scans balanced substitutions before unquoted sensitive-assignment operator boundaries', () => {
+    const redacted = redactSecrets('PASSWORD=secret$(reboot;shutdown)tail && echo visible_assignment_command');
+    expect(redacted).toBe('PASSWORD=[REDACTED]$(reboot;shutdown)[REDACTED] && echo visible_assignment_command');
+  });
+
+  it('recognizes established short sensitive aliases without overmatching', () => {
+    const redacted = redactSecrets(
+      'AUTH=opaque-auth COOKIE=opaque-cookie PERSONAL_ACCESS_TOKEN=opaque-pat AUTHOR=visible-author COOKIECUTTER=visible-cookiecutter PERSONAL_ACCESS_TOKENIZER=visible-tokenizer',
+    );
+    expect(redacted).toBe(
+      'AUTH=[REDACTED] COOKIE=[REDACTED] PERSONAL_ACCESS_TOKEN=[REDACTED] AUTHOR=visible-author COOKIECUTTER=visible-cookiecutter PERSONAL_ACCESS_TOKENIZER=visible-tokenizer',
+    );
+  });
+
+  it('preserves active substitutions in inline unquoted sensitive headers', () => {
+    const redacted = redactSecrets(
+      'curl -H Authorization:secret$(reboot)tail https://safe.example && echo visible_header_command',
+    );
+    expect(redacted).toBe(
+      'curl -H Authorization:[REDACTED]$(reboot)[REDACTED] https://safe.example && echo visible_header_command',
+    );
+  });
+
+  it('redacts bounded multiline sensitive Bash arrays', () => {
+    const redacted = redactSecrets(
+      'PASSWORD=(\n  "opaque-one"\n  opaque-two\n  "$(date)"\n) && echo visible_array_command',
+    );
+    expect(redacted).toBe(
+      'PASSWORD=(\n  "[REDACTED]"\n  [REDACTED]\n  "$(date)"\n) && echo visible_array_command',
+    );
+  });
+
+  it('validates complete private-key bodies with consistent unified-diff prefixes', () => {
+    const redacted = redactSecrets(
+      '+-----BEGIN PRIVATE KEY-----\n+QUJDREVGR0hJSktM\n+TU5PUFFSU1RVVldY\n+-----END PRIVATE KEY-----\n+safe=visible_diff_context',
+    );
+    expect(redacted).toBe('+[REDACTED]\n+safe=visible_diff_context');
+  });
+
+  it('tracks sensitive YAML block bodies across context, addition, and removal diff prefixes', () => {
+    const redacted = redactSecrets(
+      ' password: |\n-  old-secret\n+  new-secret\n   context-secret\n safe: visible_yaml_diff_context',
+    );
+    expect(redacted).toBe(
+      ' password: [REDACTED]\n-  [REDACTED]\n+  [REDACTED]\n   [REDACTED]\n safe: visible_yaml_diff_context',
+    );
+  });
+
+  it('accepts a pre-redaction header marker only as the complete value before a shell boundary', () => {
+    const redacted = redactSecrets(
+      'Authorization: [REDACTED] opaque-secret && echo visible_spoof_context\nAuthorization: [REDACTED] || echo visible_sanitized_context',
+    );
+    expect(redacted).toBe(
+      'Authorization: [REDACTED] && echo visible_spoof_context\nAuthorization: [REDACTED] || echo visible_sanitized_context',
+    );
+  });
+
+  it('decodes JSON key escapes before sensitive classification', () => {
+    const redacted = redactSecrets(
+      '{"pass\\u0077ord":"opaque-password","api\\u005fkey":42,"safe":"visible-json-context"}',
+    );
+    expect(redacted).toBe(
+      '{"pass\\u0077ord":"[REDACTED]","api\\u005fkey":[REDACTED],"safe":"visible-json-context"}',
+    );
+  });
+
+  it('recognizes supported ANSI sequences embedded inside sensitive keys', () => {
+    const redacted = redactSecrets(
+      'PASS\\u001b[31mWORD=opaque-literal-ansi API\u001b[32m_KEY=opaque-control-ansi COLOR\u001b[34mWAY=visible-colorway',
+    );
+    expect(redacted).toBe(
+      'PASS\\u001b[31mWORD=[REDACTED] API\u001b[32m_KEY=[REDACTED] COLOR\u001b[34mWAY=visible-colorway',
+    );
   });
 });
