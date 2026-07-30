@@ -75,32 +75,39 @@ describe('NetworkServiceList destructive action confirmations', () => {
 });
 
 describe('NetworkServiceList status announcements', () => {
-  it('announces an updated service status without making the entire list live', () => {
+  it('identifies the updated service without making the entire list live', () => {
     const handlers = {
       onSelectLogs: vi.fn(),
       onStart: vi.fn(),
       onStop: vi.fn(),
       onRestart: vi.fn(),
     };
+    const workerService = { id: 'worker-runtime', status: 'running' };
+    const services = [runningService, workerService];
     const { rerender } = render(
-      <NetworkServiceList services={[runningService]} {...handlers} />,
+      <NetworkServiceList services={services} {...handlers} />,
     );
 
     const serviceList = screen.getByRole('list', { name: 'Network services' });
     expect(serviceList.getAttribute('aria-live')).toBeNull();
-    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
 
-    const statusRegion = screen.getByText('running');
+    const statusRegion = screen.getAllByText('running')[0]!;
     expect(statusRegion.getAttribute('aria-live')).toBe('polite');
     expect(statusRegion.getAttribute('aria-atomic')).toBe('true');
+    expect(statusRegion.textContent).toBe('chat-gateway status: running');
 
     rerender(
       <NetworkServiceList
-        services={[{ ...runningService, status: 'degraded' }]}
+        services={[
+          { ...runningService, status: 'degraded' },
+          workerService,
+        ]}
         {...handlers}
       />,
     );
 
     expect(screen.getByText('degraded')).toBe(statusRegion);
+    expect(statusRegion.textContent).toBe('chat-gateway status: degraded');
   });
 });

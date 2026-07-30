@@ -174,7 +174,10 @@ export function NetworkServiceList({
           <article key={service.id} className="network-services__item" role="listitem">
             <div>
               <strong>{service.id}</strong>
-              <p aria-atomic="true" aria-live="polite">{service.status}</p>
+              <p aria-atomic="true" aria-live="polite">
+                <span className="sr-only">{service.id} status: </span>
+                {service.status}
+              </p>
               {service.inProcess && <small>in-process</small>}
               {service.explanation && <span>{service.explanation}</span>}
               {service.url && <small>{service.url}</small>}
