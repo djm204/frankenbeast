@@ -69,6 +69,7 @@ export class GeminiCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
+    request.signal?.throwIfAborted();
     const workspaceDir = resolve(this.workingDir);
     let contextWorkingDir: string | undefined;
     let settingsWorkingDir: string | undefined;
@@ -94,6 +95,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       }
 
       const args = this.buildArgs(request);
+      request.signal?.throwIfAborted();
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
         env: {
@@ -102,6 +104,7 @@ export class GeminiCliAdapter implements ILlmProvider {
           GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
+        ...(request.signal ? { signal: request.signal } : {}),
       });
 
       const spawnState: {

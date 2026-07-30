@@ -50,10 +50,12 @@ export class CodexCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
+    request.signal?.throwIfAborted();
     const args = this.buildArgs(request);
     const proc = spawn(this.binaryPath, args, {
       env: sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(request.signal ? { signal: request.signal } : {}),
     });
 
     const spawnState: {
