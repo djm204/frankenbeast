@@ -7,6 +7,11 @@
 - A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
 - Informational evaluator findings must not return a blocking `fail` verdict when the pipeline contract treats `pass` plus `info` as non-blocking. Preserve the finding and score signal, and fix the verdict/severity drift instead of adding environment configuration to pure evaluator logic.
 
+## 2026-07-30 — Adapter-level deadlines need one owner and one cancellation signal
+- A client wrapper that only forwards `timeoutMs` remains unbounded for generic adapters. Enforce a default/request deadline at the wrapper, pass the same abort signal through both request transformation and `execute()`, and race completion against that signal so the caller returns even when adapter work stalls.
+- Let adapters that already enforce and clean up their own deadline explicitly advertise that capability; the wrapper should forward the normalized timeout but skip its extra timer. Timeout-aware process adapters must abort their child process, while generic adapters receive the wrapper signal for cooperative cleanup.
+- Propagate cancellation through provider registries into SDK request options and child-process spawn signals. Caller cancellation must release half-open circuit-breaker reservations without recording provider failures, and timer inputs must be capped at Node's signed 32-bit delay limit.
+
 ## 2026-07-27 — Managed-service CLI visibility must use explicit operator paths
 - A managed service that rebuilds `PATH` should add only explicit conventional operator locations (for example `$HOME/.local/bin` and `/usr/local/bin`) beside the runtime/system directories; never copy the parent shell's `PATH`, because arbitrary inherited entries would undo process isolation. Validate home-derived entries as absolute and delimiter-free before adding them.
 - Audit nested child launchers after widening a managed PATH. Bare commands that were safe only under the old restricted PATH (such as a dashboard process spawning `npm`) must be replaced with already-resolved trusted executable/CLI paths, and fallback resolution must search the sanitized managed PATH rather than the parent process PATH.

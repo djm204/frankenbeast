@@ -51,10 +51,12 @@ export class ClaudeCliAdapter implements ILlmProvider {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
+    request.signal?.throwIfAborted();
     const args = this.buildArgs(request);
     const proc = spawn(this.binaryPath, args, {
       env: this.sanitizedEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(request.signal ? { signal: request.signal } : {}),
     });
 
     const spawnState: {
