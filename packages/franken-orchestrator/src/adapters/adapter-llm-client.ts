@@ -1,5 +1,6 @@
 import type { ILlmClient, LlmCompletionOptions, LlmCompletionResult, ProviderContext, TokenUsage } from '@franken/types';
 import { randomUUID } from 'node:crypto';
+import { redactSensitiveText } from '../logging/redaction.js';
 
 type UnifiedRequest = {
   id: string;
@@ -26,6 +27,46 @@ type UnifiedResponse = {
   /** The CLI provider/model that actually served this completion, and any fallback that occurred. */
   providerContext?: ProviderContext;
 };
+
+const MAX_OUTWARD_ERROR_CONTEXT_LENGTH = 1_000;
+
+function safeAdapterErrorContext(error: unknown): string {
+  let errorClass: string = typeof error;
+  let message = 'No diagnostic available';
+  let errorValue: Error | undefined;
+  try {
+    if (error instanceof Error) {
+      errorValue = error;
+    }
+  } catch {
+    // Treat values with hostile prototype traps as opaque thrown values.
+  }
+  if (errorValue) {
+    try {
+      errorClass = String(errorValue.name);
+    } catch {
+      errorClass = 'Error';
+    }
+    try {
+      message = String(errorValue.message);
+    } catch {
+      // Keep the fixed safe fallback when an untrusted error getter throws.
+    }
+  } else {
+    try {
+      message = String(error);
+    } catch {
+      // Keep the fixed safe fallback when an untrusted conversion throws.
+    }
+  }
+  const safeClass = redactSensitiveText(errorClass.replace(/\s+/gu, ' ')).trim().slice(0, 100);
+  const safeMessage = redactSensitiveText(message.replace(/\s+/gu, ' '))
+    .trim()
+    .slice(0, MAX_OUTWARD_ERROR_CONTEXT_LENGTH);
+  return redactSensitiveText(
+    `${safeClass || 'Error'}: ${safeMessage || 'No diagnostic available'}`,
+  );
+}
 
 export interface IAdapter {
   transformRequest(request: UnifiedRequest): unknown;
@@ -132,9 +173,8 @@ export class AdapterLlmClient implements ILlmClient {
         usage = response.usage;
         providerContext = response.providerContext;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
         throw new AdapterLlmError(
-          `LLM adapter call failed for request ${requestId}: ${message}`,
+          `LLM adapter call failed for request ${requestId}: ${safeAdapterErrorContext(error)}`,
           requestId,
           { cause: error },
         );
