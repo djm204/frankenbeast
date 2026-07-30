@@ -11,6 +11,58 @@ import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js
 
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 
+/**
+ * All vendor keys aider can plausibly need across LiteLLM-supported
+ * backends, used as a fallback when the active model string doesn't match a
+ * known prefix (unrecognized backend, or no model configured at all). This
+ * can't be fully exhaustive — LiteLLM supports dozens of providers — but
+ * covers the common ones. Extend if another backend is configured.
+ */
+const ALL_KNOWN_VENDOR_AUTH_ENV_VARS: readonly string[] = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'AZURE_API_KEY',
+  'GEMINI_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'OPENROUTER_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'TOGETHER_API_KEY',
+  'COHERE_API_KEY',
+  'XAI_API_KEY',
+  'PERPLEXITY_API_KEY',
+  'FIREWORKS_API_KEY',
+];
+
+/**
+ * Maps a LiteLLM model-string prefix (`<provider>/<model>`, per LiteLLM's
+ * own convention) to the vendor env var it needs. Bare model names with no
+ * `provider/` prefix are OpenAI's convention (`gpt-4o`, `o1-mini`, ...).
+ */
+const LITELLM_PREFIX_AUTH_ENV_VAR: ReadonlyArray<readonly [prefix: string, envVar: string]> = [
+  ['anthropic/', 'ANTHROPIC_API_KEY'],
+  ['claude', 'ANTHROPIC_API_KEY'],
+  ['openai/', 'OPENAI_API_KEY'],
+  ['gpt-', 'OPENAI_API_KEY'],
+  ['o1', 'OPENAI_API_KEY'],
+  ['o3', 'OPENAI_API_KEY'],
+  ['azure/', 'AZURE_API_KEY'],
+  ['gemini/', 'GEMINI_API_KEY'],
+  ['vertex_ai/', 'GEMINI_API_KEY'],
+  ['groq/', 'GROQ_API_KEY'],
+  ['mistral/', 'MISTRAL_API_KEY'],
+  ['openrouter/', 'OPENROUTER_API_KEY'],
+  ['deepseek/', 'DEEPSEEK_API_KEY'],
+  ['together_ai/', 'TOGETHER_API_KEY'],
+  ['together/', 'TOGETHER_API_KEY'],
+  ['cohere/', 'COHERE_API_KEY'],
+  ['cohere_chat/', 'COHERE_API_KEY'],
+  ['xai/', 'XAI_API_KEY'],
+  ['perplexity/', 'PERPLEXITY_API_KEY'],
+  ['fireworks_ai/', 'FIREWORKS_API_KEY'],
+  ['fireworks/', 'FIREWORKS_API_KEY'],
+];
+
 export class AiderProvider implements ICliProvider {
   readonly name = 'aider';
   readonly command = 'aider';
@@ -56,27 +108,22 @@ export class AiderProvider implements ICliProvider {
   /**
    * Aider has no fixed backend — its default chat model is Claude Sonnet,
    * but `--model` (and `providerOverrides.aider.model`) accepts any
-   * LiteLLM-supported model string, each with its own vendor API key. This
-   * can't be fully exhaustive (LiteLLM supports dozens of providers), but
-   * covers the common ones so overriding aider's model doesn't silently
-   * break auth. Extend this list if another backend is configured.
+   * LiteLLM-supported model string, each with its own vendor API key.
+   * Resolve only the *active* backend's key from the model string when it
+   * matches a known LiteLLM prefix, so an aider invocation on one backend
+   * doesn't also receive every other configured vendor's credentials. Falls
+   * back to the full known-vendor list when the model is unset or doesn't
+   * match a recognized prefix, favoring a working (if slightly
+   * over-permissive) invocation over a silently broken one.
    */
-  requiredAuthEnvVars(): readonly string[] {
-    return [
-      'ANTHROPIC_API_KEY',
-      'OPENAI_API_KEY',
-      'AZURE_API_KEY',
-      'GEMINI_API_KEY',
-      'GROQ_API_KEY',
-      'MISTRAL_API_KEY',
-      'OPENROUTER_API_KEY',
-      'DEEPSEEK_API_KEY',
-      'TOGETHER_API_KEY',
-      'COHERE_API_KEY',
-      'XAI_API_KEY',
-      'PERPLEXITY_API_KEY',
-      'FIREWORKS_API_KEY',
-    ];
+  requiredAuthEnvVars(model?: string): readonly string[] {
+    const resolved = (model ?? this.chatModel ?? '').toLowerCase();
+    for (const [prefix, envVar] of LITELLM_PREFIX_AUTH_ENV_VAR) {
+      if (resolved.startsWith(prefix)) {
+        return [envVar];
+      }
+    }
+    return ALL_KNOWN_VENDOR_AUTH_ENV_VARS;
   }
 
   supportsStreamJson(): boolean {

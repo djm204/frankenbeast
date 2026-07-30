@@ -632,6 +632,23 @@ describe('MartinLoop', () => {
     delete process.env['CLAUDECODE'];
   });
 
+  it('strips secret-shaped ambient env vars while preserving the provider auth var (spawnIteration path)', async () => {
+    process.env['SOME_UNRELATED_API_KEY'] = 'unrelated-secret';
+    process.env['ANTHROPIC_API_KEY'] = 'anthropic-secret';
+
+    queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ provider: 'claude' }));
+
+    const spawnEnv = (mockSpawn.mock.calls[0] as unknown[])[2] as { env: Record<string, string> };
+    expect(spawnEnv.env).not.toHaveProperty('SOME_UNRELATED_API_KEY');
+    expect(spawnEnv.env).toHaveProperty('ANTHROPIC_API_KEY', 'anthropic-secret');
+
+    delete process.env['SOME_UNRELATED_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+  });
+
   // ── 11. Token estimation via provider ──
 
   it('estimates tokens via provider: /4 for claude, /16 for codex', async () => {

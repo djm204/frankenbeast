@@ -32,6 +32,7 @@ import {
   type CommandFailure,
 } from '../errors/command-failure.js';
 import { redactSensitiveText } from '../logging/redaction.js';
+import { filterSecretEnvVars } from '../security/env-filter.js';
 
 const MAX_RATE_LIMIT_WARNING_STDERR_CHARS = 256;
 const MAX_RATE_LIMIT_WARNING_DIAGNOSTICS_CHARS = 768;
@@ -314,7 +315,11 @@ function spawnIteration(
       ? [...providerArgs, '--', prompt]
       : [...providerArgs, prompt];
 
-    const env = { ...provider.filterEnv(process.env as Record<string, string>) };
+    const env = {
+      ...provider.filterEnv(
+        filterSecretEnvVars(process.env as Record<string, string>, provider.requiredAuthEnvVars?.(model)),
+      ),
+    };
     const plain = isPlainOutput();
     if (plain) {
       env.NO_COLOR = env.NO_COLOR ?? '1';

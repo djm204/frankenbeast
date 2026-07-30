@@ -14,99 +14,12 @@ import {
   type CommandFailure,
 } from '../errors/command-failure.js';
 import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
+import { filterSecretEnvVars, isSecretEnvVarName } from '../security/env-filter.js';
 
-/**
- * Matches env var names that look like they carry a secret (API keys, tokens,
- * passwords, credentials, certs, etc.), checked on underscore-delimited
- * segments so unrelated names like `KEYBOARD_LAYOUT` are left alone. `PWD`
- * (the shell's present-working-directory var) is included as a segment so
- * `MYSQL_PWD` is caught, but the bare `PWD` name itself is special-cased as
- * safe below.
- *
- * This is a denylist rather than a hand-maintained allowlist: the spawned CLI
- * subprocesses (claude/codex/gemini/aider) need broad standard environment
- * access to function (PATH, HOME, locale vars, npm/node config, etc.), so
- * allowlisting would be brittle and prone to breaking legitimate CLI
- * behavior. Only vars that look secret-shaped are stripped before the
- * environment is handed to `spawn()`.
- */
-const SECRET_ENV_NAME_PATTERN =
-  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK|PWD)(?:_|$)/i;
-
-/**
- * Catches common secret-name segments written without a delimiter (e.g.
- * `APIKEY`, `PGPASSWORD` — psql's undelimited password env var).
- */
-const SECRET_ENV_NAME_COMPOUND_PATTERN =
-  /(?:APIKEY|ACCESSKEY|SECRETKEY|PRIVATEKEY|AUTHTOKEN|CLIENTSECRET|PASSWORD)/i;
-
-/**
- * Env var names that would otherwise match the patterns above but are
- * capability/configuration pointers, not secrets themselves — e.g.
- * `SSH_AUTH_SOCK` is a path to the running ssh-agent's socket,
- * `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS` point at CA bundle files, and
- * `DOCKER_CERT_PATH` (see `network/services/managed-service-env.ts`) points
- * at a directory of TLS client cert files for talking to a remote Docker
- * daemon. Stripping these breaks legitimate CLI behavior (git/ssh via the
- * user's agent, TLS trust for provider HTTPS calls, Docker client auth)
- * without reducing secret exposure, since none of them carry credential
- * material in the variable itself. `PWD` (present working directory) is
- * included for the same reason.
- */
-const SAFE_ENV_NAME_EXCEPTIONS = new Set([
-  'PWD',
-  'SSH_AUTH_SOCK',
-  'SSH_AGENT_PID',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'NODE_EXTRA_CA_CERTS',
-  'DOCKER_CERT_PATH',
-]);
-
-/**
- * Git's indexed runtime-config mechanism (`GIT_CONFIG_COUNT` plus
- * `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` pairs) is how this repo
- * itself injects config into spawned git commands (see
- * `beasts/execution/docker-container-runtime.ts`). The `KEY` segment in
- * `GIT_CONFIG_KEY_0` refers to a config key *name* (e.g. `safe.directory`),
- * not a secret — stripping it silently breaks every git command the CLI
- * runs. Exempt the whole indexed tuple by name shape rather than by value,
- * since the mechanism is inherently non-secret.
- */
-const SAFE_ENV_NAME_PATTERNS: readonly RegExp[] = [/^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/i];
-
-/** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
-export function isSecretEnvVarName(name: string): boolean {
-  if (SAFE_ENV_NAME_EXCEPTIONS.has(name.toUpperCase())) return false;
-  if (SAFE_ENV_NAME_PATTERNS.some((pattern) => pattern.test(name))) return false;
-  return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
-}
-
-/**
- * Returns a copy of `env` with any secret-shaped keys omitted, except for
- * names in `exemptNames` (case-insensitive) — used to let the actively
- * selected provider's own required auth var(s) (from
- * `ICliProvider.requiredAuthEnvVars()`, e.g. `ANTHROPIC_API_KEY` for
- * `claude`, `OPENAI_API_KEY` for `codex`) survive even though they are
- * themselves secret-shaped: they're the CLI's own designed auth channel, not
- * an unrelated ambient secret leaking through. Declaring this on the
- * provider (rather than a lookup table keyed by name here) means custom
- * providers registered via `ProviderRegistry.register()` can preserve their
- * own credentials too.
- */
-export function filterSecretEnvVars(
-  env: Record<string, string>,
-  exemptNames?: readonly string[],
-): Record<string, string> {
-  const exempt = new Set((exemptNames ?? []).map((name) => name.toUpperCase()));
-  const filtered: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (exempt.has(key.toUpperCase()) || !isSecretEnvVarName(key)) {
-      filtered[key] = value;
-    }
-  }
-  return filtered;
-}
+// Re-exported for backward compatibility — the filtering logic now lives in
+// `security/env-filter.ts` so it can be shared with the Martin-loop spawn
+// path (`skills/martin-loop.ts`), which has its own `spawn()` call site.
+export { filterSecretEnvVars, isSecretEnvVarName };
 
 type CliCacheSessionHint = {
   key: string;
@@ -355,7 +268,7 @@ export class CliLlmAdapter implements IAdapter {
               : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
-          env: provider.filterEnv(this.captureEnv(provider)),
+          env: provider.filterEnv(this.captureEnv(provider, activeModel)),
           prompt,
           signal,
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
@@ -638,12 +551,12 @@ export class CliLlmAdapter implements IAdapter {
     return this.opts.providerOverrides?.[name]?.extraArgs;
   }
 
-  private captureEnv(provider: ICliProvider): Record<string, string> {
+  private captureEnv(provider: ICliProvider, model: string | undefined): Record<string, string> {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
     }
-    const safeEnv = filterSecretEnvVars(rawEnv, provider.requiredAuthEnvVars?.());
+    const safeEnv = filterSecretEnvVars(rawEnv, provider.requiredAuthEnvVars?.(model));
     if (isPlainOutput()) {
       safeEnv.NO_COLOR = safeEnv.NO_COLOR ?? '1';
       safeEnv.FORCE_COLOR = '0';

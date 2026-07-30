@@ -617,7 +617,7 @@ describe('CliLlmAdapter', () => {
         }
       });
 
-      it('preserves common LiteLLM vendor keys for aider when overridden to a non-default backend', async () => {
+      it('falls back to the full known-vendor list for aider when the backend model is unknown/unset', async () => {
         const originalEnv = process.env;
         process.env = {
           ...originalEnv,
@@ -637,6 +637,35 @@ describe('CliLlmAdapter', () => {
           expect(env['GROQ_API_KEY']).toBe('groq-secret');
           expect(env['MISTRAL_API_KEY']).toBe('mistral-secret');
           expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves only the active backend vendor key for aider when its model is explicitly overridden', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          GROQ_API_KEY: 'groq-secret',
+          OPENROUTER_API_KEY: 'openrouter-secret',
+          ANTHROPIC_API_KEY: 'anthropic-secret',
+          OPENAI_API_KEY: 'openai-secret',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(
+            aiderProvider,
+            { ...baseOpts, providerOverrides: { aider: { model: 'groq/llama-3.1-70b-versatile' } } },
+            spawnFn,
+          );
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['GROQ_API_KEY']).toBe('groq-secret');
+          expect(env['OPENROUTER_API_KEY']).toBeUndefined();
+          expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+          expect(env['OPENAI_API_KEY']).toBeUndefined();
         } finally {
           process.env = originalEnv;
         }
@@ -1852,90 +1881,19 @@ describe('CliLlmAdapter', () => {
     });
   });
 
-  describe('isSecretEnvVarName / filterSecretEnvVars', () => {
-    it('flags common secret-shaped env var names', () => {
-      const secretNames = [
-        'SOME_API_KEY',
-        'OPENAI_API_KEY',
-        'ANTHROPIC_API_KEY',
-        'AWS_SECRET_ACCESS_KEY',
-        'AWS_SESSION_TOKEN',
-        'GITHUB_TOKEN',
-        'GH_TOKEN',
-        'NPM_TOKEN',
-        'DATABASE_PASSWORD',
-        'DB_PASSWD',
-        'MY_APP_SECRET',
-        'CLIENT_SECRET',
-        'PRIVATE_KEY',
-        'ENCRYPTION_KEY',
-        'BASIC_AUTH',
-        'SESSION_COOKIE',
-        'TLS_CERTIFICATE',
-        'SLACK_WEBHOOK_URL',
-        'GOOGLE_APPLICATION_CREDENTIALS',
-        'PGPASSWORD',
-        'MYSQL_PWD',
-      ];
-      for (const name of secretNames) {
-        expect(isSecretEnvVarName(name), `expected ${name} to be flagged as secret`).toBe(true);
-      }
+  // Full coverage of the filtering rules lives in
+  // tests/unit/security/env-filter.test.ts, against the module directly.
+  // This just smoke-tests that cli-llm-adapter.js still re-exports the same
+  // implementation (for backward compatibility with existing importers).
+  describe('isSecretEnvVarName / filterSecretEnvVars (re-export smoke test)', () => {
+    it('re-exports the same secret-detection behavior as security/env-filter.js', () => {
+      expect(isSecretEnvVarName('SOME_API_KEY')).toBe(true);
+      expect(isSecretEnvVarName('PATH')).toBe(false);
     });
 
-    it('does not flag ordinary CLI/runtime env var names', () => {
-      const safeNames = [
-        'PATH',
-        'HOME',
-        'SHELL',
-        'LANG',
-        'LC_ALL',
-        'TERM',
-        'PWD',
-        'TMPDIR',
-        'USER',
-        'EDITOR',
-        'CI',
-        'NODE_ENV',
-        'NO_COLOR',
-        'FORCE_COLOR',
-        'npm_config_registry',
-        'KEYBOARD_LAYOUT',
-        'XDG_CONFIG_HOME',
-        'SSH_AUTH_SOCK',
-        'SSH_AGENT_PID',
-        'SSL_CERT_FILE',
-        'SSL_CERT_DIR',
-        'NODE_EXTRA_CA_CERTS',
-        'DOCKER_CERT_PATH',
-        'GIT_CONFIG_COUNT',
-        'GIT_CONFIG_KEY_0',
-        'GIT_CONFIG_VALUE_0',
-        'GIT_CONFIG_KEY_12',
-      ];
-      for (const name of safeNames) {
-        expect(isSecretEnvVarName(name), `expected ${name} to NOT be flagged as secret`).toBe(false);
-      }
-    });
-
-    it('filterSecretEnvVars removes only secret-shaped keys and preserves the rest', () => {
-      const input = {
-        PATH: '/usr/bin',
-        HOME: '/home/test',
-        SOME_API_KEY: 'sk-secret',
-        DATABASE_PASSWORD: 'hunter2',
-      };
-      const filtered = filterSecretEnvVars(input);
-      expect(filtered).toEqual({ PATH: '/usr/bin', HOME: '/home/test' });
-    });
-
-    it('filterSecretEnvVars preserves keys listed in exemptNames despite looking secret-shaped', () => {
-      const input = {
-        PATH: '/usr/bin',
-        ANTHROPIC_API_KEY: 'anthropic-secret',
-        OPENAI_API_KEY: 'openai-secret',
-      };
-      const filtered = filterSecretEnvVars(input, ['ANTHROPIC_API_KEY']);
-      expect(filtered).toEqual({ PATH: '/usr/bin', ANTHROPIC_API_KEY: 'anthropic-secret' });
+    it('re-exports filterSecretEnvVars with the same filtering behavior', () => {
+      const filtered = filterSecretEnvVars({ PATH: '/usr/bin', SOME_API_KEY: 'sk-secret' });
+      expect(filtered).toEqual({ PATH: '/usr/bin' });
     });
   });
 });
