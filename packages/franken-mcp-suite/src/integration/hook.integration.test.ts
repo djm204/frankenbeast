@@ -94,6 +94,110 @@ describe('fbeast-hook runtime', () => {
     expect(seen).toContain('rm -rf /tmp/nope');
   });
 
+  it('preserves governed commands while redacting shadowed structured secrets', async () => {
+    const tupleSecret = ['governed', 'tuple', 'fixture'].join('-');
+    const pairSecret = ['governed', 'pair', 'fixture'].join('-');
+    const contexts = [
+      `{"output":[["Authorization","Basic ${tupleSecret}"]],"output":"rm -rf /tmp/nope"}`,
+      `{"output":{"value":"${pairSecret}","name":"OPENAI_API_KEY"},"output":"rm -rf /tmp/nope"}`,
+    ];
+
+    for (const context of contexts) {
+      const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+      const governedContext = result.checkCalls[0]!.context;
+
+      expect(governedContext).toContain('rm -rf /tmp/nope');
+      expect(governedContext).not.toContain(tupleSecret);
+      expect(governedContext).not.toContain(pairSecret);
+    }
+  });
+
+  it('redacts escaped quotes in shadowed structured secrets without hiding governed commands', async () => {
+    const escapedSecret = String.raw`abc\\\"def`;
+    const structuredContext = String.raw`{\"output\":{\"value\":\"${escapedSecret}\",\"name\":\"OPENAI_API_KEY\"},\"output\":\"rm -rf /tmp/nope\"}`;
+    const structuredResult = await runHookForTest(['pre-tool', '--', 'Bash'], { context: structuredContext });
+    const governedContext = structuredResult.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain('abc');
+    expect(governedContext).not.toContain('def');
+  });
+
+  it('redacts every duplicate value in labelled shadowed objects', async () => {
+    const firstSecret = ['first', 'pair', 'fixture'].join('-');
+    const secondSecret = ['second', 'pair', 'fixture'].join('-');
+    const context = String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"${firstSecret}\",\"value\":\"${secondSecret}\"},\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toBe(String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"[REDACTED]\",\"value\":\"[REDACTED]\"},\"output\":\"rm -rf /tmp/nope\"}`);
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain(firstSecret);
+    expect(governedContext).not.toContain(secondSecret);
+  });
+
+  it('redacts labelled shadowed objects that contain nested metadata', async () => {
+    const secret = ['nested', 'pair', 'fixture'].join('-');
+    const context = String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"${secret}\",\"meta\":{}},\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain(secret);
+  });
+
+  it('ignores braces inside quoted shadowed structured values', async () => {
+    const secret = ['abc', '}', 'def'].join('');
+    const context = String.raw`{\"output\":{\"name\":\"OPENAI_API_KEY\",\"value\":\"${secret}\"},\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain('abc');
+    expect(governedContext).not.toContain('def');
+  });
+
+  it('redacts parent and nested labelled shadowed object values', async () => {
+    const outerSecret = ['outer', 'pair', 'fixture'].join('-');
+    const innerSecret = ['inner', 'pair', 'fixture'].join('-');
+    const context = String.raw`{\"name\":\"OPENAI_API_KEY\",\"value\":\"${outerSecret}\",\"meta\":{\"name\":\"PASSWORD\",\"value\":\"${innerSecret}\"}}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).not.toContain(outerSecret);
+    expect(governedContext).not.toContain(innerSecret);
+    expect(governedContext.match(/\[REDACTED\]/g)).toHaveLength(2);
+  });
+
+  it('redacts bracket characters in shadowed tuple values', async () => {
+    const secret = ['abc', ']', 'def'].join('');
+    const context = String.raw`{\"output\":[[\"password\",\"${secret}\"]],\"output\":\"rm -rf /tmp/nope\"}`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain('rm -rf /tmp/nope');
+    expect(governedContext).not.toContain('abc');
+    expect(governedContext).not.toContain('def');
+  });
+
+  it('preserves shell substitutions while redacting surrounding tuple secrets', async () => {
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const context = String.raw`run [[\"Authorization\",\"prefix-${substitution}-suffix\"]]`;
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+    const governedContext = result.checkCalls[0]!.context;
+
+    expect(governedContext).toContain(substitution);
+    expect(governedContext).not.toContain('prefix');
+    expect(governedContext).not.toContain('suffix');
+  });
+
+  it('stops SigV4 option redaction at shell command separators for governance', async () => {
+    const context = '--aws-authorization AWS4-HMAC-SHA256 Credential=scope;rm -rf /tmp/nope';
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], { context });
+
+    expect(result.checkCalls[0]!.context).toBe('--aws-authorization [REDACTED];rm -rf /tmp/nope');
+  });
+
   it('redacts prefixed env-style credential assignments before governor persistence', async () => {
     const values = [
       ['openai', 'fixture', 'value'].join('-'),
@@ -140,6 +244,32 @@ describe('fbeast-hook runtime', () => {
     const seen = result.checkCalls[0]!.context;
     expect(seen).toBe('OPENAI_API_KEY=[REDACTED] OTHER_TOKEN=$(rm -rf /tmp/nope)');
     expect(seen).not.toContain(value);
+  });
+
+  it('redacts dollar and escaped characters in option credentials while preserving command substitutions', async () => {
+    const dollarSecret = ['pa', '$', 'ssword'].join('');
+    const escapedSecret = String.raw`pa\ ssword`;
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `--password ${dollarSecret} --client-secret ${escapedSecret} --api-key ${substitution}`,
+    });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe(`--password [REDACTED] --client-secret [REDACTED] --api-key ${substitution}`);
+    expect(seen).not.toContain(dollarSecret);
+    expect(seen).not.toContain(escapedSecret);
+  });
+
+  it('redacts option secret prefixes and suffixes around command substitutions', async () => {
+    const substitution = '$' + '(rm -rf /tmp/nope)';
+    const result = await runHookForTest(['pre-tool', '--', 'Bash'], {
+      context: `--api-key prefix${substitution}suffix --format json`,
+    });
+
+    const seen = result.checkCalls[0]!.context;
+    expect(seen).toBe(`--api-key [REDACTED]${substitution}[REDACTED] --format json`);
+    expect(seen).not.toContain('prefix');
+    expect(seen).not.toContain('suffix');
   });
 
   it('preserves quoted command substitutions while redacting escaped credential values', async () => {
@@ -443,16 +573,29 @@ describe('fbeast-hook runtime', () => {
   it('redacts prefixed option-style credential flags', async () => {
     const authSecret = ['proxy', 'flag', 'fixture'].join('-');
     const keySecret = ['openai', 'flag', 'fixture'].join('-');
-    const payload = `--proxy-authorization Basic ${authSecret} --openai-api-key ${keySecret} --format json`;
+    const sigSecret = ['sigv4', 'flag', 'fixture'].join('-');
+    const payload = `--proxy-authorization Basic ${authSecret} --openai-api-key ${keySecret} --aws-authorization AWS4-HMAC-SHA256 Credential=scope SignedHeaders=host Signature=${sigSecret} --format json`;
 
     const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
     const metadata = result.observerLogs[0]!.metadata;
 
     expect(metadata).not.toContain(authSecret);
     expect(metadata).not.toContain(keySecret);
+    expect(metadata).not.toContain(sigSecret);
     expect(metadata).toContain('--proxy-authorization [REDACTED]');
     expect(metadata).toContain('--openai-api-key [REDACTED]');
+    expect(metadata).toContain('--aws-authorization [REDACTED]');
     expect(metadata).toContain('--format json');
+  });
+
+  it('redacts complete semicolon-delimited SigV4 option values from post-tool logs', async () => {
+    const sigV4Signature = ['sigv4', 'semicolon', 'fixture'].join('-');
+    const sigV4Payload = `--aws-authorization AWS4-HMAC-SHA256 Credential=scope SignedHeaders=host;x-amz-date Signature=${sigV4Signature}`;
+    const sigV4Result = await runHookForTest(['post-tool', 'custom_tool', sigV4Payload]);
+    const sigV4Metadata = JSON.parse(sigV4Result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(sigV4Metadata.payload).toBe('--aws-authorization [REDACTED]');
+    expect(sigV4Result.observerLogs[0]!.metadata).not.toContain(sigV4Signature);
   });
 
   it('redacts secrets from JSON embedded in text fields', async () => {
@@ -488,6 +631,37 @@ describe('fbeast-hook runtime', () => {
 
     expect(metadata.payload).toContain('Authorization: [REDACTED]');
     expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('whole-redacts structured shadowed secrets even after another raw pattern changes the payload', async () => {
+    const hiddenSecret = ['hidden', 'pair', 'fixture'].join('-');
+    const noteSecret = ['note', 'bearer', 'fixture'].join('-');
+    const payload = `{"output":{"value":"${hiddenSecret}","name":"OPENAI_API_KEY","note":"Authorization: Bearer ${noteSecret}"},"output":"ok"}`;
+
+    const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[REDACTED]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(hiddenSecret);
+    expect(result.observerLogs[0]!.metadata).not.toContain(noteSecret);
+  });
+
+  it('whole-redacts structured secrets hidden by duplicate JSON keys', async () => {
+    const tupleSecret = ['shadowed', 'tuple', 'fixture'].join('-');
+    const pairSecret = ['shadowed', 'pair', 'fixture'].join('-');
+    const payloads = [
+      `{"output":[["Authorization","Basic ${tupleSecret}"]],"output":"ok"}`,
+      `{"output":{"value":"${pairSecret}","name":"OPENAI_API_KEY"},"output":"ok"}`,
+    ];
+
+    for (const payload of payloads) {
+      const result = await runHookForTest(['post-tool', 'custom_tool', payload]);
+      const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+      expect(metadata.payload).toBe('[REDACTED]');
+      expect(result.observerLogs[0]!.metadata).not.toContain(tupleSecret);
+      expect(result.observerLogs[0]!.metadata).not.toContain(pairSecret);
+    }
   });
 
   it('redacts long URL userinfo credentials from raw post-tool payloads', async () => {
@@ -581,6 +755,17 @@ describe('fbeast-hook runtime', () => {
       output: 'x'.repeat(70_000),
       env: [{ value: secret, name: 'OPENAI_API_KEY' }],
     });
+
+    const result = await runHookForTest(['post-tool', 'read_file', payload]);
+    const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
+
+    expect(metadata.payload).toBe('[post-tool-payload-redacted]');
+    expect(result.observerLogs[0]!.metadata).not.toContain(secret);
+  });
+
+  it('redacts oversized payloads containing prefixed credential flags', async () => {
+    const secret = ['oversized', 'prefixed', 'flag'].join('-');
+    const payload = `${'x'.repeat(70_000)} --openai-api-key ${secret}`;
 
     const result = await runHookForTest(['post-tool', 'read_file', payload]);
     const metadata = JSON.parse(result.observerLogs[0]!.metadata) as { payload: string };
