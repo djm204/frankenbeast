@@ -113,6 +113,21 @@ describe('maintained Markdown integrity', () => {
     expect(result.status).toBe(1);
   });
 
+  it('rejects complete conflict blocks with one-character markers', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/minimal.md', [
+      '< HEAD',
+      'current guide',
+      '=',
+      'incoming guide',
+      '> feature/guide',
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
   it('preserves a short conflict after an opening-like incoming line', () => {
     const root = makeFixtureRoot();
     writeFixture(root, 'docs/guide.md', [
@@ -121,6 +136,22 @@ describe('maintained Markdown integrity', () => {
       shortConflictMarker('='),
       `${shortConflictMarker('<')} example`,
       `${shortConflictMarker('>')} feature/guide`,
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
+  it('preserves an outer conflict before its separator', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/guide.md', [
+      '<<<< HEAD',
+      'current guide',
+      '<<< example',
+      '====',
+      'incoming guide',
+      '>>>> feature/guide',
     ].join('\n'));
 
     const result = runScanner(root);

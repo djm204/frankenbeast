@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const root = process.env.FRANKENBEAST_DOCS_SCAN_ROOT ?? defaultRoot;
 const docsRoot = join(root, 'docs');
-const openingMarkerPattern = /^(<{3,})(?:\s.*)?$/u;
-const separatorMarkerPattern = /^(={3,})(?:\s.*)?$/u;
-const closingMarkerPattern = /^(>{3,})(?:\s.*)?$/u;
+const openingMarkerPattern = /^(<{1,})(?:\s.*)?$/u;
+const separatorMarkerPattern = /^(={1,})(?:\s.*)?$/u;
+const closingMarkerPattern = /^(>{1,})(?:\s.*)?$/u;
 const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
 
 function toRepoPath(path) {
@@ -39,7 +39,7 @@ async function* walkMarkdown(dir) {
 async function scanFile(path) {
   const source = (await readFile(path, 'utf8')).replace(/^\uFEFF/u, '');
   const findings = [];
-  let conflict = null;
+  const conflicts = new Map();
 
   for (const [index, line] of source.split(/\r\n|\r|\n/u).entries()) {
     const openingMatch = openingMarkerPattern.exec(line);
@@ -47,12 +47,12 @@ async function scanFile(path) {
       const finding = { path: toRepoPath(path), line: index + 1, marker: openingMatch[1] };
       if (openingMatch[1].length >= 7) {
         findings.push(finding);
-      } else if (!conflict?.sawSeparator) {
-        conflict = {
+      } else if (!conflicts.has(openingMatch[1].length)) {
+        conflicts.set(openingMatch[1].length, {
           width: openingMatch[1].length,
           sawSeparator: false,
           findings: [finding],
-        };
+        });
       }
       continue;
     }
@@ -60,15 +60,17 @@ async function scanFile(path) {
     const closingMatch = closingMarkerPattern.exec(line);
     if (closingMatch?.[1].length >= 7) {
       findings.push({ path: toRepoPath(path), line: index + 1, marker: closingMatch[1] });
-      conflict = null;
+      conflicts.clear();
       continue;
     }
-    if (!conflict) continue;
 
     const separatorMatch = separatorMarkerPattern.exec(line);
-    if (separatorMatch?.[1].length === conflict.width) {
-      conflict.sawSeparator = true;
-      conflict.findings.push({
+    const separatorConflict = separatorMatch
+      ? conflicts.get(separatorMatch[1].length)
+      : undefined;
+    if (separatorConflict) {
+      separatorConflict.sawSeparator = true;
+      separatorConflict.findings.push({
         path: toRepoPath(path),
         line: index + 1,
         marker: separatorMatch[1],
@@ -76,14 +78,17 @@ async function scanFile(path) {
       continue;
     }
 
-    if (closingMatch?.[1].length === conflict.width && conflict.sawSeparator) {
-      conflict.findings.push({
+    const closingConflict = closingMatch
+      ? conflicts.get(closingMatch[1].length)
+      : undefined;
+    if (closingConflict?.sawSeparator) {
+      closingConflict.findings.push({
         path: toRepoPath(path),
         line: index + 1,
         marker: closingMatch[1],
       });
-      findings.push(...conflict.findings);
-      conflict = null;
+      findings.push(...closingConflict.findings);
+      conflicts.delete(closingMatch[1].length);
     }
   }
 
