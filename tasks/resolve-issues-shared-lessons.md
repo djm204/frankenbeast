@@ -1,7 +1,7 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-30 — Maintained-docs conflict-marker integrity
-- A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots and skip generated/vendor directories. Reject standard-width opening/closing remnants independently, but require a coherent same-width block for shorter configurable markers so custom Git conflicts are caught without misclassifying standalone Setext headings or Markdown blockquotes.
+- A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots and skip generated/vendor directories. Reject standard-width opening/closing remnants independently, but require a coherent same-width block for shorter configurable markers so custom Git conflicts are caught without misclassifying standalone Setext headings or Markdown blockquotes. Preserve an active short block after its separator, normalize BOM and CR-only inputs, and test those parser boundaries directly.
 
 ## 2026-07-30 — Faculty clocks must be wired before adapter construction
 - Resolve the shared Beast clock before constructing any faculty adapter, then use that same source for lesson-consultation and every lifecycle timestamp. A frozen-clock dependency-factory regression should exercise planning, completion, and failure paths together so one remaining wall-clock call cannot hide behind otherwise deterministic reasoning/action behavior.

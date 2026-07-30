@@ -113,6 +113,51 @@ describe('maintained Markdown integrity', () => {
     expect(result.status).toBe(1);
   });
 
+  it('preserves a short conflict after an opening-like incoming line', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/guide.md', [
+      `${shortConflictMarker('<')} HEAD`,
+      'current guide',
+      shortConflictMarker('='),
+      `${shortConflictMarker('<')} example`,
+      `${shortConflictMarker('>')} feature/guide`,
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
+  it('rejects conflicts in Markdown with CR-only line endings', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/legacy.md', [
+      `${conflictMarker('<')} HEAD`,
+      'current guide',
+      conflictMarker('='),
+      'incoming guide',
+      `${conflictMarker('>')} feature/guide`,
+    ].join('\r'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
+  it('rejects a conflict whose opening marker follows a UTF-8 BOM', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/bom.md', [
+      `\uFEFF${shortConflictMarker('<')} HEAD`,
+      'current guide',
+      shortConflictMarker('='),
+      'incoming guide',
+      `${shortConflictMarker('>')} feature/guide`,
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
   it('rejects incomplete standard-width opening and closing remnants', () => {
     const root = makeFixtureRoot();
     writeFixture(root, 'docs/opening.md', `${conflictMarker('<')} HEAD\nunfinished\n`);

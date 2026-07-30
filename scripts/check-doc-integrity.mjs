@@ -37,18 +37,17 @@ async function* walkMarkdown(dir) {
 }
 
 async function scanFile(path) {
-  const source = await readFile(path, 'utf8');
+  const source = (await readFile(path, 'utf8')).replace(/^\uFEFF/u, '');
   const findings = [];
   let conflict = null;
 
-  for (const [index, line] of source.split(/\r?\n/u).entries()) {
+  for (const [index, line] of source.split(/\r\n|\r|\n/u).entries()) {
     const openingMatch = openingMarkerPattern.exec(line);
     if (openingMatch) {
       const finding = { path: toRepoPath(path), line: index + 1, marker: openingMatch[1] };
       if (openingMatch[1].length >= 7) {
         findings.push(finding);
-        conflict = null;
-      } else {
+      } else if (!conflict?.sawSeparator) {
         conflict = {
           width: openingMatch[1].length,
           sawSeparator: false,
