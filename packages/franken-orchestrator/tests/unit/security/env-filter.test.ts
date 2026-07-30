@@ -29,6 +29,8 @@ describe('isSecretEnvVarName', () => {
       'GOOGLE_APPLICATION_CREDENTIALS',
       'PGPASSWORD',
       'MYSQL_PWD',
+      'GITHUB_PAT',
+      'SERVICE_PAT',
     ];
     for (const name of secretNames) {
       expect(isSecretEnvVarName(name), `expected ${name} to be flagged as secret`).toBe(true);
@@ -111,6 +113,23 @@ describe('isSecretEnvVarValue', () => {
     expect(isSecretEnvVarValue('https://api.example.com')).toBe(false);
     expect(isSecretEnvVarValue('')).toBe(false);
   });
+
+  it('flags Authorization/Proxy-Authorization header-shaped values', () => {
+    expect(isSecretEnvVarValue('Authorization: Bearer sometoken12345678')).toBe(true);
+    expect(isSecretEnvVarValue('authorization: Basic dXNlcjpwYXNz')).toBe(true);
+    expect(isSecretEnvVarValue('Proxy-Authorization: Bearer sometoken12345678')).toBe(true);
+  });
+
+  it('flags bare Bearer/Basic token values', () => {
+    expect(isSecretEnvVarValue('Bearer sometoken12345678')).toBe(true);
+    expect(isSecretEnvVarValue('Basic dXNlcjpwYXNzd29yZA==')).toBe(true);
+  });
+
+  it('does not flag ordinary git config values used by the safe-name-exempt tuple', () => {
+    expect(isSecretEnvVarValue('safe.directory')).toBe(false);
+    expect(isSecretEnvVarValue('/workspace')).toBe(false);
+    expect(isSecretEnvVarValue('1')).toBe(false);
+  });
 });
 
 describe('filterSecretEnvVars', () => {
@@ -164,5 +183,43 @@ describe('filterSecretEnvVars', () => {
       TRUSTED_DB_URL: 'postgres://user:hunter2@db.example.com/app',
     };
     expect(filterSecretEnvVars(input, ['TRUSTED_DB_URL'])).toEqual(input);
+  });
+
+  it('matches exemptNames case-sensitively so a differently-cased var is still filtered', () => {
+    const input = {
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'real-anthropic-secret',
+      anthropic_api_key: 'a-different-secret-with-the-same-spelling',
+    };
+    expect(filterSecretEnvVars(input, ['ANTHROPIC_API_KEY'])).toEqual({
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'real-anthropic-secret',
+    });
+  });
+
+  it('strips a credential smuggled through the git-config-tuple name exemption via its value', () => {
+    // GIT_CONFIG_KEY_<n>/VALUE_<n>/COUNT are exempt by name (git's own
+    // indexed config-injection mechanism), but git supports
+    // `http.extraHeader`, so GIT_CONFIG_VALUE_<n> could carry a live
+    // Authorization header. The name exemption must not blind the
+    // value-based check.
+    const input = {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.extraHeader',
+      GIT_CONFIG_VALUE_0: 'Authorization: Bearer super-secret-live-token',
+    };
+    const filtered = filterSecretEnvVars(input);
+    expect(filtered['GIT_CONFIG_COUNT']).toBe('1');
+    expect(filtered['GIT_CONFIG_KEY_0']).toBe('http.extraHeader');
+    expect(filtered['GIT_CONFIG_VALUE_0']).toBeUndefined();
+  });
+
+  it('still preserves an ordinary (non-credential) git-config tuple', () => {
+    const input = {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'safe.directory',
+      GIT_CONFIG_VALUE_0: '/workspace',
+    };
+    expect(filterSecretEnvVars(input)).toEqual(input);
   });
 });

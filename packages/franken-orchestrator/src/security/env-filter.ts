@@ -22,7 +22,7 @@
  * safe below.
  */
 const SECRET_ENV_NAME_PATTERN =
-  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK|PWD)(?:_|$)/i;
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK|PWD|PAT)(?:_|$)/i;
 
 /**
  * Catches common secret-name segments written without a delimiter (e.g.
@@ -95,6 +95,24 @@ const SAFE_ENV_NAME_PATTERNS: readonly RegExp[] = [/^GIT_CONFIG_(?:COUNT|KEY_\d+
 const CREDENTIAL_URL_VALUE_PATTERN =
   /^(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?):\/\/[^:\s"'/@]*:[^@\s"']+@/i;
 
+/**
+ * Matches values shaped like a raw `Authorization`/`Proxy-Authorization`
+ * HTTP header. Needed because `GIT_CONFIG_KEY_<n>`/`VALUE_<n>` (see
+ * `SAFE_ENV_NAME_PATTERNS` below) is git's genuine indexed config-injection
+ * mechanism and its `GIT_CONFIG_VALUE_<n>` name is exempt by shape — but git
+ * supports `http.extraHeader`, so an attacker- or config-controlled tuple
+ * could set `GIT_CONFIG_KEY_0=http.extraHeader` /
+ * `GIT_CONFIG_VALUE_0=Authorization: Bearer <token>` to smuggle a live
+ * credential through under a name the filter otherwise trusts. The name
+ * exemption only bypasses `isSecretEnvVarName` — `filterSecretEnvVars` still
+ * runs `isSecretEnvVarValue` on every var regardless of its name, so this
+ * catches it independent of what the var happens to be called.
+ */
+const AUTH_HEADER_VALUE_PATTERN = /^(?:authorization|proxy-authorization)\s*:\s*\S+/i;
+
+/** Matches a bare `Bearer <token>` / `Basic <token>` value (no header name prefix). */
+const BEARER_TOKEN_VALUE_PATTERN = /^(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}$/i;
+
 /** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
 export function isSecretEnvVarName(name: string): boolean {
   if (SAFE_ENV_NAME_EXCEPTIONS.has(name.toUpperCase())) return false;
@@ -104,31 +122,40 @@ export function isSecretEnvVarName(name: string): boolean {
   return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
 }
 
-/** True if an env var's *value* looks like a connection string with embedded credentials. */
+/** True if an env var's *value* looks like a connection string or auth header carrying embedded credentials. */
 export function isSecretEnvVarValue(value: string): boolean {
-  return CREDENTIAL_URL_VALUE_PATTERN.test(value);
+  return CREDENTIAL_URL_VALUE_PATTERN.test(value)
+    || AUTH_HEADER_VALUE_PATTERN.test(value)
+    || BEARER_TOKEN_VALUE_PATTERN.test(value);
 }
 
 /**
  * Returns a copy of `env` with any secret-shaped keys (by name or, for
- * connection-string values, by value) omitted, except for names in
- * `exemptNames` (case-insensitive) — used to let the actively selected
- * provider's own required auth var(s) (from `ICliProvider.requiredAuthEnvVars()`,
- * e.g. `ANTHROPIC_API_KEY` for `claude`, `OPENAI_API_KEY` for `codex`)
- * survive even though they are themselves secret-shaped: they're the CLI's
- * own designed auth channel, not an unrelated ambient secret leaking
- * through. Declaring this on the provider (rather than a lookup table keyed
- * by name here) means custom providers registered via
- * `ProviderRegistry.register()` can preserve their own credentials too.
+ * connection-string/auth-header values, by value) omitted, except for names
+ * in `exemptNames` — used to let the actively selected provider's own
+ * required auth var(s) (from `ICliProvider.requiredAuthEnvVars()`, e.g.
+ * `ANTHROPIC_API_KEY` for `claude`, `OPENAI_API_KEY` for `codex`) survive
+ * even though they are themselves secret-shaped: they're the CLI's own
+ * designed auth channel, not an unrelated ambient secret leaking through.
+ * Declaring this on the provider (rather than a lookup table keyed by name
+ * here) means custom providers registered via `ProviderRegistry.register()`
+ * can preserve their own credentials too.
+ *
+ * `exemptNames` is matched case-sensitively (unlike the general secret-name
+ * detection above): env var names are case-sensitive on POSIX, and each
+ * `exemptNames` entry names one specific, exact-case var the CLI actually
+ * reads for auth — a differently-cased var of the same spelling is a
+ * distinct variable that provider didn't declare and must still be filtered
+ * on its own merits.
  */
 export function filterSecretEnvVars(
   env: Record<string, string>,
   exemptNames?: readonly string[],
 ): Record<string, string> {
-  const exempt = new Set((exemptNames ?? []).map((name) => name.toUpperCase()));
+  const exempt = new Set(exemptNames ?? []);
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (exempt.has(key.toUpperCase())) {
+    if (exempt.has(key)) {
       filtered[key] = value;
       continue;
     }
