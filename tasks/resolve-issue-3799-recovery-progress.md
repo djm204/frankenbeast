@@ -156,3 +156,45 @@
 - [x] Remaining local P1 RED: a focused plan-diff regression across CRLF, LF, and CR exposed an unspaced canonical `+PASSWORD=...` value after prior visible context (1 failed, 115 skipped), while asserting the diff prefix and context must remain.
 - [x] Remaining local P1 GREEN: make the sensitive-assignment key boundary explicitly consume CRLF, LF, or CR followed by an optional canonical `+`/`-` prefix; the focused regression passed all newline variants (1 passed, 115 skipped) without changing existing inline boundary alternatives.
 - [x] Re-run diff/assignment compatibility tests (17/17), the complete CLI-channel file (116/116), all Governor tests (435/435), typecheck, lint (zero errors; three pre-existing warnings), build, and `git diff --check`.
+
+## Twelfth exact-head review remediation (`4e857b0a`)
+
+- [x] Finding 1 RED→GREEN: isolated regression exposed the second physical-line fragment (1 failed, 116 skipped); escaped-newline-aware quoted flag consumption hid both fragments and preserved the following command (1 passed, 116 skipped).
+- [x] Finding 2 RED→GREEN: isolated regression leaked the second array element (1 failed, 117 skipped); a bounded quote-aware balanced-array scan hid the full value while retaining array delimiters and following command (1 passed, 117 skipped).
+- [x] Finding 3 RED→GREEN: isolated regression truncated the substitution at a single-quoted `)` (1 failed, 118 skipped); quote-aware parenthesis balancing preserved the full executable substitution and hid both literal fragments (2 compatibility tests passed, 117 skipped).
+- [x] Finding 4 RED→GREEN: isolated regression truncated the outer legacy substitution at an escaped inner backtick (1 failed, 119 skipped); bounded parity-aware closing-backtick scanning preserved its executable content and hid surrounding literals (1 passed, 119 skipped).
+- [x] Finding 5 RED→GREEN: isolated regression stopped at `&&` inside a substitution and leaked the suffix (1 failed, 120 skipped); line-bounded scanning now ignores operators covered by balanced expression spans and preserves the complete substitution plus following command (1 passed, 120 skipped).
+- [x] Finding 6 RED→GREEN: isolated regression leaked an empty-username URL password (1 failed, 121 skipped); userinfo matching now permits zero username characters while still requiring colon, non-empty password, `@`, and host (1 passed, 121 skipped).
+- [x] Finding 7 RED→GREEN: isolated serialized-JSON regression leaked the value (1 failed, 122 skipped); an observer-aligned line-bounded escaped-delimiter matcher preserves the original slashes/quotes around `[REDACTED]` (1 passed, 122 skipped).
+- [x] Finding 8 RED→GREEN: isolated serialized-PEM regression left the key markers/body visible (1 failed, 123 skipped); plausibility validation now normalizes literal escaped CR/LF separators only for validation, leaving rendered context handling unchanged (1 passed, 123 skipped).
+- [x] Finding 9 RED→GREEN: isolated plan-diff regression leaked the prefixed block body (1 failed, 124 skipped); YAML scanning now separates canonical diff prefixes from indentation and emits a prefixed redaction placeholder per hidden body line (3 compatibility tests passed, 122 skipped).
+- [x] Finding 10 RED→GREEN: isolated bounded incomplete object leaked its sensitive header value (1 failed, 125 skipped); the existing depth-aware object redactor now processes bounded unterminated remainders while unrelated incomplete objects stay unchanged (2 compatibility tests passed, 124 skipped).
+- [x] Finding 11 RED→GREEN: isolated uppercase plural-key regression leaked all three values (1 failed, 126 skipped); exact plural vocabulary entries redact `SECRETS`, `TOKENS`, and `PASSWORDS` while unrelated longer words remain visible (1 passed, 126 skipped).
+- [x] Finding 12 RED→GREEN: isolated regression left both established webhook URLs intact (1 failed, 127 skipped); observer-aligned Slack/Discord format matchers redact each complete webhook while preserving a non-webhook Discord URL and following command (1 passed, 127 skipped).
+- [x] Run the complete CLI-channel test file (128/128 passed).
+- [x] Run all Governor tests (447/447), package typecheck, lint (zero errors; three pre-existing unrelated warnings), build, and `git diff --check`.
+- [x] Independently inspect the diff for secret leaks, hidden executable context, bounded scanning, synthetic fixtures, and allowed-file scope; only the production file, focused test file, and this progress document changed.
+
+### Fresh uncommitted-review P1 remediation
+
+- [x] Finding A RED: the isolated single-quoted sensitive-array regression failed (1 failed, 128 skipped) because literal `$(literal-secret)` content remained visible.
+- [x] Finding A GREEN: retain array element quote context, fully redact single-quoted element content, and preserve active substitutions in unquoted and double-quoted elements (1 passed, 128 skipped).
+- [x] Finding B RED: the isolated escaped-serialized-quote regression failed (1 failed, 129 skipped) because `secret-tail` remained visible after the first inner serialized quote.
+- [x] Finding B GREEN: bounded line scanning consumes escaped serialized quote sequences before accepting the actual closing delimiter, preserving the serialized delimiters and following `$(date)` command context (1 passed, 129 skipped).
+- [x] Run both new regressions together (2 passed, 128 skipped), all 130 CLI tests, all Governor tests (449/449), package typecheck, lint (zero errors; three pre-existing unrelated warnings), build, and `git diff --check`.
+- [x] Inspect the final diff and focused prompt assertions: both literal secret suffixes are absent; array `$(date)`/`$(whoami)` and serialized-JSON `&& echo $(date)` context remain; changed-file scope is exactly the production file, focused test file, and this progress document.
+
+### Second uncommitted-review P1 remediation
+
+- [x] Finding C RED: the isolated triple-backslash serialized-JSON regression failed (1 failed, 130 skipped), with `synthetic-depth-secret` visible before the preserved `&& echo visible_multiply_serialized_context`.
+- [x] Finding C GREEN: matching key/value delimiter escape depths and requiring the same depth at value close redacts the synthetic value while treating deeper escaped inner quotes as content; the serialized-JSON compatibility set passed (3 passed, 128 skipped).
+- [x] Run the complete CLI-channel test file (131/131), all Governor tests (450/450), package typecheck, lint (zero errors; three pre-existing unrelated warnings), build, and `git diff --check`.
+- [x] Confirm the synthetic secret suffix is absent, following executable context is preserved, and changed-file scope remains exactly the existing production file, focused test file, and progress document.
+
+### Third uncommitted-review P2 remediation
+
+- [x] RED: add a deterministic regression with 256 unterminated sensitive-array starts, one over-limit balanced candidate, and a following ordinary balanced array; the isolated run failed as expected (1 failed, 131 skipped) because the over-limit candidate was scanned and rendered as a balanced array.
+- [x] GREEN: bound each sensitive-array candidate to 65,536 body characters plus a possible closing delimiter and its physical CR/LF line; the isolated regression passed (1 passed, 131 skipped), hiding all synthetic literals while preserving the following `&& echo visible_bounded_array_context`.
+- [x] Run the complete CLI-channel test file (132/132), all Governor tests (451/451), package typecheck, lint (zero errors; three pre-existing unrelated warnings), and build successfully.
+- [x] Run `git diff --check` and confirm the existing three-file scope, synthetic secret hiding, and preservation of `&& echo visible_bounded_array_context`.
+- [x] Run a fresh final local Codex uncommitted review; no discrete correctness issue remained in the current diff.

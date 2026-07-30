@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CliChannel } from '../../../src/channels/cli-channel.js';
 import type { ReadlineAdapter } from '../../../src/channels/cli-channel.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
+import { redactSecrets } from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeFakeReadline(answers: string[]): ReadlineAdapter {
   let answerIndex = 0;
@@ -1787,5 +1788,213 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain('prefix-placeholder');
     expect(prompt).not.toContain('suffix-placeholder');
     expect(prompt).toContain('PASSWORD="[REDACTED]$(printf %s $(date))[REDACTED]" && echo visible_nested_context');
+  });
+
+  it('consumes quoted sensitive flags through escaped physical newlines', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'cmd --password "opaque-first\\\nopaque-second" && echo visible_continued_flag_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-first');
+    expect(prompt).not.toContain('opaque-second');
+    expect(prompt).toContain('--password "[REDACTED]" && echo visible_continued_flag_context');
+  });
+
+  it('redacts complete balanced sensitive Bash array assignments', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD=(opaque-one opaque-two) && echo visible_array_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-one');
+    expect(prompt).not.toContain('opaque-two');
+    expect(prompt).toContain('PASSWORD=([REDACTED]) && echo visible_array_context');
+  });
+
+  it('bounds sensitive array scans while continuing after unterminated candidates', () => {
+    const unterminatedLines = Array.from(
+      { length: 256 },
+      (_, index) => `PASSWORD=(unterminated-array-${index}`,
+    );
+    const overLimitLiteral = `over-limit-${'x'.repeat(65_536)}`;
+    const text = [
+      ...unterminatedLines,
+      `PASSWORD=(${overLimitLiteral})`,
+      'PASSWORD=(ordinary-one ordinary-two) && echo visible_bounded_array_context',
+    ].join('\n');
+
+    const redacted = redactSecrets(text);
+
+    expect(redacted).not.toContain('unterminated-array-');
+    expect(redacted).not.toContain('over-limit-');
+    expect(redacted).toContain('PASSWORD=[REDACTED]\n'.repeat(257));
+    expect(redacted).toContain(
+      'PASSWORD=([REDACTED]) && echo visible_bounded_array_context',
+    );
+  });
+
+  it('treats substitutions inside single-quoted sensitive array elements as literal data', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD=(\'opaque$(literal-secret)tail\' $(date) "opaque$(whoami)tail") && echo visible_array_quote_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('literal-secret');
+    expect(prompt).not.toContain('opaque');
+    expect(prompt).not.toContain('tail');
+    expect(prompt).toContain('PASSWORD=(\'[REDACTED]\' $(date) "[REDACTED]$(whoami)[REDACTED]") && echo visible_array_quote_context');
+  });
+
+  it('ignores quoted parentheses while balancing shell substitutions', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD="opaque-head$(printf \')\' && reboot)opaque-tail" && echo visible_quoted_paren_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-head');
+    expect(prompt).not.toContain('opaque-tail');
+    expect(prompt).toContain('$(printf \')\' && reboot)');
+    expect(prompt).toContain('&& echo visible_quoted_paren_context');
+  });
+
+  it('skips escaped inner backticks while scanning legacy substitutions', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD="opaque-head`printf \\`inner\\` && reboot`opaque-tail" && echo visible_backtick_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-head');
+    expect(prompt).not.toContain('opaque-tail');
+    expect(prompt).toContain('`printf \\`inner\\` && reboot`');
+    expect(prompt).toContain('&& echo visible_backtick_context');
+  });
+
+  it('does not terminate standalone sensitive headers at operators inside substitutions', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'Authorization: Bearer opaque-head$(printf x && reboot)opaque-tail && echo visible_header_operator_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-head');
+    expect(prompt).not.toContain('opaque-tail');
+    expect(prompt).toContain('$(printf x && reboot)[REDACTED] && echo visible_header_operator_context');
+  });
+
+  it('redacts credential URLs with empty usernames', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'connect rediss://:opaque-password@cache.example.test && echo visible_empty_user_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-password');
+    expect(prompt).toContain('rediss://:[REDACTED]@cache.example.test && echo visible_empty_user_context');
+  });
+
+  it('recognizes escaped JSON delimiters in serialized strings', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'body={\\"password\\":\\"opaque-secret\\"} && echo visible_escaped_json_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-secret');
+    expect(prompt).toContain('body={\\"password\\":\\"[REDACTED]\\"} && echo visible_escaped_json_context');
+  });
+
+  it('consumes escaped serialized quotes before closing sensitive JSON string values', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'body={\\"password\\":\\"opaque\\\\\\"secret-tail\\"} && echo $(date) visible_escaped_json_quote_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque');
+    expect(prompt).not.toContain('secret-tail');
+    expect(prompt).toContain('body={\\"password\\":\\"[REDACTED]\\"} && echo $(date) visible_escaped_json_quote_context');
+  });
+
+  it('redacts multiply serialized JSON strings at matching odd escape depth', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: String.raw`body={\\\"password\\\":\\\"synthetic-depth-secret\\\"} && echo visible_multiply_serialized_context`,
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('synthetic-depth-secret');
+    expect(prompt).toContain(String.raw`body={\\\"password\\\":\\\"[REDACTED]\\\"} && echo visible_multiply_serialized_context`);
+  });
+
+  it('recognizes literal escaped CR and LF sequences in serialized armored keys', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'pem=-----BEGIN PRIVATE KEY-----\\r\\nQUJDREVGR0hJSktM\\n-----END PRIVATE KEY----- && echo visible_serialized_pem_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('QUJDREVGR0hJSktM');
+    expect(prompt).not.toContain('BEGIN PRIVATE KEY');
+    expect(prompt).toContain('pem=[REDACTED] && echo visible_serialized_pem_context');
+  });
+
+  it('preserves unified-diff prefixes on sensitive YAML block scalars', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      planDiff: '+password: |\n+  opaque-secret\n+safe: visible_diff_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-secret');
+    expect(prompt).toContain('+password: [REDACTED]');
+    expect(prompt).toContain('+  [REDACTED]');
+    expect(prompt).toContain('+safe: visible_diff_context');
+  });
+
+  it('redacts values in bounded incomplete structured sensitive-header objects only', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: '{"name":"x-api-key","value":"opaque-secret"\n{"name":"content-type","value":"visible-incomplete-value"',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-secret');
+    expect(prompt).toContain('{"name":"x-api-key","value":"[REDACTED]"');
+    expect(prompt).toContain('{"name":"content-type","value":"visible-incomplete-value"');
+  });
+
+  it('recognizes canonical plural sensitive keys without overmatching unrelated words', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'SECRETS=opaque-secrets TOKENS=opaque-tokens PASSWORDS=opaque-passwords secretary=visible-secretary tokenizer=visible-tokenizer passwordless=visible-passwordless',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque-secrets');
+    expect(prompt).not.toContain('opaque-tokens');
+    expect(prompt).not.toContain('opaque-passwords');
+    expect(prompt).toContain('secretary=visible-secretary tokenizer=visible-tokenizer passwordless=visible-passwordless');
+  });
+
+  it('redacts established Slack and Discord webhook URLs but preserves other URLs', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    const slackWebhook = ['https://hooks.slack.com/services', 'T00000000', 'B00000000', 'synthetic_webhook_value'].join('/');
+    const discordWebhook = ['https://discord.com/api/webhooks', '123456789012345678', 'synthetic_webhook_value'].join('/');
+    const ordinaryUrl = 'https://discord.com/channels/123456789012345678';
+    await channel.requestApproval(makeRequest({
+      summary: `notify ${slackWebhook} ${discordWebhook} ${ordinaryUrl} && echo visible_webhook_context`,
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain(slackWebhook);
+    expect(prompt).not.toContain(discordWebhook);
+    expect(prompt).toContain(`${ordinaryUrl} && echo visible_webhook_context`);
+    expect(prompt.match(/\[REDACTED\]/gu)).toHaveLength(2);
   });
 });
