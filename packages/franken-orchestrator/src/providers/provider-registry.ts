@@ -621,7 +621,7 @@ export class ProviderRegistry {
       ) {
         let failureAlreadyRecorded = false;
         let terminalEventObserved = false;
-        const halfOpenProbeReserved = this.hasReservedHalfOpenProbe(provider);
+        const halfOpenProbeReserved = availabilityProbeReserved;
         try {
           throwIfRequestAborted(effectiveRequest);
           const stream = provider.execute(effectiveRequest);
