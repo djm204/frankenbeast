@@ -130,7 +130,7 @@ export function isShellExpression(val: string): boolean {
 }
 
 export function isPlausibleArmoredKeyBody(body: string): boolean {
-  const lines = body.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  const lines = body.split(/\r\n|\n|\r/u).map((l) => l.trim()).filter((l) => l.length > 0);
   if (lines.length === 0) return true;
 
   let plausibleLineCount = 0;
@@ -217,7 +217,9 @@ function redactUrlQueryParams(text: string): string {
     /([?&])([A-Za-z0-9_.-]+)(=)([^&\s"'\r\n#;|<>]*)?/giu,
     (match, p1, key, p3, val) => {
       if (isSensitiveKeyToken(key)) {
-        if (typeof val === 'string' && isShellExpression(val)) return match;
+        if (typeof val === 'string' && isShellExpression(val)) {
+          return `${p1}${key}${p3}${redactPasswordLiteralFragments(val)}`;
+        }
         return `${p1}${key}${p3}[REDACTED]`;
       }
       return match;
@@ -279,6 +281,13 @@ function redactPasswordLiteralFragments(val: string): string {
 const SENSITIVE_HEADER_NAMES = '(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization|X-API-Key|API-Key|X-Auth-Token)';
 const MAX_STRUCTURED_HEADER_OBJECT_LENGTH = 65_536;
 const MAX_STRUCTURED_HEADER_OBJECT_DEPTH = 64;
+
+function containsSensitiveHeaderLabel(object: string): boolean {
+  return new RegExp(
+    `["'](?:name|key)["']\\s*:\\s*["']${SENSITIVE_HEADER_NAMES}["']`,
+    'iu',
+  ).test(object);
+}
 
 function redactCompleteStructuredHeaderObject(object: string): string {
   const depthAt = new Uint8Array(object.length);
@@ -385,13 +394,17 @@ function redactBalancedStructuredHeaderObjects(text: string): string {
     const objectEnd = index + 1;
     const object = text.slice(objectStart, objectEnd);
     result += text.slice(cursor, objectStart);
-    result += withinBounds ? redactCompleteStructuredHeaderObject(object) : '[REDACTED]';
+    result += withinBounds
+      ? redactCompleteStructuredHeaderObject(object)
+      : containsSensitiveHeaderLabel(object) ? '[REDACTED]' : object;
     cursor = objectEnd;
     objectStart = -1;
   }
 
   if (objectStart >= 0 && !withinBounds) {
-    return result + text.slice(cursor, objectStart) + '[REDACTED]';
+    const remainder = text.slice(objectStart);
+    return result + text.slice(cursor, objectStart)
+      + (containsSensitiveHeaderLabel(remainder) ? '[REDACTED]' : remainder);
   }
   return result + text.slice(cursor);
 }
@@ -420,10 +433,16 @@ function redactAuthorizationHeaders(text: string): string {
   // 1. Standalone header lines at start of line: Authorization: Basic foo
   result = result.replace(
     new RegExp(
-      `(^|\\n|\\r)(\\s*${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])[^\\r\\n]+?(?=[ \\t]*(?:&&|\\|\\||[&|><;])|[\\r\\n]|$)`,
+      `(^|\\n|\\r)(\\s*(?:[+-]\\s*)?${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])[^\\r\\n]+?(?=[ \\t]*(?:&&|\\|\\||[&|><;])|[\\r\\n]|$)`,
       'giu',
     ),
-    '$1$2[REDACTED]',
+    (match, lineStart, prefix) => {
+      const val = match.slice((lineStart as string).length + (prefix as string).length);
+      const redactedVal = isShellExpression(val)
+        ? redactHeaderLiteralFragments(val)
+        : '[REDACTED]';
+      return `${lineStart as string}${prefix as string}${redactedVal}`;
+    },
   );
 
   // 2. Single quoted POSIX shell header argument: stops at first single quote
@@ -471,19 +490,19 @@ function redactAuthorizationHeaders(text: string): string {
   return result;
 }
 
-function isDestructiveShellCommand(content: string): boolean {
-  return /^(?:sudo\s+)?(?:rm\s|shutdown(?:\s|$)|reboot(?:\s|$)|mkfs(?:[.\s]|$)|dd\s+if=|chmod\s+-R(?:\s|$)|chown\s+-R(?:\s|$))/u.test(content);
-}
-
-function redactShellScalarLine(content: string): string | undefined {
+function redactShellScalarLine(content: string, withinShellContext = false): string | undefined {
   const tokens = content.trim().split(/\s+/u);
   const commandIndex = tokens[0] === 'sudo' ? 1 : 0;
   const command = tokens[commandIndex];
   if (command === undefined) return undefined;
 
-  const isDestructive = isDestructiveShellCommand(content);
-  const isVisibleFollowup = /^(?:echo|printf)\s/u.test(content);
-  if (!isDestructive && !isVisibleFollowup) return undefined;
+  if (
+    tokens.length <= commandIndex + 1
+    && !/^(?:shutdown|reboot|mkfs(?:\.[A-Za-z0-9_.-]+)?)$/u.test(command)
+  ) return undefined;
+  const isEstablishedVisibleFollowup = withinShellContext
+    && /^(?:echo|printf)\s/u.test(content);
+  if (!isRecognizedUnmatchedKeyCommand(content) && !isEstablishedVisibleFollowup) return undefined;
 
   const prefix = commandIndex === 1 ? ['sudo', command] : [command];
   let tokenIndex = commandIndex + 1;
@@ -515,11 +534,11 @@ function redactYamlMultilineBlocks(text: string): string {
       const currentIndent = (matchIndent && matchIndent[1]) ? matchIndent[1].length : 0;
       if (currentIndent > blockIndent) {
         const content = line.trimStart();
-        if (isDestructiveShellCommand(content)) {
+        if (redactShellScalarLine(content) !== undefined) {
           preserveShellContext = true;
         }
         if (preserveShellContext) {
-          const shellStructure = redactShellScalarLine(content);
+          const shellStructure = redactShellScalarLine(content, true);
           if (shellStructure !== undefined) {
             out.push(`${line.slice(0, currentIndent)}${shellStructure}`);
           }
@@ -587,6 +606,10 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     '[REDACTED]',
   );
   result = result.replace(
+    /\b(?:glpat-[A-Za-z0-9_-]{12,}|xox[baprs]-[A-Za-z0-9_-]{12,}|npm_[A-Za-z0-9_-]{12,}|AIza[0-9A-Za-z_-]{35})\b/gu,
+    '[REDACTED]',
+  );
+  result = result.replace(
     /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/gu,
     '[REDACTED]',
   );
@@ -634,7 +657,9 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   );
   result = result.replace(doubleQuotedAssignment, (match, prefix, key, val) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
-    if (typeof val === 'string' && isShellExpression(val)) return match;
+    if (typeof val === 'string' && isShellExpression(val)) {
+      return `${prefix}"${redactPasswordLiteralFragments(val)}"`;
+    }
     return `${prefix}"[REDACTED]"`;
   });
 
@@ -672,8 +697,11 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   );
   result = result.replace(unterminatedQuotedAssignment, (match, prefix, key, quote, val) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    if (typeof val === 'string' && val.endsWith(quote as string)) return match;
     const isSingleQuoted = quote === "'";
-    if (!isSingleQuoted && typeof val === 'string' && isShellExpression(val)) return match;
+    if (!isSingleQuoted && typeof val === 'string' && isShellExpression(val)) {
+      return `${prefix}${quote}${redactPasswordLiteralFragments(val)}${quote}`;
+    }
     return `${prefix}${quote}[REDACTED]${quote}`;
   });
 
@@ -754,6 +782,60 @@ export function truncateText(text: string, maxLength?: number | undefined): stri
   return `${text.slice(0, maxLength)}\n${TRUNCATION_MARKER}`;
 }
 
+const UNMATCHED_KEY_COMMAND_BASENAMES = new Set([
+  'curl',
+  'deploy',
+  'recover',
+  'repair',
+  'systemctl',
+  'wget',
+]);
+
+function commandBasename(command: string): string | undefined {
+  if (!/^(?:[a-z][A-Za-z0-9_.-]*|(?:\/|\.{1,2}\/)(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+)$/u.test(command)) {
+    return undefined;
+  }
+  return command.slice(command.lastIndexOf('/') + 1);
+}
+
+function isRecognizedUnmatchedKeyCommand(line: string): boolean {
+  const content = line.trim();
+  const tokens = content.split(/[ \t]+/u);
+  let commandIndex = 0;
+  let basename = commandBasename(tokens[commandIndex] ?? '');
+  if (basename === 'sudo') {
+    commandIndex++;
+    basename = commandBasename(tokens[commandIndex] ?? '');
+  }
+  if (basename === undefined) return false;
+
+  const argument = tokens[commandIndex + 1];
+  const hasArgument = argument !== undefined;
+  if (UNMATCHED_KEY_COMMAND_BASENAMES.has(basename) && hasArgument) return true;
+  if (/^python(?:\d+(?:\.\d+)*)?$/u.test(basename) && hasArgument) return true;
+
+  if (/^(?:shutdown|reboot)$/u.test(basename)) return true;
+  if (/^mkfs(?:\.[A-Za-z0-9_.-]+)?$/u.test(basename)) return true;
+  if (basename === 'rm' && hasArgument) return true;
+  if (basename === 'dd' && tokens.slice(commandIndex + 1).some((token) => token.startsWith('if='))) return true;
+  if (/^(?:chmod|chown)$/u.test(basename) && argument === '-R') return true;
+  return false;
+}
+
+function unmatchedKeyCommandBoundary(value: string): number | undefined {
+  const newlinePattern = /\r\n|\n|\r/gu;
+  let newline: RegExpExecArray | null;
+  while ((newline = newlinePattern.exec(value)) !== null) {
+    const lineStart = newline.index + newline[0].length;
+    const lineEndMatch = /[\r\n]/u.exec(value.slice(lineStart));
+    const lineEnd = lineEndMatch === null ? value.length : lineStart + lineEndMatch.index;
+    if (isRecognizedUnmatchedKeyCommand(value.slice(lineStart, lineEnd))) {
+      return newline.index;
+    }
+  }
+  return undefined;
+}
+
 export function redactAndTruncate(text: string, options: { redact?: boolean; maxLength?: number | undefined }): string {
   const doRedact = options.redact ?? false;
   const maxLen = options.maxLength;
@@ -790,8 +872,12 @@ export function redactAndTruncate(text: string, options: { redact?: boolean; max
     if (!hasMatchingEndInScan && !hasMismatchedEndInScan) {
       const afterMarker = idx + match[0].length;
       const possibleKeyMaterial = scanRegion.slice(afterMarker);
-      const boundaryMatch = /\r?\n(?=[ \t]*(?:(?:sudo\s+)?(?:rm\s|shutdown(?:\s|$)|reboot(?:\s|$)|mkfs(?:[.\s]|$)|dd\s+if=|chmod\s+-R(?:\s|$)|chown\s+-R(?:\s|$))))|["'](?=[ \t]*(?:&&|\|\||[&|><;])|[ \t]*$)|&&|\|\||[&|><;]/u.exec(possibleKeyMaterial);
-      const boundary = boundaryMatch?.index ?? possibleKeyMaterial.length;
+      const inlineBoundary = /["'](?=[ \t]*(?:&&|\|\||[&|><;])|[ \t]*$)|&&|\|\||[&|><;]/u.exec(possibleKeyMaterial)?.index;
+      const commandBoundary = unmatchedKeyCommandBoundary(possibleKeyMaterial);
+      const boundary = Math.min(
+        inlineBoundary ?? possibleKeyMaterial.length,
+        commandBoundary ?? possibleKeyMaterial.length,
+      );
       const redactedPrefix = scanRegion.slice(0, idx) + '[REDACTED]' + possibleKeyMaterial.slice(boundary);
       return isOriginalOverMax || (maxLen !== undefined && redactedPrefix.length > maxLen)
         ? `${redactedPrefix}\n${TRUNCATION_MARKER}`
