@@ -2076,7 +2076,6 @@ export class LessonRecorder {
         }
       }
 
-      let persistenceAttempted = false;
       try {
         const contradictionContext = await this.createContradictionContext(
           lesson,
@@ -2097,8 +2096,13 @@ export class LessonRecorder {
             admittedBaseLesson.timestamp,
           ),
         };
-        persistenceAttempted = true;
-        await this.memory.recordLesson(admittedLesson);
+        try {
+          await this.memory.recordLesson(admittedLesson);
+        } catch {
+          admissionSettled?.(false);
+          reportLessonRecordingFailure(admittedLesson);
+          return;
+        }
         recordingResult.recorded += 1;
         this.commitFailureClusterObservation(admittedLesson, recordingResult);
         this.commitBlockerPatternObservations(lesson);
@@ -2119,9 +2123,6 @@ export class LessonRecorder {
         admissionSettled?.(true);
       } catch {
         admissionSettled?.(false);
-        if (persistenceAttempted) {
-          reportLessonRecordingFailure(lesson);
-        }
       } finally {
         if (
           cooldownKey &&
