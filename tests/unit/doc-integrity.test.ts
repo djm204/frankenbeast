@@ -113,6 +113,18 @@ describe('maintained Markdown integrity', () => {
     expect(result.status).toBe(1);
   });
 
+  it('rejects incomplete standard-width opening and closing remnants', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/opening.md', `${conflictMarker('<')} HEAD\nunfinished\n`);
+    writeFixture(root, 'docs/closing.md', `unfinished\n${conflictMarker('>')} feature/docs\n`);
+
+    const result = runScanner(root);
+    const report = JSON.parse(result.stdout) as { totalFindings: number };
+
+    expect(result.status).toBe(1);
+    expect(report.totalFindings).toBe(2);
+  });
+
   it('allows valid Setext heading underlines outside conflict blocks', () => {
     const root = makeFixtureRoot();
     writeFixture(root, 'docs/guide.md', [

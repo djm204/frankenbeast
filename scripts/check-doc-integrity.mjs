@@ -44,15 +44,24 @@ async function scanFile(path) {
   for (const [index, line] of source.split(/\r?\n/u).entries()) {
     const openingMatch = openingMarkerPattern.exec(line);
     if (openingMatch) {
-      conflict = {
-        width: openingMatch[1].length,
-        sawSeparator: false,
-        findings: [{
-          path: toRepoPath(path),
-          line: index + 1,
-          marker: openingMatch[1],
-        }],
-      };
+      const finding = { path: toRepoPath(path), line: index + 1, marker: openingMatch[1] };
+      if (openingMatch[1].length >= 7) {
+        findings.push(finding);
+        conflict = null;
+      } else {
+        conflict = {
+          width: openingMatch[1].length,
+          sawSeparator: false,
+          findings: [finding],
+        };
+      }
+      continue;
+    }
+
+    const closingMatch = closingMarkerPattern.exec(line);
+    if (closingMatch?.[1].length >= 7) {
+      findings.push({ path: toRepoPath(path), line: index + 1, marker: closingMatch[1] });
+      conflict = null;
       continue;
     }
     if (!conflict) continue;
@@ -68,7 +77,6 @@ async function scanFile(path) {
       continue;
     }
 
-    const closingMatch = closingMarkerPattern.exec(line);
     if (closingMatch?.[1].length === conflict.width && conflict.sawSeparator) {
       conflict.findings.push({
         path: toRepoPath(path),
