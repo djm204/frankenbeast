@@ -73,3 +73,34 @@ describe('NetworkServiceList destructive action confirmations', () => {
     expect(handlers.onRestart).toHaveBeenCalledWith('chat-gateway');
   });
 });
+
+describe('NetworkServiceList status announcements', () => {
+  it('announces an updated service status without making the entire list live', () => {
+    const handlers = {
+      onSelectLogs: vi.fn(),
+      onStart: vi.fn(),
+      onStop: vi.fn(),
+      onRestart: vi.fn(),
+    };
+    const { rerender } = render(
+      <NetworkServiceList services={[runningService]} {...handlers} />,
+    );
+
+    const serviceList = screen.getByRole('list', { name: 'Network services' });
+    expect(serviceList.getAttribute('aria-live')).toBeNull();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+
+    const statusRegion = screen.getByText('running');
+    expect(statusRegion.getAttribute('aria-live')).toBe('polite');
+    expect(statusRegion.getAttribute('aria-atomic')).toBe('true');
+
+    rerender(
+      <NetworkServiceList
+        services={[{ ...runningService, status: 'degraded' }]}
+        {...handlers}
+      />,
+    );
+
+    expect(screen.getByText('degraded')).toBe(statusRegion);
+  });
+});
