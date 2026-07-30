@@ -7,7 +7,7 @@
 - [x] Implement the narrowest redaction fixes while preserving executable approval context.
 - [x] Run focused and full Governor tests plus package typecheck, lint, and build.
 - [x] Inspect the resulting diff for scope, security, and regression risk.
-- [ ] Commit with Conventional Commit format and push the existing branch only.
-- [ ] Reply to and resolve all nine seventh-round Codex threads.
+- [x] Commit with Conventional Commit format and push the existing branch only.
+- [x] Reply to and resolve all nine seventh-round Codex threads.
 - [ ] Verify exact new head, local/remote equality, current-head CI, and zero unresolved threads.
 - [ ] Record the exact over-cap review command/workdir handoff and block for fresh human authorization.
