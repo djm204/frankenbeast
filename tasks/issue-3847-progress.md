@@ -9,7 +9,7 @@
 - [x] Run relevant mcp-suite tests, lint, typecheck, build, and secret scan.
 - [x] Self-review the diff and verify no unrelated changes.
 - [x] Commit with configured identity and a Conventional Commit message.
-- [ ] Push, open one PR closing #3847, and verify local/remote/PR head equality.
+- [x] Push, open one PR closing #3847, and verify local/remote/PR head equality.
 - [ ] Run current-head GitHub Codex review, resolve all findings, verify zero unresolved threads and green CI.
 - [ ] Squash merge only after all authorized gates; verify issue closure.
 - [ ] Append concise reusable lessons and complete the Kanban handoff.
