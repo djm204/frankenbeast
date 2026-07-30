@@ -8,6 +8,6 @@
   - Focused component suite: 3/3 passed.
   - Repository lint, typecheck, and build passed.
   - Repository tests passed all assertions on retry (including 4,983/4,983 orchestrator tests) but the orchestrator command still exited 1 for a pre-existing unhandled Codex app-server-unavailable rejection; the three implicated runtime files pass together (124/124).
-- [ ] Commit with the required author identity, push, and open a linked PR.
+- [x] Commit with the required author identity, push, and open linked PR #3926.
 - [ ] Reach green CI and an exact-head Codex clean result with zero unresolved threads.
 - [ ] Guarded squash-merge and verify issue closure.
