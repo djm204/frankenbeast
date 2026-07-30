@@ -16,6 +16,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
       restore: ReturnType<typeof vi.fn>;
       snapshot: ReturnType<typeof vi.fn>;
       set: ReturnType<typeof vi.fn>;
+      setAndFlush: ReturnType<typeof vi.fn>;
       get: ReturnType<typeof vi.fn>;
       has: ReturnType<typeof vi.fn>;
       delete: ReturnType<typeof vi.fn>;
@@ -518,6 +519,7 @@ vi.mock("@franken/brain", () => ({
         }),
         snapshot: vi.fn(() => workingSnapshot),
         set: vi.fn(),
+        setAndFlush: vi.fn(),
         get: vi.fn((key: string) => workingSnapshot[key]),
         has: vi.fn(() => false),
         delete: vi.fn(),
@@ -816,11 +818,11 @@ describe("createBrainAdapter", () => {
     });
 
     const mockBrain = brainInstances[0];
-    expect(mockBrain.working.set).toHaveBeenCalledWith(
+    expect(mockBrain.working.setAndFlush).toHaveBeenCalledWith(
       "task-1",
       "working entry",
     );
-    expect(mockBrain.flush).toHaveBeenCalledOnce();
+    expect(mockBrain.flush).not.toHaveBeenCalled();
     expect(mockBrain.episodic.record).toHaveBeenCalledWith(
       expect.objectContaining({ summary: "evt-1: episode summary" }),
     );
@@ -851,20 +853,8 @@ describe("createBrainAdapter", () => {
       "task-1": "persisted value",
     };
     mockBrain.working.snapshot.mockImplementation(() => ({ ...workingState }));
-    mockBrain.working.has.mockImplementation((key: string) =>
-      Object.hasOwn(workingState, key),
-    );
-    mockBrain.working.get.mockImplementation((key: string) => workingState[key]);
-    mockBrain.working.set.mockImplementation((key: string, value: unknown) => {
-      workingState[key] = value;
-    });
-    mockBrain.working.delete.mockImplementation((key: string) => {
-      const existed = Object.hasOwn(workingState, key);
-      delete workingState[key];
-      return existed;
-    });
     const flushFailure = new Error("simulated working-memory flush failure");
-    mockBrain.flush.mockImplementationOnce(() => {
+    mockBrain.working.setAndFlush.mockImplementation(() => {
       throw flushFailure;
     });
 
@@ -883,10 +873,6 @@ describe("createBrainAdapter", () => {
     ]);
 
     delete workingState["task-1"];
-    mockBrain.flush.mockImplementationOnce(() => {
-      throw flushFailure;
-    });
-
     await expect(
       brain.store({ key: "task-2", value: "rejected new value", type: "working" }),
     ).rejects.toBe(flushFailure);
@@ -894,6 +880,12 @@ describe("createBrainAdapter", () => {
     await expect(
       brain.query({ query: "rejected new value", type: "working" }),
     ).resolves.toEqual([]);
+    expect(mockBrain.working.setAndFlush).toHaveBeenCalledTimes(2);
+    expect(mockBrain.working.has).not.toHaveBeenCalled();
+    expect(mockBrain.working.get).not.toHaveBeenCalled();
+    expect(mockBrain.working.set).not.toHaveBeenCalled();
+    expect(mockBrain.working.delete).not.toHaveBeenCalled();
+    expect(mockBrain.flush).not.toHaveBeenCalled();
   });
 
   it("stores temporary operational working facts with expiresAt metadata when ttlMs is provided", async () => {
@@ -904,13 +896,13 @@ describe("createBrainAdapter", () => {
       await brain.store({ key: "run:tmp", value: "short-lived status", type: "working", ttlMs: 60_000 });
 
       const mockBrain = brainInstances[0];
-      expect(mockBrain.working.set).toHaveBeenCalledWith("run:tmp", {
+      expect(mockBrain.working.setAndFlush).toHaveBeenCalledWith("run:tmp", {
         value: "short-lived status",
         category: "temporary-operational",
         sourceScope: "mcp-memory-store",
         expiresAt: "2026-01-01T00:01:00.000Z",
       });
-      expect(mockBrain.flush).toHaveBeenCalledOnce();
+      expect(mockBrain.flush).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -926,7 +918,7 @@ describe("createBrainAdapter", () => {
       ).rejects.toThrow("ttlMs must be a positive integer");
     }
 
-    expect(mockBrain.working.set).not.toHaveBeenCalled();
+    expect(mockBrain.working.setAndFlush).not.toHaveBeenCalled();
     expect(mockBrain.flush).not.toHaveBeenCalled();
   });
 
@@ -939,7 +931,7 @@ describe("createBrainAdapter", () => {
     ).rejects.toThrow("ttlMs is only supported for working memory");
 
     expect(mockBrain.episodic.record).not.toHaveBeenCalled();
-    expect(mockBrain.working.set).not.toHaveBeenCalled();
+    expect(mockBrain.working.setAndFlush).not.toHaveBeenCalled();
   });
 
   it("does not label durable working values with expiresAt fields as TTL-expiring", async () => {
@@ -1554,7 +1546,7 @@ describe("createBrainAdapter", () => {
     });
 
     const mockBrain = brainInstances[0];
-    expect(mockBrain.working.set).toHaveBeenCalledWith(
+    expect(mockBrain.working.setAndFlush).toHaveBeenCalledWith(
       "__fbeast_agent_memory__/Alpha%20Team!/task",
       {
         __fbeastMemoryScope: "fbeast:agent-memory",
