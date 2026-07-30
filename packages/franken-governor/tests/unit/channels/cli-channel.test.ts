@@ -487,4 +487,159 @@ describe('CliChannel', () => {
     expect(prompt).toContain('[TRUNCATED]');
     expect(prompt).not.toContain('&& rm -rf /important');
   });
+
+  it('does not expose URL password prefix starting near cutoff when password extends beyond scan margin without at-sign in scan region', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    const padding = 'a'.repeat(950);
+    const summary = `${padding}https://admin:secret_pass_prefix${'x'.repeat(2100)}@example.com/api`;
+
+    await channel.requestApproval(makeRequest({ summary }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('secret_pass_prefix');
+  });
+
+  it('does not falsely redact complete URLs ending in username and port when summary exceeds display max but is under scan limit', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    const padding = 'a'.repeat(985);
+    const summary = `${padding}https://user:8080`;
+
+    await channel.requestApproval(makeRequest({ summary }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).toContain('https://user:80');
+    expect(prompt).not.toContain('https://user:[REDACTED]');
+  });
+
+  it('consumes comma and closing bracket/brace punctuation for unquoted sensitive flags while preserving next arguments and shell operators', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: '--password abc,def --verbose --token token}tail && echo ok --passphrase pass]word next_arg',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('abc');
+    expect(prompt).not.toContain(',def');
+    expect(prompt).not.toContain('token}tail');
+    expect(prompt).not.toContain('pass]word');
+    expect(prompt).toContain('--password [REDACTED] --verbose');
+    expect(prompt).toContain('--token [REDACTED] && echo ok');
+    expect(prompt).toContain('--passphrase [REDACTED] next_arg');
+  });
+
+  it('supports sensitive YAML block scalar indicators |2, |2-, >+2 and valid indicator ordering', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary:
+        'yaml_password_1: |2\n  secret_val_1\n' +
+        'yaml_password_2: |2-\n  secret_val_2\n' +
+        'yaml_password_3: >+2\n  secret_val_3\n' +
+        'safe_step: echo done\n',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('secret_val_1');
+    expect(prompt).not.toContain('secret_val_2');
+    expect(prompt).not.toContain('secret_val_3');
+    expect(prompt).toContain('yaml_password_1: [REDACTED]');
+    expect(prompt).toContain('yaml_password_2: [REDACTED]');
+    expect(prompt).toContain('yaml_password_3: [REDACTED]');
+    expect(prompt).toContain('safe_step: echo done');
+  });
+
+  it('recognizes shell assignments immediately after unspaced ampersand and opening parenthesis without hiding operators', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'echo async&PASSWORD=hunter2 ./bg && (TOKEN=secret_val ./subshell)',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('hunter2');
+    expect(prompt).not.toContain('secret_val');
+    expect(prompt).toContain('echo async&PASSWORD=[REDACTED] ./bg');
+    expect(prompt).toContain('(TOKEN=[REDACTED] ./subshell)');
+  });
+
+  it('supports URL userinfo password redaction with bracketed IPv6 authorities', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'https://user:ipv6-pass-value@[::1]:8080/path && postgres://admin:db-pass-value@[2001:db8::1]:5432/dbname',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('ipv6-pass-value');
+    expect(prompt).not.toContain('db-pass-value');
+    expect(prompt).toContain('https://user:[REDACTED]@[::1]:8080/path');
+    expect(prompt).toContain('postgres://admin:[REDACTED]@[2001:db8::1]:5432/dbname');
+  });
+
+  it('redacts literal dollar-paren and dollar-brace syntax inside single-quoted sensitive assignments and flags while preserving approval context', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: "PASSWORD='$(reboot)' --token '${MY_SECRET}' && echo ok",
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('$(reboot)');
+    expect(prompt).not.toContain('${MY_SECRET}');
+    expect(prompt).toContain("PASSWORD='[REDACTED]'");
+    expect(prompt).toContain("--token '[REDACTED]'");
+    expect(prompt).toContain('&& echo ok');
+  });
+
+  it('redacts duplicate assignment text in flow and non-flow contexts using actual occurrence offsets', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'x { password=abc,def}\ny password=abc,def --verbose',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('abc');
+    expect(prompt).not.toContain(',def');
+    expect(prompt).toContain('x { password=[REDACTED]}');
+    expect(prompt).toContain('y password=[REDACTED] --verbose');
+  });
+
+  it('stops POSIX single-quoted Authorization header at first single quote even when preceded by backslash while keeping harmless context visible', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: "curl -H 'Authorization: Bearer auth-value-123\\' http://example.com && echo done",
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('auth-value-123');
+    expect(prompt).toContain("curl -H 'Authorization: [REDACTED]' http://example.com && echo done");
+  });
+
+  it('redacts standalone Bearer tokens of any length including short and single-character tokens', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'Header Bearer abc12345 and Bearer x present',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('abc12345');
+    expect(prompt).not.toContain('Bearer x ');
+    expect(prompt).toContain('Header Bearer [REDACTED] and Bearer [REDACTED] present');
+  });
 });

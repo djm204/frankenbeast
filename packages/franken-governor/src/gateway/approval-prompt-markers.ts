@@ -130,9 +130,18 @@ function redactPrivateKeyBlocks(text: string): string {
   });
 }
 
-function redactUrlPasswords(text: string): string {
+function redactUrlPasswords(text: string, isTruncatedTail = false): string {
+  if (isTruncatedTail) {
+    return text.replace(
+      /\b([a-z0-9+.-]+:\/\/(?:[a-zA-Z0-9_%+.-]+:))([^@/\s]+)(?:(@[a-zA-Z0-9.\[\]:-]+)|(?=$))/giu,
+      (match, prefix, _pass, atHost) => {
+        return `${prefix}[REDACTED]${atHost ?? ''}`;
+      },
+    );
+  }
+
   return text.replace(
-    /\b([a-z0-9+.-]+:\/\/(?:[a-zA-Z0-9_%+.-]+:))([^@/\s]+)(@[a-zA-Z0-9.-]+)/giu,
+    /\b([a-z0-9+.-]+:\/\/(?:[a-zA-Z0-9_%+.-]+:))([^@/\s]+)(@[a-zA-Z0-9.\[\]:-]+)/giu,
     '$1[REDACTED]$3',
   );
 }
@@ -140,13 +149,17 @@ function redactUrlPasswords(text: string): string {
 function redactAuthorizationHeaders(text: string): string {
   let result = text;
 
-  // Single quoted shell header argument: 'Cookie: foo', 'Authorization: bar'
+  // Single quoted POSIX shell header argument: stops at first single quote (no escapes in POSIX single quotes)
   result = result.replace(
-    /(')(Authorization|Cookie|Set-Cookie|Proxy-Authorization)\s*:\s*(?:(?:\\.|[^'\\])+)\1/giu,
-    "$1$2: [REDACTED]$1",
+    /('(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization)\s*:\s*[^']*')/giu,
+    (match) => {
+      const colonIdx = match.indexOf(':');
+      const headerName = match.slice(1, colonIdx).trim();
+      return `'${headerName}: [REDACTED]'`;
+    },
   );
 
-  // Double quoted shell header argument with escaped quotes support: "Authorization: Digest username=\"bob\"..."
+  // Double quoted shell header argument with escaped quotes support
   result = result.replace(
     /(")(Authorization|Cookie|Set-Cookie|Proxy-Authorization)\s*:\s*(?:(?:\\.|[^"\\])+)\1/giu,
     '$1$2: [REDACTED]$1',
@@ -185,7 +198,7 @@ function redactYamlMultilineBlocks(text: string): string {
       }
     }
 
-    const yamlBlockMatch = line.match(/^(\s*)([A-Za-z0-9_-]+)\s*:\s*[|>][-+]?\s*$/);
+    const yamlBlockMatch = line.match(/^(\s*)([A-Za-z0-9_-]+)\s*:\s*[|>](?:[-+]?\d?|\d?[-+]?)\s*$/);
     if (yamlBlockMatch && yamlBlockMatch[1] !== undefined && yamlBlockMatch[2] !== undefined) {
       const indentStr = yamlBlockMatch[1];
       const key = yamlBlockMatch[2];
@@ -203,21 +216,22 @@ function redactYamlMultilineBlocks(text: string): string {
   return out.join('\n');
 }
 
-export function redactSecrets(text: string): string {
+export function redactSecrets(text: string, options?: { isTruncatedTail?: boolean }): string {
+  const isTruncatedTail = options?.isTruncatedTail ?? false;
   let result = text;
 
   // 1. Private Key Blocks (plausible key body check)
   result = redactPrivateKeyBlocks(result);
 
-  // 2. URL Userinfo Passwords (supports dots and plus in username)
-  result = redactUrlPasswords(result);
+  // 2. URL Userinfo Passwords (supports dots and plus in username, IPv6 authority, cutoff boundary)
+  result = redactUrlPasswords(result, isTruncatedTail);
 
   // 3. Authorization, Cookie, Set-Cookie, Proxy-Authorization Headers
   result = redactAuthorizationHeaders(result);
 
-  // 4. Standalone Bearer tokens outside Authorization header
+  // 4. Standalone Bearer tokens outside Authorization header (including short/single-char tokens)
   result = result.replace(
-    /\b(Bearer\s+)[A-Za-z0-9_.~+/\-]{10,}/giu,
+    /\b(Bearer\s+)[A-Za-z0-9_.~+/\-]+/giu,
     '$1[REDACTED]',
   );
 
@@ -235,31 +249,32 @@ export function redactSecrets(text: string): string {
     '[REDACTED]',
   );
 
-  // 6. YAML Multiline Block Scalars (| or >)
+  // 6. YAML Multiline Block Scalars (| or > with indicators like |2, |2-, >+2)
   result = redactYamlMultilineBlocks(result);
 
   // 7. Space-Separated CLI Flags (--flag val, --flag "val", --flag 'val', unterminated, shell expr)
-  const flagRegex = /(--[A-Za-z0-9_-]+)(\s+)("((?:\\.|[^"\r\n\\])*)"|'((?:\\.|[^'\r\n\\])*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"',;}\]\r\n&|><]|<\([^)]*\)|>\([^)]*\))+))/gimu;
+  const flagRegex = /(--[A-Za-z0-9_-]+)(\s+)("((?:\\.|[^"\r\n\\])*)"|'((?:\\.|[^'\r\n\\])*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"'\r\n&|><;]|<\([^)]*\)|>\([^)]*\))+))/gimu;
   result = result.replace(flagRegex, (match, flag, space, valWithQuotes, dQuoteVal, sQuoteVal, dQuoteUnterm, sQuoteUnterm, unquotedVal) => {
     if (typeof flag !== 'string' || !isSensitiveKeyToken(flag)) {
       return match;
     }
     const val = (dQuoteVal ?? sQuoteVal ?? dQuoteUnterm ?? sQuoteUnterm ?? unquotedVal ?? valWithQuotes) as string;
-    if (isShellExpression(val)) {
+    const isSingleQuoted = valWithQuotes.startsWith("'") || sQuoteUnterm !== undefined;
+    if (!isSingleQuoted && isShellExpression(val)) {
       return match;
     }
-    if (valWithQuotes.startsWith('"')) {
+    if (valWithQuotes.startsWith('"') || dQuoteUnterm !== undefined) {
       return `${flag}${space}"[REDACTED]"`;
     }
-    if (valWithQuotes.startsWith("'")) {
+    if (valWithQuotes.startsWith("'") || sQuoteUnterm !== undefined) {
       return `${flag}${space}'[REDACTED]'`;
     }
     return `${flag}${space}[REDACTED]`;
   });
 
   // 8. Key-Value Assignments & YAML Colon / Equals Assignments
-  // Treat shell operators (; && || |) as key boundaries
-  const keyBoundary = '(?:^|\\s|[{,;]|&&|\\|\\||\\|)';
+  // Treat shell operators (; && || | &), parenthesis, and flow punctuation as key boundaries
+  const keyBoundary = '(?:^|\\s|[{,;(]|&&|\\|\\||[&|])';
   const ansiPattern = '(?:(?:\\\\u001b|\\u001b|\\x1b)\\[[0-9;]*m)*';
   const keyTokenPattern = '([A-Za-z0-9_-]+)';
 
@@ -278,9 +293,8 @@ export function redactSecrets(text: string): string {
     `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*[:=]\\s*)'((?:\\\\.|[^'\\r\\n\\\\])*)'`,
     'giu',
   );
-  result = result.replace(singleQuotedAssignment, (match, prefix, key, val) => {
+  result = result.replace(singleQuotedAssignment, (match, prefix, key) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
-    if (typeof val === 'string' && isShellExpression(val)) return match;
     return `${prefix}'[REDACTED]'`;
   });
 
@@ -291,11 +305,12 @@ export function redactSecrets(text: string): string {
   );
   result = result.replace(unterminatedQuotedAssignment, (match, prefix, key, quote, val) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
-    if (typeof val === 'string' && isShellExpression(val)) return match;
+    const isSingleQuoted = quote === "'";
+    if (!isSingleQuoted && typeof val === 'string' && isShellExpression(val)) return match;
     return `${prefix}${quote}[REDACTED]${quote}`;
   });
 
-  // YAML / Colon unquoted assignments: key: val (exclude flow mapping punctuation , and {})
+  // YAML / Colon unquoted assignments: key: val
   const yamlColonAssignment = new RegExp(
     `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*:\\s*)(?!["'\\s]|\\\[REDACTED\\\](?:$|\\s|["',;}\\]&|><]))([^"\\s'\\r\\n,{}]+(?:[ \\t]+[^"\\s'\\r\\n#,{}]+)*)([ \\t]+#.*)?$`,
     'gimu',
@@ -308,7 +323,7 @@ export function redactSecrets(text: string): string {
     return `${prefix}[REDACTED]${shellOpRemainder}${comment ? comment.trimEnd() : ''}`;
   });
 
-  // Standard unquoted assignments (key=val), handling commas in shell words vs flow mappings `{...}`
+  // Standard unquoted assignments (key=val)
   const valToken = '((?:\\\\.|[^\\s"\';}\\r\\n&|><]|<\\([^)]*\\)|>\\([^)]*\\))+)';
   const unquotedAssignment = new RegExp(
     `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)${valToken}`,
@@ -325,17 +340,10 @@ export function redactSecrets(text: string): string {
       return match;
     }
 
-    const idxMatch = result.indexOf(match);
-
-    // Isolate flow mapping check to current line only
-    const lastNewlineIdx = idxMatch >= 0 ? result.lastIndexOf('\n', idxMatch) : -1;
-    const lineBefore = idxMatch >= 0 ? result.slice(lastNewlineIdx + 1, idxMatch) : '';
-    const isFlowMapping = lineBefore.lastIndexOf('{') > lineBefore.lastIndexOf('}');
-
-    if (isFlowMapping && typeof val === 'string') {
-      const cleanVal = val.split(/[,}]/)[0] ?? '';
-      const commaRemainder = val.slice(cleanVal.length);
-      return `${prefix}[REDACTED]${commaRemainder}`;
+    if (typeof val === 'string') {
+      const cleanVal = val.replace(/[}\]]+$/, '');
+      const bracketRemainder = val.slice(cleanVal.length);
+      return `${prefix}[REDACTED]${bracketRemainder}`;
     }
 
     return `${prefix}[REDACTED]`;
@@ -363,9 +371,10 @@ export function redactAndTruncate(text: string, options: { redact?: boolean; max
 
   // Bound scanning region to avoid quadratic work on large inputs
   const scanLimit = maxLen !== undefined ? maxLen + 2000 : text.length;
+  const isScanTruncated = text.length > scanLimit;
   let scanRegion = text.slice(0, scanLimit);
 
-  scanRegion = redactSecrets(scanRegion);
+  scanRegion = redactSecrets(scanRegion, { isTruncatedTail: isScanTruncated });
 
   // Inspect the displayed scanRegion (or slice up to maxLen) for private key BEGIN markers
   const effectiveMax = maxLen !== undefined ? maxLen : scanRegion.length;
