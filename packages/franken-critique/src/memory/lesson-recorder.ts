@@ -46,6 +46,9 @@ const LESSON_TRACEABILITY_VERIFICATION_COMMAND =
   'npm run test --workspace @franken/critique -- --run tests/unit/memory/lesson-recorder.test.ts';
 const LESSON_CONTRADICTION_VERIFICATION_COMMAND =
   LESSON_TRACEABILITY_VERIFICATION_COMMAND;
+const LESSON_RECORD_FAILURE_CODE = 'CRITIQUE_LESSON_RECORD_FAILED';
+const LESSON_RECORD_FAILURE_GUIDANCE =
+  'Inspect the memory adapter and retry the critique run after persistence recovers.';
 
 const DEFAULT_LESSON_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const MAX_LESSON_COOLDOWN_MS = 100 * 365 * 24 * 60 * 60 * 1000;
@@ -2073,6 +2076,7 @@ export class LessonRecorder {
         }
       }
 
+      let persistenceAttempted = false;
       try {
         const contradictionContext = await this.createContradictionContext(
           lesson,
@@ -2093,6 +2097,7 @@ export class LessonRecorder {
             admittedBaseLesson.timestamp,
           ),
         };
+        persistenceAttempted = true;
         await this.memory.recordLesson(admittedLesson);
         recordingResult.recorded += 1;
         this.commitFailureClusterObservation(admittedLesson, recordingResult);
@@ -2114,7 +2119,9 @@ export class LessonRecorder {
         admissionSettled?.(true);
       } catch {
         admissionSettled?.(false);
-        // Non-fatal: log failure but don't disrupt the critique flow
+        if (persistenceAttempted) {
+          reportLessonRecordingFailure(lesson);
+        }
       } finally {
         if (
           cooldownKey &&
@@ -4443,6 +4450,25 @@ function findRedactionSpans(
 
 function stableHash(value: string): string {
   return createHash('sha256').update(value).digest('base64url');
+}
+
+function reportLessonRecordingFailure(lesson: CritiqueLesson): void {
+  const lessonId =
+    lesson.testTraceability?.[0]?.lessonId ??
+    `${lesson.taskId}\u0000${lesson.evaluatorName}`;
+  try {
+    console.warn('Lesson recording failed', {
+      code: LESSON_RECORD_FAILURE_CODE,
+      operation: 'memory.recordLesson',
+      taskIdHash: stableHash(lesson.taskId).slice(0, 16),
+      lessonIdHash: stableHash(lessonId).slice(0, 16),
+      evaluatorNameHash: stableHash(lesson.evaluatorName).slice(0, 16),
+      retryable: true,
+      guidance: LESSON_RECORD_FAILURE_GUIDANCE,
+    });
+  } catch {
+    // Diagnostic output is best-effort so persistence failures remain non-fatal.
+  }
 }
 
 function sanitizeLessonIdPart(value: string): string {

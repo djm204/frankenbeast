@@ -2223,6 +2223,68 @@ describe('LessonRecorder', () => {
     expect(port.recordLesson).not.toHaveBeenCalled();
   });
 
+  it('reports lesson persistence failures without exposing raw failure data', async () => {
+    const port = createMockMemoryPort();
+    const sensitiveFailure = ['storage', 'credential', 'must-not-leak'].join('-');
+    port.recordLesson = vi
+      .fn()
+      .mockRejectedValue(new Error(sensitiveFailure));
+    const logged = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', `memory-${sensitiveFailure}`, [
+          {
+            message: 'Persist the recovered lesson',
+            severity: 'critical',
+          },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    const recording = await recorder.record(
+      result,
+      `task-${sensitiveFailure}`,
+    );
+
+    expect(recording.recorded).toBe(0);
+    expect(logged).toHaveBeenCalledWith('Lesson recording failed', {
+      code: 'CRITIQUE_LESSON_RECORD_FAILED',
+      operation: 'memory.recordLesson',
+      taskIdHash: expect.stringMatching(/^[A-Za-z0-9_-]{16}$/),
+      lessonIdHash: expect.stringMatching(/^[A-Za-z0-9_-]{16}$/),
+      evaluatorNameHash: expect.stringMatching(/^[A-Za-z0-9_-]{16}$/),
+      retryable: true,
+      guidance:
+        'Inspect the memory adapter and retry the critique run after persistence recovers.',
+    });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain(sensitiveFailure);
+  });
+
+  it('keeps lesson persistence failures non-fatal when warning output fails', async () => {
+    const port = createMockMemoryPort();
+    port.recordLesson = vi.fn().mockRejectedValue(new Error('DB unavailable'));
+    vi.spyOn(console, 'warn').mockImplementation(() => {
+      throw new Error('warning sink unavailable');
+    });
+    const recorder = new LessonRecorder(port);
+    const result: CritiqueLoopResult = {
+      verdict: 'pass',
+      iterations: [
+        createIteration(0, 'fail', 'memory-safety', [
+          { message: 'Persist the recovered lesson', severity: 'critical' },
+        ]),
+        createIteration(1, 'pass'),
+      ],
+    };
+
+    await expect(recorder.record(result, 'warning-failure-task')).resolves.toMatchObject({
+      recorded: 0,
+    });
+  });
+
   it('redacts secrets before recording critique lessons', async () => {
     const port = createMockMemoryPort();
     const recorder = new LessonRecorder(port);
