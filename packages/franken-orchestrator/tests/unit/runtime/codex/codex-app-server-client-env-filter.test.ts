@@ -8,6 +8,11 @@ vi.mock('node:child_process', () => ({
 }));
 import { spawn } from 'node:child_process';
 import { createCodexAppServerRequest } from '../../../../src/runtime/codex/codex-app-server-client.js';
+import {
+  RUN_CONFIG_INTEGRITY_ENV,
+  RUN_CONFIG_INTEGRITY_SECRET_ENV,
+  RUN_CONFIG_INTEGRITY_BYPASS_ENV,
+} from '../../../../src/cli/run-config-integrity.js';
 
 function mockChildProcess(): ChildProcess {
   const proc = new EventEmitter() as ChildProcess;
@@ -47,6 +52,29 @@ describe('createCodexAppServerRequest env filtering', () => {
     } finally {
       delete process.env['SOME_UNRELATED_API_KEY'];
       delete process.env['OPENAI_API_KEY'];
+    }
+  });
+
+  it('strips runtime config integrity state from the default (non-override) spawned env, matching every other provider spawn path', () => {
+    process.env[RUN_CONFIG_INTEGRITY_ENV] = '/tmp/run-config.integrity';
+    process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV] = 'signing-key';
+    process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV] = '1';
+
+    try {
+      const proc = mockChildProcess();
+      (spawn as ReturnType<typeof vi.fn>).mockReturnValue(proc);
+
+      const request = createCodexAppServerRequest({});
+      request('someMethod', {}, { timeoutMs: 10 }).catch(() => undefined);
+
+      const spawnEnv = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][2].env as Record<string, string>;
+      expect(spawnEnv[RUN_CONFIG_INTEGRITY_ENV]).toBeUndefined();
+      expect(spawnEnv[RUN_CONFIG_INTEGRITY_SECRET_ENV]).toBeUndefined();
+      expect(spawnEnv[RUN_CONFIG_INTEGRITY_BYPASS_ENV]).toBeUndefined();
+    } finally {
+      delete process.env[RUN_CONFIG_INTEGRITY_ENV];
+      delete process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];
+      delete process.env[RUN_CONFIG_INTEGRITY_BYPASS_ENV];
     }
   });
 
