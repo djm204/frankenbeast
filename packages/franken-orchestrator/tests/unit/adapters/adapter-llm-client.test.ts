@@ -89,6 +89,20 @@ describe('AdapterLlmClient', () => {
     expect((err as AdapterLlmError).cause).toBe(boom);
   });
 
+  it('redacts header-style secrets before normalizing multiline adapter errors', async () => {
+    const privateMaterial = ['multiline', 'private', 'material'].join('-');
+    const boom = new Error(`API_TOKEN: ${privateMaterial}\n at execute`);
+    const client = new AdapterLlmClient(
+      makeAdapter({ execute: vi.fn(async () => { throw boom; }) }),
+    );
+
+    const err = await client.complete('prompt').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterLlmError);
+    expect((err as AdapterLlmError).message).toContain('API_TOKEN: <redacted>');
+    expect((err as AdapterLlmError).message).not.toContain(privateMaterial);
+    expect((err as AdapterLlmError).cause).toBe(boom);
+  });
+
   it('bounds outward adapter diagnostics and identifies the error class', async () => {
     const boom = new TypeError(`invalid response ${'x'.repeat(2_000)}`);
     const client = new AdapterLlmClient(

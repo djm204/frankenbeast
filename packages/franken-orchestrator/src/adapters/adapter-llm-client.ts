@@ -34,8 +34,7 @@ function safeAdapterErrorContext(error: unknown): string {
   const errorClass = error instanceof Error ? error.name : typeof error;
   const message = error instanceof Error ? error.message : String(error);
   const safeClass = redactSensitiveText(errorClass).replace(/\s+/gu, ' ').trim().slice(0, 100);
-  const safeMessage = redactSensitiveText(message)
-    .replace(/\s+/gu, ' ')
+  const safeMessage = redactSensitiveText(message.replace(/\s+/gu, ' '))
     .trim()
     .slice(0, MAX_OUTWARD_ERROR_CONTEXT_LENGTH);
   return `${safeClass || 'Error'}: ${safeMessage || 'No diagnostic available'}`;
