@@ -27,6 +27,7 @@ const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
   'i',
 );
 const MAX_COMMENT_RATIO = 0.5;
+const MAX_INPUT_BYTES = 500_000;
 
 interface UnresolvedMarkerOccurrence {
   readonly label: string;
@@ -1014,10 +1015,15 @@ export class ConcisenessEvaluator implements Evaluator {
       };
     }
 
+    const content = input.content.length > MAX_INPUT_BYTES
+      ? input.content.slice(0, MAX_INPUT_BYTES)
+      : input.content;
+
     const findings: EvaluationFinding[] = [];
 
-    this.checkCommentRatio(input.content, findings);
-    this.checkTodoComments(input.content, findings);
+    this.checkCommentRatio(content, findings);
+    this.checkTodoComments(content, findings);
+
 
     const score = createScore(Math.max(0, 1 - findings.length * 0.2));
 

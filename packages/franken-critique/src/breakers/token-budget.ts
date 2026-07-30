@@ -27,7 +27,15 @@ export class TokenBudgetBreaker implements CircuitBreaker {
       );
     }
 
+    if (config.costBudgetUsd !== undefined && (typeof config.costBudgetUsd !== 'number' || Number.isNaN(config.costBudgetUsd) || config.costBudgetUsd < 0)) {
+      throw new ConfigurationError(
+        `costBudgetUsd must be a finite non-negative number, got ${config.costBudgetUsd}`,
+        { context: { costBudgetUsd: config.costBudgetUsd } },
+      );
+    }
+
     const spend = await this.observability.getTokenSpend(config.sessionId);
+
 
     // A dollar-denominated budget (e.g. the CLI `--budget <usd>` flag) must be
     // compared against estimated cost, not the raw token count. Use strict

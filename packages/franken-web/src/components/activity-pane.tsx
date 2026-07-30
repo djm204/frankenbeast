@@ -239,7 +239,7 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
   }, [events.length, latestAnnouncement, resetKey]);
 
   return (
-    <section className="rail-card terminal-activity" aria-label="Activity">
+    <section className="rail-card terminal-activity" role="region" aria-label="Activity">
       <div className="rail-card__header">
         <p className="eyebrow">Activity</p>
         <h2>Runtime Events</h2>
