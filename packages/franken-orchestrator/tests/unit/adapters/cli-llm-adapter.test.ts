@@ -573,6 +573,73 @@ describe('CliLlmAdapter', () => {
           process.env = originalEnv;
         }
       });
+
+      it('preserves DOCKER_CERT_PATH (a directory path, not a secret)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          DOCKER_CERT_PATH: '/home/test/.docker/certs',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['DOCKER_CERT_PATH']).toBe('/home/test/.docker/certs');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves the indexed GIT_CONFIG_COUNT/KEY_n/VALUE_n tuple used to inject git config', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'safe.directory',
+          GIT_CONFIG_VALUE_0: '/workspace',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['GIT_CONFIG_COUNT']).toBe('1');
+          expect(env['GIT_CONFIG_KEY_0']).toBe('safe.directory');
+          expect(env['GIT_CONFIG_VALUE_0']).toBe('/workspace');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves common LiteLLM vendor keys for aider when overridden to a non-default backend', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          OPENROUTER_API_KEY: 'openrouter-secret',
+          GROQ_API_KEY: 'groq-secret',
+          MISTRAL_API_KEY: 'mistral-secret',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(aiderProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['OPENROUTER_API_KEY']).toBe('openrouter-secret');
+          expect(env['GROQ_API_KEY']).toBe('groq-secret');
+          expect(env['MISTRAL_API_KEY']).toBe('mistral-secret');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
     });
 
     describe('with CodexProvider', () => {
@@ -1803,6 +1870,11 @@ describe('CliLlmAdapter', () => {
         'SSL_CERT_FILE',
         'SSL_CERT_DIR',
         'NODE_EXTRA_CA_CERTS',
+        'DOCKER_CERT_PATH',
+        'GIT_CONFIG_COUNT',
+        'GIT_CONFIG_KEY_0',
+        'GIT_CONFIG_VALUE_0',
+        'GIT_CONFIG_KEY_12',
       ];
       for (const name of safeNames) {
         expect(isSecretEnvVarName(name), `expected ${name} to NOT be flagged as secret`).toBe(false);

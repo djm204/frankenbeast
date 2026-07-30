@@ -43,12 +43,15 @@ const SECRET_ENV_NAME_COMPOUND_PATTERN =
 /**
  * Env var names that would otherwise match the patterns above but are
  * capability/configuration pointers, not secrets themselves — e.g.
- * `SSH_AUTH_SOCK` is a path to the running ssh-agent's socket, and
- * `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS` point at CA bundle files. Stripping
- * these breaks legitimate CLI behavior (git/ssh via the user's agent, TLS
- * trust for provider HTTPS calls) without reducing secret exposure, since
- * none of them carry credential material in the variable itself. `PWD`
- * (present working directory) is included for the same reason.
+ * `SSH_AUTH_SOCK` is a path to the running ssh-agent's socket,
+ * `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS` point at CA bundle files, and
+ * `DOCKER_CERT_PATH` (see `network/services/managed-service-env.ts`) points
+ * at a directory of TLS client cert files for talking to a remote Docker
+ * daemon. Stripping these breaks legitimate CLI behavior (git/ssh via the
+ * user's agent, TLS trust for provider HTTPS calls, Docker client auth)
+ * without reducing secret exposure, since none of them carry credential
+ * material in the variable itself. `PWD` (present working directory) is
+ * included for the same reason.
  */
 const SAFE_ENV_NAME_EXCEPTIONS = new Set([
   'PWD',
@@ -57,11 +60,25 @@ const SAFE_ENV_NAME_EXCEPTIONS = new Set([
   'SSL_CERT_FILE',
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
+  'DOCKER_CERT_PATH',
 ]);
+
+/**
+ * Git's indexed runtime-config mechanism (`GIT_CONFIG_COUNT` plus
+ * `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` pairs) is how this repo
+ * itself injects config into spawned git commands (see
+ * `beasts/execution/docker-container-runtime.ts`). The `KEY` segment in
+ * `GIT_CONFIG_KEY_0` refers to a config key *name* (e.g. `safe.directory`),
+ * not a secret — stripping it silently breaks every git command the CLI
+ * runs. Exempt the whole indexed tuple by name shape rather than by value,
+ * since the mechanism is inherently non-secret.
+ */
+const SAFE_ENV_NAME_PATTERNS: readonly RegExp[] = [/^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/i];
 
 /** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
 export function isSecretEnvVarName(name: string): boolean {
   if (SAFE_ENV_NAME_EXCEPTIONS.has(name.toUpperCase())) return false;
+  if (SAFE_ENV_NAME_PATTERNS.some((pattern) => pattern.test(name))) return false;
   return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
 }
 
@@ -88,17 +105,40 @@ export function filterSecretEnvVars(
 }
 
 /**
+ * Vendor API key env vars for LiteLLM-supported backends aider can be
+ * pointed at via `providerOverrides.aider.model` (aider itself has no fixed
+ * backend — its default chat model is Claude Sonnet, but any LiteLLM model
+ * string is accepted). This can't be fully exhaustive — LiteLLM supports
+ * dozens of providers — but covers the common ones so overriding aider's
+ * model doesn't silently break auth. Extend this list if another backend is
+ * configured.
+ */
+const AIDER_LITELLM_BACKEND_AUTH_ENV_VARS: readonly string[] = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'AZURE_API_KEY',
+  'GEMINI_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'OPENROUTER_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'TOGETHER_API_KEY',
+  'COHERE_API_KEY',
+  'XAI_API_KEY',
+  'PERPLEXITY_API_KEY',
+  'FIREWORKS_API_KEY',
+];
+
+/**
  * Auth env var(s) each CLI provider needs preserved to authenticate itself,
  * even though the names are secret-shaped. `gemini` is intentionally absent:
  * its own `filterEnv()` already strips all `GEMINI*`/`GOOGLE*` vars, so it
- * doesn't rely on env-based auth surviving this filter. `aider`'s default
- * chat model runs on Claude but is user-configurable to any LiteLLM-backed
- * model, so both common vendor keys are preserved for it.
+ * doesn't rely on env-based auth surviving this filter.
  */
 const PROVIDER_AUTH_ENV_VAR_ALLOWLIST: Record<string, readonly string[]> = {
   claude: ['ANTHROPIC_API_KEY'],
   codex: ['OPENAI_API_KEY'],
-  aider: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'],
+  aider: AIDER_LITELLM_BACKEND_AUTH_ENV_VARS,
 };
 
 type CliCacheSessionHint = {
