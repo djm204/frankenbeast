@@ -7,6 +7,7 @@ import { setPlainOutput } from '../../../src/logging/beast-logger.js';
 import { AiderProvider } from '../../../src/skills/providers/aider-provider.js';
 import { ClaudeProvider } from '../../../src/skills/providers/claude-provider.js';
 import { CodexProvider } from '../../../src/skills/providers/codex-provider.js';
+import type { ICliProvider } from '../../../src/skills/providers/cli-provider.js';
 
 // --- Mock spawn infrastructure ---
 
@@ -635,6 +636,41 @@ describe('CliLlmAdapter', () => {
           expect(env['OPENROUTER_API_KEY']).toBe('openrouter-secret');
           expect(env['GROQ_API_KEY']).toBe('groq-secret');
           expect(env['MISTRAL_API_KEY']).toBe('mistral-secret');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('lets a custom (pluggable) ICliProvider preserve its own declared auth var', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          CUSTOM_PROVIDER_API_KEY: 'custom-secret-value',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret',
+        };
+
+        try {
+          const customProvider: ICliProvider = {
+            name: 'custom',
+            command: 'custom-cli',
+            buildArgs: () => [],
+            normalizeOutput: (raw: string) => raw,
+            estimateTokens: (text: string) => Math.ceil(text.length / 4),
+            isRateLimited: () => false,
+            parseRetryAfter: () => undefined,
+            filterEnv: (env: Record<string, string>) => env,
+            supportsStreamJson: () => false,
+            supportsNativeSessionResume: () => false,
+            defaultContextWindowTokens: () => 128_000,
+            requiredAuthEnvVars: () => ['CUSTOM_PROVIDER_API_KEY'],
+          };
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(customProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['CUSTOM_PROVIDER_API_KEY']).toBe('custom-secret-value');
           expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
         } finally {
           process.env = originalEnv;

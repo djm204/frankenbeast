@@ -74,6 +74,17 @@ describe('AiderProvider', () => {
     expect(filtered).not.toBe(env);
   });
 
+  // -- requiredAuthEnvVars --------------------------------------------------
+
+  it('requiredAuthEnvVars declares common LiteLLM-backed vendor keys (aider has no fixed backend)', () => {
+    const vars = provider.requiredAuthEnvVars?.() ?? [];
+    expect(vars).toContain('ANTHROPIC_API_KEY');
+    expect(vars).toContain('OPENAI_API_KEY');
+    expect(vars).toContain('OPENROUTER_API_KEY');
+    expect(vars).toContain('GROQ_API_KEY');
+    expect(vars).toContain('MISTRAL_API_KEY');
+  });
+
   // -- isRateLimited -------------------------------------------------------
 
   it('isRateLimited always returns false (LiteLLM handles retries)', () => {

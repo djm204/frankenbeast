@@ -76,6 +76,18 @@ export interface ICliProvider {
    * exposes this (Codex's `--json` output never reports a model field).
    */
   extractModel?(raw: string): string | undefined;
+  /**
+   * Env var name(s) this provider's own CLI needs to authenticate itself
+   * (e.g. `ANTHROPIC_API_KEY` for claude), even though the names are
+   * secret-shaped. `CliLlmAdapter` strips secret-shaped ambient env vars
+   * before spawning the CLI (see `filterSecretEnvVars` in
+   * `adapters/cli-llm-adapter.ts`) to avoid leaking unrelated credentials —
+   * this lets a provider (built-in or custom, via `ProviderRegistry`)
+   * declare which of its own vars must survive that filter. Optional:
+   * providers that don't rely on env-based auth (or whose `filterEnv()`
+   * already strips their own vendor vars, like Gemini) simply omit it.
+   */
+  requiredAuthEnvVars?(): readonly string[];
 }
 
 export function resolveProviderCacheCapabilities(provider: ICliProvider): ProviderCacheCapabilities {

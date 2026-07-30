@@ -53,6 +53,32 @@ export class AiderProvider implements ICliProvider {
     return filtered;
   }
 
+  /**
+   * Aider has no fixed backend — its default chat model is Claude Sonnet,
+   * but `--model` (and `providerOverrides.aider.model`) accepts any
+   * LiteLLM-supported model string, each with its own vendor API key. This
+   * can't be fully exhaustive (LiteLLM supports dozens of providers), but
+   * covers the common ones so overriding aider's model doesn't silently
+   * break auth. Extend this list if another backend is configured.
+   */
+  requiredAuthEnvVars(): readonly string[] {
+    return [
+      'ANTHROPIC_API_KEY',
+      'OPENAI_API_KEY',
+      'AZURE_API_KEY',
+      'GEMINI_API_KEY',
+      'GROQ_API_KEY',
+      'MISTRAL_API_KEY',
+      'OPENROUTER_API_KEY',
+      'DEEPSEEK_API_KEY',
+      'TOGETHER_API_KEY',
+      'COHERE_API_KEY',
+      'XAI_API_KEY',
+      'PERPLEXITY_API_KEY',
+      'FIREWORKS_API_KEY',
+    ];
+  }
+
   supportsStreamJson(): boolean {
     return false;
   }

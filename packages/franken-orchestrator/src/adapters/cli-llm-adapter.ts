@@ -85,10 +85,14 @@ export function isSecretEnvVarName(name: string): boolean {
 /**
  * Returns a copy of `env` with any secret-shaped keys omitted, except for
  * names in `exemptNames` (case-insensitive) — used to let the actively
- * selected provider's own required auth var(s) (e.g. `ANTHROPIC_API_KEY` for
+ * selected provider's own required auth var(s) (from
+ * `ICliProvider.requiredAuthEnvVars()`, e.g. `ANTHROPIC_API_KEY` for
  * `claude`, `OPENAI_API_KEY` for `codex`) survive even though they are
  * themselves secret-shaped: they're the CLI's own designed auth channel, not
- * an unrelated ambient secret leaking through.
+ * an unrelated ambient secret leaking through. Declaring this on the
+ * provider (rather than a lookup table keyed by name here) means custom
+ * providers registered via `ProviderRegistry.register()` can preserve their
+ * own credentials too.
  */
 export function filterSecretEnvVars(
   env: Record<string, string>,
@@ -103,43 +107,6 @@ export function filterSecretEnvVars(
   }
   return filtered;
 }
-
-/**
- * Vendor API key env vars for LiteLLM-supported backends aider can be
- * pointed at via `providerOverrides.aider.model` (aider itself has no fixed
- * backend — its default chat model is Claude Sonnet, but any LiteLLM model
- * string is accepted). This can't be fully exhaustive — LiteLLM supports
- * dozens of providers — but covers the common ones so overriding aider's
- * model doesn't silently break auth. Extend this list if another backend is
- * configured.
- */
-const AIDER_LITELLM_BACKEND_AUTH_ENV_VARS: readonly string[] = [
-  'ANTHROPIC_API_KEY',
-  'OPENAI_API_KEY',
-  'AZURE_API_KEY',
-  'GEMINI_API_KEY',
-  'GROQ_API_KEY',
-  'MISTRAL_API_KEY',
-  'OPENROUTER_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'TOGETHER_API_KEY',
-  'COHERE_API_KEY',
-  'XAI_API_KEY',
-  'PERPLEXITY_API_KEY',
-  'FIREWORKS_API_KEY',
-];
-
-/**
- * Auth env var(s) each CLI provider needs preserved to authenticate itself,
- * even though the names are secret-shaped. `gemini` is intentionally absent:
- * its own `filterEnv()` already strips all `GEMINI*`/`GOOGLE*` vars, so it
- * doesn't rely on env-based auth surviving this filter.
- */
-const PROVIDER_AUTH_ENV_VAR_ALLOWLIST: Record<string, readonly string[]> = {
-  claude: ['ANTHROPIC_API_KEY'],
-  codex: ['OPENAI_API_KEY'],
-  aider: AIDER_LITELLM_BACKEND_AUTH_ENV_VARS,
-};
 
 type CliCacheSessionHint = {
   key: string;
@@ -388,7 +355,7 @@ export class CliLlmAdapter implements IAdapter {
               : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
-          env: provider.filterEnv(this.captureEnv(activeProvider)),
+          env: provider.filterEnv(this.captureEnv(provider)),
           prompt,
           signal,
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
@@ -671,12 +638,12 @@ export class CliLlmAdapter implements IAdapter {
     return this.opts.providerOverrides?.[name]?.extraArgs;
   }
 
-  private captureEnv(providerName: string): Record<string, string> {
+  private captureEnv(provider: ICliProvider): Record<string, string> {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
     }
-    const safeEnv = filterSecretEnvVars(rawEnv, PROVIDER_AUTH_ENV_VAR_ALLOWLIST[providerName]);
+    const safeEnv = filterSecretEnvVars(rawEnv, provider.requiredAuthEnvVars?.());
     if (isPlainOutput()) {
       safeEnv.NO_COLOR = safeEnv.NO_COLOR ?? '1';
       safeEnv.FORCE_COLOR = '0';

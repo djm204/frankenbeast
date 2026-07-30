@@ -87,6 +87,12 @@ describe('ClaudeProvider', () => {
     expect(filtered).not.toBe(env);
   });
 
+  // -- requiredAuthEnvVars --------------------------------------------------
+
+  it('requiredAuthEnvVars declares ANTHROPIC_API_KEY', () => {
+    expect(provider.requiredAuthEnvVars?.()).toEqual(['ANTHROPIC_API_KEY']);
+  });
+
   // -- isRateLimited -------------------------------------------------------
 
   it('isRateLimited detects rate limit patterns', () => {
