@@ -201,6 +201,19 @@ describe('maintained Markdown integrity', () => {
     expect(report.totalFindings).toBe(2);
   });
 
+  it('rejects incomplete standard-width diff3 ancestor remnants', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/ancestor.md', [
+      '# Guide',
+      '||||||| base',
+      'ancestor text',
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
   it('allows valid Setext heading underlines outside conflict blocks', () => {
     const root = makeFixtureRoot();
     writeFixture(root, 'docs/guide.md', [

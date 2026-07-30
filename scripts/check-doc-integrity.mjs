@@ -7,6 +7,7 @@ const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const root = process.env.FRANKENBEAST_DOCS_SCAN_ROOT ?? defaultRoot;
 const docsRoot = join(root, 'docs');
 const openingMarkerPattern = /^(<{1,})(?:\s.*)?$/u;
+const ancestorMarkerPattern = /^(\|{7,})(?:\s.*)?$/u;
 const separatorMarkerPattern = /^(={1,})(?:\s.*)?$/u;
 const closingMarkerPattern = /^(>{1,})(?:\s.*)?$/u;
 const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
@@ -54,6 +55,12 @@ async function scanFile(path) {
           findings: [finding],
         });
       }
+      continue;
+    }
+
+    const ancestorMatch = ancestorMarkerPattern.exec(line);
+    if (ancestorMatch) {
+      findings.push({ path: toRepoPath(path), line: index + 1, marker: ancestorMatch[1] });
       continue;
     }
 
