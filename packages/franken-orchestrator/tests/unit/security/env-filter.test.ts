@@ -89,10 +89,36 @@ describe('isSecretEnvVarName', () => {
       'GIT_CONFIG_KEY_0',
       'GIT_CONFIG_VALUE_0',
       'GIT_CONFIG_KEY_12',
+      'PIP_CERT',
     ];
     for (const name of safeNames) {
       expect(isSecretEnvVarName(name), `expected ${name} to NOT be flagged as secret`).toBe(false);
     }
+  });
+
+  describe('safe-name matching follows OS env-var case semantics', () => {
+    const originalPlatform = process.platform;
+
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
+
+    it('on POSIX, a differently-cased collision with a safe name is still flagged as secret', () => {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      // ssh_auth_sock (lowercase) is a genuinely distinct variable from
+      // SSH_AUTH_SOCK on POSIX and matches the AUTH segment — it must not
+      // be waved through just because it collides case-insensitively with
+      // the well-known safe name.
+      expect(isSecretEnvVarName('ssh_auth_sock')).toBe(true);
+      expect(isSecretEnvVarName('SSH_AUTH_SOCK')).toBe(false);
+    });
+
+    it('on Windows, a differently-cased collision with a safe name is still treated as safe', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      // On Windows, ssh_auth_sock and SSH_AUTH_SOCK name the same variable.
+      expect(isSecretEnvVarName('ssh_auth_sock')).toBe(false);
+      expect(isSecretEnvVarName('SSH_AUTH_SOCK')).toBe(false);
+    });
   });
 });
 
@@ -114,6 +140,12 @@ describe('isSecretEnvVarValue', () => {
     expect(isSecretEnvVarValue('en_US.UTF-8')).toBe(false);
     expect(isSecretEnvVarValue('https://api.example.com')).toBe(false);
     expect(isSecretEnvVarValue('')).toBe(false);
+  });
+
+  it('flags credentials embedded in non-database URL schemes (pip index, generic proxy, etc.)', () => {
+    expect(isSecretEnvVarValue('https://user:hunter2@packages.example.com/simple')).toBe(true);
+    expect(isSecretEnvVarValue('http://proxyuser:proxypass@proxy.example.com:8080')).toBe(true);
+    expect(isSecretEnvVarValue('ftp://user:pass@ftp.example.com')).toBe(true);
   });
 
   it('flags Authorization/Proxy-Authorization header-shaped values', () => {
@@ -160,6 +192,7 @@ describe('filterSecretEnvVars', () => {
       PATH: '/usr/bin',
       DATABASE_URL: 'postgres://user:hunter2@db.example.com:5432/app',
       REDIS_URL: 'redis://user:pw@localhost:6379',
+      PIP_INDEX_URL: 'https://user:hunter2@packages.example.com/simple',
       PUBLIC_API_URL: 'https://api.example.com',
     };
     expect(filterSecretEnvVars(input)).toEqual({
@@ -234,6 +267,21 @@ describe('filterSecretEnvVars', () => {
       GIT_CONFIG_VALUE_0: '/workspace',
       GIT_CONFIG_KEY_1: 'http.extraHeader',
       GIT_CONFIG_VALUE_1: 'Authorization: Bearer super-secret-live-token',
+    };
+    expect(filterSecretEnvVars(input)).toEqual({ PATH: '/usr/bin' });
+  });
+
+  it('drops the family when a credential-bearing config key carries a non-Authorization header (e.g. GitLab PRIVATE-TOKEN)', () => {
+    // http.extraHeader accepts *any* header name, not just Authorization —
+    // GitLab's PRIVATE-TOKEN/JOB-TOKEN, or any custom scheme, are just as
+    // capable of carrying a live credential. Detected via the paired
+    // GIT_CONFIG_KEY_<n> being a known credential-bearing config key, not by
+    // pattern-matching every possible header name in the value.
+    const input = {
+      PATH: '/usr/bin',
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.extraHeader',
+      GIT_CONFIG_VALUE_0: 'PRIVATE-TOKEN: glpat-super-secret-live-token',
     };
     expect(filterSecretEnvVars(input)).toEqual({ PATH: '/usr/bin' });
   });

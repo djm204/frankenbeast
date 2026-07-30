@@ -32,43 +32,51 @@ const ALL_KNOWN_VENDOR_AUTH_ENV_VARS: readonly string[] = [
   'XAI_API_KEY',
   'PERPLEXITY_API_KEY',
   'FIREWORKS_API_KEY',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
 ];
 
 /**
  * Maps a LiteLLM model-string prefix (`<provider>/<model>`, per LiteLLM's
- * own convention) to the vendor env var it needs. Bare model names with no
- * `provider/` prefix are OpenAI's convention (`gpt-4o`, `o1-mini`, ...).
+ * own convention) to the vendor env var(s) it needs. Bare model names with
+ * no `provider/` prefix are OpenAI's convention (`gpt-4o`, `o1-mini`, ...).
+ * Bedrock/SageMaker authenticate via the standard AWS credential trio
+ * (access key + secret + optional session token for temporary credentials),
+ * not a single API key.
  */
-const LITELLM_PREFIX_AUTH_ENV_VAR: ReadonlyArray<readonly [prefix: string, envVar: string]> = [
-  ['anthropic/', 'ANTHROPIC_API_KEY'],
-  ['claude', 'ANTHROPIC_API_KEY'],
+const LITELLM_PREFIX_AUTH_ENV_VARS: ReadonlyArray<readonly [prefix: string, envVars: readonly string[]]> = [
+  ['anthropic/', ['ANTHROPIC_API_KEY']],
+  ['claude', ['ANTHROPIC_API_KEY']],
   // Bare Claude model-family shorthand — this class's own default
   // `chatModel` is the literal string 'sonnet' (see below), which reaches
   // requiredAuthEnvVars() as-is when no explicit model is configured, so it
   // must resolve to Anthropic rather than falling through to the full
   // multi-vendor list.
-  ['sonnet', 'ANTHROPIC_API_KEY'],
-  ['opus', 'ANTHROPIC_API_KEY'],
-  ['haiku', 'ANTHROPIC_API_KEY'],
-  ['openai/', 'OPENAI_API_KEY'],
-  ['gpt-', 'OPENAI_API_KEY'],
-  ['o1', 'OPENAI_API_KEY'],
-  ['o3', 'OPENAI_API_KEY'],
-  ['azure/', 'AZURE_API_KEY'],
-  ['gemini/', 'GEMINI_API_KEY'],
-  ['vertex_ai/', 'GEMINI_API_KEY'],
-  ['groq/', 'GROQ_API_KEY'],
-  ['mistral/', 'MISTRAL_API_KEY'],
-  ['openrouter/', 'OPENROUTER_API_KEY'],
-  ['deepseek/', 'DEEPSEEK_API_KEY'],
-  ['together_ai/', 'TOGETHER_API_KEY'],
-  ['together/', 'TOGETHER_API_KEY'],
-  ['cohere/', 'COHERE_API_KEY'],
-  ['cohere_chat/', 'COHERE_API_KEY'],
-  ['xai/', 'XAI_API_KEY'],
-  ['perplexity/', 'PERPLEXITY_API_KEY'],
-  ['fireworks_ai/', 'FIREWORKS_API_KEY'],
-  ['fireworks/', 'FIREWORKS_API_KEY'],
+  ['sonnet', ['ANTHROPIC_API_KEY']],
+  ['opus', ['ANTHROPIC_API_KEY']],
+  ['haiku', ['ANTHROPIC_API_KEY']],
+  ['openai/', ['OPENAI_API_KEY']],
+  ['gpt-', ['OPENAI_API_KEY']],
+  ['o1', ['OPENAI_API_KEY']],
+  ['o3', ['OPENAI_API_KEY']],
+  ['azure/', ['AZURE_API_KEY']],
+  ['gemini/', ['GEMINI_API_KEY']],
+  ['vertex_ai/', ['GEMINI_API_KEY']],
+  ['groq/', ['GROQ_API_KEY']],
+  ['mistral/', ['MISTRAL_API_KEY']],
+  ['openrouter/', ['OPENROUTER_API_KEY']],
+  ['deepseek/', ['DEEPSEEK_API_KEY']],
+  ['together_ai/', ['TOGETHER_API_KEY']],
+  ['together/', ['TOGETHER_API_KEY']],
+  ['cohere/', ['COHERE_API_KEY']],
+  ['cohere_chat/', ['COHERE_API_KEY']],
+  ['xai/', ['XAI_API_KEY']],
+  ['perplexity/', ['PERPLEXITY_API_KEY']],
+  ['fireworks_ai/', ['FIREWORKS_API_KEY']],
+  ['fireworks/', ['FIREWORKS_API_KEY']],
+  ['bedrock/', ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN']],
+  ['sagemaker/', ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN']],
 ];
 
 export class AiderProvider implements ICliProvider {
@@ -126,9 +134,9 @@ export class AiderProvider implements ICliProvider {
    */
   requiredAuthEnvVars(model?: string): readonly string[] {
     const resolved = (model ?? this.chatModel ?? '').toLowerCase();
-    for (const [prefix, envVar] of LITELLM_PREFIX_AUTH_ENV_VAR) {
+    for (const [prefix, envVars] of LITELLM_PREFIX_AUTH_ENV_VARS) {
       if (resolved.startsWith(prefix)) {
-        return [envVar];
+        return envVars;
       }
     }
     return ALL_KNOWN_VENDOR_AUTH_ENV_VARS;

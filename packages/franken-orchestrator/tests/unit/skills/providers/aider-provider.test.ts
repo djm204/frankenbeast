@@ -96,6 +96,19 @@ describe('AiderProvider', () => {
     expect(vars).toContain('MISTRAL_API_KEY');
   });
 
+  it('requiredAuthEnvVars resolves to the AWS credential trio for Bedrock/SageMaker backends', () => {
+    expect(provider.requiredAuthEnvVars?.('bedrock/anthropic.claude-3-sonnet')).toEqual([
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_SESSION_TOKEN',
+    ]);
+    expect(provider.requiredAuthEnvVars?.('sagemaker/my-endpoint')).toEqual([
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_SESSION_TOKEN',
+    ]);
+  });
+
   // -- isRateLimited -------------------------------------------------------
 
   it('isRateLimited always returns false (LiteLLM handles retries)', () => {

@@ -14,6 +14,24 @@
  */
 
 /**
+ * True on Windows, where env var names are case-insensitive (`OpenAI_API_Key`
+ * and `OPENAI_API_KEY` name the same variable). False on POSIX, where they
+ * are genuinely distinct variables. Used only for the "is this literally the
+ * same well-known variable" checks below (safe-name exceptions, provider
+ * auth exemptions) — the general secret-*shape* detection patterns stay
+ * unconditionally case-insensitive, since they're guarding against secrets
+ * in any casing, not matching a specific known variable.
+ */
+function isWindowsPlatform(): boolean {
+  return process.platform === 'win32';
+}
+
+/** Normalizes an env var name for exact-identity comparisons, per OS env-var-name case semantics. */
+function normalizeEnvVarName(name: string): string {
+  return isWindowsPlatform() ? name.toUpperCase() : name;
+}
+
+/**
  * Matches env var names that look like they carry a secret (API keys, tokens,
  * passwords, credentials, certs, etc.), checked on underscore-delimited
  * segments so unrelated names like `KEYBOARD_LAYOUT` are left alone. `PWD`
@@ -51,17 +69,24 @@ const KNOWN_SECRET_ENV_NAMES = new Set(['BW_SESSION']);
 const SECRET_ENV_NAME_ADDITIONAL_PATTERNS: readonly RegExp[] = [/^OP_SESSION_[A-Za-z0-9_]+$/i];
 
 /**
- * Env var names that would otherwise match the patterns above but are
- * capability/configuration pointers, not secrets themselves — e.g.
- * `SSH_AUTH_SOCK` is a path to the running ssh-agent's socket,
- * `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS` point at CA bundle files, and
- * `DOCKER_CERT_PATH` (see `network/services/managed-service-env.ts`) points
- * at a directory of TLS client cert files for talking to a remote Docker
- * daemon. Stripping these breaks legitimate CLI behavior (git/ssh via the
- * user's agent, TLS trust for provider HTTPS calls, Docker client auth)
- * without reducing secret exposure, since none of them carry credential
- * material in the variable itself. `PWD` (present working directory) is
- * included for the same reason.
+ * Env var names (in their canonical, real-world case) that would otherwise
+ * match the patterns above but are capability/configuration pointers, not
+ * secrets themselves — e.g. `SSH_AUTH_SOCK` is a path to the running
+ * ssh-agent's socket, `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS`/`PIP_CERT` point
+ * at CA bundle files, and `DOCKER_CERT_PATH` (see
+ * `network/services/managed-service-env.ts`) points at a directory of TLS
+ * client cert files for talking to a remote Docker daemon. Stripping these
+ * breaks legitimate CLI behavior (git/ssh via the user's agent, TLS trust
+ * for provider HTTPS/pip calls, Docker client auth) without reducing secret
+ * exposure, since none of them carry credential material in the variable
+ * itself. `PWD` (present working directory) is included for the same
+ * reason.
+ *
+ * Matched via `normalizeEnvVarName` (exact case on POSIX, case-insensitive
+ * on Windows) — a differently-cased var on POSIX (e.g. `ssh_auth_sock`) is a
+ * genuinely distinct variable and must still be checked against the
+ * denylist patterns below, not waved through just because it collides
+ * case-insensitively with a well-known safe name.
  */
 const SAFE_ENV_NAME_EXCEPTIONS = new Set([
   'PWD',
@@ -71,6 +96,7 @@ const SAFE_ENV_NAME_EXCEPTIONS = new Set([
   'SSL_CERT_DIR',
   'NODE_EXTRA_CA_CERTS',
   'DOCKER_CERT_PATH',
+  'PIP_CERT',
 ]);
 
 /**
@@ -81,36 +107,52 @@ const SAFE_ENV_NAME_EXCEPTIONS = new Set([
  * `GIT_CONFIG_KEY_0` refers to a config key *name* (e.g. `safe.directory`),
  * not a secret — stripping it silently breaks every git command the CLI
  * runs. Exempt the whole indexed tuple by name shape rather than by value,
- * since the mechanism is inherently non-secret.
+ * since the mechanism is inherently non-secret (values are checked
+ * separately below regardless of this exemption).
+ *
+ * Written in canonical uppercase and matched via `normalizeEnvVarName`, same
+ * case semantics as `SAFE_ENV_NAME_EXCEPTIONS` above.
  */
-const GIT_CONFIG_FAMILY_NAME_PATTERN = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/i;
+const GIT_CONFIG_FAMILY_NAME_PATTERN = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/;
 const SAFE_ENV_NAME_PATTERNS: readonly RegExp[] = [GIT_CONFIG_FAMILY_NAME_PATTERN];
 
-/** Matches just the `GIT_CONFIG_VALUE_<n>` half of the tuple, to scan for a secret-shaped value. */
-const GIT_CONFIG_VALUE_NAME_PATTERN = /^GIT_CONFIG_VALUE_\d+$/i;
+/** Matches just the `GIT_CONFIG_VALUE_<n>` half of the tuple, capturing the index. */
+const GIT_CONFIG_VALUE_NAME_PATTERN = /^GIT_CONFIG_VALUE_(\d+)$/;
+/** Matches just the `GIT_CONFIG_KEY_<n>` half of the tuple, capturing the index. */
+const GIT_CONFIG_KEY_NAME_PATTERN = /^GIT_CONFIG_KEY_(\d+)$/;
+
+/**
+ * Git config keys whose *value* injects an arbitrary HTTP header (or similar
+ * free-form config) into every request git makes — e.g. `http.extraHeader`
+ * accepts literally any header, including `PRIVATE-TOKEN: glpat-...`
+ * (GitLab), `JOB-TOKEN: ...`, or a custom bearer scheme, not just
+ * `Authorization:`. Enumerating every possible credential header *name* is
+ * unbounded, so instead treat any `GIT_CONFIG_VALUE_<n>` paired with one of
+ * these *keys* as inherently secret-shaped regardless of its literal
+ * content. Git config key names are themselves case-insensitive, so this
+ * comparison is deliberately case-insensitive regardless of OS — it's about
+ * git's own semantics, not the env var name.
+ */
+const GIT_CONFIG_CREDENTIAL_BEARING_KEYS = new Set(['http.extraheader']);
 
 /**
  * Matches connection-string *values* with embedded `user:password@` userinfo
- * for common database schemes — e.g. `DATABASE_URL=postgres://user:pass@host/db`.
- * The var name (`DATABASE_URL`, `REDIS_URL`, ...) doesn't look secret-shaped
- * by itself, so this checks the value directly. Same scheme list this repo
- * already treats as sensitive in `logging/redaction.ts`.
+ * for any URL scheme (not just databases) — e.g.
+ * `DATABASE_URL=postgres://user:pass@host/db` or
+ * `PIP_INDEX_URL=https://user:pass@packages.example/simple`. The var name
+ * doesn't look secret-shaped by itself, so this checks the value directly.
+ * Same userinfo-in-any-scheme treatment this repo already applies in
+ * `logging/redaction.ts`. URL schemes are case-insensitive per RFC 3986
+ * regardless of OS, so this stays unconditionally case-insensitive.
  */
 const CREDENTIAL_URL_VALUE_PATTERN =
-  /^(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?):\/\/[^:\s"'/@]*:[^@\s"']+@/i;
+  /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^:\s"'/@]*:[^@\s"']+@/i;
 
 /**
  * Matches values shaped like a raw `Authorization`/`Proxy-Authorization`
- * HTTP header. Needed because `GIT_CONFIG_KEY_<n>`/`VALUE_<n>` (see
- * `SAFE_ENV_NAME_PATTERNS` below) is git's genuine indexed config-injection
- * mechanism and its `GIT_CONFIG_VALUE_<n>` name is exempt by shape — but git
- * supports `http.extraHeader`, so an attacker- or config-controlled tuple
- * could set `GIT_CONFIG_KEY_0=http.extraHeader` /
- * `GIT_CONFIG_VALUE_0=Authorization: Bearer <token>` to smuggle a live
- * credential through under a name the filter otherwise trusts. The name
- * exemption only bypasses `isSecretEnvVarName` — `filterSecretEnvVars` still
- * runs `isSecretEnvVarValue` on every var regardless of its name, so this
- * catches it independent of what the var happens to be called.
+ * HTTP header (a fallback for header-injection vectors not covered by the
+ * `GIT_CONFIG_CREDENTIAL_BEARING_KEYS` check above — e.g. the header value
+ * shows up under some other var name entirely).
  */
 const AUTH_HEADER_VALUE_PATTERN = /^(?:authorization|proxy-authorization)\s*:\s*\S+/i;
 
@@ -127,8 +169,9 @@ const JWT_VALUE_PATTERN = /^[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-
 
 /** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
 export function isSecretEnvVarName(name: string): boolean {
-  if (SAFE_ENV_NAME_EXCEPTIONS.has(name.toUpperCase())) return false;
-  if (SAFE_ENV_NAME_PATTERNS.some((pattern) => pattern.test(name))) return false;
+  const normalized = normalizeEnvVarName(name);
+  if (SAFE_ENV_NAME_EXCEPTIONS.has(normalized)) return false;
+  if (SAFE_ENV_NAME_PATTERNS.some((pattern) => pattern.test(normalized))) return false;
   if (KNOWN_SECRET_ENV_NAMES.has(name.toUpperCase())) return true;
   if (SECRET_ENV_NAME_ADDITIONAL_PATTERNS.some((pattern) => pattern.test(name))) return true;
   return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
@@ -154,37 +197,48 @@ export function isSecretEnvVarValue(value: string): boolean {
  * here) means custom providers registered via `ProviderRegistry.register()`
  * can preserve their own credentials too.
  *
- * `exemptNames` matching follows the OS's own env var name semantics: exact
- * case on POSIX, where env var names are case-sensitive and a
- * differently-cased var of the same spelling is a genuinely distinct
- * variable the provider didn't declare; case-insensitive on Windows, where
- * env var names themselves are case-insensitive (`OpenAI_API_Key` and
- * `OPENAI_API_KEY` name the same variable, and the CLI would read either).
+ * `exemptNames` matching follows the OS's own env var name semantics via
+ * `normalizeEnvVarName`: exact case on POSIX, case-insensitive on Windows.
  */
 export function filterSecretEnvVars(
   env: Record<string, string>,
   exemptNames?: readonly string[],
 ): Record<string, string> {
-  const caseInsensitiveExempt = process.platform === 'win32';
-  const normalize = (name: string): string => (caseInsensitiveExempt ? name.toUpperCase() : name);
-  const exempt = new Set((exemptNames ?? []).map(normalize));
+  const exempt = new Set((exemptNames ?? []).map(normalizeEnvVarName));
 
   // GIT_CONFIG_KEY_<n>/VALUE_<n>/COUNT is git's genuine indexed
-  // config-injection mechanism (see SAFE_ENV_NAME_PATTERNS above) — but if
-  // any GIT_CONFIG_VALUE_<n> turns out to be secret-shaped (e.g. a smuggled
-  // Authorization header), dropping only that VALUE_<n> leaves a malformed
-  // tuple (COUNT and KEY_<n> present, VALUE_<n> missing) that makes git
-  // itself error out ("missing config value") on every command the CLI
-  // runs. Drop the whole GIT_CONFIG_* family atomically instead, so git
-  // simply doesn't see the mechanism at all rather than seeing it broken.
-  const dropGitConfigFamily = Object.entries(env).some(
-    ([key, value]) => GIT_CONFIG_VALUE_NAME_PATTERN.test(key) && isSecretEnvVarValue(value),
-  );
+  // config-injection mechanism (see SAFE_ENV_NAME_PATTERNS above), but two
+  // distinct ways it can smuggle a live credential through under a name the
+  // filter otherwise trusts: (a) GIT_CONFIG_VALUE_<n> literally looks
+  // secret-shaped (e.g. "Authorization: Bearer ..."), or (b) its paired
+  // GIT_CONFIG_KEY_<n> names a credential-bearing config key like
+  // `http.extraHeader`, whose value is credential-shaped by construction
+  // regardless of what that value literally contains (GitLab's
+  // "PRIVATE-TOKEN: ...", "JOB-TOKEN: ...", or any other custom header).
+  //
+  // Either way, dropping only the offending VALUE_<n> would leave a
+  // malformed tuple (COUNT/KEY_<n> present, VALUE_<n> missing) that makes
+  // git itself error out ("missing config value") on every command the CLI
+  // runs — so the whole GIT_CONFIG_* family is dropped atomically instead,
+  // so git simply doesn't see the mechanism at all rather than seeing it
+  // broken.
+  const keyByIndex = new Map<string, string>();
+  for (const [key, value] of Object.entries(env)) {
+    const keyMatch = GIT_CONFIG_KEY_NAME_PATTERN.exec(key);
+    if (keyMatch) keyByIndex.set(keyMatch[1]!, value);
+  }
+  const dropGitConfigFamily = Object.entries(env).some(([key, value]) => {
+    const valueMatch = GIT_CONFIG_VALUE_NAME_PATTERN.exec(key);
+    if (!valueMatch) return false;
+    if (isSecretEnvVarValue(value)) return true;
+    const pairedKey = keyByIndex.get(valueMatch[1]!);
+    return pairedKey !== undefined && GIT_CONFIG_CREDENTIAL_BEARING_KEYS.has(pairedKey.toLowerCase());
+  });
 
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
-    if (dropGitConfigFamily && GIT_CONFIG_FAMILY_NAME_PATTERN.test(key)) continue;
-    if (exempt.has(normalize(key))) {
+    if (dropGitConfigFamily && GIT_CONFIG_FAMILY_NAME_PATTERN.test(normalizeEnvVarName(key))) continue;
+    if (exempt.has(normalizeEnvVarName(key))) {
       filtered[key] = value;
       continue;
     }
