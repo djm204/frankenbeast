@@ -76,8 +76,19 @@ describe('AiderProvider', () => {
 
   // -- requiredAuthEnvVars --------------------------------------------------
 
-  it('requiredAuthEnvVars declares common LiteLLM-backed vendor keys (aider has no fixed backend)', () => {
-    const vars = provider.requiredAuthEnvVars?.() ?? [];
+  it('requiredAuthEnvVars resolves to just ANTHROPIC_API_KEY by default (default chatModel is Sonnet)', () => {
+    expect(provider.requiredAuthEnvVars?.()).toEqual(['ANTHROPIC_API_KEY']);
+    expect(provider.requiredAuthEnvVars?.('sonnet')).toEqual(['ANTHROPIC_API_KEY']);
+  });
+
+  it('requiredAuthEnvVars resolves to just the active backend key for a recognized LiteLLM prefix', () => {
+    expect(provider.requiredAuthEnvVars?.('groq/llama-3.1-70b-versatile')).toEqual(['GROQ_API_KEY']);
+    expect(provider.requiredAuthEnvVars?.('openrouter/anthropic/claude-3.5-sonnet')).toEqual(['OPENROUTER_API_KEY']);
+    expect(provider.requiredAuthEnvVars?.('gpt-4o')).toEqual(['OPENAI_API_KEY']);
+  });
+
+  it('requiredAuthEnvVars falls back to the full known-vendor list for an unrecognized model string', () => {
+    const vars = provider.requiredAuthEnvVars?.('some-unrecognized-custom-model') ?? [];
     expect(vars).toContain('ANTHROPIC_API_KEY');
     expect(vars).toContain('OPENAI_API_KEY');
     expect(vars).toContain('OPENROUTER_API_KEY');

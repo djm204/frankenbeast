@@ -617,7 +617,34 @@ describe('CliLlmAdapter', () => {
         }
       });
 
-      it('falls back to the full known-vendor list for aider when the backend model is unknown/unset', async () => {
+      it('preserves only ANTHROPIC_API_KEY for aider with no explicit model (default chatModel is Sonnet)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          ANTHROPIC_API_KEY: 'anthropic-secret',
+          OPENROUTER_API_KEY: 'openrouter-secret',
+          GROQ_API_KEY: 'groq-secret',
+          MISTRAL_API_KEY: 'mistral-secret',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(aiderProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['ANTHROPIC_API_KEY']).toBe('anthropic-secret');
+          expect(env['OPENROUTER_API_KEY']).toBeUndefined();
+          expect(env['GROQ_API_KEY']).toBeUndefined();
+          expect(env['MISTRAL_API_KEY']).toBeUndefined();
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('falls back to the full known-vendor list for aider when the model string is unrecognized', async () => {
         const originalEnv = process.env;
         process.env = {
           ...originalEnv,
@@ -629,7 +656,11 @@ describe('CliLlmAdapter', () => {
 
         try {
           const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
-          const adapter = new CliLlmAdapter(aiderProvider, baseOpts, spawnFn);
+          const adapter = new CliLlmAdapter(
+            aiderProvider,
+            { ...baseOpts, providerOverrides: { aider: { model: 'some-unrecognized-custom-model' } } },
+            spawnFn,
+          );
           await adapter.execute({ prompt: 'test', maxTurns: 1 });
 
           const env = calls[0]!.options.env as Record<string, string>;

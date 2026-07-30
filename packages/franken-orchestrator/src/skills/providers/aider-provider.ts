@@ -42,6 +42,14 @@ const ALL_KNOWN_VENDOR_AUTH_ENV_VARS: readonly string[] = [
 const LITELLM_PREFIX_AUTH_ENV_VAR: ReadonlyArray<readonly [prefix: string, envVar: string]> = [
   ['anthropic/', 'ANTHROPIC_API_KEY'],
   ['claude', 'ANTHROPIC_API_KEY'],
+  // Bare Claude model-family shorthand — this class's own default
+  // `chatModel` is the literal string 'sonnet' (see below), which reaches
+  // requiredAuthEnvVars() as-is when no explicit model is configured, so it
+  // must resolve to Anthropic rather than falling through to the full
+  // multi-vendor list.
+  ['sonnet', 'ANTHROPIC_API_KEY'],
+  ['opus', 'ANTHROPIC_API_KEY'],
+  ['haiku', 'ANTHROPIC_API_KEY'],
   ['openai/', 'OPENAI_API_KEY'],
   ['gpt-', 'OPENAI_API_KEY'],
   ['o1', 'OPENAI_API_KEY'],

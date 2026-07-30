@@ -14,6 +14,7 @@ import { deterministicUuid } from '@franken/types';
 import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
+import { filterSecretEnvVars } from '../security/env-filter.js';
 import { resolveCodexSandboxArgs } from './codex-args.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
@@ -45,14 +46,21 @@ export class CodexCliAdapter implements ILlmProvider {
 
   constructor(private options: CodexCliOptions = {}) {}
 
+  sanitizedEnv(): Record<string, string> {
+    return filterSecretEnvVars(
+      sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+      ['OPENAI_API_KEY'],
+    );
+  }
+
   async isAvailable(): Promise<boolean> {
-    return isCliAvailable(this.binaryPath, sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>));
+    return isCliAvailable(this.binaryPath, this.sanitizedEnv());
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
     const args = this.buildArgs(request);
     const proc = spawn(this.binaryPath, args, {
-      env: sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+      env: this.sanitizedEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -95,7 +103,7 @@ export class CodexCliAdapter implements ILlmProvider {
       const { stdout, exitCode } = await collectCliOutput(
         this.binaryPath,
         ['mcp', 'list', '--json'],
-        sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+        this.sanitizedEnv(),
       );
       if (exitCode !== 0 || !stdout.trim()) return [];
 
