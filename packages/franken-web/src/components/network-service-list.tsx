@@ -164,17 +164,20 @@ export function NetworkServiceList({
       <div className="rail-card__header">
         <p className="eyebrow">Services</p>
       </div>
-      <div className="network-services__list">
+      <div aria-label="Network services" className="network-services__list" role="list">
         {services.map((service) => {
           const actionState = actionStateByService[service.id];
           const hasPendingAction = actionState?.status === 'pending';
           const startDisabled = hasPendingAction || !canStartService(service);
           const stopOrRestartDisabled = hasPendingAction || !canStopOrRestartService(service);
           return (
-          <article key={service.id} className="network-services__item">
+          <article key={service.id} className="network-services__item" role="listitem">
             <div>
               <strong>{service.id}</strong>
-              <p>{service.status}</p>
+              <p aria-atomic="true" aria-live="polite">
+                <span className="sr-only">{service.id} status: </span>
+                {service.status}
+              </p>
               {service.inProcess && <small>in-process</small>}
               {service.explanation && <span>{service.explanation}</span>}
               {service.url && <small>{service.url}</small>}
