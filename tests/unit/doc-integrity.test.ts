@@ -12,6 +12,10 @@ function conflictMarker(character: '<' | '=' | '>'): string {
   return character.repeat(7);
 }
 
+function wideConflictMarker(character: '<' | '=' | '>'): string {
+  return character.repeat(9);
+}
+
 function makeFixtureRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'franken-doc-integrity-'));
   fixtureRoots.add(root);
@@ -73,6 +77,33 @@ describe('maintained Markdown integrity', () => {
       marker: conflictMarker('<'),
       path: 'docs/onboarding/RAMP_UP.md',
     });
+  });
+
+  it('rejects configurable conflict-marker widths', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/ARCHITECTURE.md', [
+      `${wideConflictMarker('<')} HEAD`,
+      'current architecture',
+      wideConflictMarker('='),
+      'incoming architecture',
+      `${wideConflictMarker('>')} feature/architecture`,
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
+  it('allows valid Setext heading underlines outside conflict blocks', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/guide.md', [
+      'Architecture',
+      conflictMarker('='),
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(0);
   });
 
   it('does not scan generated or vendored Markdown artifacts', () => {

@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const root = process.env.FRANKENBEAST_DOCS_SCAN_ROOT ?? defaultRoot;
 const docsRoot = join(root, 'docs');
-const markerPattern = /^(<{7}|={7}|>{7})(?:\s.*)?$/u;
+const openingMarkerPattern = /^(<{7,})(?:\s.*)?$/u;
+const separatorMarkerPattern = /^(={7,})(?:\s.*)?$/u;
+const closingMarkerPattern = /^(>{7,})(?:\s.*)?$/u;
 const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
 
 function toRepoPath(path) {
@@ -37,9 +39,14 @@ async function* walkMarkdown(dir) {
 async function scanFile(path) {
   const source = await readFile(path, 'utf8');
   const findings = [];
+  let insideConflict = false;
 
   for (const [index, line] of source.split(/\r?\n/u).entries()) {
-    const match = markerPattern.exec(line);
+    const openingMatch = openingMarkerPattern.exec(line);
+    const closingMatch = closingMarkerPattern.exec(line);
+    const match = openingMatch
+      ?? closingMatch
+      ?? (insideConflict ? separatorMarkerPattern.exec(line) : null);
     if (match) {
       findings.push({
         path: toRepoPath(path),
@@ -47,6 +54,8 @@ async function scanFile(path) {
         marker: match[1],
       });
     }
+    if (openingMatch) insideConflict = true;
+    if (closingMatch) insideConflict = false;
   }
 
   return findings;
