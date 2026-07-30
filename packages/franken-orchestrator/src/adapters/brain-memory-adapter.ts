@@ -36,10 +36,14 @@ export class SqliteBrainMemoryAdapter implements IMemoryModule {
         requiredSkills: [],
         dependsOn: [],
       };
-      if (trace.outcome === 'success') {
-        this.brain.planning.recordStepCompleted(task);
-      } else if (trace.objective !== undefined) {
-        this.brain.planning.recordStepFailed(task, new Error(trace.summary));
+      try {
+        if (trace.outcome === 'success') {
+          this.brain.planning.recordStepCompleted(task);
+        } else if (trace.objective !== undefined) {
+          this.brain.planning.recordStepFailed(task, new Error(trace.summary));
+        }
+      } catch {
+        // Optional lifecycle telemetry must not prevent the generic recovery trace.
       }
     }
 

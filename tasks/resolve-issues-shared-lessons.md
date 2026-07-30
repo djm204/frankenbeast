@@ -590,3 +590,6 @@
 
 ## 2026-07-30 — Best-effort persistence diagnostics
 - Emit persistence-failure diagnostics only around the failing adapter call, keep diagnostic sinks best-effort, log bounded hashes instead of raw payloads/errors, and restore console spies so rejection tests remain isolated and warning-free.
+
+## 2026-07-30 — Caller-side boundaries for optional faculty hooks
+- An adapter-owned faculty may already contain persistence failures, but custom faculties attached through the public brain boundary can still throw. Keep a caller-side best-effort boundary around optional lifecycle hooks and leave the established generic recovery write outside it; regress both success and failure hooks with a custom throwing faculty.
