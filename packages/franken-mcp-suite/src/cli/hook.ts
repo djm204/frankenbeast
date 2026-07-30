@@ -466,12 +466,33 @@ export async function runHook(
   }
 }
 
+/** Upper bound on how much of a redacted error message is ever logged. */
+const MAX_HOOK_FAILURE_SUMMARY_CHARS = 500;
+
+/**
+ * Summarizes a rejected value for the entrypoint failure log. Hook failures
+ * can wrap arbitrary tool/provider payloads, so only a genuine `Error`'s
+ * `message` is ever considered — never its `stack`, and never an arbitrary
+ * rejected object/value, which could carry raw provider or tool output.
+ * The message itself is still run through `redactSecrets` before logging,
+ * since a caught exception's message can itself contain a credential-shaped
+ * value (e.g. a request URL or header echoed back by a failing dependency).
+ */
+function summarizeHookFailure(error: unknown): string | undefined {
+  if (!(error instanceof Error) || typeof error.message !== 'string' || error.message.length === 0) {
+    return undefined;
+  }
+  const redacted = redactSecrets(error.message);
+  return redacted.length > MAX_HOOK_FAILURE_SUMMARY_CHARS
+    ? `${redacted.slice(0, MAX_HOOK_FAILURE_SUMMARY_CHARS)}…`
+    : redacted;
+}
+
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
-  runHook().catch(() => {
-    // Hook failures can wrap arbitrary tool/provider payloads. Keep the
-    // entrypoint diagnostic stable without serializing the rejected value.
-    console.error('fbeast-hook failed');
+  runHook().catch((error) => {
+    const summary = summarizeHookFailure(error);
+    console.error(summary ? `fbeast-hook failed: ${summary}` : 'fbeast-hook failed');
     process.exit(1);
   });
 }
