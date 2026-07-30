@@ -15,6 +15,40 @@ import {
 } from '../errors/command-failure.js';
 import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
 
+/**
+ * Matches env var names that look like they carry a secret (API keys, tokens,
+ * passwords, credentials, certs, etc.), checked on underscore-delimited
+ * segments so unrelated names like `KEYBOARD_LAYOUT` or `PWD` are left alone.
+ *
+ * This is a denylist rather than a hand-maintained allowlist: the spawned CLI
+ * subprocesses (claude/codex/gemini/aider) need broad standard environment
+ * access to function (PATH, HOME, locale vars, npm/node config, etc.), so
+ * allowlisting would be brittle and prone to breaking legitimate CLI
+ * behavior. Only vars that look secret-shaped are stripped before the
+ * environment is handed to `spawn()`.
+ */
+const SECRET_ENV_NAME_PATTERN =
+  /(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIALS?|AUTH|AUTHORIZATION|COOKIE|CERT|CERTIFICATE|WEBHOOK)(?:_|$)/i;
+
+/** Catches common secret-name segments written without a delimiter (e.g. `APIKEY`). */
+const SECRET_ENV_NAME_COMPOUND_PATTERN =
+  /(?:APIKEY|ACCESSKEY|SECRETKEY|PRIVATEKEY|AUTHTOKEN|CLIENTSECRET)/i;
+
+/** True if an env var name matches a common secret-name pattern (*_KEY, *_TOKEN, *_SECRET, etc.). */
+export function isSecretEnvVarName(name: string): boolean {
+  return SECRET_ENV_NAME_PATTERN.test(name) || SECRET_ENV_NAME_COMPOUND_PATTERN.test(name);
+}
+
+/** Returns a copy of `env` with any secret-shaped keys omitted. */
+export function filterSecretEnvVars(env: Record<string, string>): Record<string, string> {
+  const filtered: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (isSecretEnvVarName(key)) continue;
+    filtered[key] = value;
+  }
+  return filtered;
+}
+
 type CliCacheSessionHint = {
   key: string;
   persist?: boolean;
@@ -550,11 +584,12 @@ export class CliLlmAdapter implements IAdapter {
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
     }
+    const safeEnv = filterSecretEnvVars(rawEnv);
     if (isPlainOutput()) {
-      rawEnv.NO_COLOR = rawEnv.NO_COLOR ?? '1';
-      rawEnv.FORCE_COLOR = '0';
+      safeEnv.NO_COLOR = safeEnv.NO_COLOR ?? '1';
+      safeEnv.FORCE_COLOR = '0';
     }
-    return rawEnv;
+    return safeEnv;
   }
 
   private resolveSleepMs(exhaustedProviders: Map<string, CommandFailure>): number {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
-import { CliLlmAdapter } from '../../../src/adapters/cli-llm-adapter.js';
+import { CliLlmAdapter, filterSecretEnvVars, isSecretEnvVarName } from '../../../src/adapters/cli-llm-adapter.js';
 import { setPlainOutput } from '../../../src/logging/beast-logger.js';
 import { AiderProvider } from '../../../src/skills/providers/aider-provider.js';
 import { ClaudeProvider } from '../../../src/skills/providers/claude-provider.js';
@@ -404,6 +404,68 @@ describe('CliLlmAdapter', () => {
           expect(env['CLAUDECODE_PLUGIN']).toBeUndefined();
           expect(env['PATH']).toBe('/usr/bin');
           expect(env['HOME']).toBe('/home/test');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+    });
+
+    describe('secret env var filtering (captureEnv)', () => {
+      it('does not forward env vars whose names look like secrets to the spawned CLI', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          SOME_API_KEY: 'sk-super-secret-value',
+          AWS_SECRET_ACCESS_KEY: 'aws-secret-value',
+          ANTHROPIC_API_KEY: 'anthropic-secret-value',
+          GITHUB_TOKEN: 'ghp_leaked_token',
+          DATABASE_PASSWORD: 'hunter2',
+          NPM_TOKEN: 'npm-secret-token',
+          PATH: '/usr/bin',
+          HOME: '/home/test',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['SOME_API_KEY']).toBeUndefined();
+          expect(env['AWS_SECRET_ACCESS_KEY']).toBeUndefined();
+          expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+          expect(env['GITHUB_TOKEN']).toBeUndefined();
+          expect(env['DATABASE_PASSWORD']).toBeUndefined();
+          expect(env['NPM_TOKEN']).toBeUndefined();
+          expect(env['PATH']).toBe('/usr/bin');
+          expect(env['HOME']).toBe('/home/test');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('still forwards non-secret environment configuration the CLI needs to run', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          PATH: '/usr/bin:/bin',
+          HOME: '/home/test',
+          LANG: 'en_US.UTF-8',
+          TERM: 'xterm-256color',
+          npm_config_registry: 'https://registry.npmjs.org/',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['PATH']).toBe('/usr/bin:/bin');
+          expect(env['HOME']).toBe('/home/test');
+          expect(env['LANG']).toBe('en_US.UTF-8');
+          expect(env['TERM']).toBe('xterm-256color');
+          expect(env['npm_config_registry']).toBe('https://registry.npmjs.org/');
         } finally {
           process.env = originalEnv;
         }
@@ -1581,6 +1643,71 @@ describe('CliLlmAdapter', () => {
       const rawResponse = await adapter.execute(transformed);
       const response = adapter.transformResponse(rawResponse, 'req-2');
       expect(response.content).toBe('codex says 42');
+    });
+  });
+
+  describe('isSecretEnvVarName / filterSecretEnvVars', () => {
+    it('flags common secret-shaped env var names', () => {
+      const secretNames = [
+        'SOME_API_KEY',
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+        'AWS_SECRET_ACCESS_KEY',
+        'AWS_SESSION_TOKEN',
+        'GITHUB_TOKEN',
+        'GH_TOKEN',
+        'NPM_TOKEN',
+        'DATABASE_PASSWORD',
+        'DB_PASSWD',
+        'MY_APP_SECRET',
+        'CLIENT_SECRET',
+        'PRIVATE_KEY',
+        'ENCRYPTION_KEY',
+        'BASIC_AUTH',
+        'SESSION_COOKIE',
+        'TLS_CERTIFICATE',
+        'SLACK_WEBHOOK_URL',
+        'GOOGLE_APPLICATION_CREDENTIALS',
+      ];
+      for (const name of secretNames) {
+        expect(isSecretEnvVarName(name), `expected ${name} to be flagged as secret`).toBe(true);
+      }
+    });
+
+    it('does not flag ordinary CLI/runtime env var names', () => {
+      const safeNames = [
+        'PATH',
+        'HOME',
+        'SHELL',
+        'LANG',
+        'LC_ALL',
+        'TERM',
+        'PWD',
+        'TMPDIR',
+        'USER',
+        'EDITOR',
+        'CI',
+        'NODE_ENV',
+        'NO_COLOR',
+        'FORCE_COLOR',
+        'npm_config_registry',
+        'KEYBOARD_LAYOUT',
+        'XDG_CONFIG_HOME',
+      ];
+      for (const name of safeNames) {
+        expect(isSecretEnvVarName(name), `expected ${name} to NOT be flagged as secret`).toBe(false);
+      }
+    });
+
+    it('filterSecretEnvVars removes only secret-shaped keys and preserves the rest', () => {
+      const input = {
+        PATH: '/usr/bin',
+        HOME: '/home/test',
+        SOME_API_KEY: 'sk-secret',
+        DATABASE_PASSWORD: 'hunter2',
+      };
+      const filtered = filterSecretEnvVars(input);
+      expect(filtered).toEqual({ PATH: '/usr/bin', HOME: '/home/test' });
     });
   });
 });
