@@ -52,7 +52,7 @@ const SENSITIVE_VOCABULARY = [
   'credentials',
 ];
 
-export function isSensitiveKeyToken(token: string): boolean {
+function isSensitiveSingleToken(token: string): boolean {
   const clean = token
     .replace(/^\\u001b\[[0-9;]*m/g, '')
     .replace(/^\x1b\[[0-9;]*m/g, '')
@@ -79,9 +79,47 @@ export function isSensitiveKeyToken(token: string): boolean {
   return false;
 }
 
+export function isSensitiveKeyToken(token: string): boolean {
+  const parts = token.split('.');
+  for (const part of parts) {
+    if (isSensitiveSingleToken(part)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function isShellExpression(val: string): boolean {
-  // Detect executable shell expansions anywhere in value (not just start)
-  return /\$\(|\`|\$\{|<\(|>\(/.test(val);
+  const len = val.length;
+  for (let i = 0; i < len; i++) {
+    const ch = val[i];
+    let isMarker = false;
+
+    if (ch === '`') {
+      isMarker = true;
+    } else if (ch === '$' || ch === '<' || ch === '>') {
+      const next = val[i + 1];
+      if (ch === '$' && (next === '(' || next === '{')) {
+        isMarker = true;
+      } else if ((ch === '<' || ch === '>') && next === '(') {
+        isMarker = true;
+      }
+    }
+
+    if (isMarker) {
+      let backslashCount = 0;
+      let j = i - 1;
+      while (j >= 0 && val[j] === '\\') {
+        backslashCount++;
+        j--;
+      }
+      if (backslashCount % 2 === 0) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 export function isPlausibleArmoredKeyBody(body: string): boolean {
@@ -146,29 +184,63 @@ function redactUrlPasswords(text: string, isTruncatedTail = false): string {
   );
 }
 
+function redactUrlQueryParams(text: string): string {
+  return text.replace(
+    /([?&])([A-Za-z0-9_.-]+)(=)([^&\s"'\r\n#]+)/giu,
+    (match, p1, key, p3, val) => {
+      if (isSensitiveKeyToken(key)) {
+        if (isShellExpression(val)) return match;
+        return `${p1}${key}${p3}[REDACTED]`;
+      }
+      return match;
+    },
+  );
+}
+
+function redactCurlUserCredentials(text: string): string {
+  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)([A-Za-z0-9_.-]+:)([^\s"'\r\n&|><;]+)/giu;
+  return text.replace(curlUserRegex, '$1$2$3[REDACTED]');
+}
+
 function redactAuthorizationHeaders(text: string): string {
   let result = text;
 
-  // Single quoted POSIX shell header argument: stops at first single quote (no escapes in POSIX single quotes)
-  result = result.replace(
-    /('(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization)\s*:\s*[^']*')/giu,
-    (match) => {
-      const colonIdx = match.indexOf(':');
-      const headerName = match.slice(1, colonIdx).trim();
-      return `'${headerName}: [REDACTED]'`;
-    },
-  );
+  const headers = '(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization)';
 
-  // Double quoted shell header argument with escaped quotes support
+  // 1. Standalone header lines at start of line: Authorization: Basic foo
   result = result.replace(
-    /(")(Authorization|Cookie|Set-Cookie|Proxy-Authorization)\s*:\s*(?:(?:\\.|[^"\\])+)\1/giu,
-    '$1$2: [REDACTED]$1',
-  );
-
-  // Standalone header lines
-  result = result.replace(
-    /(^|\n|\r)(\s*(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization)\s*:\s*)[^\r\n]+/giu,
+    new RegExp(`(^|\\n|\\r)(\\s*${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])[^\\r\\n]+`, 'giu'),
     '$1$2[REDACTED]',
+  );
+
+  // 2. Single quoted POSIX shell header argument: stops at first single quote
+  result = result.replace(
+    new RegExp(`(')(${headers}\\s*:\\s*)(?:(?!\\\[REDACTED\\\])[^']*')`, 'giu'),
+    '$1$2[REDACTED]\'',
+  );
+
+  // 3. Double quoted shell header argument with escaped quotes support
+  result = result.replace(
+    new RegExp(`(")(${headers}\\s*:\\s*)(?:(?!\\\[REDACTED\\\])(?:\\\\.|[^"\\\\])+)\\1`, 'giu'),
+    '$1$2[REDACTED]$1',
+  );
+
+  // 4. Unterminated double quoted header in command: "Authorization: ...
+  result = result.replace(
+    new RegExp(`(")(${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^"\\r\\n]+)$`, 'gimu'),
+    '$1$2[REDACTED]"',
+  );
+
+  // 5. Unterminated single quoted header in command: 'Authorization: ...
+  result = result.replace(
+    new RegExp(`(')(${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^'\\r\\n]+)$`, 'gimu'),
+    '$1$2[REDACTED]\'',
+  );
+
+  // 6. Inline unquoted header argument: Authorization:val, Cookie:val, etc.
+  result = result.replace(
+    new RegExp(`(\\b${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^\\s"'\r\n&|><;]+)`, 'giu'),
+    '$1[REDACTED]',
   );
 
   return result;
@@ -226,16 +298,22 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   // 2. URL Userinfo Passwords (supports dots and plus in username, IPv6 authority, cutoff boundary)
   result = redactUrlPasswords(result, isTruncatedTail);
 
-  // 3. Authorization, Cookie, Set-Cookie, Proxy-Authorization Headers
+  // 3. URL Query Parameters (?access_token=secret&...)
+  result = redactUrlQueryParams(result);
+
+  // 4. Curl --user and --proxy-user credentials (user:password)
+  result = redactCurlUserCredentials(result);
+
+  // 5. Authorization, Cookie, Set-Cookie, Proxy-Authorization Headers
   result = redactAuthorizationHeaders(result);
 
-  // 4. Standalone Bearer tokens outside Authorization header (including short/single-char tokens)
+  // 6. Standalone Bearer tokens outside Authorization header (including short/single-char tokens)
   result = result.replace(
     /\b(Bearer\s+)[A-Za-z0-9_.~+/\-]+/giu,
     '$1[REDACTED]',
   );
 
-  // 5. Explicit token formats (GitHub tokens, OpenAI sk- keys, JWTs)
+  // 7. Explicit token formats (GitHub tokens, OpenAI sk- keys, JWTs)
   result = result.replace(
     /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{30,})\b/gu,
     '[REDACTED]',
@@ -249,11 +327,11 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     '[REDACTED]',
   );
 
-  // 6. YAML Multiline Block Scalars (| or > with indicators like |2, |2-, >+2)
+  // 8. YAML Multiline Block Scalars (| or > with indicators like |2, |2-, >+2)
   result = redactYamlMultilineBlocks(result);
 
-  // 7. Space-Separated CLI Flags (--flag val, --flag "val", --flag 'val', unterminated, shell expr)
-  const flagRegex = /(--[A-Za-z0-9_-]+)(\s+)("((?:\\.|[^"\r\n\\])*)"|'((?:\\.|[^'\r\n\\])*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"'\r\n&|><;]|<\([^)]*\)|>\([^)]*\))+))/gimu;
+  // 9. Space-Separated CLI Flags (--flag val, --flag "val", --flag 'val', unterminated, shell expr)
+  const flagRegex = /(--[A-Za-z0-9_-]+)(\s+)("((?:\\.|[^"\r\n\\])*)"|'([^'\r\n]*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"'\r\n&|><;]|<\([^)]*\)|>\([^)]*\))+))/gimu;
   result = result.replace(flagRegex, (match, flag, space, valWithQuotes, dQuoteVal, sQuoteVal, dQuoteUnterm, sQuoteUnterm, unquotedVal) => {
     if (typeof flag !== 'string' || !isSensitiveKeyToken(flag)) {
       return match;
@@ -272,11 +350,11 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     return `${flag}${space}[REDACTED]`;
   });
 
-  // 8. Key-Value Assignments & YAML Colon / Equals Assignments
-  // Treat shell operators (; && || | &), parenthesis, and flow punctuation as key boundaries
-  const keyBoundary = '(?:^|\\s|[{,;(]|&&|\\|\\||[&|])';
+  // 10. Key-Value Assignments & YAML Colon / Equals Assignments
+  // Treat shell operators (; && || | &), parenthesis, ?, and flow punctuation as key boundaries
+  const keyBoundary = '(?:^|\\s|[{,;(]|&&|\\|\\||[&|?])';
   const ansiPattern = '(?:(?:\\\\u001b|\\u001b|\\x1b)\\[[0-9;]*m)*';
-  const keyTokenPattern = '([A-Za-z0-9_-]+)';
+  const keyTokenPattern = '([A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)';
 
   // Quoted JSON properties: "key": "val" or unquoted key="val"
   const doubleQuotedAssignment = new RegExp(
@@ -318,8 +396,17 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   result = result.replace(yamlColonAssignment, (match, prefix, key, val, comment = '') => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
     if (typeof val === 'string' && isShellExpression(val)) return match;
-    const cleanVal = typeof val === 'string' ? val.split(/(?=[&|;><])/)[0]?.trimEnd() ?? '' : '';
-    const shellOpRemainder = typeof val === 'string' ? val.slice(cleanVal.length) : '';
+
+    let cleanVal = typeof val === 'string' ? val : '';
+    const propAssignMatch = cleanVal.match(/^(\S+?)(?=\s+[A-Za-z0-9_.-]+\s*[:=])/);
+    let trailingContext = '';
+    if (propAssignMatch && propAssignMatch[1] !== undefined) {
+      cleanVal = propAssignMatch[1];
+      trailingContext = val.slice(cleanVal.length);
+    }
+    const cleanValWOOp = cleanVal.split(/(?=[&|;><])/)[0]?.trimEnd() ?? '';
+    const shellOpRemainder = cleanVal.slice(cleanValWOOp.length) + trailingContext;
+
     return `${prefix}[REDACTED]${shellOpRemainder}${comment ? comment.trimEnd() : ''}`;
   });
 

@@ -642,4 +642,107 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain('Bearer x ');
     expect(prompt).toContain('Header Bearer [REDACTED] and Bearer [REDACTED] present');
   });
+
+  it('redacts unterminated quoted Authorization headers through line or scan boundary without exposing value prefix', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    const padding = 'a'.repeat(950);
+    const summary = `${padding}curl -H "Authorization: Bearer unterm_header_prefix_${'x'.repeat(2100)}`;
+
+    await channel.requestApproval(makeRequest({ summary }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('unterm_header_prefix_');
+    expect(prompt).toContain('curl -H "Authorization: [REDACTED]"');
+  });
+
+  it('terminates POSIX single-quoted sensitive flag values at first single quote even when preceded by backslash keeping harmless context visible', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: "--password 'flag_secret_val\\' && echo harmless_flag_context",
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('flag_secret_val');
+    expect(prompt).toContain("--password '[REDACTED]' && echo harmless_flag_context");
+  });
+
+  it('redacts escaped dollar expansion markers in unquoted and double-quoted sensitive values while unescaped executable expansions retain behavior', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD=\\$(reboot) TOKEN="\\${MY_VAR}" PASSWORD=$(reboot) TOKEN="$(reboot)"',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('\\$(reboot)');
+    expect(prompt).not.toContain('\\${MY_VAR}');
+    expect(prompt).toContain('PASSWORD=[REDACTED]');
+    expect(prompt).toContain('TOKEN="[REDACTED]"');
+    expect(prompt).toContain('PASSWORD=$(reboot)');
+    expect(prompt).toContain('TOKEN="$(reboot)"');
+  });
+
+  it('redacts inline unquoted Authorization header arguments while preserving URL and remaining command', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H Authorization:Bearer_inline_header_secret https://example.com/api && echo done',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('Bearer_inline_header_secret');
+    expect(prompt).toContain('curl -H Authorization:[REDACTED] https://example.com/api && echo done');
+  });
+
+  it('classifies sensitive components in dotted configuration property paths and redacts only the value', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'spring.datasource.password=dotted_pass_val database.password: dotted_yaml_val safe.property=hello',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('dotted_pass_val');
+    expect(prompt).not.toContain('dotted_yaml_val');
+    expect(prompt).toContain('spring.datasource.password=[REDACTED]');
+    expect(prompt).toContain('database.password: [REDACTED]');
+    expect(prompt).toContain('safe.property=hello');
+  });
+
+  it('redacts sensitive first URL query parameters after question mark while preserving later safe query parameters', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'https://api.example.com/data?access_token=first_query_token_secret&format=json && https://api.example.com/v1?api_key=query_key_secret&verbose=true',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('first_query_token_secret');
+    expect(prompt).not.toContain('query_key_secret');
+    expect(prompt).toContain('https://api.example.com/data?access_token=[REDACTED]&format=json');
+    expect(prompt).toContain('https://api.example.com/v1?api_key=[REDACTED]&verbose=true');
+  });
+
+  it('redacts password in curl --user and --proxy-user credentials while preserving username, flag, and command', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl --user myuser:curl_user_pass_secret https://example.com && curl --proxy-user myproxyuser:proxy_pass_secret https://proxy.example',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('curl_user_pass_secret');
+    expect(prompt).not.toContain('proxy_pass_secret');
+    expect(prompt).toContain('curl --user myuser:[REDACTED] https://example.com');
+    expect(prompt).toContain('curl --proxy-user myproxyuser:[REDACTED] https://proxy.example');
+  });
 });
