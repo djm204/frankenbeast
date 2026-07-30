@@ -219,6 +219,44 @@ describe('E2E: Consolidated deps through BeastLoop', () => {
     );
   });
 
+  it('uses the injected clock for every planning faculty episode', async () => {
+    const frozenNow = new Date('2026-07-30T12:34:56.789Z');
+    const deps = createBeastDeps(
+      { providers: [{ name: 'claude', type: 'claude-cli' }] },
+      {
+        ...mockExistingDeps(),
+        clock: () => frozenNow,
+      },
+    );
+
+    await deps.planner.createPlan({ goal: 'Replay deterministic planning' });
+    await deps.memory.recordTrace({
+      taskId: 'task-1',
+      objective: 'Complete deterministic planning',
+      summary: 'Planning step completed',
+      outcome: 'success',
+      timestamp: frozenNow.toISOString(),
+    });
+    await deps.memory.recordTrace({
+      taskId: 'task-2',
+      objective: 'Fail deterministic planning',
+      summary: 'Planning step failed',
+      outcome: 'failure',
+      timestamp: frozenNow.toISOString(),
+    });
+
+    const planningEpisodes = deps.sqliteBrain!.episodic.recent().filter((episode) =>
+      episode.step === 'planning:lesson-consultation'
+      || episode.details?.category === 'planning-lifecycle'
+    );
+    expect(planningEpisodes.map((episode) => episode.createdAt)).toEqual([
+      frozenNow.toISOString(),
+      frozenNow.toISOString(),
+      frozenNow.toISOString(),
+      frozenNow.toISOString(),
+    ]);
+  });
+
   it('provider registry has configured providers', () => {
     const deps = createBeastDeps(
       {
