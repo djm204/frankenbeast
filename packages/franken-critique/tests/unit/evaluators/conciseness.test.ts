@@ -42,6 +42,25 @@ describe('ConcisenessEvaluator', () => {
     );
   });
 
+  it('keeps excessive-comment feedback informational and non-blocking', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    const content = [
+      '// Explain the public contract.',
+      '// Document the supported edge case.',
+      'export const value = 1;',
+    ].join('\n');
+
+    const result = await evaluator.evaluate(createInput(content));
+
+    expect(result.verdict).toBe('pass');
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining('Excessive comment ratio: 67%'),
+        severity: 'info',
+      }),
+    ]);
+  });
+
   it('counts inline unresolved comments toward the comment ratio', async () => {
     const evaluator = new ConcisenessEvaluator();
     const pendingMarker = ['TO', 'DO'].join('');
