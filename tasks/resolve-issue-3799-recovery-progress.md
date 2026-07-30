@@ -133,3 +133,26 @@
 - [x] Run all YAML-named compatibility tests (13/13) and the complete CLI-channel test file (103/103).
 - [x] Run Governor package tests (422/422), typecheck, lint (zero errors; three existing unrelated warnings), and build successfully.
 - [x] Confirm the final diff remains limited to the existing issue #3799 source, test, and progress files.
+
+## Eleventh exact-head review remediation (`69ee75a35`)
+
+- [x] Slice 1 RED→GREEN: isolated test leaked both unquoted literal fragments (1 failed, 103 skipped); password-fragment redaction preserved `$(date)` and passed (1 passed, 103 skipped).
+- [x] Slice 2 RED→GREEN: isolated multi-cookie test exposed the second and third cookies (1 failed, 104 skipped); standalone Cookie scanning consumed cookie separators and passed (1 passed, 104 skipped).
+- [x] Slice 3 RED→GREEN: isolated signed/fractional/exponent JSON-number test exposed all numeric values (1 failed, 105 skipped); full JSON number grammar passed (1 passed, 105 skipped).
+- [x] Slice 4 RED→GREEN: isolated newline-variant YAML test exposed CR-only block content (1 failed, 106 skipped); CRLF/LF/CR splitting passed all variants (1 passed, 106 skipped).
+- [x] Slice 5 RED→GREEN: isolated curl ANSI-C argument test exposed the credential (1 failed, 107 skipped); whole-argument consumption passed (1 passed, 107 skipped).
+- [x] Slice 6 RED→GREEN: isolated sensitive-flag test exposed `Basic` and `Bearer` literals (1 failed, 108 skipped); password-literal semantics preserved `$(date)` and passed (1 passed, 108 skipped).
+- [x] Slice 7 RED→GREEN: isolated standalone Bearer test exposed suffixes and substitution-first credentials (1 failed, 109 skipped); expression-aware Bearer redaction passed (1 passed, 109 skipped).
+- [x] Slice 8 RED→GREEN: isolated unspaced diff-assignment test exposed the added value (1 failed, 110 skipped); canonical `+`/`-` prefixes were preserved and passed (1 passed, 110 skipped).
+- [x] Slice 9 RED→GREEN: isolated mismatched-END test exposed the entire bounded key block (1 failed, 111 skipped); plausible bounded mismatched-label fallback passed (1 passed, 111 skipped).
+- [x] Slice 10 RED→GREEN: isolated unmatched-key recovery test returned more than `maxLength` before the marker (1 failed, 112 skipped); post-recovery slicing passed (1 passed, 112 skipped).
+- [x] Slice 11 RED→GREEN: isolated nested-substitution test redacted the outer closing parenthesis (1 failed, 113 skipped); shared balanced expression scanning preserved the complete outer substitution and passed (1 passed, 113 skipped).
+- [x] Run the focused compatibility set (52 passed, 62 skipped) and complete CLI-channel test file (114/114 passed).
+- [x] Run all Governor tests (433/433), typecheck, lint (zero errors; three pre-existing warnings), build, and `git diff --check`.
+- [x] Confirm changed-file scope is limited to the production file, test file, and this progress document.
+- [x] Actionable local P1 RED: a focused standalone multi-cookie regression showed `&& echo visible_cookie_context` was consumed with the final cookie value (1 failed, 114 skipped).
+- [x] Actionable local P1 GREEN: bound standalone Cookie matching to cookie `name=value` syntax and repeated semicolon-delimited pairs, preserving the explicit operator and full following command context (1 passed, 114 skipped).
+- [x] Re-run cookie/header compatibility tests (27/27), the complete CLI-channel file (115/115), all Governor tests (434/434), typecheck, lint (zero errors; three pre-existing warnings), build, and `git diff --check`.
+- [x] Remaining local P1 RED: a focused plan-diff regression across CRLF, LF, and CR exposed an unspaced canonical `+PASSWORD=...` value after prior visible context (1 failed, 115 skipped), while asserting the diff prefix and context must remain.
+- [x] Remaining local P1 GREEN: make the sensitive-assignment key boundary explicitly consume CRLF, LF, or CR followed by an optional canonical `+`/`-` prefix; the focused regression passed all newline variants (1 passed, 115 skipped) without changing existing inline boundary alternatives.
+- [x] Re-run diff/assignment compatibility tests (17/17), the complete CLI-channel file (116/116), all Governor tests (435/435), typecheck, lint (zero errors; three pre-existing warnings), build, and `git diff --check`.

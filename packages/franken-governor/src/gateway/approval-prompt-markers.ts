@@ -180,12 +180,15 @@ export function isPlausibleArmoredKeyBody(body: string): boolean {
 
 function redactPrivateKeyBlocks(text: string): string {
   const blockRegex = /-----BEGIN ([^\r\n]*PRIVATE KEY[^\r\n]*)-----([\s\S]*?)-----END \1-----/giu;
-  return text.replace(blockRegex, (match, _label, body) => {
+  const exactRedacted = text.replace(blockRegex, (match, _label, body) => {
     if (typeof body === 'string' && isPlausibleArmoredKeyBody(body)) {
       return '[REDACTED]';
     }
     return match;
   });
+  const mismatchedBlockRegex = /-----BEGIN [^\r\n]*PRIVATE KEY[^\r\n]*-----([\s\S]*?)-----END [^\r\n]*PRIVATE KEY[^\r\n]*-----/giu;
+  return exactRedacted.replace(mismatchedBlockRegex, (match, body) =>
+    typeof body === 'string' && isPlausibleArmoredKeyBody(body) ? '[REDACTED]' : match);
 }
 
 function redactUrlPasswords(text: string, isTruncatedTail = false): string {
@@ -228,8 +231,9 @@ function redactUrlQueryParams(text: string): string {
 }
 
 function redactCurlUserCredentials(text: string): string {
-  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:"([A-Za-z0-9_.-]+:)((?:\\.|[^"\\\r\n])*)"|'([A-Za-z0-9_.-]+:)([^'\r\n]*)'|([A-Za-z0-9_.-]+:)([^\s"'\r\n&|><;]+))/giu;
-  return text.replace(curlUserRegex, (_match, flag, separator, doubleUser, doublePassword, singleUser, _singlePassword, bareUser, barePassword) => {
+  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:\$'([A-Za-z0-9_.-]+:)((?:\\.|[^'\\\r\n])*)'|"([A-Za-z0-9_.-]+:)((?:\\.|[^"\\\r\n])*)"|'([A-Za-z0-9_.-]+:)([^'\r\n]*)'|([A-Za-z0-9_.-]+:)([^\s"'\r\n&|><;]+))/giu;
+  return text.replace(curlUserRegex, (_match, flag, separator, ansiUser, _ansiPassword, doubleUser, doublePassword, singleUser, _singlePassword, bareUser, barePassword) => {
+    if (typeof ansiUser === 'string') return `${flag}${separator}$'${ansiUser}[REDACTED]'`;
     if (typeof doubleUser === 'string') {
       const redactedPassword = isShellExpression(doublePassword)
         ? redactPasswordLiteralFragments(doublePassword)
@@ -244,8 +248,46 @@ function redactCurlUserCredentials(text: string): string {
   });
 }
 
+function shellExpressionSpans(val: string): Array<readonly [number, number]> {
+  const spans: Array<readonly [number, number]> = [];
+  for (let start = 0; start < val.length; start++) {
+    let precedingBackslashes = 0;
+    for (let index = start - 1; index >= 0 && val[index] === '\\'; index--) {
+      precedingBackslashes++;
+    }
+    if (precedingBackslashes % 2 === 1) continue;
+    const opener = val.slice(start, start + 2);
+    if (opener === '$(' || opener === '<(' || opener === '>(') {
+      let depth = 1;
+      for (let index = start + 2; index < val.length; index++) {
+        if (val[index] === '\\') {
+          index++;
+        } else if (val[index] === '(') {
+          depth++;
+        } else if (val[index] === ')' && --depth === 0) {
+          spans.push([start, index + 1]);
+          start = index;
+          break;
+        }
+      }
+    } else if (opener === '${') {
+      const end = val.indexOf('}', start + 2);
+      if (end >= 0) {
+        spans.push([start, end + 1]);
+        start = end;
+      }
+    } else if (val[start] === '`') {
+      const end = val.indexOf('`', start + 1);
+      if (end >= 0) {
+        spans.push([start, end + 1]);
+        start = end;
+      }
+    }
+  }
+  return spans;
+}
+
 function redactHeaderLiteralFragments(val: string): string {
-  const shellExprPattern = /(?<!\\)(?:\\\\)*(?:\$\([^\r\n)]*\)|\$\{[^\r\n}]*\}|<(?:\([^\r\n)]*\))|>(?:\([^\r\n)]*\))|`[^\r\n`]*`)/g;
   const schemeNames = /^(?:Bearer|Basic|Digest|OAuth|HOBA|Mutual|Negotiate|VAPID|SCRAM-SHA-256|AWS4-HMAC-SHA256)$/i;
   const redactLiteral = (literal: string): string => literal.replace(/\S+/gu, (token) => {
     if (schemeNames.test(token)) return token;
@@ -254,26 +296,23 @@ function redactHeaderLiteralFragments(val: string): string {
 
   let result = '';
   let lastIndex = 0;
-  for (const match of val.matchAll(shellExprPattern)) {
-    const matchIndex = match.index;
-    result += redactLiteral(val.slice(lastIndex, matchIndex));
-    result += match[0];
-    lastIndex = matchIndex + match[0].length;
+  for (const [start, end] of shellExpressionSpans(val)) {
+    result += redactLiteral(val.slice(lastIndex, start));
+    result += val.slice(start, end);
+    lastIndex = end;
   }
   return result + redactLiteral(val.slice(lastIndex));
 }
 
 function redactPasswordLiteralFragments(val: string): string {
-  const shellExprPattern = /(?<!\\)(?:\\\\)*(?:\$\([^\r\n)]*\)|\$\{[^\r\n}]*\}|<(?:\([^\r\n)]*\))|>(?:\([^\r\n)]*\))|`[^\r\n`]*`)/g;
   const redactLiteral = (literal: string): string => literal.length > 0 ? '[REDACTED]' : '';
 
   let result = '';
   let lastIndex = 0;
-  for (const match of val.matchAll(shellExprPattern)) {
-    const matchIndex = match.index;
-    result += redactLiteral(val.slice(lastIndex, matchIndex));
-    result += match[0];
-    lastIndex = matchIndex + match[0].length;
+  for (const [start, end] of shellExpressionSpans(val)) {
+    result += redactLiteral(val.slice(lastIndex, start));
+    result += val.slice(start, end);
+    lastIndex = end;
   }
   return result + redactLiteral(val.slice(lastIndex));
 }
@@ -430,6 +469,12 @@ function redactAuthorizationHeaders(text: string): string {
 
   const headers = SENSITIVE_HEADER_NAMES;
 
+  // Cookie separators are header syntax, not shell boundaries, on standalone lines.
+  result = result.replace(
+    /(^|\r\n|\n|\r)(\s*(?:[+-]\s*)?Cookie\s*:\s*)[^;\s=&|<>]+\s*=\s*(?:"(?:\\.|[^"\\\r\n])*"|[^;\s&|<>]*)(?:;\s*[^;\s=&|<>]+\s*=\s*(?:"(?:\\.|[^"\\\r\n])*"|[^;\s&|<>]*))*/giu,
+    '$1$2[REDACTED]',
+  );
+
   // 1. Standalone header lines at start of line: Authorization: Basic foo
   result = result.replace(
     new RegExp(
@@ -515,7 +560,7 @@ function redactShellScalarLine(content: string, withinShellContext = false): str
 }
 
 function redactYamlMultilineBlocks(text: string): string {
-  const lines = text.split(/\r?\n/);
+  const lines = text.split(/\r\n|\n|\r/u);
   const out: string[] = [];
   let inRedactedBlock = false;
   let blockIndent = 0;
@@ -592,8 +637,12 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // 6. Standalone Bearer tokens outside Authorization header (including short/single-char tokens)
   result = result.replace(
-    /\b(Bearer\s+)[A-Za-z0-9_.~+/\-]+/giu,
-    '$1[REDACTED]',
+    /\b(Bearer\s+)([^\s"'\r\n&|><;]+)/giu,
+    (_match, prefix, credential) => `${prefix as string}${
+      isShellExpression(credential as string)
+        ? redactPasswordLiteralFragments(credential as string)
+        : '[REDACTED]'
+    }`,
   );
 
   // 7. Explicit token formats (GitHub tokens, OpenAI sk- keys, JWTs)
@@ -629,7 +678,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     }
     const isSingleQuoted = valWithQuotes.startsWith("'") || sQuoteUnterm !== undefined;
     if (!isSingleQuoted && isShellExpression(val)) {
-      const redactedVal = redactHeaderLiteralFragments(val);
+      const redactedVal = redactPasswordLiteralFragments(val);
       if (valWithQuotes.startsWith('"') || dQuoteUnterm !== undefined) {
         return `${flag}${space}"${redactedVal}"`;
       }
@@ -646,7 +695,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // 10. Key-Value Assignments & YAML Colon / Equals Assignments
   // Treat shell operators (; && || | &), parenthesis, ?, and flow punctuation as key boundaries
-  const keyBoundary = '(?:^|\\s|[{,;(]|&&|\\|\\||[&|?])';
+  const keyBoundary = '(?:^[+-]?|(?:\\r\\n|\\n|\\r)[+-]?|\\s|[{,;(]|&&|\\|\\||[&|?])';
   const ansiPattern = '(?:(?:\\\\u001b|\\u001b|\\x1b)\\[[0-9;]*m)*';
   const keyTokenPattern = '([A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)';
 
@@ -664,7 +713,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   });
 
   const jsonPrimitiveAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}"${keyTokenPattern}"${ansiPattern}\\s*:\\s*)([0-9]+(?:\\.[0-9]+)?|true|false|null)(?=\\s*[,}\\]\\r\\n]|$)`,
+    `(${keyBoundary}${ansiPattern}"${keyTokenPattern}"${ansiPattern}\\s*:\\s*)(-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)(?=\\s*[,}\\]\\r\\n]|$)`,
     'giu',
   );
   result = result.replace(jsonPrimitiveAssignment, (match, prefix, key) => {
@@ -739,14 +788,16 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   });
 
   // Standard unquoted assignments (key=val)
-  const valToken = '((?:\\\\.|[^\\s"\';}\\r\\n&|><]|<\\([^)]*\\)|>\\([^)]*\\))+)';
+  const valToken = '((?:\\\\.|\\$\\{[^}\\r\\n]*\\}|[^\\s"\';}\\r\\n&|><]|<\\([^)]*\\)|>\\([^)]*\\))+)';
   const unquotedAssignment = new RegExp(
     `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)${valToken}`,
     'giu',
   );
   result = result.replace(unquotedAssignment, (match, prefix, key, val, offset, whole) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
-    if (typeof val === 'string' && isShellExpression(val)) return match;
+    if (typeof val === 'string' && isShellExpression(val)) {
+      return `${prefix}${redactPasswordLiteralFragments(val)}`;
+    }
     if (
       val === '$'
       && typeof offset === 'number'
@@ -880,7 +931,7 @@ export function redactAndTruncate(text: string, options: { redact?: boolean; max
       );
       const redactedPrefix = scanRegion.slice(0, idx) + '[REDACTED]' + possibleKeyMaterial.slice(boundary);
       return isOriginalOverMax || (maxLen !== undefined && redactedPrefix.length > maxLen)
-        ? `${redactedPrefix}\n${TRUNCATION_MARKER}`
+        ? `${maxLen === undefined ? redactedPrefix : redactedPrefix.slice(0, maxLen)}\n${TRUNCATION_MARKER}`
         : redactedPrefix;
     }
   }

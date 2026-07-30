@@ -257,10 +257,10 @@ describe('CliChannel', () => {
     }));
 
     const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
-    expect(prompt).toContain('TOKEN=prefix$(reboot)');
+    expect(prompt).toContain('TOKEN=[REDACTED]$(reboot)');
     expect(prompt).toContain('TOKEN="[REDACTED]$(reboot)"');
-    expect(prompt).toContain('TOKEN=abc`pwd`');
-    expect(prompt).toContain('TOKEN=x${MY_VAR}');
+    expect(prompt).toContain('TOKEN=[REDACTED]`pwd`');
+    expect(prompt).toContain('TOKEN=[REDACTED]${MY_VAR}');
     expect(prompt).toContain('--token [REDACTED]<(cat /etc/passwd)');
   });
 
@@ -1619,5 +1619,173 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain('first_part');
     expect(prompt).not.toContain('second_part');
     expect(prompt).toContain('curl -H "Authorization: [REDACTED]" https://example.com && echo visible_continuation_context');
+  });
+
+  it('redacts every unquoted sensitive assignment literal around an active substitution', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD=prefix-placeholder$(date)suffix-placeholder && echo visible_unquoted_context',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('prefix-placeholder');
+    expect(prompt).not.toContain('suffix-placeholder');
+    expect(prompt).toContain('PASSWORD=[REDACTED]$(date)[REDACTED] && echo visible_unquoted_context');
+  });
+
+  it('redacts every cookie in a standalone multi-cookie header', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'Cookie: first=placeholder-one; second=placeholder-two; third=placeholder-three',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('placeholder-one');
+    expect(prompt).not.toContain('placeholder-two');
+    expect(prompt).not.toContain('placeholder-three');
+    expect(prompt).toContain('Cookie: [REDACTED]');
+  });
+
+  it('redacts a standalone multi-cookie header without consuming a following shell command', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'Cookie: first=placeholder-one; second=placeholder-two && echo visible_cookie_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('placeholder-one');
+    expect(prompt).not.toContain('placeholder-two');
+    expect(prompt).toContain('Cookie: [REDACTED] && echo visible_cookie_context');
+  });
+
+  it('redacts sensitive structured values using the full JSON number grammar', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: '{"password":-12.5e+3,"api_key":6E-4,"secret":-0}',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('-12.5e+3');
+    expect(prompt).not.toContain('6E-4');
+    expect(prompt).not.toContain('"-0"');
+    expect(prompt).toContain('{"password":[REDACTED],"api_key":[REDACTED],"secret":[REDACTED]}');
+  });
+
+  it('splits sensitive YAML blocks across CRLF, LF, and CR-only lines', async () => {
+    for (const newline of ['\r\n', '\n', '\r']) {
+      const readline = makeFakeReadline(['a']);
+      const channel = new CliChannel({ readline, operatorName: 'dev' });
+      await channel.requestApproval(makeRequest({
+        summary: ['password: |', '  placeholder-alpha', '  placeholder-beta', 'safe: visible'].join(newline),
+      }));
+      const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+      expect(prompt).not.toContain('placeholder-alpha');
+      expect(prompt).not.toContain('placeholder-beta');
+      expect(prompt).toContain('safe: visible');
+    }
+  });
+
+  it('consumes and redacts complete Bash ANSI-C quoted curl credentials', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: "curl --user $'alice:placeholder\\nvalue' https://example.test && echo visible_ansi_curl",
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('placeholder');
+    expect(prompt).not.toContain("value'");
+    expect(prompt).toContain("curl --user $'alice:[REDACTED]' https://example.test && echo visible_ansi_curl");
+  });
+
+  it('uses password-literal semantics for sensitive flag values with substitutions', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'deploy --password "Basic $(date) Bearer" && echo visible_flag_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('Basic');
+    expect(prompt).not.toContain('Bearer');
+    expect(prompt).toContain('deploy --password "[REDACTED]$(date)[REDACTED]" && echo visible_flag_context');
+  });
+
+  it('redacts standalone Bearer literals around substitutions including substitution-first values', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'first Bearer prefix-placeholder$(date)suffix-placeholder and second Bearer $(whoami)tail-placeholder',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('prefix-placeholder');
+    expect(prompt).not.toContain('suffix-placeholder');
+    expect(prompt).not.toContain('tail-placeholder');
+    expect(prompt).toContain('Bearer [REDACTED]$(date)[REDACTED]');
+    expect(prompt).toContain('Bearer $(whoami)[REDACTED]');
+  });
+
+  it('preserves canonical unspaced unified-diff prefixes on sensitive assignments', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      planDiff: '+PASSWORD=added-placeholder\n-API_TOKEN=removed-placeholder',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('added-placeholder');
+    expect(prompt).not.toContain('removed-placeholder');
+    expect(prompt).toContain('| +PASSWORD=[REDACTED]');
+    expect(prompt).toContain('| -API_TOKEN=[REDACTED]');
+  });
+
+  it('redacts canonical unspaced added assignments after prior plan-diff context', async () => {
+    for (const newline of ['\r\n', '\n', '\r']) {
+      const readline = makeFakeReadline(['a']);
+      const channel = new CliChannel({ readline, operatorName: 'dev' });
+      await channel.requestApproval(makeRequest({
+        planDiff: ` unchanged visible context${newline}+PASSWORD=added-after-context-placeholder`,
+      }));
+      const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+      expect(prompt).not.toContain('added-after-context-placeholder');
+      expect(prompt).toContain('|  unchanged visible context');
+      expect(prompt).toContain('| +PASSWORD=[REDACTED]');
+    }
+  });
+
+  it('redacts bounded private-key material with a mismatched END label', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: '-----BEGIN RSA PRIVATE KEY-----\nQUJDREVGR0hJSktM\n-----END EC PRIVATE KEY-----\necho visible_after_key',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('QUJDREVGR0hJSktM');
+    expect(prompt).not.toContain('BEGIN RSA PRIVATE KEY');
+    expect(prompt).not.toContain('END EC PRIVATE KEY');
+    expect(prompt).toContain('[REDACTED]\n| echo visible_after_key');
+  });
+
+  it('slices unmatched-key recovery output to maxLength before truncation marker', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    const oversizedCommand = `curl https://example.test/${'x'.repeat(600)}`;
+    await channel.requestApproval(makeRequest({
+      summary: `${'p'.repeat(950)}-----BEGIN PRIVATE KEY-----\n${oversizedCommand}`,
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).toContain('[TRUNCATED]');
+    expect(prompt).not.toContain('x'.repeat(200));
+  });
+
+  it('preserves complete balanced nested command substitutions during redaction', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    await channel.requestApproval(makeRequest({
+      summary: 'PASSWORD="prefix-placeholder$(printf %s $(date))suffix-placeholder" && echo visible_nested_context',
+    }));
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('prefix-placeholder');
+    expect(prompt).not.toContain('suffix-placeholder');
+    expect(prompt).toContain('PASSWORD="[REDACTED]$(printf %s $(date))[REDACTED]" && echo visible_nested_context');
   });
 });
