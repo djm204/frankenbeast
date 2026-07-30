@@ -1877,6 +1877,28 @@ describe('SqliteBrain', () => {
       }
     });
 
+    it('preserves unlimited faculty-outcome retrieval for a negative limit', () => {
+      brain.episodic.record({
+        type: 'decision',
+        step: 'reasoning:critique',
+        summary: 'First unlimited faculty outcome',
+        details: { category: 'reasoning-lifecycle', outcome: 'negative', reward: -1 },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      brain.episodic.record({
+        type: 'decision',
+        step: 'reasoning:critique',
+        summary: 'Second unlimited faculty outcome',
+        details: { category: 'reasoning-lifecycle', outcome: 'negative' },
+        createdAt: '2026-01-02T00:00:00.000Z',
+      });
+
+      expect(brain.episodic.recentFacultyNegativeOutcomes(-1).map((item) => item.summary)).toEqual([
+        'Second unlimited faculty outcome',
+        'First unlimited faculty outcome',
+      ]);
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',
