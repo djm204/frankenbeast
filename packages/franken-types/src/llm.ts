@@ -7,6 +7,8 @@ import type { ProviderContext } from './api-contracts.js';
  * Returns plain string — caller handles parsing.
  */
 export interface LlmCompletionOptions {
+  /** Maximum completion tokens requested from providers that support the limit. */
+  maxTokens?: number | undefined;
   /** Cancels the logical completion, including any provider process or retry wait. */
   signal?: AbortSignal | undefined;
   /** Maximum time for this logical completion, including provider fallback/retries. */

@@ -21,6 +21,7 @@ export class ProviderRegistryIAdapter implements IAdapter {
     const req = request as {
       messages: Array<{ role: string; content: string }>;
       system?: string;
+      max_tokens?: number;
       signal?: AbortSignal;
     };
     const raw: LlmRequest = {
@@ -30,6 +31,7 @@ export class ProviderRegistryIAdapter implements IAdapter {
         content: m.content,
       })),
       tools: [],
+      ...(req.max_tokens !== undefined ? { maxTokens: req.max_tokens } : {}),
       ...(req.signal ? { signal: req.signal } : {}),
     };
     const processed = this.middleware ? this.middleware.processRequest(raw) : raw;
