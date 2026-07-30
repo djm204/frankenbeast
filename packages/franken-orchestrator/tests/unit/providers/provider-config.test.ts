@@ -212,4 +212,17 @@ describe('resolveWizardExecutionProvider', () => {
   it('returns undefined for a provider identity that resolves to no known CLI', () => {
     expect(resolveWizardExecutionProvider('totally-unknown-provider')).toBeUndefined();
   });
+
+  it('trims the provider name before aliasing/lookup, matching normalizeWizardProvider', () => {
+    // ProviderConfigSchema currently accepts a `name` with surrounding whitespace, but the
+    // real wizard pipeline trims the selected name before submission
+    // (normalizeWizardProvider). Without trimming here too, a consolidated entry configured
+    // with padded whitespace in its name would only match this untrimmed lookup, diverging
+    // from what the trimmed submission actually resolves to at launch (#3888).
+    expect(
+      resolveWizardExecutionProvider(' codex ', [{ name: ' codex ', type: 'claude-cli' }]),
+    ).toBe('codex');
+    expect(resolveWizardExecutionProvider('  claude  ')).toBe('claude');
+    expect(resolveWizardExecutionProvider('   ')).toBeUndefined();
+  });
 });

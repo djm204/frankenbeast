@@ -190,7 +190,16 @@ export function resolveWizardExecutionProvider(
   providerName: string,
   consolidatedProviders: readonly ConsolidatedProviderLookup[] = [],
 ): string | undefined {
-  const submittedName = WIZARD_PROVIDER_ALIASES[providerName] ?? providerName;
+  // Mirror normalizeWizardProvider's own trimming exactly: the wizard trims the
+  // selected provider name before submission, so a consolidated provider name
+  // with surrounding whitespace (which ProviderConfigSchema currently accepts)
+  // would otherwise resolve differently here than what actually launches — see
+  // #3888, where `{ name: ' codex ', type: 'claude-cli' }` was reported as
+  // executing Claude, but the trimmed 'codex' submitted at launch no longer
+  // matches this entry and resolves to the plain Codex CLI default instead.
+  const trimmedProviderName = providerName.trim();
+  if (trimmedProviderName.length === 0) return undefined;
+  const submittedName = WIZARD_PROVIDER_ALIASES[trimmedProviderName] ?? trimmedProviderName;
   if (submittedName === 'aider') return 'aider';
   const configuredProvider = consolidatedProviders.find(
     (provider) => provider.name === submittedName || provider.type === submittedName,
