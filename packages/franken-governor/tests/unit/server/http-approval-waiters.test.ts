@@ -411,13 +411,16 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
     const health = await (await app.request('/health')).json();
     expect(health.pendingApprovals).toBe(0);
 
-    // And it cannot be replayed by trying again either.
+    // And it cannot be replayed by trying again either: a bounded expiry
+    // tombstone keeps reporting the distinct 410 (rather than degrading to
+    // a generic 404 as soon as the entry itself is purged), so a replay
+    // attempt is never mistaken for a request that simply never existed.
     const replay = await app.request('/v1/approval/respond', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ requestId: 'req-expiring-1', decision: 'APPROVE' }),
     });
-    expect(replay.status).toBe(404);
+    expect(replay.status).toBe(410);
   });
 
   it('createGovernorApp threads its timeoutMs into a default (auto-created) registry so pending approvals expire consistently', async () => {
@@ -442,5 +445,104 @@ describe('standalone governor HTTP app wired to real approval waiters', () => {
       body: JSON.stringify({ requestId: 'req-default-registry-1', decision: 'APPROVE' }),
     });
     expect(res.status).toBe(200);
+  });
+
+  /**
+   * Coverage for a Codex review follow-up on PR #3924: the TTL can be
+   * crossed between the handler's preflight `isExpired`/`has` checks and
+   * the actual `registry.resolve()` call. Before this fix, the handler
+   * unconditionally returned `status: 'resolved'` with 200 regardless of
+   * what `resolve()` reported, so an operator could be told an approval
+   * succeeded even though `resolve()` silently failed to wake anything.
+   * A subclass that forces `resolve()` to report failure (while `has()`
+   * still reports the entry present, as it would in the real race window)
+   * exercises that exact branch deterministically.
+   */
+  it('POST /v1/approval/respond returns 410 (not 200) when registry.resolve() reports failure despite has() being true', async () => {
+    class ForceFailResolveRegistry extends ApprovalWaiterRegistry {
+      resolve(): boolean {
+        return false;
+      }
+    }
+
+    const registry = new ForceFailResolveRegistry();
+    const app = createGovernorApp({ registry, allowUnsignedApprovalsForTests: true });
+
+    const createRes = await app.request('/v1/approval/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'req-race-1',
+        taskId: 'task-1',
+        summary: 'Deploy to production',
+        timestamp: new Date().toISOString(),
+      }),
+    });
+    expect(createRes.status).toBe(201);
+    expect(registry.has('req-race-1')).toBe(true);
+
+    const res = await app.request('/v1/approval/respond', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: 'req-race-1', decision: 'APPROVE' }),
+    });
+    expect(res.status).toBe(410);
+    const body = await res.json();
+    expect(body.error.code).toBe('approval_expired');
+  });
+
+  it('Slack webhook path also returns 410 (not 200) when registry.resolve() reports failure despite has() being true', async () => {
+    class ForceFailResolveRegistry extends ApprovalWaiterRegistry {
+      resolve(): boolean {
+        return false;
+      }
+    }
+
+    const SLACK_SECRET = ['slack', 'signing', 'fixture'].join('-');
+    function slackHeaders(rawBody: string) {
+      const ts = Math.floor(Date.now() / 1000).toString();
+      const sig = `v0=${createHmac('sha256', SLACK_SECRET)
+        .update(`v0:${ts}:`, 'utf8')
+        .update(Buffer.from(rawBody, 'utf8'))
+        .digest('hex')}`;
+      return {
+        'Content-Type': 'application/json',
+        'X-Slack-Request-Timestamp': ts,
+        'X-Slack-Signature': sig,
+      };
+    }
+
+    const registry = new ForceFailResolveRegistry();
+    const app = createGovernorApp({
+      registry,
+      slackSigningSecret: SLACK_SECRET,
+      slackApproverUserIds: ['U123'],
+      allowUnsignedApprovalsForTests: true,
+    });
+
+    await app.request('/v1/approval/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requestId: 'req-race-slack-1',
+        taskId: 'task-1',
+        summary: 'Deploy to production',
+        timestamp: new Date().toISOString(),
+      }),
+    });
+    expect(registry.has('req-race-slack-1')).toBe(true);
+
+    const rawBody = JSON.stringify({
+      actions: [{ action_id: 'approve', value: 'req-race-slack-1' }],
+      user: { id: 'U123' },
+    });
+    const res = await app.request('/v1/webhook/slack', {
+      method: 'POST',
+      headers: slackHeaders(rawBody),
+      body: rawBody,
+    });
+    expect(res.status).toBe(410);
+    const json = await res.json();
+    expect(json.error.code).toBe('approval_expired');
   });
 });

@@ -1,4 +1,5 @@
-import { now as deterministicNow } from '@franken/types';
+import { wallClockNow } from '@franken/types';
+import { MAX_TIMEOUT_MS } from '../core/config.js';
 import type { ApprovalResponse } from '../core/types.js';
 
 interface PendingApproval {
@@ -30,12 +31,21 @@ export interface ApprovalWaiterRegistryOptions {
    * `300_000` (5 minutes), matching `GovernorConfig`'s default `timeoutMs`.
    * Callers that share a `GovernorConfig` with an `ApprovalGateway` should
    * pass the same `timeoutMs` here so both layers agree on approval
-   * validity.
+   * validity. Capped at `MAX_TIMEOUT_MS` (Node's `setTimeout` limit), same
+   * as `GovernorConfig`: a larger value would silently truncate to a ~1ms
+   * `setTimeout` delay, firing the purge timer almost immediately while the
+   * entry is not yet logically expired, and never rescheduling.
    */
   readonly timeoutMs?: number;
   /**
    * Injectable clock, primarily so tests can control elapsed time without
-   * real timers. Defaults to the shared `@franken/types` `now()`.
+   * real timers. Defaults to `wallClockNow` (real `Date.now()`) rather than
+   * `@franken/types`'s deterministic `now()`: TTL math needs a clock that
+   * genuinely advances with real elapsed time. When `FRANKENBEAST_SEED` is
+   * set (as it is across this repo's CI matrix), the deterministic `now()`
+   * returns a fixed value for the life of the process, which would make
+   * every pending approval look permanently fresh -- defeating expiration
+   * entirely under CI.
    */
   readonly now?: () => number;
 }
@@ -64,9 +74,13 @@ export interface ApprovalWaiterRegistryOptions {
  * lazily on access (`has`, `get`, `list`, `size`, `resolve`,
  * `hasKnownRequest`) and actively via a per-entry background timer, so an
  * abandoned placeholder that nobody ever queries does not linger forever.
+ * Once an entry is purged for having expired, a bounded "tombstone" record
+ * is kept for `EXPIRED_TOMBSTONE_TTL_MS` so a late decision still gets a
+ * distinct "expired" error instead of a generic "not found" one.
  */
 export class ApprovalWaiterRegistry {
   private static readonly EARLY_RESPONSE_TTL_MS = 300_000;
+  private static readonly EXPIRED_TOMBSTONE_TTL_MS = 300_000;
   static readonly DEFAULT_TIMEOUT_MS = 300_000;
 
   private readonly timeoutMs: number;
@@ -80,14 +94,24 @@ export class ApprovalWaiterRegistry {
   private readonly resolvedBeforeWaiter = new Map<string, EarlyApprovalResponse>();
   /** Background purge timers, keyed by requestId, for `pending` entries. */
   private readonly expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * `requestId`s that were purged for having expired, retained briefly so a
+   * late decision or replay attempt is told "expired" rather than "not
+   * found". Cleared once a fresh `register`/`waitFor` legitimately reuses
+   * the id.
+   */
+  private readonly expiredTombstones = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(options: ApprovalWaiterRegistryOptions = {}) {
     const timeoutMs = options.timeoutMs ?? ApprovalWaiterRegistry.DEFAULT_TIMEOUT_MS;
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new RangeError('ApprovalWaiterRegistry timeoutMs must be a positive finite number');
     }
+    if (timeoutMs > MAX_TIMEOUT_MS) {
+      throw new RangeError(`ApprovalWaiterRegistry timeoutMs must be less than or equal to ${MAX_TIMEOUT_MS}`);
+    }
     this.timeoutMs = timeoutMs;
-    this.now = options.now ?? deterministicNow;
+    this.now = options.now ?? wallClockNow;
   }
 
   get size(): number {
@@ -104,15 +128,23 @@ export class ApprovalWaiterRegistry {
   }
 
   /**
-   * True if `requestId` has a pending entry that has exceeded `timeoutMs`.
-   * This is a non-mutating peek (unlike `has`, `resolve`, etc., which evict
-   * expired entries as a side effect) so callers can distinguish "expired"
-   * from "never existed" for a clear, specific error before that lazy
-   * eviction happens.
+   * True if `requestId` currently has a pending entry that has exceeded
+   * `timeoutMs`, or was recently purged for having done so (see
+   * `expiredTombstones`). This is a non-mutating peek with respect to
+   * `pending` (unlike `has`, `resolve`, etc., which evict expired entries as
+   * a side effect) so callers can distinguish "expired" from "never
+   * existed" for a clear, specific error before that lazy eviction happens.
+   * It does record a tombstone the first time it observes a pending entry
+   * has expired, so subsequent calls keep reporting "expired" for a bounded
+   * grace period even after the entry itself is purged.
    */
   isExpired(requestId: string): boolean {
     const entry = this.pending.get(requestId);
-    return entry !== undefined && this.isEntryExpired(entry);
+    if (entry && this.isEntryExpired(entry)) {
+      this.markExpired(requestId);
+      return true;
+    }
+    return this.expiredTombstones.has(requestId);
   }
 
   get(requestId: string): { taskId: string; summary: string; approvalAnomalyNotice?: string } | undefined {
@@ -148,6 +180,10 @@ export class ApprovalWaiterRegistry {
     if (this.resolvedBeforeWaiter.has(requestId)) return;
 
     const existing = this.evictIfExpired(requestId);
+    // A fresh entry (nothing live under this id) legitimately supersedes
+    // any earlier expiry tombstone -- this is a new approval request, not a
+    // replay of the old one.
+    if (!existing) this.clearTombstone(requestId);
     const effectiveApprovalAnomalyNotice = approvalAnomalyNotice ?? existing?.approvalAnomalyNotice;
     // Preserve the original creation time across a refreshing `register()`
     // call for the same requestId: re-registering must not push the TTL
@@ -180,6 +216,7 @@ export class ApprovalWaiterRegistry {
     if (earlyResponse) {
       this.resolvedBeforeWaiter.delete(requestId);
       clearTimeout(earlyResponse.expiry);
+      this.clearTombstone(requestId);
       return new Promise<ApprovalResponse>((resolvePromise) => {
         const createdAt = this.now();
         this.pending.set(requestId, {
@@ -205,6 +242,7 @@ export class ApprovalWaiterRegistry {
     if (existing?.hasRealWaiter) {
       return Promise.reject(new Error(`Approval waiter already registered for requestId ${requestId}`));
     }
+    if (!existing) this.clearTombstone(requestId);
 
     return new Promise<ApprovalResponse>((resolvePromise) => {
       const effectiveApprovalAnomalyNotice = approvalAnomalyNotice ?? existing?.approvalAnomalyNotice;
@@ -229,14 +267,15 @@ export class ApprovalWaiterRegistry {
    * pending approval exists for `requestId`, including when it existed but
    * has passed its `timeoutMs` deadline: an expired approval is invalidated
    * (purged) rather than honored, so a late or replayed decision can never
-   * resolve it (see #3736).
+   * resolve it (see #3736). Callers MUST branch on the return value rather
+   * than assuming success once `has()` was true, since expiry can be
+   * crossed between that check and this call.
    */
   resolve(requestId: string, response: ApprovalResponse): boolean {
     const pending = this.pending.get(requestId);
     if (!pending) return false;
     if (this.isEntryExpired(pending)) {
-      this.pending.delete(requestId);
-      this.clearExpiryTimer(requestId);
+      this.purgeExpiredEntry(requestId);
       return false;
     }
     this.pending.delete(requestId);
@@ -274,8 +313,7 @@ export class ApprovalWaiterRegistry {
     const entry = this.pending.get(requestId);
     if (!entry) return undefined;
     if (this.isEntryExpired(entry)) {
-      this.pending.delete(requestId);
-      this.clearExpiryTimer(requestId);
+      this.purgeExpiredEntry(requestId);
       return undefined;
     }
     return entry;
@@ -285,10 +323,16 @@ export class ApprovalWaiterRegistry {
   private pruneExpired(): void {
     for (const [requestId, entry] of this.pending) {
       if (this.isEntryExpired(entry)) {
-        this.pending.delete(requestId);
-        this.clearExpiryTimer(requestId);
+        this.purgeExpiredEntry(requestId);
       }
     }
+  }
+
+  /** Removes an expired `pending` entry and records its expiry tombstone. */
+  private purgeExpiredEntry(requestId: string): void {
+    this.pending.delete(requestId);
+    this.clearExpiryTimer(requestId);
+    this.markExpired(requestId);
   }
 
   private clearExpiryTimer(requestId: string): void {
@@ -296,6 +340,23 @@ export class ApprovalWaiterRegistry {
     if (timer) {
       clearTimeout(timer);
       this.expiryTimers.delete(requestId);
+    }
+  }
+
+  private markExpired(requestId: string): void {
+    if (this.expiredTombstones.has(requestId)) return;
+    const timer = setTimeout(() => {
+      this.expiredTombstones.delete(requestId);
+    }, ApprovalWaiterRegistry.EXPIRED_TOMBSTONE_TTL_MS);
+    timer.unref?.();
+    this.expiredTombstones.set(requestId, timer);
+  }
+
+  private clearTombstone(requestId: string): void {
+    const timer = this.expiredTombstones.get(requestId);
+    if (timer) {
+      clearTimeout(timer);
+      this.expiredTombstones.delete(requestId);
     }
   }
 
@@ -314,6 +375,7 @@ export class ApprovalWaiterRegistry {
       const entry = this.pending.get(requestId);
       if (entry && this.isEntryExpired(entry)) {
         this.pending.delete(requestId);
+        this.markExpired(requestId);
       }
     }, remaining);
     timer.unref?.();

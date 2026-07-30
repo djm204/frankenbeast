@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { ApprovalWaiterRegistry } from '../../../src/gateway/approval-waiter-registry.js';
+import { MAX_TIMEOUT_MS } from '../../../src/core/config.js';
 import type { ApprovalResponse } from '../../../src/core/types.js';
 
 function makeResponse(overrides: Partial<ApprovalResponse> = {}): ApprovalResponse {
@@ -33,6 +34,30 @@ describe('ApprovalWaiterRegistry expiration', () => {
     expect(() => new ApprovalWaiterRegistry({ timeoutMs: -1 })).toThrow(RangeError);
     expect(() => new ApprovalWaiterRegistry({ timeoutMs: Number.NaN })).toThrow(RangeError);
     expect(() => new ApprovalWaiterRegistry({ timeoutMs: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+  });
+
+  it('rejects a timeoutMs above MAX_TIMEOUT_MS (Node setTimeout limit), same as GovernorConfig', () => {
+    expect(() => new ApprovalWaiterRegistry({ timeoutMs: MAX_TIMEOUT_MS })).not.toThrow();
+    expect(() => new ApprovalWaiterRegistry({ timeoutMs: MAX_TIMEOUT_MS + 1 })).toThrow(RangeError);
+    expect(() => new ApprovalWaiterRegistry({ timeoutMs: Number.MAX_SAFE_INTEGER })).toThrow(RangeError);
+  });
+
+  it('uses a real advancing clock by default, not a value that could be frozen for a process (regression: FRANKENBEAST_SEED-style deterministic clocks must not be used for TTL math)', () => {
+    const dateNowSpy = vi.spyOn(Date, 'now');
+    try {
+      let currentTime = 1_700_000_000_000;
+      dateNowSpy.mockImplementation(() => currentTime);
+
+      // No `now` override: exercises the registry's actual default clock.
+      const registry = new ApprovalWaiterRegistry({ timeoutMs: 1000 });
+      registry.register('req-1', 'task-1', 'Deploy to production');
+      expect(registry.isExpired('req-1')).toBe(false);
+
+      currentTime += 1500;
+      expect(registry.isExpired('req-1')).toBe(true);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
   });
 
   it('reports a freshly registered approval as not expired', () => {
@@ -174,5 +199,49 @@ describe('ApprovalWaiterRegistry expiration', () => {
 
     expect(registry.isExpired('req-1')).toBe(true);
     expect(registry.resolve('req-1', makeResponse())).toBe(false);
+  });
+
+  it('isExpired() keeps reporting expired via a tombstone even after the entry itself has been purged from pending', () => {
+    const clock = makeClock();
+    const registry = new ApprovalWaiterRegistry({ timeoutMs: 1000, now: clock.now });
+
+    registry.register('req-1', 'task-1', 'Deploy to production');
+    clock.advance(1500);
+
+    // Force the lazy-eviction path to actually remove it from `pending`
+    // (has() evicts as a side effect), simulating a late decision arriving
+    // *after* the entry was already purged -- either by an earlier access
+    // or by the background timer -- rather than in the narrow window right
+    // as it crosses its TTL.
+    expect(registry.has('req-1')).toBe(false);
+
+    // A late decision must still be told "expired", not "not found": the
+    // distinction matters for operators and for audit/observability.
+    expect(registry.isExpired('req-1')).toBe(true);
+    expect(registry.resolve('req-1', makeResponse())).toBe(false);
+  });
+
+  it('a background-timer purge also leaves a tombstone, so a late decision after active purging still reads as expired', async () => {
+    const registry = new ApprovalWaiterRegistry({ timeoutMs: 20 });
+    registry.register('req-1', 'task-1', 'Deploy to production');
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(registry.size).toBe(0);
+    expect(registry.isExpired('req-1')).toBe(true);
+  });
+
+  it('a fresh register() for a requestId clears any stale expiry tombstone from an earlier occupant of that id', () => {
+    const clock = makeClock();
+    const registry = new ApprovalWaiterRegistry({ timeoutMs: 1000, now: clock.now });
+
+    registry.register('req-1', 'task-1', 'Deploy to production');
+    clock.advance(1500);
+    expect(registry.resolve('req-1', makeResponse())).toBe(false);
+    expect(registry.isExpired('req-1')).toBe(true); // tombstoned
+
+    registry.register('req-1', 'task-1', 'Deploy to production (second request)');
+
+    expect(registry.isExpired('req-1')).toBe(false);
   });
 });

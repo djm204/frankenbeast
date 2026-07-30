@@ -518,7 +518,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // a caller blocked on `ApprovalGateway.requestApproval()` actually
     // unblocks with this decision instead of the request silently resolving
     // only from the HTTP caller's point of view.
-    registry.resolve(body.requestId, {
+    const resolved = registry.resolve(body.requestId, {
       requestId: body.requestId,
       decision,
       respondedBy,
@@ -526,6 +526,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ...(feedback !== undefined ? { feedback } : {}),
       ...(signature !== undefined ? { signature } : {}),
     });
+
+    // The TTL can be crossed between the preflight checks above and this
+    // call (e.g. a decision arriving in the request's final milliseconds).
+    // `resolve()` is the actual source of truth for whether the decision
+    // was honored: trust its return value rather than the earlier `has()`
+    // check, so an operator is never told "resolved" for a decision that
+    // silently failed to wake anything.
+    if (!resolved) {
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
 
     return c.json({
       requestId: body.requestId,
@@ -734,7 +749,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       )
       : undefined;
 
-    registry.resolve(requestId, {
+    const resolved = registry.resolve(requestId, {
       requestId,
       decision,
       respondedBy: slackUserId,
@@ -742,6 +757,19 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ...(feedback !== undefined ? { feedback } : {}),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
+
+    // Same rationale as the HTTP respond endpoint above: the TTL can be
+    // crossed between the preflight checks and this call, so `resolve()`'s
+    // actual return value -- not the earlier `has()` check -- decides
+    // whether this is reported as resolved.
+    if (!resolved) {
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
 
     return c.json({
       requestId,
