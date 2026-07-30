@@ -68,6 +68,7 @@ export class OpenAiApiAdapter implements ILlmProvider {
     const model = this.options.model ?? 'gpt-4o';
 
     try {
+      request.signal?.throwIfAborted();
       const params: OpenAI.ChatCompletionCreateParamsStreaming = {
         model,
         max_tokens: request.maxTokens ?? this.options.maxTokens ?? 4096,
@@ -81,7 +82,10 @@ export class OpenAiApiAdapter implements ILlmProvider {
       if (request.temperature !== undefined) {
         params.temperature = request.temperature;
       }
-      const stream = await this.getClient().chat.completions.create(params);
+      const stream = await this.getClient().chat.completions.create(
+        params,
+        request.signal ? { signal: request.signal } : undefined,
+      );
 
       const toolCallAccumulators = new Map<
         number,
@@ -89,6 +93,7 @@ export class OpenAiApiAdapter implements ILlmProvider {
       >();
 
       for await (const chunk of stream) {
+        request.signal?.throwIfAborted();
         const choice = chunk.choices[0];
         if (choice) {
           const delta = choice.delta;

@@ -3,9 +3,17 @@
 ## 2026-07-30 — Maintained-docs conflict-marker integrity
 - A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots and skip generated/vendor directories. Reject standard-width opening/closing remnants independently, but require a coherent same-width block for shorter configurable markers so custom Git conflicts are caught without misclassifying standalone Setext headings or Markdown blockquotes.
 
+## 2026-07-30 — Faculty clocks must be wired before adapter construction
+- Resolve the shared Beast clock before constructing any faculty adapter, then use that same source for lesson-consultation and every lifecycle timestamp. A frozen-clock dependency-factory regression should exercise planning, completion, and failure paths together so one remaining wall-clock call cannot hide behind otherwise deterministic reasoning/action behavior.
+
 ## 2026-07-30 — Evaluator severity must agree with blocking verdicts
 - A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
 - Informational evaluator findings must not return a blocking `fail` verdict when the pipeline contract treats `pass` plus `info` as non-blocking. Preserve the finding and score signal, and fix the verdict/severity drift instead of adding environment configuration to pure evaluator logic.
+
+## 2026-07-30 — Adapter-level deadlines need one owner and one cancellation signal
+- A client wrapper that only forwards `timeoutMs` remains unbounded for generic adapters. Enforce a default/request deadline at the wrapper, pass the same abort signal through both request transformation and `execute()`, and race completion against that signal so the caller returns even when adapter work stalls.
+- Let adapters that already enforce and clean up their own deadline explicitly advertise that capability; the wrapper should forward the normalized timeout but skip its extra timer. Timeout-aware process adapters must abort their child process, while generic adapters receive the wrapper signal for cooperative cleanup.
+- Propagate cancellation through provider registries into SDK request options and child-process spawn signals. Caller cancellation must release half-open circuit-breaker reservations without recording provider failures, and timer inputs must be capped at Node's signed 32-bit delay limit.
 
 ## 2026-07-27 — Managed-service CLI visibility must use explicit operator paths
 - A managed service that rebuilds `PATH` should add only explicit conventional operator locations (for example `$HOME/.local/bin` and `/usr/local/bin`) beside the runtime/system directories; never copy the parent shell's `PATH`, because arbitrary inherited entries would undo process isolation. Validate home-derived entries as absolute and delimiter-free before adding them.

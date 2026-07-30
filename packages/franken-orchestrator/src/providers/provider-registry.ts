@@ -214,6 +214,23 @@ function shouldRecordProviderHealthFailure(error: Error | string): boolean {
   return classifyProviderError(error) !== 'request_error';
 }
 
+function throwIfRequestAborted(request: LlmRequest): void {
+  request.signal?.throwIfAborted();
+}
+
+async function awaitWithRequestAbort<T>(operation: Promise<T>, request: LlmRequest): Promise<T> {
+  const signal = request.signal;
+  if (!signal) return operation;
+  signal.throwIfAborted();
+  return await new Promise<T>((resolve, reject) => {
+    const rejectOnAbort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', rejectOnAbort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', rejectOnAbort);
+    });
+  });
+}
+
 export class ProviderRegistry {
   private providers: ILlmProvider[];
   private brain: IBrain;
@@ -501,6 +518,7 @@ export class ProviderRegistry {
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
+    throwIfRequestAborted(request);
     let lastError: Error | undefined;
     let terminalError: Error | undefined;
     let lastFailedProviderName: string | undefined;
@@ -511,10 +529,17 @@ export class ProviderRegistry {
 
     const providerOrder = this.getProviderIterationOrder();
     for (let i = 0; i < providerOrder.length; i++) {
+      throwIfRequestAborted(request);
       const providerIndex = providerOrder[i]!;
       const provider = this.providers[providerIndex]!;
 
+      const probeCountBeforeReservation = this.providerHealth.get(
+        this.providerKey(provider),
+      )?.halfOpenProbeCount ?? 0;
       const circuitError = this.reserveCircuitBreakerProbe(provider);
+      const availabilityProbeReserved = (
+        this.providerHealth.get(this.providerKey(provider))?.halfOpenProbeCount ?? 0
+      ) > probeCountBeforeReservation;
       if (circuitError) {
         unavailableProviders.push(provider.name);
         circuitErrors.push(circuitError.message);
@@ -530,7 +555,19 @@ export class ProviderRegistry {
         continue;
       }
 
-      if (!(await provider.isAvailable())) {
+      let providerAvailable: boolean;
+      try {
+        providerAvailable = await awaitWithRequestAbort(provider.isAvailable(), request);
+      } catch (error) {
+        if (request.signal?.aborted) {
+          if (availabilityProbeReserved) {
+            this.releaseHalfOpenProbeWithoutHealthFailure(provider, 'half-open-probe-availability-aborted');
+          }
+          throw request.signal.reason;
+        }
+        throw error;
+      }
+      if (!providerAvailable) {
         unavailableProviders.push(provider.name);
         const availabilityError = new Error(`Provider ${provider.name} is unavailable`);
         availabilityErrors.push(availabilityError.message);
@@ -584,13 +621,15 @@ export class ProviderRegistry {
       ) {
         let failureAlreadyRecorded = false;
         let terminalEventObserved = false;
-        const halfOpenProbeReserved = this.hasReservedHalfOpenProbe(provider);
+        const halfOpenProbeReserved = availabilityProbeReserved;
         try {
+          throwIfRequestAborted(effectiveRequest);
           const stream = provider.execute(effectiveRequest);
           let retried = false;
           const buffer: LlmStreamEvent[] = [];
 
           for await (const event of stream) {
+            throwIfRequestAborted(effectiveRequest);
             if (
               event.type === 'error' &&
               event.retryable &&
@@ -610,7 +649,7 @@ export class ProviderRegistry {
                 Math.pow(this.opts.backoffMultiplier, retry),
                 this.opts.maxRetryDelayMs,
               );
-              await this.opts.sleep(delay);
+              await awaitWithRequestAbort(this.opts.sleep(delay), effectiveRequest);
               retried = true;
               break; // discard buffer, retry same provider
             }
@@ -663,6 +702,13 @@ export class ProviderRegistry {
           lastFailedProviderName = provider.name;
           break; // stream ended without done — failover
         } catch (error) {
+          if (effectiveRequest.signal?.aborted) {
+            if (halfOpenProbeReserved) {
+              this.releaseHalfOpenProbeWithoutHealthFailure(provider, 'half-open-probe-execution-aborted');
+              terminalEventObserved = true;
+            }
+            throw effectiveRequest.signal.reason;
+          }
           lastError =
             error instanceof Error ? error : new Error(String(error));
           if (!failureAlreadyRecorded) {
