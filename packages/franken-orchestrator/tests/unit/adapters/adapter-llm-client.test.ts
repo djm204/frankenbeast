@@ -291,6 +291,23 @@ describe('AdapterLlmClient', () => {
     expect(observer.recordTokenUsage).not.toHaveBeenCalled();
   });
 
+  it('cleans up its deadline when observer span creation throws', async () => {
+    vi.useFakeTimers();
+    try {
+      const observer = makeObserver();
+      vi.mocked(observer.startSpan).mockImplementation(() => {
+        throw new Error('trace ended');
+      });
+      const client = new AdapterLlmClient(makeAdapter(), observer);
+
+      await expect(client.complete('prompt')).rejects.toThrow('trace ended');
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('ends the observer span with completed status and records usage on success', async () => {
     const observer = makeObserver();
     const client = new AdapterLlmClient(makeAdapter(), observer);

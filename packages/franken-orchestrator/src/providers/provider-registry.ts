@@ -533,7 +533,13 @@ export class ProviderRegistry {
       const providerIndex = providerOrder[i]!;
       const provider = this.providers[providerIndex]!;
 
+      const probeCountBeforeReservation = this.providerHealth.get(
+        this.providerKey(provider),
+      )?.halfOpenProbeCount ?? 0;
       const circuitError = this.reserveCircuitBreakerProbe(provider);
+      const availabilityProbeReserved = (
+        this.providerHealth.get(this.providerKey(provider))?.halfOpenProbeCount ?? 0
+      ) > probeCountBeforeReservation;
       if (circuitError) {
         unavailableProviders.push(provider.name);
         circuitErrors.push(circuitError.message);
@@ -554,7 +560,9 @@ export class ProviderRegistry {
         providerAvailable = await awaitWithRequestAbort(provider.isAvailable(), request);
       } catch (error) {
         if (request.signal?.aborted) {
-          this.releaseHalfOpenProbeWithoutHealthFailure(provider, 'half-open-probe-availability-aborted');
+          if (availabilityProbeReserved) {
+            this.releaseHalfOpenProbeWithoutHealthFailure(provider, 'half-open-probe-availability-aborted');
+          }
           throw request.signal.reason;
         }
         throw error;

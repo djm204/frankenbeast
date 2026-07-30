@@ -203,12 +203,11 @@ export class AdapterLlmClient implements ILlmClient {
     };
 
     let span: any;
-    if (this.observer) {
-      span = this.observer.startSpan(this.observer.trace, { name: `llm-complete:${requestId}` });
-    }
-
     let failed = false;
     try {
+      if (this.observer) {
+        span = this.observer.startSpan(this.observer.trace, { name: `llm-complete:${requestId}` });
+      }
       let content: string | null;
       let usage: TokenUsage | undefined;
       let providerContext: ProviderContext | undefined;
