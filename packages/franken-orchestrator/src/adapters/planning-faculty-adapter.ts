@@ -9,8 +9,9 @@ import type { IPlannerModule, PlanGraph, PlanIntent, PlanTask } from '../deps.js
 import { consultFacultyLessons } from './faculty-learning.js';
 
 export interface PlanningFacultyAdapterOptions {
-  recordEpisodes?: boolean;
-  learning?: ILearningFaculty;
+  readonly recordEpisodes?: boolean;
+  readonly learning?: ILearningFaculty;
+  readonly clock?: () => Date;
 }
 
 /**
@@ -34,7 +35,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
         intent.goal,
         this.episodic,
         this.options.learning,
-        isoNow(),
+        this.now(),
       );
     }
     const plan = await this.delegate.createPlan(intent);
@@ -52,7 +53,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
         taskCount: plan.tasks.length,
         taskIds: plan.tasks.map((task) => task.id),
       },
-      createdAt: isoNow(),
+      createdAt: this.now(),
     });
   }
 
@@ -71,7 +72,7 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
       step: task.id,
       summary: `Planning step completed: ${task.objective}`,
       details: { category: 'planning-lifecycle', taskId: task.id },
-      createdAt: isoNow(),
+      createdAt: this.now(),
     });
   }
 
@@ -85,8 +86,12 @@ export class PlanningFacultyAdapter implements IPlannerModule, IPlanningFaculty 
         taskId: task.id,
         errorName: error instanceof Error ? error.name : 'Error',
       },
-      createdAt: isoNow(),
+      createdAt: this.now(),
     });
+  }
+
+  private now(): string {
+    return this.options.clock?.().toISOString() ?? isoNow();
   }
 
   private recordLifecycleEvent(event: EpisodicEvent): void {

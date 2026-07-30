@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-30 — Faculty clocks must be wired before adapter construction
+- Resolve the shared Beast clock before constructing any faculty adapter, then use that same source for lesson-consultation and every lifecycle timestamp. A frozen-clock dependency-factory regression should exercise planning, completion, and failure paths together so one remaining wall-clock call cannot hide behind otherwise deterministic reasoning/action behavior.
+
 ## 2026-07-30 — Evaluator severity must agree with blocking verdicts
 - A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
 - Informational evaluator findings must not return a blocking `fail` verdict when the pipeline contract treats `pass` plus `info` as non-blocking. Preserve the finding and score signal, and fix the verdict/severity drift instead of adding environment configuration to pure evaluator logic.
