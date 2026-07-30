@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-30 — Bound automatic scans without breaking unlimited retrieval
+- When an API uses negative limits to mean “all,” do not reuse that result limit directly as a finite raw-row budget: bound non-negative automatic lookbacks by rows examined, but preserve the explicit negative-limit convention (and label it `unbounded` in audit metadata). Add separate regressions for bounded filtered/encrypted scans and negative-limit ordering.
+
 ## 2026-07-30 — Evaluator severity must agree with blocking verdicts
 - A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
 - Informational evaluator findings must not return a blocking `fail` verdict when the pipeline contract treats `pass` plus `info` as non-blocking. Preserve the finding and score signal, and fix the verdict/severity drift instead of adding environment configuration to pure evaluator logic.
