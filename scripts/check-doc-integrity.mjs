@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
 const root = process.env.FRANKENBEAST_DOCS_SCAN_ROOT ?? defaultRoot;
 const docsRoot = join(root, 'docs');
-const openingMarkerPattern = /^(<{7,})(?:\s.*)?$/u;
-const separatorMarkerPattern = /^(={7,})(?:\s.*)?$/u;
-const closingMarkerPattern = /^(>{7,})(?:\s.*)?$/u;
+const openingMarkerPattern = /^(<{3,})(?:\s.*)?$/u;
+const separatorMarkerPattern = /^(={3,})(?:\s.*)?$/u;
+const closingMarkerPattern = /^(>{3,})(?:\s.*)?$/u;
 const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
 
 function toRepoPath(path) {
@@ -39,23 +39,45 @@ async function* walkMarkdown(dir) {
 async function scanFile(path) {
   const source = await readFile(path, 'utf8');
   const findings = [];
-  let insideConflict = false;
+  let conflict = null;
 
   for (const [index, line] of source.split(/\r?\n/u).entries()) {
     const openingMatch = openingMarkerPattern.exec(line);
-    const closingMatch = closingMarkerPattern.exec(line);
-    const match = openingMatch
-      ?? closingMatch
-      ?? (insideConflict ? separatorMarkerPattern.exec(line) : null);
-    if (match) {
-      findings.push({
+    if (openingMatch) {
+      conflict = {
+        width: openingMatch[1].length,
+        sawSeparator: false,
+        findings: [{
+          path: toRepoPath(path),
+          line: index + 1,
+          marker: openingMatch[1],
+        }],
+      };
+      continue;
+    }
+    if (!conflict) continue;
+
+    const separatorMatch = separatorMarkerPattern.exec(line);
+    if (separatorMatch?.[1].length === conflict.width) {
+      conflict.sawSeparator = true;
+      conflict.findings.push({
         path: toRepoPath(path),
         line: index + 1,
-        marker: match[1],
+        marker: separatorMatch[1],
       });
+      continue;
     }
-    if (openingMatch) insideConflict = true;
-    if (closingMatch) insideConflict = false;
+
+    const closingMatch = closingMarkerPattern.exec(line);
+    if (closingMatch?.[1].length === conflict.width && conflict.sawSeparator) {
+      conflict.findings.push({
+        path: toRepoPath(path),
+        line: index + 1,
+        marker: closingMatch[1],
+      });
+      findings.push(...conflict.findings);
+      conflict = null;
+    }
   }
 
   return findings;

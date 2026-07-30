@@ -16,6 +16,10 @@ function wideConflictMarker(character: '<' | '=' | '>'): string {
   return character.repeat(9);
 }
 
+function shortConflictMarker(character: '<' | '=' | '>'): string {
+  return character.repeat(3);
+}
+
 function makeFixtureRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'franken-doc-integrity-'));
   fixtureRoots.add(root);
@@ -87,6 +91,21 @@ describe('maintained Markdown integrity', () => {
       wideConflictMarker('='),
       'incoming architecture',
       `${wideConflictMarker('>')} feature/architecture`,
+    ].join('\n'));
+
+    const result = runScanner(root);
+
+    expect(result.status).toBe(1);
+  });
+
+  it('rejects complete conflict blocks with marker widths below seven', () => {
+    const root = makeFixtureRoot();
+    writeFixture(root, 'docs/guide.md', [
+      `${shortConflictMarker('<')} HEAD`,
+      'current guide',
+      shortConflictMarker('='),
+      'incoming guide',
+      `${shortConflictMarker('>')} feature/guide`,
     ].join('\n'));
 
     const result = runScanner(root);

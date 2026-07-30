@@ -1,7 +1,7 @@
 # Resolve Issues Shared Lessons
 
 ## 2026-07-30 — Maintained-docs conflict-marker integrity
-- A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots, skip generated/vendor directories, accept configurable marker widths, and classify equals-only separators only inside conflict blocks so valid Setext headings remain allowed.
+- A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots, skip generated/vendor directories, and recognize coherent opening/separator/closing blocks at the same configurable width; block-level detection catches short custom Git markers without misclassifying standalone Setext headings or Markdown blockquotes.
 
 ## 2026-07-30 — Evaluator severity must agree with blocking verdicts
 - A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
