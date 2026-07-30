@@ -230,7 +230,10 @@ function redactAuthorizationHeaders(text: string): string {
 
   // 1. Standalone header lines at start of line: Authorization: Basic foo
   result = result.replace(
-    new RegExp(`(^|\\n|\\r)(\\s*${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])[^\\r\\n]+`, 'giu'),
+    new RegExp(
+      `(^|\\n|\\r)(\\s*${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])[^\\r\\n]+?(?=[ \\t]+(?:&&|\\|\\||[&|><;])|[\\r\\n]|$)`,
+      'giu',
+    ),
     '$1$2[REDACTED]',
   );
 

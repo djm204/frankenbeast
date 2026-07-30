@@ -700,6 +700,19 @@ describe('CliChannel', () => {
     expect(prompt).toContain('curl -H Authorization:[REDACTED] https://example.com/api && echo done');
   });
 
+  it('preserves shell operators and commands after a standalone Authorization credential', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'Authorization: abc && rm -rf /',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('abc');
+    expect(prompt).toContain('Authorization: [REDACTED] && rm -rf /');
+  });
+
   it('classifies sensitive components in dotted configuration property paths and redacts only the value', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
