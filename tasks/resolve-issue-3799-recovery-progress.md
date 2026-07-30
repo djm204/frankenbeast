@@ -1,4 +1,4 @@
-# Issue #3799 seventh-round recovery progress
+# Issue #3799 exact-head recovery progress
 
 - [x] Reconstruct local/remote/PR exact-head state and verify clean singular worktree ownership.
 - [x] Confirm Git identity and current-head CI status.
@@ -10,5 +10,13 @@
 - [x] Commit with Conventional Commit format and push the existing branch only.
 - [x] Reply to and resolve all nine seventh-round Codex threads.
 - [x] Run a Codex CLI review, reproduce its line-leading header P1, and remediate it test-first without hiding shell commands.
-- [ ] Verify exact new head, local/remote equality, current-head CI, and zero unresolved threads.
-- [ ] Record the exact over-cap review command/workdir handoff and block for fresh human authorization.
+- [x] Verify seventh-round repair head, local/remote equality, current-head CI, and zero unresolved threads.
+- [x] Record the exact tier-12 review command/workdir handoff and block for fresh human authorization.
+- [x] Confirm the authorized eighth exact-head review returned ten actionable P1 threads on head `50c68b07a81343c7c119b08d219b61a260ab89a3`.
+- [x] Add and observe focused failing regressions for all ten eighth-round findings.
+- [x] Apply narrow fixes that redact literals while preserving adjacent shell expressions and commands.
+- [x] Run focused Governor tests plus package test, typecheck, lint, build, and diff/scope/identity gates.
+- [ ] Commit conventionally and push only the existing branch.
+- [ ] Reply to and resolve all ten eighth-round threads.
+- [ ] Verify the new exact head, local/remote/PR equality, zero unresolved threads, and current-head CI state.
+- [ ] Record the terminal handoff and stop before another Codex review or merge.

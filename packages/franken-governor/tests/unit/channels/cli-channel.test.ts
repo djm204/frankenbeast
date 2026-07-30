@@ -261,7 +261,7 @@ describe('CliChannel', () => {
     expect(prompt).toContain('TOKEN="prefix$(reboot)"');
     expect(prompt).toContain('TOKEN=abc`pwd`');
     expect(prompt).toContain('TOKEN=x${MY_VAR}');
-    expect(prompt).toContain('--token pre<(cat /etc/passwd)');
+    expect(prompt).toContain('--token [REDACTED]<(cat /etc/passwd)');
   });
 
   it('redacts unterminated private key blocks in final displayed text even after redaction shrinks prefix below maxLen', async () => {
@@ -917,5 +917,143 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain(':true');
     expect(prompt).not.toContain(':null');
     expect(prompt).toContain('{"password":[REDACTED],"api_key":[REDACTED],"secret":[REDACTED],"dryRun":false,"db_password":{"nested":"val"}}');
+  });
+
+  it('redacts armored private keys whose final base64 line is shorter than twelve characters', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+    const fourCharacterTailKey = '-----BEGIN PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\nAQ==\n-----END PRIVATE KEY-----';
+    const eightCharacterTailKey = '-----BEGIN EC PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\nQUJDRA==\n-----END EC PRIVATE KEY-----';
+
+    await channel.requestApproval(makeRequest({
+      summary: `inspect ${fourCharacterTailKey} && inspect ${eightCharacterTailKey} && echo visible_key_context`,
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=');
+    expect(prompt).not.toContain('AQ==');
+    expect(prompt).not.toContain('QUJDRA==');
+    expect(prompt).toContain('inspect [REDACTED] && inspect [REDACTED] && echo visible_key_context');
+  });
+
+  it('redacts complete double-quoted curl credentials containing escaped quotes', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl --user "alice:sec\\\"ret" https://example.com && echo visible_curl_context',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('sec');
+    expect(prompt).not.toContain('ret');
+    expect(prompt).toContain('curl --user "alice:[REDACTED]" https://example.com && echo visible_curl_context');
+  });
+
+  it('preserves shell expressions directly adjacent to redacted header literals', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "Authorization: Bearer literal_prefix$(date)literal_suffix" https://example.com',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('literal_prefix');
+    expect(prompt).not.toContain('literal_suffix');
+    expect(prompt).toContain('curl -H "Authorization: Bearer [REDACTED]$(date)[REDACTED]" https://example.com');
+  });
+
+  it('preserves unspaced shell operators and commands after standalone headers', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'Authorization: opaque_value&& rm -rf /operator_target\nAuthorization: another_value;echo visible_semicolon_context',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('opaque_value');
+    expect(prompt).not.toContain('another_value');
+    expect(prompt).toContain('Authorization: [REDACTED]&& rm -rf /operator_target');
+    expect(prompt).toContain('Authorization: [REDACTED];echo visible_semicolon_context');
+  });
+
+  it('redacts literal sensitive flag fragments while preserving adjacent shell expressions', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'deploy --password abc_prefix$(date)xyz_suffix --verbose',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('abc_prefix');
+    expect(prompt).not.toContain('xyz_suffix');
+    expect(prompt).toContain('deploy --password [REDACTED]$(date)[REDACTED] --verbose');
+  });
+
+  it('classifies PGPASSWORD as a sensitive environment assignment', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({ summary: 'PGPASSWORD=db_value psql appdb' }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('db_value');
+    expect(prompt).toContain('PGPASSWORD=[REDACTED] psql appdb');
+  });
+
+  it('redacts quoted sensitive YAML block-scalar keys and their bodies', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: '"password": |\n  first_line\n  second_line\nsafe: visible',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('first_line');
+    expect(prompt).not.toContain('second_line');
+    expect(prompt).toContain('"password": [REDACTED]');
+    expect(prompt).toContain('safe: visible');
+  });
+
+  it('redacts complete ANSI-C quoted sensitive assignment values', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({ summary: "PASSWORD=$'ansi_value' && echo visible_ansi_context" }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('ansi_value');
+    expect(prompt).toContain("PASSWORD=$'[REDACTED]' && echo visible_ansi_context");
+  });
+
+  it('preserves shell commands after unmatched private-key begin markers', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: "echo '-----BEGIN PRIVATE KEY-----'; rm -rf /important && echo visible_unmatched_context",
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('-----BEGIN PRIVATE KEY-----');
+    expect(prompt).toContain("echo '[REDACTED]'; rm -rf /important && echo visible_unmatched_context");
+  });
+
+  it('redacts quoted authorization headers continued across escaped newlines', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "Authorization: Bearer first_part\\\nsecond_part" https://example.com && echo visible_continuation_context',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('first_part');
+    expect(prompt).not.toContain('second_part');
+    expect(prompt).toContain('curl -H "Authorization: [REDACTED]" https://example.com && echo visible_continuation_context');
   });
 });
