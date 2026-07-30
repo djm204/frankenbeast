@@ -1,5 +1,8 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-30 — Completion token limits must cross every adapter boundary
+- Put provider-agnostic completion limits on the shared `LlmCompletionOptions` contract, reject non-positive or unsafe integers before adapter work starts, and explicitly map the unified request's `max_tokens` field into provider-facing `LlmRequest.maxTokens`; declaring a field on an intermediate request type alone neither validates nor forwards it.
+
 ## 2026-07-30 — Bound automatic scans without breaking unlimited retrieval
 - When an API uses negative limits to mean “all,” do not reuse that result limit directly as a finite raw-row budget: bound non-negative automatic lookbacks by rows examined, but preserve the explicit negative-limit convention (and label it `unbounded` in audit metadata). Add separate regressions for bounded filtered/encrypted scans and negative-limit ordering.
 

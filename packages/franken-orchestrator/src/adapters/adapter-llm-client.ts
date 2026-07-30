@@ -32,6 +32,12 @@ const MAX_OUTWARD_ERROR_CONTEXT_LENGTH = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_REQUEST_TIMEOUT_MS = 2_147_483_647;
 
+function validateMaxTokens(maxTokens: number | undefined): void {
+  if (maxTokens !== undefined && (!Number.isSafeInteger(maxTokens) || maxTokens <= 0)) {
+    throw new TypeError('LLM request maxTokens must be a positive safe integer');
+  }
+}
+
 function normalizeRequestTimeout(timeoutMs: number | undefined): number {
   const normalized = timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   if (!Number.isFinite(normalized) || normalized <= 0) {
@@ -169,6 +175,7 @@ export class AdapterLlmClient implements ILlmClient {
   ): Promise<{ content: string; usage?: TokenUsage; providerContext?: ProviderContext }> {
     const requestId = `llm-${randomUUID()}`;
     const model = this.defaultModel;
+    validateMaxTokens(options?.maxTokens);
     const timeoutMs = normalizeRequestTimeout(options?.timeoutMs);
     const controller = new AbortController();
     const abortFromCaller = (): void => {
@@ -196,6 +203,7 @@ export class AdapterLlmClient implements ILlmClient {
       provider: 'adapter',
       model,
       messages: [{ role: 'user', content: prompt }],
+      ...(options?.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       ...(options?.sessionId ? { session_id: options.sessionId } : {}),
       ...(options?.sessionContinue !== undefined ? { sessionContinue: options.sessionContinue } : {}),
       signal: controller.signal,
