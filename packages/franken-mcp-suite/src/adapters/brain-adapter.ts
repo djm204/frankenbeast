@@ -1291,11 +1291,23 @@ export function createBrainAdapter(
       }
 
       const ttlMs = resolveOperationalTtlMs(input.ttlMs);
-      brain.working.set(
-        scopedWorkingKey(input.key, input.agentId),
-        scopedWorkingValue(input.value, input.agentId, ttlMs),
-      );
-      brain.flush();
+      const key = scopedWorkingKey(input.key, input.agentId);
+      const hadPreviousValue = brain.working.has(key);
+      const previousValue = hadPreviousValue ? brain.working.get(key) : undefined;
+      brain.working.set(key, scopedWorkingValue(input.value, input.agentId, ttlMs));
+      try {
+        brain.flush();
+      } catch (error) {
+        try {
+          if (hadPreviousValue) {
+            brain.working.set(key, previousValue);
+          } else {
+            brain.working.delete(key);
+          }
+        } finally {
+          throw error;
+        }
+      }
     },
 
     async frontload(input = {}) {

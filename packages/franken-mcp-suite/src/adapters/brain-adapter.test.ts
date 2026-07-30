@@ -16,6 +16,7 @@ const { databaseInstances, brainInstances, workingMemoryRowsByPath } = vi.hoiste
       restore: ReturnType<typeof vi.fn>;
       snapshot: ReturnType<typeof vi.fn>;
       set: ReturnType<typeof vi.fn>;
+      get: ReturnType<typeof vi.fn>;
       has: ReturnType<typeof vi.fn>;
       delete: ReturnType<typeof vi.fn>;
     };
@@ -517,6 +518,7 @@ vi.mock("@franken/brain", () => ({
         }),
         snapshot: vi.fn(() => workingSnapshot),
         set: vi.fn(),
+        get: vi.fn((key: string) => workingSnapshot[key]),
         has: vi.fn(() => false),
         delete: vi.fn(),
       },
@@ -840,6 +842,58 @@ describe("createBrainAdapter", () => {
       limit: 5,
     });
     expect(episodicResult.some((row) => row.type === "episodic")).toBe(true);
+  });
+
+  it("restores the previous working-memory state when persistence fails", async () => {
+    const brain = createBrainAdapter("/tmp/beast.db");
+    const mockBrain = brainInstances[0];
+    const workingState: Record<string, unknown> = {
+      "task-1": "persisted value",
+    };
+    mockBrain.working.snapshot.mockImplementation(() => ({ ...workingState }));
+    mockBrain.working.has.mockImplementation((key: string) =>
+      Object.hasOwn(workingState, key),
+    );
+    mockBrain.working.get.mockImplementation((key: string) => workingState[key]);
+    mockBrain.working.set.mockImplementation((key: string, value: unknown) => {
+      workingState[key] = value;
+    });
+    mockBrain.working.delete.mockImplementation((key: string) => {
+      const existed = Object.hasOwn(workingState, key);
+      delete workingState[key];
+      return existed;
+    });
+    const flushFailure = new Error("simulated working-memory flush failure");
+    mockBrain.flush.mockImplementationOnce(() => {
+      throw flushFailure;
+    });
+
+    await expect(
+      brain.store({ key: "task-1", value: "rejected value", type: "working" }),
+    ).rejects.toBe(flushFailure);
+
+    expect(workingState).toEqual({ "task-1": "persisted value" });
+    await expect(
+      brain.query({ query: "rejected value", type: "working" }),
+    ).resolves.toEqual([]);
+    await expect(
+      brain.query({ query: "persisted value", type: "working" }),
+    ).resolves.toEqual([
+      { key: "task-1", value: "persisted value", type: "working" },
+    ]);
+
+    delete workingState["task-1"];
+    mockBrain.flush.mockImplementationOnce(() => {
+      throw flushFailure;
+    });
+
+    await expect(
+      brain.store({ key: "task-2", value: "rejected new value", type: "working" }),
+    ).rejects.toBe(flushFailure);
+    expect(workingState).toEqual({});
+    await expect(
+      brain.query({ query: "rejected new value", type: "working" }),
+    ).resolves.toEqual([]);
   });
 
   it("stores temporary operational working facts with expiresAt metadata when ttlMs is provided", async () => {
