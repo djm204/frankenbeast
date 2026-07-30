@@ -33,14 +33,22 @@ const MAX_OUTWARD_ERROR_CONTEXT_LENGTH = 1_000;
 function safeAdapterErrorContext(error: unknown): string {
   let errorClass: string = typeof error;
   let message = 'No diagnostic available';
-  if (error instanceof Error) {
+  let errorValue: Error | undefined;
+  try {
+    if (error instanceof Error) {
+      errorValue = error;
+    }
+  } catch {
+    // Treat values with hostile prototype traps as opaque thrown values.
+  }
+  if (errorValue) {
     try {
-      errorClass = String(error.name);
+      errorClass = String(errorValue.name);
     } catch {
       errorClass = 'Error';
     }
     try {
-      message = String(error.message);
+      message = String(errorValue.message);
     } catch {
       // Keep the fixed safe fallback when an untrusted error getter throws.
     }
@@ -55,7 +63,9 @@ function safeAdapterErrorContext(error: unknown): string {
   const safeMessage = redactSensitiveText(message.replace(/\s+/gu, ' '))
     .trim()
     .slice(0, MAX_OUTWARD_ERROR_CONTEXT_LENGTH);
-  return `${safeClass || 'Error'}: ${safeMessage || 'No diagnostic available'}`;
+  return redactSensitiveText(
+    `${safeClass || 'Error'}: ${safeMessage || 'No diagnostic available'}`,
+  );
 }
 
 export interface IAdapter {

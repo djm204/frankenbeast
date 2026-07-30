@@ -133,6 +133,35 @@ describe('AdapterLlmClient', () => {
     expect((err as AdapterLlmError).cause).toBe(boom);
   });
 
+  it('redacts secrets formed by composing the error name and message', async () => {
+    const privateMaterial = ['composed', 'private', 'material'].join('-');
+    const boom = new Error(privateMaterial);
+    boom.name = 'API_TOKEN';
+    const client = new AdapterLlmClient(
+      makeAdapter({ execute: vi.fn(async () => { throw boom; }) }),
+    );
+
+    const err = await client.complete('prompt').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterLlmError);
+    expect((err as AdapterLlmError).message).toContain('API_TOKEN: <redacted>');
+    expect((err as AdapterLlmError).message).not.toContain(privateMaterial);
+    expect((err as AdapterLlmError).cause).toBe(boom);
+  });
+
+  it('preserves the adapter wrapper when error classification throws', async () => {
+    const boom = new Proxy(new Error('provider unavailable'), {
+      getPrototypeOf: () => { throw new Error('prototype unavailable'); },
+    });
+    const client = new AdapterLlmClient(
+      makeAdapter({ execute: vi.fn(async () => { throw boom; }) }),
+    );
+
+    const err = await client.complete('prompt').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AdapterLlmError);
+    expect((err as AdapterLlmError).requestId).toBe('llm-123e4567-e89b-42d3-a456-426614174000');
+    expect((err as AdapterLlmError).cause).toBe(boom);
+  });
+
   it('bounds outward adapter diagnostics and identifies the error class', async () => {
     const boom = new TypeError(`invalid response ${'x'.repeat(2_000)}`);
     const client = new AdapterLlmClient(
