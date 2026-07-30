@@ -165,13 +165,41 @@ describe('createPlannerAdapter', () => {
     const loggedMessage = consoleErrorSpy.mock.calls[0]?.[0] as string;
     expect(loggedMessage).not.toContain('\n');
     expect(loggedMessage).not.toContain('\r');
-    expect(loggedMessage).toContain('\\x0a');
-    expect(loggedMessage).toContain('\\x0d');
+    expect(loggedMessage).toContain('\\u000a');
+    expect(loggedMessage).toContain('\\u000d');
     // The structured `reason` returned to callers is unaffected — only the log is sanitized.
     await expect(adapter.visualize(planId)).resolves.toMatchObject({
       kind: 'corrupt',
       reason: expect.stringContaining(maliciousId),
     });
+  }));
+
+  it('escapes C1 controls and Unicode line separators from attacker-controlled text before logging', async () => withTempDb(async (dbPath) => {
+    const adapter = createPlannerAdapter(dbPath);
+    const { planId } = await adapter.decompose({ objective: 'ship a memory search feature' });
+    // U+009B (a C1 control, CSI) and U+2028/U+2029 (Unicode line/paragraph
+    // separators) aren't ASCII newlines but are still treated as line
+    // terminators or terminal control sequences by many log consumers.
+    const maliciousId = 't1\u009bFAKE SECOND LINE\u2028THIRD LINE\u2029';
+    replaceStoredDag(dbPath, planId, JSON.stringify({
+      objective: 'ship',
+      constraints: null,
+      tasks: [
+        { id: maliciousId, title: 'first', deps: [], status: 'pending' },
+        { id: maliciousId, title: 'second', deps: [], status: 'pending' },
+      ],
+    }));
+
+    await adapter.visualize(planId);
+
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const loggedMessage = consoleErrorSpy.mock.calls[0]?.[0] as string;
+    expect(loggedMessage).not.toContain('\u009b');
+    expect(loggedMessage).not.toContain('\u2028');
+    expect(loggedMessage).not.toContain('\u2029');
+    expect(loggedMessage).toContain('\\u009b');
+    expect(loggedMessage).toContain('\\u2028');
+    expect(loggedMessage).toContain('\\u2029');
   }));
 
   it('accepts valid stored DAGs whose dependencies appear later in the task list', async () => withTempDb(async (dbPath) => {

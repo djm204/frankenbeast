@@ -296,19 +296,23 @@ function describeStoredPlanIssue(issue: StoredPlanIssueLike): string {
 }
 
 /**
- * Escapes ASCII control characters (0x00-0x1F, 0x7F) — newlines, carriage
- * returns, ANSI/terminal escape sequences, etc. — before untrusted text
- * reaches a log call. `reason` strings can embed raw field names or values
- * copied directly out of a tampered stored plan row (e.g. a duplicate task
- * id or an unrecognized field name), so logging them verbatim would let a
- * crafted payload forge multiline log entries or inject terminal control
- * sequences into server logs. This only affects what is written to stderr;
- * the structured `reason` returned to callers is left untouched.
+ * Escapes characters that can be abused to forge log entries or manipulate
+ * a terminal before untrusted text reaches a log call: ASCII C0 controls
+ * and DEL (0x00-0x1F, 0x7F), C1 controls (0x80-0x9F, which include further
+ * ANSI-adjacent escape codes), and the Unicode line-breaking separators
+ * U+2028/U+2029 (treated as line terminators by many consumers even though
+ * they aren't ASCII newlines). `reason` strings can embed raw field names
+ * or values copied directly out of a tampered stored plan row (e.g. a
+ * duplicate task id or an unrecognized field name), so logging them
+ * verbatim would let a crafted payload forge multiline log entries or
+ * inject terminal control sequences into server logs. This only affects
+ * what is written to stderr; the structured `reason` returned to callers
+ * is left untouched.
  */
 function sanitizeForLog(value: string): string {
   return value.replace(
-    /[\x00-\x1f\x7f]/g,
-    (char) => `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`,
+    /[\x00-\x1f\x7f-\x9f\u2028\u2029]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
   );
 }
 
