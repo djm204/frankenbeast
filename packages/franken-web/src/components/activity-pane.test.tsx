@@ -40,7 +40,7 @@ describe('ActivityPane', () => {
     const liveStatus = screen.getByRole('status');
     expect(liveStatus.getAttribute('aria-live')).toBe('polite');
     expect(liveStatus.getAttribute('aria-atomic')).toBe('true');
-    expect(liveStatus.textContent).toBe('');
+    expect(liveStatus.textContent).toBe('Waiting for execution events.');
 
     rerender(
       <ActivityPane
@@ -95,6 +95,26 @@ describe('ActivityPane', () => {
     );
 
     expect(screen.getByRole('status').textContent).toBe('');
+  });
+
+  it('announces when runtime activity becomes empty', () => {
+    const { rerender } = render(
+      <ActivityPane
+        events={[
+          {
+            type: 'turn.execution.complete',
+            data: { summary: 'Completed activity' },
+            timestamp: '2026-07-05T01:02:03.000Z',
+          },
+        ]}
+      />,
+    );
+
+    rerender(<ActivityPane events={[]} />);
+
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('Waiting for execution events.');
+    expect(status.getAttribute('aria-live')).toBe('polite');
   });
 
   it('renders runtime activity as a readable timeline with status chips and artifact links', () => {
