@@ -20,3 +20,20 @@
 - [ ] Reply to and resolve all ten eighth-round threads.
 - [ ] Verify the new exact head, local/remote/PR equality, zero unresolved threads, and current-head CI state.
 - [ ] Record the terminal handoff and stop before another Codex review or merge.
+
+## Ninth-round local remediation
+
+- [x] Add and observe a focused RED regression for curl userinfo passwords with active command substitutions, then make it GREEN.
+- [x] Add and observe a focused RED regression for URL userinfo passwords with active command substitutions, then make it GREEN.
+- [x] Add and observe a focused RED regression for ANSI-C quoted sensitive flag values, then make it GREEN.
+- [x] Add and observe a focused RED regression for unmatched private-key markers at command newlines, then make it GREEN.
+- [x] Add and observe a focused RED regression for YAML-looking shell text followed by an indented destructive command, then make it GREEN.
+- [x] Add and observe focused RED regressions for established sensitive-key aliases without unrelated-word overmatching, then make them GREEN.
+- [x] Add and observe focused RED regressions for structured header objects and tuple arrays, then make them GREEN.
+- [x] Run the focused CLI-channel suite and inspect the final diff for scope and preserved shell context.
+- [x] Add and observe a focused RED regression for punctuation-only dynamic curl/URL password fragments, then redact every literal fragment while preserving active expressions.
+- [x] Add and observe a focused RED regression for destructive-looking YAML secret scalars, then fail closed while preserving only safe shell command/option structure.
+- [x] Run both focused GREEN regressions and the full CLI-channel test file.
+- [x] Add and observe focused RED regressions for auth-scheme password fragments, then separate password and header literal redaction.
+- [x] Add and observe focused RED regressions for nested structured-header objects and quoted braces, then use a bounded balanced-object scanner.
+- [x] Run the full Governor test, typecheck, lint, and build gates and obtain a clean local Codex review.
