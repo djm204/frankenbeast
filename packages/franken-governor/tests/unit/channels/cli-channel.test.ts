@@ -745,4 +745,164 @@ describe('CliChannel', () => {
     expect(prompt).toContain('curl --user myuser:[REDACTED] https://example.com');
     expect(prompt).toContain('curl --proxy-user myproxyuser:[REDACTED] https://proxy.example');
   });
+
+  it('redacts equals-attached sensitive flags like --password=value and --api-key=value while preserving safe command context', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'deploy --password=my_equals_pass --verbose && ./app --api-key=my_equals_key --debug',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('my_equals_pass');
+    expect(prompt).not.toContain('my_equals_key');
+    expect(prompt).toContain('deploy --password=[REDACTED] --verbose');
+    expect(prompt).toContain('./app --api-key=[REDACTED] --debug');
+  });
+
+  it('terminates POSIX single-quoted assignments with a trailing backslash at the first quote', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: "PASSWORD='secret\\' && echo visible_cmd",
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('secret');
+    expect(prompt).toContain("PASSWORD='[REDACTED]' && echo visible_cmd");
+  });
+
+  it('preserves executable command substitution inside double-quoted credential headers', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "Authorization: Bearer $(reboot)" https://example.com',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).toContain('curl -H "Authorization: Bearer $(reboot)" https://example.com');
+    expect(prompt).not.toContain('"Authorization: [REDACTED]"');
+  });
+
+  it('redacts literal credential fragments in double-quoted headers while keeping executable expressions visible for approval', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "Authorization: Bearer my_literal_opaque_credential_xyz $(reboot)" https://example.com',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('my_literal_opaque_credential_xyz');
+    expect(prompt).toContain('curl -H "Authorization: Bearer [REDACTED] $(reboot)" https://example.com');
+  });
+
+  it('redacts both prefix and suffix literal fragments around unescaped dollar-brace expressions in double-quoted headers', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "Authorization: Bearer literal_prefix_123 ${TOKEN_SOURCE} literal_suffix_456" https://example.com',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('literal_prefix_123');
+    expect(prompt).not.toContain('literal_suffix_456');
+    expect(prompt).toContain('${TOKEN_SOURCE}');
+    expect(prompt).toContain('curl -H "Authorization: Bearer [REDACTED] ${TOKEN_SOURCE} [REDACTED]" https://example.com');
+  });
+
+  it('redacts complete double-quoted X-API-Key header while preserving safe context', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "X-API-Key: x_key_secret_123" https://example.com && echo safe_x_api_key',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('x_key_secret_123');
+    expect(prompt).toContain('curl -H "X-API-Key: [REDACTED]" https://example.com && echo safe_x_api_key');
+  });
+
+  it('redacts complete single-quoted API-Key header while preserving safe context', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H \'API-Key: api_key_secret_456\' https://example.com && echo safe_api_key',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('api_key_secret_456');
+    expect(prompt).toContain('curl -H \'API-Key: [REDACTED]\' https://example.com && echo safe_api_key');
+  });
+
+  it('redacts unterminated double-quoted X-Auth-Token header without swallowing line boundary', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'curl -H "X-Auth-Token: auth_token_secret_789',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('auth_token_secret_789');
+    expect(prompt).toContain('curl -H "X-Auth-Token: [REDACTED]"');
+  });
+
+  it('classifies AUTHORIZATION and HTTP_AUTHORIZATION equals assignments with Basic/Bearer values and redacts without swallowing later shell context', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary:
+        'AUTHORIZATION="Bearer secret_token_123" && echo safe1 && ' +
+        'HTTP_AUTHORIZATION="Basic dXNlcjpwYXNz" ; echo safe2 && ' +
+        'AUTHORIZATION=\'Bearer secret_token_456\' && echo safe3',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('secret_token_123');
+    expect(prompt).not.toContain('dXNlcjpwYXNz');
+    expect(prompt).not.toContain('secret_token_456');
+    expect(prompt).toContain('AUTHORIZATION="[REDACTED]" && echo safe1');
+    expect(prompt).toContain('HTTP_AUTHORIZATION="[REDACTED]" ; echo safe2');
+    expect(prompt).toContain('AUTHORIZATION=\'[REDACTED]\' && echo safe3');
+  });
+
+  it('redacts unquoted AUTHORIZATION and HTTP_AUTHORIZATION assignments with multi-token Basic/Bearer credentials while preserving safe shell operators and commands', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary:
+        'AUTHORIZATION=Basic dXNlcjpwYXNz && echo safe_unquoted_1 && ' +
+        'HTTP_AUTHORIZATION=Bearer my_unquoted_token_123 ; echo safe_unquoted_2',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain('dXNlcjpwYXNz');
+    expect(prompt).not.toContain('my_unquoted_token_123');
+    expect(prompt).toContain('AUTHORIZATION=[REDACTED] && echo safe_unquoted_1');
+    expect(prompt).toContain('HTTP_AUTHORIZATION=[REDACTED] ; echo safe_unquoted_2');
+  });
+
+  it('redacts non-string primitives (number, boolean, null) for quoted JSON sensitive keys while preserving sibling fields and leaving objects/arrays', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: '{"password":12345,"api_key":true,"secret":null,"dryRun":false,"db_password":{"nested":"val"}}',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).not.toContain(':12345');
+    expect(prompt).not.toContain(':true');
+    expect(prompt).not.toContain(':null');
+    expect(prompt).toContain('{"password":[REDACTED],"api_key":[REDACTED],"secret":[REDACTED],"dryRun":false,"db_password":{"nested":"val"}}');
+  });
 });

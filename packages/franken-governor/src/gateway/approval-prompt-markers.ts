@@ -50,6 +50,7 @@ const SENSITIVE_VOCABULARY = [
   'passphrases',
   'credential',
   'credentials',
+  'authorization',
 ];
 
 function isSensitiveSingleToken(token: string): boolean {
@@ -186,10 +187,10 @@ function redactUrlPasswords(text: string, isTruncatedTail = false): string {
 
 function redactUrlQueryParams(text: string): string {
   return text.replace(
-    /([?&])([A-Za-z0-9_.-]+)(=)([^&\s"'\r\n#]+)/giu,
+    /([?&])([A-Za-z0-9_.-]+)(=)([^&\s"'\r\n#;|<>]*)?/giu,
     (match, p1, key, p3, val) => {
       if (isSensitiveKeyToken(key)) {
-        if (isShellExpression(val)) return match;
+        if (typeof val === 'string' && isShellExpression(val)) return match;
         return `${p1}${key}${p3}[REDACTED]`;
       }
       return match;
@@ -198,14 +199,34 @@ function redactUrlQueryParams(text: string): string {
 }
 
 function redactCurlUserCredentials(text: string): string {
-  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)([A-Za-z0-9_.-]+:)([^\s"'\r\n&|><;]+)/giu;
-  return text.replace(curlUserRegex, '$1$2$3[REDACTED]');
+  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(["']?)([A-Za-z0-9_.-]+:)([^"'\s\r\n&|><;]+)\3/giu;
+  return text.replace(curlUserRegex, '$1$2$3$4[REDACTED]$3');
+}
+
+function redactHeaderLiteralFragments(val: string): string {
+  const shellExprPattern = /(?<!\\)(?:\\\\)*(?:\$\([^\r\n)]*\)|\$\{[^\r\n}]*\}|<(?:\([^\r\n)]*\))|>(?:\([^\r\n)]*\))|`[^\r\n`]*`)/g;
+  const shellExprs: string[] = [];
+  const maskedVal = val.replace(shellExprPattern, (match) => {
+    shellExprs.push(match);
+    return `__SHELL_EXPR_${shellExprs.length - 1}__`;
+  });
+
+  const schemeNames = /^(?:Bearer|Basic|Digest|OAuth|HOBA|Mutual|Negotiate|VAPID|SCRAM-SHA-256|AWS4-HMAC-SHA256)$/i;
+  const redactedMasked = maskedVal.replace(/\b[A-Za-z0-9_.~+/\-]+(?:=[A-Za-z0-9_.~+/\-]+)?\b/gu, (token) => {
+    if (schemeNames.test(token) || token.startsWith('__SHELL_EXPR_')) return token;
+    return '[REDACTED]';
+  });
+
+  return redactedMasked.replace(/__SHELL_EXPR_(\d+)__/g, (_m, idxStr) => {
+    const idx = parseInt(idxStr, 10);
+    return shellExprs[idx] ?? '';
+  });
 }
 
 function redactAuthorizationHeaders(text: string): string {
   let result = text;
 
-  const headers = '(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization)';
+  const headers = '(?:Authorization|Cookie|Set-Cookie|Proxy-Authorization|X-API-Key|API-Key|X-Auth-Token)';
 
   // 1. Standalone header lines at start of line: Authorization: Basic foo
   result = result.replace(
@@ -221,14 +242,26 @@ function redactAuthorizationHeaders(text: string): string {
 
   // 3. Double quoted shell header argument with escaped quotes support
   result = result.replace(
-    new RegExp(`(")(${headers}\\s*:\\s*)(?:(?!\\\[REDACTED\\\])(?:\\\\.|[^"\\\\])+)\\1`, 'giu'),
-    '$1$2[REDACTED]$1',
+    new RegExp(`(")(${headers}\\s*:\\s*)((?:(?!\\\[REDACTED\\\])(?:\\\\.|[^"\\\\])+))\\1`, 'giu'),
+    (match, quote, prefix, val) => {
+      if (typeof val === 'string' && isShellExpression(val)) {
+        const redactedVal = redactHeaderLiteralFragments(val);
+        return `${quote}${prefix}${redactedVal}${quote}`;
+      }
+      return `${quote}${prefix}[REDACTED]${quote}`;
+    },
   );
 
   // 4. Unterminated double quoted header in command: "Authorization: ...
   result = result.replace(
     new RegExp(`(")(${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^"\\r\\n]+)$`, 'gimu'),
-    '$1$2[REDACTED]"',
+    (match, quote, prefix, val) => {
+      if (typeof val === 'string' && isShellExpression(val)) {
+        const redactedVal = redactHeaderLiteralFragments(val);
+        return `${quote}${prefix}${redactedVal}"`;
+      }
+      return `${quote}${prefix}[REDACTED]"`;
+    },
   );
 
   // 5. Unterminated single quoted header in command: 'Authorization: ...
@@ -239,7 +272,7 @@ function redactAuthorizationHeaders(text: string): string {
 
   // 6. Inline unquoted header argument: Authorization:val, Cookie:val, etc.
   result = result.replace(
-    new RegExp(`(\\b${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^\\s"'\r\n&|><;]+)`, 'giu'),
+    new RegExp(`(?<!["'])(\\b${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^\\s"'\r\n&|><;]+)`, 'giu'),
     '$1[REDACTED]',
   );
 
@@ -270,7 +303,7 @@ function redactYamlMultilineBlocks(text: string): string {
       }
     }
 
-    const yamlBlockMatch = line.match(/^(\s*)([A-Za-z0-9_-]+)\s*:\s*[|>](?:[-+]?\d?|\d?[-+]?)\s*$/);
+    const yamlBlockMatch = line.match(/^(\s*)([A-Za-z0-9_-]+)\s*:\s*[|>](?:[-+]?\d?|\d?[-+]?)(?:\s*#.*)?$/);
     if (yamlBlockMatch && yamlBlockMatch[1] !== undefined && yamlBlockMatch[2] !== undefined) {
       const indentStr = yamlBlockMatch[1];
       const key = yamlBlockMatch[2];
@@ -367,8 +400,17 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     return `${prefix}"[REDACTED]"`;
   });
 
+  const jsonPrimitiveAssignment = new RegExp(
+    `(${keyBoundary}${ansiPattern}"${keyTokenPattern}"${ansiPattern}\\s*:\\s*)([0-9]+(?:\\.[0-9]+)?|true|false|null)(?=\\s*[,}\\]\\r\\n]|$)`,
+    'giu',
+  );
+  result = result.replace(jsonPrimitiveAssignment, (match, prefix, key) => {
+    if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    return `${prefix}[REDACTED]`;
+  });
+
   const singleQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*[:=]\\s*)'((?:\\\\.|[^'\\r\\n\\\\])*)'`,
+    `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*[:=]\\s*)'([^'\\r\\n]*)'`,
     'giu',
   );
   result = result.replace(singleQuotedAssignment, (match, prefix, key) => {
@@ -408,6 +450,17 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     const shellOpRemainder = cleanVal.slice(cleanValWOOp.length) + trailingContext;
 
     return `${prefix}[REDACTED]${shellOpRemainder}${comment ? comment.trimEnd() : ''}`;
+  });
+
+  // Unquoted multi-token auth assignments (key=Basic creds or key=Bearer creds)
+  const unquotedMultiTokenAuthAssignment = new RegExp(
+    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)((?:Basic|Bearer)\\s+[^"\\s'\\r\\n&|><;]+)`,
+    'giu',
+  );
+  result = result.replace(unquotedMultiTokenAuthAssignment, (match, prefix, key, val) => {
+    if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    if (typeof val === 'string' && isShellExpression(val)) return match;
+    return `${prefix}[REDACTED]`;
   });
 
   // Standard unquoted assignments (key=val)
