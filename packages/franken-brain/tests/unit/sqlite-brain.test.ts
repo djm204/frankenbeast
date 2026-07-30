@@ -1818,6 +1818,65 @@ describe('SqliteBrain', () => {
       expect(candidate?.value.evidenceEventIds).toEqual([2, 3]);
     });
 
+    it('bounds encrypted faculty-outcome discovery by raw decision rows', () => {
+      const encrypted = new SqliteBrain(':memory:', undefined, {
+        encryption: { enabled: true, key: 'faculty-outcome-scan-budget-key' },
+      });
+      try {
+        encrypted.episodic.record({
+          type: 'decision',
+          step: 'reasoning:critique',
+          summary: 'Reasoning verdict: fail — outside the scan budget',
+          details: {
+            category: 'reasoning-lifecycle',
+            outcome: 'negative',
+            lessonContext: 'faculty failure outside the scan budget',
+          },
+          createdAt: '2026-07-24T10:00:00.000Z',
+        });
+        for (const index of [1, 2, 3]) {
+          encrypted.episodic.record({
+            type: 'decision',
+            step: 'unrelated-decision',
+            summary: `Unrelated encrypted decision ${index}`,
+            details: { outcome: 'positive', privateContext: `encrypted-${index}` },
+            createdAt: `2026-07-24T10:0${index}:00.000Z`,
+          });
+        }
+
+        const db = (encrypted as unknown as { db: Database.Database }).db;
+        const storedDetails = db.prepare(
+          `SELECT details FROM episodic_events WHERE type = 'decision' ORDER BY id DESC LIMIT 1`,
+        ).pluck().get() as string;
+        expect(storedDetails).toMatch(/^enc:v1:/);
+
+        const originalPrepare = db.prepare.bind(db);
+        const decisionFetches: Array<{ limit: number; offset: number; rows: number }> = [];
+        db.prepare = ((sql: string) => {
+          const statement = originalPrepare(sql);
+          if (!sql.includes("WHERE type = 'decision'")) return statement;
+          const originalAll = statement.all.bind(statement);
+          statement.all = ((limit: number, offset: number) => {
+            const rows = originalAll(limit, offset);
+            decisionFetches.push({ limit, offset, rows: rows.length });
+            return rows;
+          }) as typeof statement.all;
+          return statement;
+        }) as typeof db.prepare;
+        let outcomes: EpisodicEvent[] = [];
+        try {
+          outcomes = encrypted.episodic.recentFacultyNegativeOutcomes(2);
+        } finally {
+          db.prepare = originalPrepare as typeof db.prepare;
+        }
+
+        expect(decisionFetches).toEqual([{ limit: 2, offset: 0, rows: 2 }]);
+        expect(outcomes).toEqual([]);
+      } finally {
+        encrypted.close();
+      }
+    });
+
     it('does not cluster skill-evolution review signals as generic lessons', () => {
       brain.episodic.recordSkillFailure({
         skillName: 'resolve-issues',

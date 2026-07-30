@@ -3341,6 +3341,10 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
     }
   }
 
+  /**
+   * Inspect at most the newest `n` decision rows while collecting faculty
+   * negative outcomes, so automatic consolidation has a finite raw-row budget.
+   */
   recentFacultyNegativeOutcomes(n = 10): EpisodicEvent[] {
     const quarantinedEventIds = new Set<number>();
     const stmt = this.db.prepare(
@@ -3353,6 +3357,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       this.encryption,
       (eventId) => quarantinedEventIds.add(eventId),
       isConsolidatableFacultyNegativeOutcome,
+      n,
     );
     this.audit?.({
       operation: 'episodic.recent',
@@ -3360,6 +3365,7 @@ class SqliteEpisodicMemory implements IEpisodicMemory {
       outcome: 'success',
       details: {
         limit: n,
+        rawScanLimit: n,
         count: result.length,
         ...(quarantinedEventIds.size > 0
           ? { quarantinedEventIds: [...quarantinedEventIds] }
