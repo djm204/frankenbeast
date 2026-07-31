@@ -27,10 +27,115 @@ const UNRESOLVED_COMMENT_LINE_PATTERN = new RegExp(
   'i',
 );
 const MAX_COMMENT_RATIO = 0.5;
+const MAX_INPUT_BYTES = 500_000;
 
 interface UnresolvedMarkerOccurrence {
   readonly label: string;
   readonly index: number;
+}
+
+/**
+ * Truncates `content` to at most `maxBytes` UTF-8 bytes. `String.length` and
+ * `String.slice` operate on UTF-16 code units, not bytes, so a naive
+ * character-count cap under-enforces the intended memory bound for
+ * non-ASCII content (e.g. CJK text is ~3 bytes/char in UTF-8 but 1 code
+ * unit in UTF-16 -- a 500,000-unit cap would let through ~1.5MB). This
+ * truncates on the actual encoded byte size and backs off from the cut
+ * point while it lands inside a multi-byte sequence, so a character is
+ * never split and the result is always valid UTF-8.
+ *
+ * Every UTF-16 code unit encodes to at least 1 UTF-8 byte, so a
+ * `maxBytes`-code-unit prefix of `content` is always long enough (in
+ * bytes) to reach `maxBytes` if the full content would. We take that
+ * bounded prefix *before* encoding, so `Buffer.from` never has to
+ * materialize or scan an arbitrarily large uncapped input just to
+ * discover it needs truncating -- encode/scan work is bounded by
+ * `maxBytes`, not by `content.length`.
+ */
+function truncateToByteLimit(
+  content: string,
+  maxBytes: number,
+): { content: string; truncated: boolean } {
+  const isEntireContent = content.length <= maxBytes;
+  const candidate = isEntireContent ? content : content.slice(0, maxBytes);
+  const encoded = Buffer.from(candidate, 'utf8');
+
+  if (isEntireContent && encoded.length <= maxBytes) {
+    return { content, truncated: false };
+  }
+
+  let end = Math.min(encoded.length, maxBytes);
+  // Continuation bytes match the 10xxxxxx bit pattern; back off until we
+  // land right after a complete character.
+  while (end > 0 && ((encoded[end] ?? 0) & 0xc0) === 0x80) {
+    end -= 1;
+  }
+
+  return {
+    content: encoded.subarray(0, end).toString('utf8'),
+    truncated: true,
+  };
+}
+
+/**
+ * Determines whether scanning `content` to its end leaves us inside an
+ * unterminated block comment. This mirrors the same quote/comment/regex
+ * skip logic `collectCodeMarkers` uses (reusing `skipQuotedLiteral`,
+ * `canStartRegexLiteral`, and `skipRegexLiteral`) so a `/*`-looking
+ * substring inside a string or regex literal -- e.g. `const sentinel =
+ * "/*";` -- is never mistaken for a real comment opener. It is a single
+ * forward O(n) pass over `content`, which is already bounded to at most
+ * `maxBytes` by `truncateToByteLimit`.
+ */
+function isInsideOpenBlockComment(content: string): boolean {
+  const state = createParenScanState();
+  let index = 0;
+
+  while (index < content.length) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', index + 2);
+      index = lineEnd === -1 ? content.length : lineEnd + 1;
+      continue;
+    }
+
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      if (commentEnd === -1) {
+        return true;
+      }
+      index = commentEnd + 2;
+      continue;
+    }
+
+    if (current === '/' && canStartRegexLiteral(content, index, state)) {
+      index = skipRegexLiteral(content, index);
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return false;
+}
+
+/**
+ * If truncation cut through an open block comment (its `/*` appeared
+ * before the cutoff but its closing `*\/` would have appeared after it),
+ * the naive `BLOCK_COMMENT_PATTERN` regex used for comment-ratio scoring
+ * requires a literal closing delimiter and so silently counts none of
+ * that comment's lines. Closing the dangling comment keeps the ratio
+ * calculation honest about the content that was actually scanned.
+ */
+function closeUnterminatedBlockComment(content: string): string {
+  return isInsideOpenBlockComment(content) ? `${content}*/` : content;
 }
 
 function skipQuotedLiteral(content: string, start: number): number {
@@ -243,33 +348,57 @@ function isPostfixOperatorBefore(content: string, index: number): boolean {
   return false;
 }
 
-function findMatchingOpeningParen(content: string, closeIndex: number): number {
-  const openParens: number[] = [];
-  let cursor = 0;
+interface ParenScanState {
+  readonly stack: number[];
+  readonly closeToOpen: Map<number, number>;
+  cursor: number;
+}
 
-  while (cursor <= closeIndex && cursor < content.length) {
+function createParenScanState(): ParenScanState {
+  return { stack: [], closeToOpen: new Map(), cursor: 0 };
+}
+
+/**
+ * Incrementally extends a shared paren-matching scan up to (and including)
+ * `target`, recording every closing paren's matching opening paren as it
+ * goes. `state.cursor` only ever moves forward and is shared across every
+ * call for a given `content` string, so the *total* work performed by all
+ * calls combined is bounded by `content.length` -- unlike a from-scratch
+ * rescan on every call, which is O(n) work per call and O(n^2) overall
+ * when many candidate regex literals follow closing parens (e.g. repeated
+ * `if (x) /a/;` lines).
+ */
+function advanceParenScan(
+  content: string,
+  state: ParenScanState,
+  target: number,
+): void {
+  const openParens = state.stack;
+
+  while (state.cursor <= target && state.cursor < content.length) {
+    const cursor = state.cursor;
     const current = content[cursor];
     const next = content[cursor + 1];
 
     if (current === '"' || current === "'" || current === '`') {
-      cursor = skipQuotedLiteral(content, cursor);
+      state.cursor = skipQuotedLiteral(content, cursor);
       continue;
     }
 
     if (current === '/' && next === '/') {
       const lineEnd = content.indexOf('\n', cursor + 2);
-      cursor = lineEnd === -1 ? content.length : lineEnd + 1;
+      state.cursor = lineEnd === -1 ? content.length : lineEnd + 1;
       continue;
     }
 
     if (current === '/' && next === '*') {
       const commentEnd = content.indexOf('*/', cursor + 2);
-      cursor = commentEnd === -1 ? content.length : commentEnd + 2;
+      state.cursor = commentEnd === -1 ? content.length : commentEnd + 2;
       continue;
     }
 
     if (current === '/' && canStartRegexLiteralWhileMatchingParens(content, cursor)) {
-      cursor = skipRegexLiteral(content, cursor);
+      state.cursor = skipRegexLiteral(content, cursor);
       continue;
     }
 
@@ -277,24 +406,38 @@ function findMatchingOpeningParen(content: string, closeIndex: number): number {
       openParens.push(cursor);
     } else if (current === ')') {
       const openIndex = openParens.pop();
-      if (cursor === closeIndex) {
-        return openIndex ?? -1;
+      if (openIndex !== undefined) {
+        state.closeToOpen.set(cursor, openIndex);
       }
     }
 
-    cursor += 1;
+    state.cursor = cursor + 1;
   }
-
-  return -1;
 }
 
-function followsControlCondition(content: string, index: number): boolean {
+function findMatchingOpeningParen(
+  content: string,
+  closeIndex: number,
+  state: ParenScanState,
+): number {
+  if (closeIndex < 0) return -1;
+  if (state.cursor <= closeIndex) {
+    advanceParenScan(content, state, closeIndex);
+  }
+  return state.closeToOpen.get(closeIndex) ?? -1;
+}
+
+function followsControlCondition(
+  content: string,
+  index: number,
+  state: ParenScanState,
+): boolean {
   const previousIndex = previousSignificantIndex(content, index);
   if (content[previousIndex] !== ')') {
     return false;
   }
 
-  const openIndex = findMatchingOpeningParen(content, previousIndex);
+  const openIndex = findMatchingOpeningParen(content, previousIndex, state);
   if (openIndex === -1) {
     return false;
   }
@@ -327,7 +470,11 @@ function canStartRegexLiteralWhileMatchingParens(
   );
 }
 
-function canStartRegexLiteral(content: string, index: number): boolean {
+function canStartRegexLiteral(
+  content: string,
+  index: number,
+  state: ParenScanState,
+): boolean {
   const previous = previousSignificantCharacter(content, index);
   const previousToken = previousSignificantToken(content, index);
   if (isPostfixOperatorBefore(content, index)) {
@@ -361,7 +508,7 @@ function canStartRegexLiteral(content: string, index: number): boolean {
   return (
     isRegexPrefixToken(previousToken) ||
     followsForIterationKeywordOnLine(content, index) ||
-    followsControlCondition(content, index) ||
+    followsControlCondition(content, index, state) ||
     previous === '' ||
     '([{=,:;!&|?+-*~^<>/'.includes(previous)
   );
@@ -512,6 +659,7 @@ function collectJsxTagExpressionMarkers(
   content: string,
   start: number,
   end: number,
+  state: ParenScanState,
 ): UnresolvedMarkerOccurrence[] {
   const markers: UnresolvedMarkerOccurrence[] = [];
   let index = start + 1;
@@ -536,6 +684,7 @@ function collectJsxTagExpressionMarkers(
         content,
         index + 1,
         '}',
+        state,
       );
       markers.push(...expressionMarkers);
       index = expressionEnd;
@@ -837,6 +986,7 @@ function isJsxTextBlockComment(content: string, start: number, end: number): boo
 function collectTemplateLiteralMarkers(
   content: string,
   start: number,
+  state: ParenScanState,
 ): [UnresolvedMarkerOccurrence[], number] {
   const markers: UnresolvedMarkerOccurrence[] = [];
   let index = start + 1;
@@ -856,6 +1006,7 @@ function collectTemplateLiteralMarkers(
         content,
         index + 2,
         '}',
+        state,
       );
       markers.push(...expressionMarkers);
       index = expressionEnd;
@@ -869,8 +1020,9 @@ function collectTemplateLiteralMarkers(
 
 function collectCodeMarkers(
   content: string,
-  start = 0,
-  endCharacter?: string,
+  start: number,
+  endCharacter: string | undefined,
+  state: ParenScanState,
 ): [UnresolvedMarkerOccurrence[], number] {
   const markers: UnresolvedMarkerOccurrence[] = [];
   let index = start;
@@ -925,6 +1077,7 @@ function collectCodeMarkers(
       const [templateMarkers, templateEnd] = collectTemplateLiteralMarkers(
         content,
         index,
+        state,
       );
       markers.push(...templateMarkers);
       index = templateEnd;
@@ -956,13 +1109,15 @@ function collectCodeMarkers(
     if (current === '<' && isLikelyJsxTagStart(content, index)) {
       const tagEnd = skipJsxTag(content, index);
       if (tagEnd !== -1 && !isLikelyTypeArgumentTag(content, index, tagEnd)) {
-        markers.push(...collectJsxTagExpressionMarkers(content, index, tagEnd));
+        markers.push(
+          ...collectJsxTagExpressionMarkers(content, index, tagEnd, state),
+        );
         index = tagEnd;
         continue;
       }
     }
 
-    if (current === '/' && canStartRegexLiteral(content, index)) {
+    if (current === '/' && canStartRegexLiteral(content, index, state)) {
       index = skipRegexLiteral(content, index);
       continue;
     }
@@ -976,7 +1131,7 @@ function collectCodeMarkers(
 function collectUnresolvedCommentMarkers(
   content: string,
 ): UnresolvedMarkerOccurrence[] {
-  return collectCodeMarkers(content)[0];
+  return collectCodeMarkers(content, 0, undefined, createParenScanState())[0];
 }
 
 function lineNumberAt(content: string, index: number): number {
@@ -1005,7 +1160,15 @@ export class ConcisenessEvaluator implements Evaluator {
   readonly category = 'heuristic' as const;
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
-    if (!input.content.trim()) {
+    const { content: truncated, truncated: wasTruncated } = truncateToByteLimit(
+      input.content,
+      MAX_INPUT_BYTES,
+    );
+    const content = wasTruncated
+      ? closeUnterminatedBlockComment(truncated)
+      : truncated;
+
+    if (!content.trim()) {
       return {
         evaluatorName: this.name,
         verdict: 'pass',
@@ -1016,8 +1179,8 @@ export class ConcisenessEvaluator implements Evaluator {
 
     const findings: EvaluationFinding[] = [];
 
-    this.checkCommentRatio(input.content, findings);
-    this.checkTodoComments(input.content, findings);
+    this.checkCommentRatio(content, findings);
+    this.checkTodoComments(content, findings);
 
     const score = createScore(Math.max(0, 1 - findings.length * 0.2));
 
