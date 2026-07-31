@@ -934,6 +934,14 @@ describe('CliChannel', () => {
     expect(prompt).toContain('{"name":"Safe","value":["visible","collection"]}');
   });
 
+  it('preserves active substitutions in collection-valued structured sensitive headers', () => {
+    expect(redactSecrets(
+      '{"name":"Authorization","value":["Bearer","violet$(reboot)quartz"],"safe":"visible"}',
+    )).toBe(
+      '{"name":"Authorization","value":["[REDACTED]","[REDACTED]$(reboot)[REDACTED]"],"safe":"visible"}',
+    );
+  });
+
   it('redacts unterminated double-quoted X-Auth-Token header without swallowing line boundary', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -1362,6 +1370,14 @@ describe('CliChannel', () => {
     expect(prompt).toContain('|   systemctl [REDACTED]');
     expect(prompt).toContain('|   terraform [REDACTED]');
     expect(prompt).toContain('safe: visible');
+  });
+
+  it('retains later script-runner commands after YAML shell context is established', () => {
+    expect(redactSecrets(
+      'password: |\n  systemctl stop synthetic-service\n  bash evil.sh\n  node exploit.js\nsafe: visible',
+    )).toBe(
+      'password: [REDACTED]\n  systemctl [REDACTED]\n  bash [REDACTED]\n  node [REDACTED]\nsafe: visible',
+    );
   });
 
   it('preserves previously supported argumentless destructive command words', async () => {
@@ -1961,6 +1977,14 @@ describe('CliChannel', () => {
     expect(prompt).toContain('rediss://:[REDACTED]@cache.example.test && echo visible_empty_user_context');
   });
 
+  it('redacts curl passwords with empty usernames', () => {
+    expect(redactSecrets(
+      'curl --user :synthetic-long -u ":synthetic-short" https://example.test',
+    )).toBe(
+      'curl --user :[REDACTED] -u ":[REDACTED]" https://example.test',
+    );
+  });
+
   it('recognizes escaped JSON delimiters in serialized strings', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -2136,6 +2160,14 @@ describe('CliChannel', () => {
     );
   });
 
+  it('normalizes acronym-prefix PascalCase sensitive keys without broad matches', () => {
+    expect(redactSecrets(
+      'DBPassword=violet JWTToken=quartz HTTPAuthorization=stone DBSchema=visible JWTTokenizer=visible HTTPAuthor=visible',
+    )).toBe(
+      'DBPassword=[REDACTED] JWTToken=[REDACTED] HTTPAuthorization=[REDACTED] DBSchema=visible JWTTokenizer=visible HTTPAuthor=visible',
+    );
+  });
+
   it('preserves active substitutions in inline unquoted sensitive headers', () => {
     const redacted = redactSecrets(
       'curl -H Authorization:secret$(reboot)tail https://safe.example && echo visible_header_command',
@@ -2159,6 +2191,12 @@ describe('CliChannel', () => {
       '+-----BEGIN PRIVATE KEY-----\n+QUJDREVGR0hJSktM\n+TU5PUFFSU1RVVldY\n+-----END PRIVATE KEY-----\n+safe=visible_diff_context',
     );
     expect(redacted).toBe('+[REDACTED]\n+safe=visible_diff_context');
+  });
+
+  it('validates private-key bodies with independently mixed unified-diff prefixes', () => {
+    expect(redactSecrets(
+      ' -----BEGIN PRIVATE KEY-----\n-QUJDREVGR0hJSktM\n+TU5PUFFSU1RVVldY\n -----END PRIVATE KEY-----',
+    )).toBe(' [REDACTED]');
   });
 
   it('tracks sensitive YAML block bodies across context, addition, and removal diff prefixes', () => {
@@ -2389,6 +2427,14 @@ describe('CliChannel', () => {
       .toBe('$PASSWORD="[REDACTED]"');
   });
 
+  it('recognizes scoped PowerShell assignments while preserving executable substitutions', () => {
+    expect(redactSecrets(
+      '$global:PASSWORD="violet$(reboot)quartz"; $script:API_KEY=synthetic-key; ${global:PASSWORD}=other-secret',
+    )).toBe(
+      '$global:PASSWORD="[REDACTED]$(reboot)[REDACTED]"; $script:API_KEY=[REDACTED]; ${global:PASSWORD}=[REDACTED]',
+    );
+  });
+
   it('consumes PowerShell-native escapes in quoted assignment values', () => {
     expect(redactSecrets('$env:PASSWORD=\'violet\'\'quartz\' && echo visible_single_quote_context'))
       .toBe('$env:PASSWORD=\'[REDACTED]\' && echo visible_single_quote_context');
@@ -2459,6 +2505,14 @@ describe('CliChannel', () => {
   it('redacts continued YAML plain scalars', () => {
     expect(redactSecrets('password: violet\n  quartz\nsafe: visible'))
       .toBe('password: [REDACTED]\n  [REDACTED]\nsafe: visible');
+  });
+
+  it('redacts plain YAML scalars under quoted sensitive keys including list mappings', () => {
+    expect(redactSecrets(
+      '"password": violet; reboot\n- \'API_KEY\': quartz && node exploit.js\n- safe: visible',
+    )).toBe(
+      '"password": [REDACTED]; reboot\n- \'API_KEY\': [REDACTED] && node exploit.js\n- safe: visible',
+    );
   });
 
   it('does not redact sibling YAML mapping keys as plain-scalar continuations', () => {

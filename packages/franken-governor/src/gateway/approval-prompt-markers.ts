@@ -76,8 +76,10 @@ function isSensitiveSingleToken(token: string): boolean {
     .replace(/^["']/, '')
     .replace(/["']$/, '');
 
-  // Normalize camelCase boundaries before lowercasing (e.g., clientSecret -> client_secret)
-  const withSeparators = clean.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  // Normalize camelCase and acronym-prefix PascalCase boundaries before lowercasing.
+  const withSeparators = clean
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2');
   const lower = withSeparators.toLowerCase();
 
   for (const keyword of SENSITIVE_VOCABULARY) {
@@ -156,13 +158,10 @@ export function isPlausibleArmoredKeyBody(body: string): boolean {
   const normalizedBody = body.replace(/\\r\\n|\\n|\\r/gu, '\n');
   const physicalLines = normalizedBody.split(/\r\n|\n|\r/u);
   const prefixedLines = physicalLines.filter((line) => line.length > 0);
-  const diffPrefix = prefixedLines.length > 0
-    && prefixedLines.every((line) => line.startsWith(prefixedLines[0]?.[0] ?? '\0'))
-    && /^[ +\-]$/u.test(prefixedLines[0]?.[0] ?? '')
-    ? prefixedLines[0]?.[0] ?? ''
-    : '';
+  const hasDiffPrefixes = prefixedLines.length > 0
+    && prefixedLines.every((line) => /^[ +\-]/u.test(line));
   const lines = physicalLines
-    .map((line) => diffPrefix !== '' && line.startsWith(diffPrefix) ? line.slice(1) : line)
+    .map((line) => hasDiffPrefixes && /^[ +\-]/u.test(line) ? line.slice(1) : line)
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   if (lines.length === 0) return true;
@@ -274,7 +273,7 @@ function redactUrlQueryParams(text: string): string {
 }
 
 function redactCurlUserCredentials(text: string): string {
-  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:\$'([^:'\r\n]+:)((?:\\.|[^'\\\r\n])*)'|"([^:"\r\n]+:)((?:\\.|[^"\\\r\n])*)"|'([^:'\r\n]+:)([^'\r\n]*)'|([^:\s"'\r\n]+:)([^\s"'\r\n&|><;]+))/giu;
+  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:\$'([^:'\r\n]*:)((?:\\.|[^'\\\r\n])*)'|"([^:"\r\n]*:)((?:\\.|[^"\\\r\n])*)"|'([^:'\r\n]*:)([^'\r\n]*)'|([^:\s"'\r\n]*:)([^\s"'\r\n&|><;]+))/giu;
   let result = text;
   const attachedStart = /(?<![-A-Za-z0-9])(-[uU])([^:\s"'\r\n]+:)/gu;
   let attachedResult = '';
@@ -292,7 +291,7 @@ function redactCurlUserCredentials(text: string): string {
     attachedCursor = valueEnd;
   }
   result = attachedResult + result.slice(attachedCursor);
-  const bareStart = /(--user|--proxy-user|-u|-U)(\s+|=)([^:\s"'\r\n]+:)/giu;
+  const bareStart = /(--user|--proxy-user|-u|-U)(\s+|=)([^:\s"'\r\n]*:)/giu;
   let output = '';
   let cursor = 0;
   for (const match of result.matchAll(bareStart)) {
@@ -1041,10 +1040,13 @@ function redactCompleteStructuredHeaderObject(object: string): string {
     const valueStart = match.index + match[0].length;
     const valueEnd = balancedStructuredValueEnd(object, valueStart);
     if (valueEnd === undefined) continue;
+    const value = object.slice(valueStart, valueEnd);
     replacements.push({
       start: match.index,
       end: valueEnd,
-      value: `${prefix}"[REDACTED]"`,
+      value: `${prefix}${
+        isShellExpression(value) ? redactJsonCollectionLiteralFragments(value) : '"[REDACTED]"'
+      }`,
     });
   }
 
@@ -1556,12 +1558,13 @@ function powerShellUnquotedValueBoundary(text: string, start: number): number {
 }
 
 function redactPowerShellAssignments(text: string): string {
-  const assignmentStart = /(\$(?:env:)?([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*)/giu;
+  const assignmentStart = /(\$(?:(?:env|global|script):([A-Za-z_][A-Za-z0-9_-]*)|\{(?:env|global|script):([A-Za-z_][A-Za-z0-9_-]*)\}|([A-Za-z_][A-Za-z0-9_-]*))\s*=\s*)/giu;
   let result = '';
   let cursor = 0;
 
   for (const match of text.matchAll(assignmentStart)) {
-    if (match.index < cursor || match[2] === undefined || !isSensitiveKeyToken(match[2])) continue;
+    const key = match[2] ?? match[3] ?? match[4];
+    if (match.index < cursor || key === undefined || !isSensitiveKeyToken(key)) continue;
     const valueStart = match.index + match[0].length;
     const ansiSingleQuoted = text.startsWith("$'", valueStart);
     const quote = ansiSingleQuoted ? "'" : text[valueStart];
@@ -1840,6 +1843,17 @@ export function redactSecrets(
     return `${prefix}${quote}[REDACTED]${quote}`;
   });
 
+  const quotedYamlPlainScalar = /^([ +\-]?\s*(["'])([A-Za-z0-9_.-]+)\2\s*:\s*)(?![|>"'{\[])(\S[^\r\n#]*?)([ \t]+#.*)?$/gimu;
+  result = result.replace(quotedYamlPlainScalar, (match, prefix, _quote, key, value, comment = '') => {
+    if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    const cleanValue = typeof value === 'string' ? value.trimEnd() : '';
+    const literal = cleanValue.split(/(?=[&|;><])/u)[0]?.trimEnd() ?? '';
+    const shellContext = cleanValue.slice(literal.length);
+    return `${prefix}${
+      isShellExpression(literal) ? redactPasswordLiteralFragments(literal) : '[REDACTED]'
+    }${shellContext}${comment as string}`;
+  });
+
   // YAML / Colon unquoted assignments: key: val
   const yamlColonAssignment = new RegExp(
     `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*:\\s*)(?!["'\\s]|\\\[REDACTED\\\](?:$|\\s|["',;}\\]&|><]))([^"\\s'\\r\\n,{}]+(?:[ \\t]+[^"\\s'\\r\\n#,{}]+)*)([ \\t]+#.*)?$`,
@@ -2011,9 +2025,11 @@ function isRecognizedUnmatchedKeyCommand(line: string): boolean {
 function isGeneralCommandShapedLine(line: string): boolean {
   const tokens = line.trim().split(/[ \t]+/u);
   let commandIndex = tokens[0] === 'sudo' ? 1 : 0;
-  if (commandBasename(tokens[commandIndex] ?? '') === undefined) return false;
+  const basename = commandBasename(tokens[commandIndex] ?? '');
+  if (basename === undefined) return false;
   const argument = tokens[++commandIndex];
   if (argument === undefined) return false;
+  if (/^(?:bash|node)$/u.test(basename)) return true;
   return tokens.slice(commandIndex).some((token) =>
     /^-{1,2}[A-Za-z0-9]/u.test(token)
     || /^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|\/|\.{1,2}\/)/u.test(token))
