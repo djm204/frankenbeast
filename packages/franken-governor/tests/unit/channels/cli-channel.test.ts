@@ -2947,4 +2947,177 @@ describe('CliChannel', () => {
       'PASSWORDS[2]=[REDACTED] config[password]=[REDACTED] safe[mode]=visible',
     );
   });
+
+  it('redacts every password fragment in concatenated curl user shell words', () => {
+    expect(redactSecrets(
+      'curl --user alice:"violet quartz"$(printf harmless-user)amber https://example.test && echo visible_user_context',
+    )).toBe(
+      'curl --user alice:"[REDACTED]"$(printf harmless-user)[REDACTED] https://example.test && echo visible_user_context',
+    );
+  });
+
+  it('recognizes local and private PowerShell sensitive assignments', () => {
+    expect(redactSecrets(
+      '$local:PASSWORD="violet"; $private:API_KEY=quartz; Write-Output visible_scope_context',
+    )).toBe(
+      '$local:PASSWORD="[REDACTED]"; $private:API_KEY=[REDACTED]; Write-Output visible_scope_context',
+    );
+  });
+
+  it('retains no-argument commands after sensitive YAML shell context is established', () => {
+    expect(redactSecrets(
+      'password: |\n  curl --token synthetic-token\n  whoami\n  id\nsafe: visible',
+    )).toBe(
+      'password: [REDACTED]\n  curl --token [REDACTED]\n  whoami\n  id\nsafe: visible',
+    );
+  });
+
+  it('redacts bounded PowerShell here-string assignment bodies', () => {
+    expect(redactSecrets(
+      '$local:PASSWORD=@"\nsynthetic-line\nAPI_KEY=synthetic-inner\n"@\nRestart-Computer',
+    )).toBe(
+      '$local:PASSWORD=@"\n[REDACTED]\n[REDACTED]\n"@\nRestart-Computer',
+    );
+  });
+
+  it('preserves YAML node-property prefixes while redacting sensitive scalars', () => {
+    expect(redactSecrets(
+      'password: &credential !!str "synthetic value"; reboot\nsafe: visible',
+    )).toBe(
+      'password: &credential !!str "[REDACTED]"; reboot\nsafe: visible',
+    );
+  });
+
+  it('consumes YAML node-property quoted scalar escapes before preserving following context', () => {
+    expect([
+      redactSecrets('password: !!str "first \\"second"; reboot\nsafe: visible'),
+      redactSecrets("password: !!str 'first ''second'; reboot\nsafe: visible"),
+    ]).toEqual([
+      'password: !!str "[REDACTED]"; reboot\nsafe: visible',
+      "password: !!str '[REDACTED]'; reboot\nsafe: visible",
+    ]);
+  });
+
+  it('accepts shell quote delimiters after quoted URL userinfo authorities', () => {
+    expect([
+      redactSecrets('echo "https://alice:synthetic@example.com" && echo visible_double_context'),
+      redactSecrets("echo 'https://alice:synthetic@example.com' && echo visible_single_context"),
+    ]).toEqual([
+      'echo "https://alice:[REDACTED]@example.com" && echo visible_double_context',
+      "echo 'https://alice:[REDACTED]@example.com' && echo visible_single_context",
+    ]);
+  });
+
+  it('redacts multiline YAML node-property quoted scalars across physical line delimiters', () => {
+    const delimiters = ['\r\n', '\n', '\r'];
+    expect(delimiters.flatMap((delimiter) => [
+      redactSecrets(
+        `password: !!str "synthetic${delimiter}continued"; reboot${delimiter}safe: visible`,
+      ),
+      redactSecrets(
+        `password: !!str 'synthetic${delimiter}continued'; reboot${delimiter}safe: visible`,
+      ),
+    ])).toEqual(delimiters.flatMap((delimiter) => [
+      `password: !!str "[REDACTED]"; reboot${delimiter}safe: visible`,
+      `password: !!str '[REDACTED]'; reboot${delimiter}safe: visible`,
+    ]));
+  });
+
+  it('fails closed through the physical line for an over-cap YAML node-property quoted scalar', () => {
+    const syntheticLiteral = 'v'.repeat(65_537);
+    expect(redactSecrets(
+      `password: &credential !!str "${syntheticLiteral}"; reboot\r\nsafe: visible`,
+    )).toBe(
+      'password: &credential !!str "[REDACTED]\r\nsafe: visible',
+    );
+  });
+
+  it('redacts registry-scoped npmrc credentials', () => {
+    expect(redactSecrets(
+      '//registry.npmjs.org/:_authToken=synthetic-token\nregistry=https://registry.npmjs.org/',
+    )).toBe(
+      '//registry.npmjs.org/:_authToken=[REDACTED]\nregistry=https://registry.npmjs.org/',
+    );
+  });
+
+  it('redacts a first OAuth URL fragment parameter', () => {
+    expect(redactSecrets(
+      'open https://example.test/callback#access_token=synthetic-token&state=visible && echo visible_fragment_context',
+    )).toBe(
+      'open https://example.test/callback#access_token=[REDACTED]&state=visible && echo visible_fragment_context',
+    );
+  });
+
+  it('accepts RFC3986 reg-name authorities beginning with underscore or tilde', () => {
+    expect(redactSecrets(
+      'fetch https://alice:violet@_service.example/path https://bob:quartz@~node.example/path',
+    )).toBe(
+      'fetch https://alice:[REDACTED]@_service.example/path https://bob:[REDACTED]@~node.example/path',
+    );
+  });
+
+  it('redacts complete quoted export and declare assignment shell words', () => {
+    expect(redactSecrets(
+      'export "PASSWORD=synthetic value"; declare -x \'API_KEY=synthetic key\'; reboot',
+    )).toBe(
+      'export "PASSWORD=[REDACTED]"; declare -x \'API_KEY=[REDACTED]\'; reboot',
+    );
+  });
+
+  it('keeps executable substitution structure visible when truncation intersects it', () => {
+    const redacted = redactAndTruncate(
+      `PASSWORD=$(printf ${'x'.repeat(96)}; reboot) && echo visible_after_substitution`,
+      { redact: true, maxLength: 64 },
+    );
+    expect(redacted).toContain('PASSWORD=$(printf');
+    expect(redacted).toContain('; reboot)');
+    expect(redacted).toContain('[TRUNCATED]');
+    expect(redacted).not.toContain('x'.repeat(16));
+  });
+
+  it('redacts a first sensitive URL fragment parameter after whitespace boundaries', () => {
+    const delimiters = ['\t', '\n', '\r\n'];
+    expect([
+      ...delimiters.map((delimiter) => redactSecrets(
+        `open${delimiter}https://example.test/callback#access_token=synthetic-token&state=visible`,
+      )),
+      redactSecrets(
+        '1https://example.test/callback#access_token=visible-non-url-token',
+      ),
+    ]).toEqual([
+      ...delimiters.map((delimiter) =>
+        `open${delimiter}https://example.test/callback#access_token=[REDACTED]&state=visible`),
+      '1https://example.test/callback#access_token=visible-non-url-token',
+    ]);
+  });
+
+  it('requires marker-only PowerShell here-string closers for both quote forms', () => {
+    expect([
+      redactSecrets(
+        '$PASSWORD=@"\nsynthetic-one\n"@ trailing text\nsynthetic-two\n"@ \t\r\nWrite-Output visible',
+      ),
+      redactSecrets(
+        "$API_KEY=@'\nsynthetic-one\n'@ trailing text\nsynthetic-two\n'@\t\nWrite-Output visible",
+      ),
+    ]).toEqual([
+      '$PASSWORD=@"\n[REDACTED]\n[REDACTED]\n[REDACTED]\n"@ \t\r\nWrite-Output visible',
+      "$API_KEY=@'\n[REDACTED]\n[REDACTED]\n[REDACTED]\n'@\t\nWrite-Output visible",
+    ]);
+  });
+
+  it('redacts path-scoped npmrc credentials while retaining safe registry lines', () => {
+    expect(redactSecrets(
+      '//registry.example.test/npm/private/:_authToken=synthetic-token\nregistry=https://registry.example.test/npm/private/',
+    )).toBe(
+      '//registry.example.test/npm/private/:_authToken=[REDACTED]\nregistry=https://registry.example.test/npm/private/',
+    );
+  });
+
+  it('redacts root- and path-scoped npmrc credentials for bracketed IPv6 registries', () => {
+    expect(redactSecrets(
+      '//[::1]/:_authToken=synthetic-root\n//[2001:db8::1]:4873/npm/private/:_authToken=synthetic-path\nregistry=https://[2001:db8::1]:4873/npm/private/',
+    )).toBe(
+      '//[::1]/:_authToken=[REDACTED]\n//[2001:db8::1]:4873/npm/private/:_authToken=[REDACTED]\nregistry=https://[2001:db8::1]:4873/npm/private/',
+    );
+  });
 });

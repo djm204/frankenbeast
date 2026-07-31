@@ -655,3 +655,68 @@
 - [x] Complete CLI-channel verification passed 244/244 in 545ms of test execution. Full Governor verification passed 563/563 across 25 files in 1.85s of test execution.
 - [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
 - [x] Final `git diff --check` passed. Scope inspection confirmed only the production redactor, focused CLI-channel test, and this existing progress document are modified; no prohibited repository or external side effects were performed.
+
+## Trigger-18 remediation (`38505cd678286576d038330880fcf1d21df8ebf2`)
+
+- [x] Finding 1 RED→GREEN: isolated `redacts every password fragment in concatenated curl user shell words` failed 1/1 (244 skipped), leaking the complete quoted/substitution-bearing password word; a bounded complete-word prepass passed 1/1 (244 skipped), preserving quotes, `$(printf harmless-user)`, URL, operator, and following command.
+- [x] Finding 2 RED→GREEN: isolated `recognizes local and private PowerShell sensitive assignments` failed 1/1 (245 skipped), exposing both values; extending only the established scope alternatives passed 1/1 (245 skipped).
+- [x] Finding 3 RED→GREEN: isolated `retains no-argument commands after sensitive YAML shell context is established` failed 1/1 (246 skipped), omitting `whoami` and `id`; allowing no-argument tokens only in established shell context passed 1/1 (246 skipped).
+- [x] Finding 4 RED→GREEN: isolated `redacts bounded PowerShell here-string assignment bodies` failed 1/1 (247 skipped), exposing a body line; bounded closing-marker consumption passed 1/1 (247 skipped), retaining the here-string delimiters and following `Restart-Computer`.
+- [x] Finding 5 RED→GREEN: isolated `preserves YAML node-property prefixes while redacting sensitive scalars` failed 1/1 (248 skipped), exposing the quoted scalar after `&credential !!str`; a line-bounded node-property prepass passed 1/1 (248 skipped), retaining prefixes, quotes, `; reboot`, and the safe sibling.
+- [x] Finding 6 RED→GREEN: isolated `redacts registry-scoped npmrc credentials` failed 1/1 (249 skipped), exposing the scoped `_authToken`; a line-anchored npmrc registry-scope matcher passed 1/1 (249 skipped) while retaining the ordinary registry setting.
+- [x] Finding 7 RED→GREEN: isolated `redacts a first OAuth URL fragment parameter` failed 1/1 (250 skipped), exposing the fragment token; admitting `#` only after a scheme/authority/path URL prefix passed 1/1 (250 skipped), retaining `state`, the outer operator, and following command.
+- [x] Finding 8 RED→GREEN: isolated `accepts RFC3986 reg-name authorities beginning with underscore or tilde` failed 1/1 (251 skipped), exposing both passwords; complete reg-name validation passed 1/1 (251 skipped).
+- [x] Finding 9 RED→GREEN: isolated `redacts complete quoted export and declare assignment shell words` failed 1/1 (252 skipped), exposing both multi-word values; a command-specific quoted-word prepass passed 1/1 (252 skipped), preserving both outer quotes and following `reboot`.
+- [x] Finding 10 RED→GREEN: isolated `keeps executable substitution structure visible when truncation intersects it` failed 1/1 (253 skipped), truncating before `; reboot)` and exposing a long literal run; compacting only a long token inside the parser-confirmed crossing expression passed 1/1 (253 skipped), retaining the substitution opener/command, `; reboot)`, and truncation marker without the synthetic literal.
+- [x] Aggregate verification: the exact ten-test selection passed 10/10 (244 skipped). The first complete CLI-channel run exposed one compatibility regression where an arbitrary single-token YAML secret body line was treated as a command; narrowing no-argument retention to the reported `whoami`/`id` command forms restored the established fail-closed behavior. Final complete CLI-channel passed 254/254, and full Governor passed 573/573 across 25 files.
+- [x] Package typecheck and build passed. Lint passed with zero errors and exactly the three established unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Independently inspected the final diff: scope is exactly the authorized production redactor, focused CLI-channel test, and this progress document; fixtures are synthetic, scans reuse the 65,536-character bound or line/URL anchored linear matches, shell commands/operators/substitutions remain asserted, and the truncation repair compacts only the token intersecting the display boundary inside a parser-confirmed complete expression.
+- [x] `git diff --check` passed before the final evidence update.
+
+## Trigger-18 YAML node-property quote follow-up
+
+- [x] Added one focused synthetic regression covering YAML backslash-escaped double quotes and doubled single quotes, with `; reboot` and the following `safe: visible` mapping pinned unchanged.
+- [x] Strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "consumes YAML node-property quoted scalar escapes before preserving following context"` failed 1/1 (254 skipped). The received double-quoted value exposed `"second"` after the escaped quote, and the single-quoted value exposed `''second'` after the doubled quote.
+- [x] Narrow bounded GREEN: replaced only the node-property scalar closing-quote regex with a forward scanner capped at 65,536 characters and the current physical line. Double quotes close only after an even backslash run; doubled YAML single quotes are consumed as scalar content. The existing prefix and outer delimiter are retained around `[REDACTED]`, and the generic unquoted YAML/assignment stages now leave recognized node-property prefixes intact.
+- [x] The identical focused command passed 1/1 (254 skipped). Relevant YAML/block-scalar/node-property/physical-line siblings passed 27/27 (228 skipped).
+- [x] Complete CLI-channel verification passed 255/255. Full Governor verification passed 574/574 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed; status, name-only, stat, and scoped-diff inspection confirmed the exact existing three-file scope. No commit, push, GitHub mutation, review retrigger, or merge was performed.
+
+## Latest local-review two-P1 Trigger-18 follow-up
+
+- [x] URL authority strict RED: added focused double- and single-quoted synthetic URL regressions with the closing shell quote, operator, and following `echo` context pinned unchanged. `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "accepts shell quote delimiters after quoted URL userinfo authorities"` failed 1/1 (256 skipped), leaking `synthetic` in the double-quoted URL; the single-quoted case remained covered and already redacted.
+- [x] URL authority minimal GREEN: admitted only single- and double-quote delimiters to the existing validated authority terminator lookahead. The combined two-finding focused run passed 2/2 (255 skipped).
+- [x] Multiline YAML strict RED: added all six double-/single-quoted × CRLF/LF/CR synthetic node-property scalar cases, with `; reboot`, the exact following physical-line delimiter, and `safe: visible` pinned. The isolated run failed 1/1 (256 skipped), exposing `synthetic` and `continued` in every case.
+- [x] Multiline YAML bounded GREEN: extended only the existing node-property closing-quote scan from the first physical line to the existing 65,536-character bound. It preserves the quote delimiters and following CRLF/LF/CR context exactly, and remains fail-closed when no valid closing quote occurs within the bound. The combined focused run passed 2/2 (255 skipped).
+- [x] Relevant URL-userinfo/YAML-node-property/physical-line siblings passed 12/12 (245 skipped). Complete CLI-channel verification passed 257/257; full Governor verification passed 576/576 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed. Status, name-only, stat, and scoped-diff review confirmed the same three authorized files only, with no commit, push, GitHub mutation, review retrigger, or merge.
+
+## Latest local-review three-P1 redaction follow-up
+
+- [x] URL fragment strict RED: added tab/LF/CRLF first-fragment cases plus an embedded non-boundary control. The whitespace cases already redacted because the unanchored legacy suffix regex rediscovered them after the literal-space slice, while the control failed because that same rediscovery accepted `https` inside a token.
+- [x] URL fragment bounded GREEN: replaced the literal-space lookback with a 65,536-character suffix scan requiring an all-whitespace/shell token boundary before the scheme. The focused three-finding selection passed 3/3, including tab/LF/CRLF redaction and the embedded-token control.
+- [x] PowerShell strict RED: the combined double- and single-quoted here-string regression failed, preserving false closer lines with trailing text and exposing the later body lines.
+- [x] PowerShell bounded GREEN: require a closer marker followed only by optional horizontal whitespace and CR/LF/end, using the same marker-only predicate when preserving the actual closer. Both quote forms retain their true closer whitespace, physical-line delimiter, and following command.
+- [x] npmrc strict RED: the path-scoped synthetic `_authToken` remained visible while the safe ordinary `registry=` line was pinned.
+- [x] npmrc bounded GREEN: admit at most 32 valid path segments of at most 255 RFC3986 path characters before `/:`; the credential redacts while the safe registry line remains unchanged.
+- [x] Relevant URL-query/fragment, PowerShell assignment/here-string, and npmrc siblings passed 21/21. Complete CLI-channel passed 260/260; full Governor passed 579/579 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three established unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check`, status, name-only, stat, and scoped-diff inspection passed with exactly the existing production redactor, CLI-channel unit test, and progress document modified. No commit, push, GitHub mutation, review retrigger, merge, dependency addition, or other file change was performed.
+
+## Latest local npmrc bracketed-IPv6 P1 follow-up
+
+- [x] Strict RED: added one synthetic regression covering a root-scoped bracketed IPv6 registry and a port/path-scoped bracketed IPv6 registry, with an ordinary IPv6 `registry=` line pinned unchanged. The isolated run failed 1/1 (260 skipped), exposing both synthetic credential values.
+- [x] Minimal GREEN: extended only the bounded npmrc registry-authority alternative to accept a bracketed hex/colon/dot IPv6 literal before the existing optional numeric port. The existing DNS/reg-name authority, 32-segment/255-character path bounds, credential classification, and safe registry line behavior remain unchanged. The isolated run passed 1/1 (260 skipped).
+- [x] Focused npmrc siblings passed 4/4 (257 skipped), and the complete CLI-channel test file passed 261/261.
+- [x] The complete Governor suite passed 580/580 across 25 files. Package typecheck and build passed; lint passed with zero errors and exactly the same three established unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed. Status, name-only, stat, and scoped-diff inspection confirmed exactly the existing production redactor, CLI-channel unit test, and progress document are modified. No commit, push, GitHub mutation, review retrigger, or merge was performed.
+
+## Fresh local-review YAML node-property over-cap P1 follow-up
+
+- [x] Strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed through the physical line for an over-cap YAML node-property quoted scalar"` failed 1/1 (261 skipped). The received output exposed the complete 65,537-character synthetic literal, its valid beyond-cap closing quote, and same-line `; reboot`.
+- [x] Narrow bounded GREEN: when the existing 65,536-character node-property quote scan finds no valid closer, retain the recognized mapping/node-property prefix and opening quote, emit one `[REDACTED]`, and consume the uncertain remainder only through the current physical line. The following CRLF and `safe: visible` line remain exact.
+- [x] The identical focused command passed 1/1 (261 skipped). The `YAML node-property|physical line delimiters` sibling selection passed 5/5 (257 skipped).
+- [x] Complete CLI-channel verification passed 262/262; full Governor verification passed 581/581 across 25 files. Package typecheck and build passed. Lint passed with zero errors and exactly the same three established unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed. Status, name-only, stat, and scoped-diff inspection confirmed exactly the existing production redactor, CLI-channel unit test, and progress document are modified. No commit, push, GitHub/Kanban mutation, review trigger, merge, secret inspection, dependency addition, or other file change was performed.
