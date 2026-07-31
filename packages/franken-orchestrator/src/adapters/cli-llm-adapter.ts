@@ -14,6 +14,12 @@ import {
   type CommandFailure,
 } from '../errors/command-failure.js';
 import { isPlainOutput, stripAnsi } from '../logging/beast-logger.js';
+import { filterSecretEnvVars, isSecretEnvVarName } from '../security/env-filter.js';
+
+// Re-exported for backward compatibility — the filtering logic now lives in
+// `security/env-filter.ts` so it can be shared with the Martin-loop spawn
+// path (`skills/martin-loop.ts`), which has its own `spawn()` call site.
+export { filterSecretEnvVars, isSecretEnvVarName };
 
 type CliCacheSessionHint = {
   key: string;
@@ -263,7 +269,7 @@ export class CliLlmAdapter implements IAdapter {
               : {}),
             extraArgs: this.resolveExtraArgs(activeProvider),
           }),
-          env: provider.filterEnv(this.captureEnv()),
+          env: provider.filterEnv(this.captureEnv(provider, activeModel)),
           prompt,
           signal,
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
@@ -546,16 +552,17 @@ export class CliLlmAdapter implements IAdapter {
     return this.opts.providerOverrides?.[name]?.extraArgs;
   }
 
-  private captureEnv(): Record<string, string> {
+  private captureEnv(provider: ICliProvider, model: string | undefined): Record<string, string> {
     const rawEnv: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) rawEnv[key] = value;
     }
+    const safeEnv = filterSecretEnvVars(rawEnv, provider.requiredAuthEnvVars?.(model));
     if (isPlainOutput()) {
-      rawEnv.NO_COLOR = rawEnv.NO_COLOR ?? '1';
-      rawEnv.FORCE_COLOR = '0';
+      safeEnv.NO_COLOR = safeEnv.NO_COLOR ?? '1';
+      safeEnv.FORCE_COLOR = '0';
     }
-    return rawEnv;
+    return safeEnv;
   }
 
   private resolveSleepMs(exhaustedProviders: Map<string, CommandFailure>): number {

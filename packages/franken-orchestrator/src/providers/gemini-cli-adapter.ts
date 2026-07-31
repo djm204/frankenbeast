@@ -32,6 +32,7 @@ import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
+import { filterSecretEnvVars } from '../security/env-filter.js';
 
 const MANAGED_START = '<!-- FRANKENBEAST MANAGED SECTION - DO NOT EDIT -->';
 const MANAGED_END = '<!-- END FRANKENBEAST SECTION -->';
@@ -64,8 +65,16 @@ export class GeminiCliAdapter implements ILlmProvider {
 
   constructor(private options: GeminiCliOptions = {}) {}
 
+  // No auth-var exemption: gemini-provider.ts's own filterEnv() already
+  // strips all GEMINI*/GOOGLE* vars for the ICliProvider path, so this
+  // consolidated ILlmProvider path doesn't rely on env-based auth surviving
+  // this filter either.
+  sanitizedEnv(): Record<string, string> {
+    return filterSecretEnvVars(sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>));
+  }
+
   async isAvailable(): Promise<boolean> {
-    return isCliAvailable(this.binaryPath, sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>));
+    return isCliAvailable(this.binaryPath, this.sanitizedEnv());
   }
 
   async *execute(request: LlmRequest): AsyncGenerator<LlmStreamEvent> {
@@ -99,7 +108,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       const proc = spawn(this.binaryPath, args, {
         cwd: workspaceDir,
         env: {
-          ...sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+          ...this.sanitizedEnv(),
           GEMINI_CLI_SYSTEM_DEFAULTS_PATH: this.effectiveSystemDefaultsPath(),
           GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath,
         },
@@ -153,7 +162,7 @@ export class GeminiCliAdapter implements ILlmProvider {
       const { stdout, exitCode } = await collectCliOutput(
         this.binaryPath,
         ['tool', 'list', '--json'],
-        sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+        this.sanitizedEnv(),
       );
       if (exitCode !== 0 || !stdout.trim()) {
         return this.discoverFromSettingsFile();

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import type { CodexAppServerRequest, CodexAppServerRequestOptions } from './codex-runtime-adapter.js';
+import { filterSecretEnvVars } from '../../security/env-filter.js';
+import { sanitizeRunConfigIntegrityEnv } from '../../cli/run-config-integrity.js';
 
 export interface CodexAppServerClientOptions {
   command?: string | undefined;
@@ -180,7 +182,10 @@ export function createCodexAppServerRequest(
   const ensureServer = (): Promise<void> => {
     if (child !== null && initialization !== null) return initialization;
     const server = spawn(command, ['app-server', '--stdio'], {
-      env: options.env ?? process.env,
+      env: options.env ?? filterSecretEnvVars(
+        sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+        ['OPENAI_API_KEY'],
+      ),
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,

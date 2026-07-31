@@ -156,6 +156,10 @@ export class ClaudeProvider implements ICliProvider {
     return filtered;
   }
 
+  requiredAuthEnvVars(): readonly string[] {
+    return ['ANTHROPIC_API_KEY'];
+  }
+
   supportsStreamJson(): boolean {
     return true;
   }

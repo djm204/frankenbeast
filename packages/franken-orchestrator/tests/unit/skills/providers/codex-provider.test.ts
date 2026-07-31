@@ -121,6 +121,12 @@ describe('CodexProvider', () => {
     });
   });
 
+  // -- requiredAuthEnvVars --------------------------------------------------
+
+  it('requiredAuthEnvVars declares OPENAI_API_KEY', () => {
+    expect(provider.requiredAuthEnvVars?.()).toEqual(['OPENAI_API_KEY']);
+  });
+
   // -- isRateLimited -------------------------------------------------------
 
   it('isRateLimited detects rate limit patterns', () => {

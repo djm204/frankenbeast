@@ -190,6 +190,19 @@ describe('ClaudeCliAdapter', () => {
       expect(env['FRANKENBEAST_SPAWNED']).toBe('1');
     });
 
+    it('strips unrelated secret-shaped env vars but preserves ANTHROPIC_API_KEY', () => {
+      process.env['SOME_UNRELATED_API_KEY'] = 'unrelated-secret';
+      process.env['ANTHROPIC_API_KEY'] = 'anthropic-secret';
+      try {
+        const env = adapter.sanitizedEnv();
+        expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        expect(env['ANTHROPIC_API_KEY']).toBe('anthropic-secret');
+      } finally {
+        delete process.env['SOME_UNRELATED_API_KEY'];
+        delete process.env['ANTHROPIC_API_KEY'];
+      }
+    });
+
     it('strips runtime config integrity state', () => {
       const originalManifest = process.env[RUN_CONFIG_INTEGRITY_ENV];
       const originalSecret = process.env[RUN_CONFIG_INTEGRITY_SECRET_ENV];

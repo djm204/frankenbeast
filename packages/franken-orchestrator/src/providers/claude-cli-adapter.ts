@@ -15,6 +15,7 @@ import { formatHandoff } from './format-handoff.js';
 import { collectCliOutput, extractAuthFields, isCliAvailable } from './discover-skills-helpers.js';
 import { tryExtractTextFromNode } from '../skills/providers/stream-json-utils.js';
 import { sanitizeRunConfigIntegrityEnv } from '../cli/run-config-integrity.js';
+import { filterSecretEnvVars } from '../security/env-filter.js';
 
 function terminateRunningProcess(proc: ChildProcess): void {
   if (proc.exitCode === null && proc.signalCode === null) {
@@ -152,7 +153,10 @@ export class ClaudeCliAdapter implements ILlmProvider {
   }
 
   sanitizedEnv(): Record<string, string> {
-    const env = sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>);
+    const env = filterSecretEnvVars(
+      sanitizeRunConfigIntegrityEnv(process.env as Record<string, string>),
+      ['ANTHROPIC_API_KEY'],
+    );
     for (const key of Object.keys(env)) {
       if (key.startsWith('CLAUDE')) {
         delete env[key];

@@ -2,11 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
-import { CliLlmAdapter } from '../../../src/adapters/cli-llm-adapter.js';
+import { CliLlmAdapter, filterSecretEnvVars, isSecretEnvVarName } from '../../../src/adapters/cli-llm-adapter.js';
 import { setPlainOutput } from '../../../src/logging/beast-logger.js';
 import { AiderProvider } from '../../../src/skills/providers/aider-provider.js';
 import { ClaudeProvider } from '../../../src/skills/providers/claude-provider.js';
 import { CodexProvider } from '../../../src/skills/providers/codex-provider.js';
+import type { ICliProvider } from '../../../src/skills/providers/cli-provider.js';
 
 // --- Mock spawn infrastructure ---
 
@@ -404,6 +405,333 @@ describe('CliLlmAdapter', () => {
           expect(env['CLAUDECODE_PLUGIN']).toBeUndefined();
           expect(env['PATH']).toBe('/usr/bin');
           expect(env['HOME']).toBe('/home/test');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+    });
+
+    describe('secret env var filtering (captureEnv)', () => {
+      it('does not forward env vars whose names look like secrets to the spawned CLI', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          SOME_API_KEY: 'sk-super-secret-value',
+          AWS_SECRET_ACCESS_KEY: 'aws-secret-value',
+          GITHUB_TOKEN: 'ghp_leaked_token',
+          DATABASE_PASSWORD: 'hunter2',
+          NPM_TOKEN: 'npm-secret-token',
+          PATH: '/usr/bin',
+          HOME: '/home/test',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['SOME_API_KEY']).toBeUndefined();
+          expect(env['AWS_SECRET_ACCESS_KEY']).toBeUndefined();
+          expect(env['GITHUB_TOKEN']).toBeUndefined();
+          expect(env['DATABASE_PASSWORD']).toBeUndefined();
+          expect(env['NPM_TOKEN']).toBeUndefined();
+          expect(env['PATH']).toBe('/usr/bin');
+          expect(env['HOME']).toBe('/home/test');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('still forwards non-secret environment configuration the CLI needs to run', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          PATH: '/usr/bin:/bin',
+          HOME: '/home/test',
+          LANG: 'en_US.UTF-8',
+          TERM: 'xterm-256color',
+          npm_config_registry: 'https://registry.npmjs.org/',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['PATH']).toBe('/usr/bin:/bin');
+          expect(env['HOME']).toBe('/home/test');
+          expect(env['LANG']).toBe('en_US.UTF-8');
+          expect(env['TERM']).toBe('xterm-256color');
+          expect(env['npm_config_registry']).toBe('https://registry.npmjs.org/');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves ANTHROPIC_API_KEY for the claude provider (its own required auth var)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          ANTHROPIC_API_KEY: 'anthropic-secret-value',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret-value',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['ANTHROPIC_API_KEY']).toBe('anthropic-secret-value');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves OPENAI_API_KEY for the codex provider (its own required auth var)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          OPENAI_API_KEY: 'openai-secret-value',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret-value',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(codexProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['OPENAI_API_KEY']).toBe('openai-secret-value');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('does not leak OPENAI_API_KEY to the claude provider (not its required auth var)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          OPENAI_API_KEY: 'openai-secret-value',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['OPENAI_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('filters undelimited PGPASSWORD and MYSQL_PWD but keeps plain PWD', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          PGPASSWORD: 'pg-secret-value',
+          MYSQL_PWD: 'mysql-secret-value',
+          PWD: '/home/test/project',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['PGPASSWORD']).toBeUndefined();
+          expect(env['MYSQL_PWD']).toBeUndefined();
+          expect(env['PWD']).toBe('/home/test/project');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves SSH_AUTH_SOCK and SSL_CERT_FILE (capability/config paths, not secrets)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          SSH_AUTH_SOCK: '/tmp/ssh-agent.sock',
+          SSL_CERT_FILE: '/etc/ssl/certs/ca-bundle.crt',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['SSH_AUTH_SOCK']).toBe('/tmp/ssh-agent.sock');
+          expect(env['SSL_CERT_FILE']).toBe('/etc/ssl/certs/ca-bundle.crt');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves DOCKER_CERT_PATH (a directory path, not a secret)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          DOCKER_CERT_PATH: '/home/test/.docker/certs',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['DOCKER_CERT_PATH']).toBe('/home/test/.docker/certs');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves the indexed GIT_CONFIG_COUNT/KEY_n/VALUE_n tuple used to inject git config', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'safe.directory',
+          GIT_CONFIG_VALUE_0: '/workspace',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(claudeProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['GIT_CONFIG_COUNT']).toBe('1');
+          expect(env['GIT_CONFIG_KEY_0']).toBe('safe.directory');
+          expect(env['GIT_CONFIG_VALUE_0']).toBe('/workspace');
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves only ANTHROPIC_API_KEY for aider with no explicit model (default chatModel is Sonnet)', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          ANTHROPIC_API_KEY: 'anthropic-secret',
+          OPENROUTER_API_KEY: 'openrouter-secret',
+          GROQ_API_KEY: 'groq-secret',
+          MISTRAL_API_KEY: 'mistral-secret',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(aiderProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['ANTHROPIC_API_KEY']).toBe('anthropic-secret');
+          expect(env['OPENROUTER_API_KEY']).toBeUndefined();
+          expect(env['GROQ_API_KEY']).toBeUndefined();
+          expect(env['MISTRAL_API_KEY']).toBeUndefined();
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('falls back to the full known-vendor list for aider when the model string is unrecognized', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          OPENROUTER_API_KEY: 'openrouter-secret',
+          GROQ_API_KEY: 'groq-secret',
+          MISTRAL_API_KEY: 'mistral-secret',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(
+            aiderProvider,
+            { ...baseOpts, providerOverrides: { aider: { model: 'some-unrecognized-custom-model' } } },
+            spawnFn,
+          );
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['OPENROUTER_API_KEY']).toBe('openrouter-secret');
+          expect(env['GROQ_API_KEY']).toBe('groq-secret');
+          expect(env['MISTRAL_API_KEY']).toBe('mistral-secret');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('preserves only the active backend vendor key for aider when its model is explicitly overridden', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          GROQ_API_KEY: 'groq-secret',
+          OPENROUTER_API_KEY: 'openrouter-secret',
+          ANTHROPIC_API_KEY: 'anthropic-secret',
+          OPENAI_API_KEY: 'openai-secret',
+        };
+
+        try {
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(
+            aiderProvider,
+            { ...baseOpts, providerOverrides: { aider: { model: 'groq/llama-3.1-70b-versatile' } } },
+            spawnFn,
+          );
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['GROQ_API_KEY']).toBe('groq-secret');
+          expect(env['OPENROUTER_API_KEY']).toBeUndefined();
+          expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+          expect(env['OPENAI_API_KEY']).toBeUndefined();
+        } finally {
+          process.env = originalEnv;
+        }
+      });
+
+      it('lets a custom (pluggable) ICliProvider preserve its own declared auth var', async () => {
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          CUSTOM_PROVIDER_API_KEY: 'custom-secret-value',
+          SOME_UNRELATED_API_KEY: 'unrelated-secret',
+        };
+
+        try {
+          const customProvider: ICliProvider = {
+            name: 'custom',
+            command: 'custom-cli',
+            buildArgs: () => [],
+            normalizeOutput: (raw: string) => raw,
+            estimateTokens: (text: string) => Math.ceil(text.length / 4),
+            isRateLimited: () => false,
+            parseRetryAfter: () => undefined,
+            filterEnv: (env: Record<string, string>) => env,
+            supportsStreamJson: () => false,
+            supportsNativeSessionResume: () => false,
+            defaultContextWindowTokens: () => 128_000,
+            requiredAuthEnvVars: () => ['CUSTOM_PROVIDER_API_KEY'],
+          };
+          const { spawnFn, calls } = createMockSpawn({ stdout: 'ok', exitCode: 0 });
+          const adapter = new CliLlmAdapter(customProvider, baseOpts, spawnFn);
+          await adapter.execute({ prompt: 'test', maxTurns: 1 });
+
+          const env = calls[0]!.options.env as Record<string, string>;
+          expect(env['CUSTOM_PROVIDER_API_KEY']).toBe('custom-secret-value');
+          expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
         } finally {
           process.env = originalEnv;
         }
@@ -1581,6 +1909,22 @@ describe('CliLlmAdapter', () => {
       const rawResponse = await adapter.execute(transformed);
       const response = adapter.transformResponse(rawResponse, 'req-2');
       expect(response.content).toBe('codex says 42');
+    });
+  });
+
+  // Full coverage of the filtering rules lives in
+  // tests/unit/security/env-filter.test.ts, against the module directly.
+  // This just smoke-tests that cli-llm-adapter.js still re-exports the same
+  // implementation (for backward compatibility with existing importers).
+  describe('isSecretEnvVarName / filterSecretEnvVars (re-export smoke test)', () => {
+    it('re-exports the same secret-detection behavior as security/env-filter.js', () => {
+      expect(isSecretEnvVarName('SOME_API_KEY')).toBe(true);
+      expect(isSecretEnvVarName('PATH')).toBe(false);
+    });
+
+    it('re-exports filterSecretEnvVars with the same filtering behavior', () => {
+      const filtered = filterSecretEnvVars({ PATH: '/usr/bin', SOME_API_KEY: 'sk-secret' });
+      expect(filtered).toEqual({ PATH: '/usr/bin' });
     });
   });
 });
