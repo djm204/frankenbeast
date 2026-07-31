@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CliChannel } from '../../../src/channels/cli-channel.js';
 import type { ReadlineAdapter } from '../../../src/channels/cli-channel.js';
 import type { ApprovalRequest } from '../../../src/core/types.js';
-import { redactSecrets } from '../../../src/gateway/approval-prompt-markers.js';
+import { redactAndTruncate, redactSecrets } from '../../../src/gateway/approval-prompt-markers.js';
 
 function makeFakeReadline(answers: string[]): ReadlineAdapter {
   let answerIndex = 0;
@@ -984,7 +984,7 @@ describe('CliChannel', () => {
     expect(prompt).toContain('HTTP_AUTHORIZATION=[REDACTED] ; echo safe_unquoted_2');
   });
 
-  it('redacts non-string primitives (number, boolean, null) for quoted JSON sensitive keys while preserving sibling fields and leaving objects/arrays', async () => {
+  it('redacts non-string primitives and collections for quoted JSON sensitive keys while preserving sibling fields', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
 
@@ -996,7 +996,7 @@ describe('CliChannel', () => {
     expect(prompt).not.toContain(':12345');
     expect(prompt).not.toContain(':true');
     expect(prompt).not.toContain(':null');
-    expect(prompt).toContain('{"password":[REDACTED],"api_key":[REDACTED],"secret":[REDACTED],"dryRun":false,"db_password":{"nested":"val"}}');
+    expect(prompt).toContain('{"password":[REDACTED],"api_key":[REDACTED],"secret":[REDACTED],"dryRun":false,"db_password":[REDACTED]}');
   });
 
   it('redacts armored private keys whose final base64 line is shorter than twelve characters', async () => {
@@ -2154,5 +2154,267 @@ describe('CliChannel', () => {
     expect(redacted).toBe(
       'PASS\\u001b[31mWORD=[REDACTED] API\u001b[32m_KEY=[REDACTED] COLOR\u001b[34mWAY=visible-colorway',
     );
+  });
+
+  it('preserves general command-shaped lines after unmatched private-key markers', () => {
+    expect(redactAndTruncate('-----BEGIN PRIVATE KEY-----\nterraform destroy -auto-approve', { redact: true }))
+      .toBe('[REDACTED]\nterraform destroy -auto-approve');
+    expect(redactAndTruncate('-----BEGIN PRIVATE KEY-----\naws s3 rm s3://synthetic-bucket --recursive', { redact: true }))
+      .toBe('[REDACTED]\naws s3 rm s3://synthetic-bucket --recursive');
+  });
+
+  it('balances substitutions in unquoted sensitive flag values', () => {
+    expect(redactSecrets('deploy --password violet$(reboot;shutdown)quartz --verbose'))
+      .toBe('deploy --password [REDACTED]$(reboot;shutdown)[REDACTED] --verbose');
+  });
+
+  it('balances substitutions in standalone Bearer credentials', () => {
+    expect(redactSecrets('Bearer violet$(reboot;shutdown)quartz && echo visible_bearer_context'))
+      .toBe('Bearer [REDACTED]$(reboot;shutdown)[REDACTED] && echo visible_bearer_context');
+  });
+
+  it('does not rematch substitution-first standalone Bearer credentials in the fallback pass', () => {
+    expect(redactSecrets('Bearer $(echo hi)secret'))
+      .toBe('Bearer $(echo hi)[REDACTED]');
+  });
+
+  it('balances substitutions in inline unquoted headers', () => {
+    expect(redactSecrets('curl -H Authorization:violet$(reboot;shutdown)quartz https://safe.example'))
+      .toBe('curl -H Authorization:[REDACTED]$(reboot;shutdown)[REDACTED] https://safe.example');
+  });
+
+  it('balances substitutions in unquoted curl credentials', () => {
+    expect(redactSecrets('curl --user alice:violet$(reboot;shutdown)quartz https://safe.example'))
+      .toBe('curl --user alice:[REDACTED]$(reboot;shutdown)[REDACTED] https://safe.example');
+  });
+
+  it('does not rematch expression-aware unquoted curl credentials in the fallback pass', () => {
+    expect(redactSecrets('curl -u user:$(echo hi)secret x'))
+      .toBe('curl -u user:$(echo hi)[REDACTED] x');
+  });
+
+  it('preserves substitutions in structured-header string values', () => {
+    expect(redactSecrets('headers=[{"name":"Authorization","value":"violet$(reboot;shutdown)quartz"}]'))
+      .toBe('headers=[{"name":"Authorization","value":"[REDACTED]$(reboot;shutdown)[REDACTED]"}]');
+  });
+
+  it('preserves substitutions in escaped JSON assignments', () => {
+    expect(redactSecrets('body={\\"password\\":\\"violet$(reboot;shutdown)quartz\\"}'))
+      .toBe('body={\\"password\\":\\"[REDACTED]$(reboot;shutdown)[REDACTED]\\"}');
+  });
+
+  it('redacts curl passwords for UPN usernames', () => {
+    expect(redactSecrets('curl --user user@example.com:synthetic-password https://safe.example'))
+      .toBe('curl --user user@example.com:[REDACTED] https://safe.example');
+  });
+
+  it('redacts collection-valued sensitive JSON properties', () => {
+    expect(redactSecrets('{"password":["violet","quartz"],"safe":"visible"}'))
+      .toBe('{"password":[REDACTED],"safe":"visible"}');
+    expect(redactSecrets('{"password":{"primary":"violet"},"safe":"visible"}'))
+      .toBe('{"password":[REDACTED],"safe":"visible"}');
+  });
+
+  it('parses case-pattern terminators inside command substitutions', () => {
+    expect(redactSecrets('PASSWORD="violet$(case x in x) reboot;; esac)quartz"'))
+      .toBe('PASSWORD="[REDACTED]$(case x in x) reboot;; esac)[REDACTED]"');
+  });
+
+  it('parses optional opening parentheses in Bash case patterns without nesting the substitution', () => {
+    expect(redactSecrets('PASSWORD="violet$(case x in (x) reboot;; esac)quartz"'))
+      .toBe('PASSWORD="[REDACTED]$(case x in (x) reboot;; esac)[REDACTED]"');
+  });
+
+  it('parses escaped case-pattern characters inside command substitutions', () => {
+    expect(redactSecrets(String.raw`PASSWORD="violet$(case x in x\)) reboot;; esac)quartz"`))
+      .toBe(String.raw`PASSWORD="[REDACTED]$(case x in x\)) reboot;; esac)[REDACTED]"`);
+  });
+
+  it('parses quoted multi-pattern case terminators inside command substitutions', () => {
+    expect(redactSecrets('PASSWORD="violet$(case "$x" in x|y) reboot;; esac)quartz"'))
+      .toBe('PASSWORD="[REDACTED]$(case "$x" in x|y) reboot;; esac)[REDACTED]"');
+    expect(redactSecrets('PASSWORD="violet$(case "$x" in x | "y z" ) reboot;; esac)quartz"'))
+      .toBe('PASSWORD="[REDACTED]$(case "$x" in x | "y z" ) reboot;; esac)[REDACTED]"');
+  });
+
+  it('parses every valid Bash case arm terminator inside command substitutions', () => {
+    for (const terminator of [';;', ';&', ';;&']) {
+      const expression = `$(case "$x" in x) reboot${terminator} y) shutdown;; esac)`;
+      expect(redactSecrets(`PASSWORD="violet${expression}quartz"`))
+        .toBe(`PASSWORD="[REDACTED]${expression}[REDACTED]"`);
+    }
+  });
+
+  it('keeps case-pattern parsing work linear within the bounded value size', () => {
+    const arms = 'x) :;;& '.repeat(2_048);
+    const input = `PASSWORD="violet$(case x in ${arms}z) reboot;; esac)quartz"`;
+    let slicedCharacters = 0;
+    const originalSlice = String.prototype.slice;
+    const sliceSpy = vi.spyOn(String.prototype, 'slice').mockImplementation(function (start, end) {
+      if (this.toString() === input) {
+        const normalizedStart = start < 0 ? Math.max(input.length + start, 0) : Math.min(start, input.length);
+        const normalizedEnd = end === undefined
+          ? input.length
+          : end < 0 ? Math.max(input.length + end, 0) : Math.min(end, input.length);
+        slicedCharacters += Math.max(0, normalizedEnd - normalizedStart);
+      }
+      return originalSlice.call(this, start, end);
+    });
+
+    try {
+      expect(redactSecrets(input))
+        .toBe(`PASSWORD="[REDACTED]$(case x in ${arms}z) reboot;; esac)[REDACTED]"`);
+      expect(slicedCharacters).toBeLessThanOrEqual(input.length * 64);
+    } finally {
+      sliceSpy.mockRestore();
+    }
+  });
+
+  it('keeps case-pattern parsing work linear across many command substitutions', () => {
+    const substitutions = '$(x)'.repeat(1_024);
+    const input = `PASSWORD="violet${substitutions}quartz"`;
+    let classifiedCharacters = 0;
+    const originalTest = RegExp.prototype.test;
+    const testSpy = vi.spyOn(RegExp.prototype, 'test').mockImplementation(function (value) {
+      if (this.source === '\\s' && typeof value === 'string' && value.length === 1) {
+        classifiedCharacters++;
+      }
+      return originalTest.call(this, value);
+    });
+
+    try {
+      expect(redactSecrets(input))
+        .toBe(`PASSWORD="[REDACTED]${substitutions}[REDACTED]"`);
+      expect(classifiedCharacters).toBeLessThanOrEqual(input.length * 16);
+    } finally {
+      testSpy.mockRestore();
+    }
+  });
+
+  it('does not treat ordinary case and in command arguments as a case-pattern terminator', () => {
+    expect(redactSecrets('PASSWORD="violet$(echo case in foo)quartz"'))
+      .toBe('PASSWORD="[REDACTED]$(echo case in foo)[REDACTED]"');
+  });
+
+  it('does not treat esac command arguments as case reserved-word terminators', () => {
+    for (const body of [
+      'echo esac',
+      'printf %s esac',
+      'command echo esac',
+    ]) {
+      const expression = `$(case x in x) ${body};; y) reboot;; esac)`;
+      expect(redactSecrets(`PASSWORD="violet${expression}quartz"`))
+        .toBe(`PASSWORD="[REDACTED]${expression}[REDACTED]"`);
+    }
+  });
+
+  it('redacts all supported multi-token authorization schemes', () => {
+    for (const scheme of ['Basic', 'Bearer', 'Digest', 'OAuth', 'HOBA', 'Mutual', 'Negotiate', 'VAPID', 'SCRAM-SHA-256', 'AWS4-HMAC-SHA256']) {
+      expect(redactSecrets(`AUTH=${scheme} synthetic-credential && echo visible_scheme_context`))
+        .toBe('AUTH=[REDACTED] && echo visible_scheme_context');
+    }
+  });
+
+  it('recognizes PowerShell environment-variable assignments', () => {
+    expect(redactSecrets('$env:PASSWORD = \'synthetic-password\''))
+      .toBe('$env:PASSWORD = \'[REDACTED]\'');
+    expect(redactSecrets('$Env:API_KEY = "synthetic-key"'))
+      .toBe('$Env:API_KEY = "[REDACTED]"');
+    expect(redactSecrets('$PASSWORD="synthetic-password"'))
+      .toBe('$PASSWORD="[REDACTED]"');
+  });
+
+  it('consumes PowerShell-native escapes in quoted assignment values', () => {
+    expect(redactSecrets('$env:PASSWORD=\'violet\'\'quartz\' && echo visible_single_quote_context'))
+      .toBe('$env:PASSWORD=\'[REDACTED]\' && echo visible_single_quote_context');
+    expect(redactSecrets('$env:PASSWORD="violet`"quartz" && echo visible_double_quote_context'))
+      .toBe('$env:PASSWORD="[REDACTED]" && echo visible_double_quote_context');
+  });
+
+  it('treats trailing backslashes as literals in PowerShell quoted assignments', () => {
+    expect(redactSecrets(String.raw`$env:PASSWORD='violet\'; reboot`))
+      .toBe(`$env:PASSWORD='[REDACTED]'; reboot`);
+    expect(redactSecrets(String.raw`$env:PASSWORD="violet\"; reboot`))
+      .toBe(`$env:PASSWORD="[REDACTED]"; reboot`);
+  });
+
+  it('preserves executable interpolation in double-quoted PowerShell assignments', () => {
+    expect(redactSecrets('$env:PASSWORD="violet$(reboot)quartz"'))
+      .toBe('$env:PASSWORD="[REDACTED]$(reboot)[REDACTED]"');
+  });
+
+  it('preserves complete unquoted PowerShell command substitutions', () => {
+    expect(redactSecrets('$env:PASSWORD=$(reboot)'))
+      .toBe('$env:PASSWORD=$(reboot)');
+    expect(redactSecrets('$PASSWORD=$(reboot)'))
+      .toBe('$PASSWORD=$(reboot)');
+    expect(redactSecrets('$env:PASSWORD=$(Get-Content secret)'))
+      .toBe('$env:PASSWORD=$(Get-Content secret)');
+    expect(redactSecrets('$env:PASSWORD=violet$(Get-Content secret)quartz && echo visible_unquoted_ps_context'))
+      .toBe('$env:PASSWORD=[REDACTED]$(Get-Content secret)[REDACTED] && echo visible_unquoted_ps_context');
+  });
+
+  it('treats PowerShell backticks as escapes while preserving dollar-paren interpolation', () => {
+    expect(redactSecrets('$env:PASSWORD="violet`nquartz`nstone" && echo visible_escape_context'))
+      .toBe('$env:PASSWORD="[REDACTED]" && echo visible_escape_context');
+    expect(redactSecrets('$env:PASSWORD="violet`n$(reboot)`tquartz"'))
+      .toBe('$env:PASSWORD="[REDACTED]$(reboot)[REDACTED]"');
+    expect(redactSecrets('$env:PASSWORD="violet`ignored`quartz"'))
+      .toBe('$env:PASSWORD="[REDACTED]"');
+  });
+
+  it('keeps substitution-first assignment commands visible', () => {
+    expect(redactSecrets('PASSWORD=$(cat /synthetic/input) && echo visible_assignment_context'))
+      .toBe('PASSWORD=$(cat /synthetic/input) && echo visible_assignment_context');
+  });
+
+  it('consumes escaped physical newlines in unquoted assignments', () => {
+    for (const newline of ['\n', '\r\n', '\r']) {
+      expect(redactSecrets(`PASSWORD=violet\\${newline}quartz && echo visible_continuation_context`))
+        .toBe('PASSWORD=[REDACTED] && echo visible_continuation_context');
+    }
+  });
+
+  it('keeps commands after even Bash backslash runs and physical newlines visible', () => {
+    for (const newline of ['\n', '\r\n', '\r']) {
+      expect(redactSecrets(`PASSWORD=violet\\\\${newline}rm -rf /tmp/synthetic-even-run`))
+        .toBe(`PASSWORD=[REDACTED]${newline}rm -rf /tmp/synthetic-even-run`);
+    }
+  });
+
+  it('uses PowerShell boundaries after backtick-newline escapes without hiding commands', () => {
+    for (const newline of ['\n', '\r\n', '\r']) {
+      expect(redactSecrets(`$env:PASSWORD=violet\`${newline}; Remove-Item /tmp/synthetic-ps-boundary`))
+        .toBe('$env:PASSWORD=[REDACTED]; Remove-Item /tmp/synthetic-ps-boundary');
+      expect(redactSecrets(`$env:PASSWORD=violet$(Get-Content synthetic)\`${newline}; Restart-Computer`))
+        .toBe('$env:PASSWORD=[REDACTED]$(Get-Content synthetic)[REDACTED]; Restart-Computer');
+    }
+  });
+
+  it('redacts continued YAML plain scalars', () => {
+    expect(redactSecrets('password: violet\n  quartz\nsafe: visible'))
+      .toBe('password: [REDACTED]\n  [REDACTED]\nsafe: visible');
+  });
+
+  it('does not redact sibling YAML mapping keys as plain-scalar continuations', () => {
+    expect(redactSecrets('password: violet\ncommand: reboot'))
+      .toBe('password: [REDACTED]\ncommand: reboot');
+    expect(redactSecrets('- password: violet\n  command: reboot'))
+      .toBe('- password: [REDACTED]\n  command: reboot');
+    expect(redactSecrets('- password: violet\n  nested:\n    command: shutdown'))
+      .toBe('- password: [REDACTED]\n  nested:\n    command: shutdown');
+  });
+
+  it('preserves YAML plain-scalar physical line delimiters exactly', () => {
+    expect(redactSecrets('safe: visible\r\ncommand: reboot\rtail: visible'))
+      .toBe('safe: visible\r\ncommand: reboot\rtail: visible');
+    expect(redactSecrets('password: violet\r\n  quartz\rcommand: reboot'))
+      .toBe('password: [REDACTED]\r\n  [REDACTED]\rcommand: reboot');
+  });
+
+  it('recognizes Bash append scalar and array assignments', () => {
+    expect(redactSecrets('PASSWORD+=synthetic-password')).toBe('PASSWORD+=[REDACTED]');
+    expect(redactSecrets('declare PASSWORD+=synthetic-password')).toBe('declare PASSWORD+=[REDACTED]');
+    expect(redactSecrets('PASSWORD+=(violet quartz)')).toBe('PASSWORD+=([REDACTED])');
   });
 });

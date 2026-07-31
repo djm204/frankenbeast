@@ -269,8 +269,23 @@ function redactUrlQueryParams(text: string): string {
 }
 
 function redactCurlUserCredentials(text: string): string {
-  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:\$'([A-Za-z0-9_.-]+:)((?:\\.|[^'\\\r\n])*)'|"([A-Za-z0-9_.-]+:)((?:\\.|[^"\\\r\n])*)"|'([A-Za-z0-9_.-]+:)([^'\r\n]*)'|([A-Za-z0-9_.-]+:)([^\s"'\r\n&|><;]+))/giu;
-  return text.replace(curlUserRegex, (_match, flag, separator, ansiUser, _ansiPassword, doubleUser, doublePassword, singleUser, _singlePassword, bareUser, barePassword) => {
+  const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:\$'([^:'\r\n]+:)((?:\\.|[^'\\\r\n])*)'|"([^:"\r\n]+:)((?:\\.|[^"\\\r\n])*)"|'([^:'\r\n]+:)([^'\r\n]*)'|([^:\s"'\r\n]+:)([^\s"'\r\n&|><;]+))/giu;
+  let result = text;
+  const bareStart = /(--user|--proxy-user|-u|-U)(\s+|=)([^:\s"'\r\n]+:)/giu;
+  let output = '';
+  let cursor = 0;
+  for (const match of result.matchAll(bareStart)) {
+    if (match.index < cursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /[\s"'\r\n&|><;]/u);
+    const password = result.slice(valueStart, valueEnd);
+    if (!isShellExpression(password)) continue;
+    output += result.slice(cursor, match.index);
+    output += `${match[1] as string}${match[2] as string}${match[3] as string}${redactPasswordLiteralFragments(password)}`;
+    cursor = valueEnd;
+  }
+  result = output + result.slice(cursor);
+  result = result.replace(curlUserRegex, (_match, flag, separator, ansiUser, _ansiPassword, doubleUser, doublePassword, singleUser, _singlePassword, bareUser, barePassword, offset, whole) => {
     if (typeof ansiUser === 'string') return `${flag}${separator}$'${ansiUser}[REDACTED]'`;
     if (typeof doubleUser === 'string') {
       const redactedPassword = isShellExpression(doublePassword)
@@ -279,11 +294,148 @@ function redactCurlUserCredentials(text: string): string {
       return `${flag}${separator}"${doubleUser}${redactedPassword}"`;
     }
     if (typeof singleUser === 'string') return `${flag}${separator}'${singleUser}[REDACTED]'`;
+    if (
+      typeof barePassword === 'string'
+      && typeof bareUser === 'string'
+      && (
+        barePassword.includes('[REDACTED]$(')
+        || (
+          typeof offset === 'number'
+          && typeof whole === 'string'
+          && shellExpressionSpans(whole.slice(offset + flag.length + separator.length + bareUser.length))[0]?.[0] === 0
+        )
+      )
+    ) {
+      return `${flag}${separator}${bareUser as string}${barePassword}`;
+    }
     const redactedPassword = isShellExpression(barePassword)
       ? redactPasswordLiteralFragments(barePassword)
       : '[REDACTED]';
     return `${flag}${separator}${bareUser as string}${redactedPassword}`;
   });
+  return result;
+}
+
+type CasePhase = 'selector' | 'await-in' | 'pattern' | 'body';
+
+function createCasePatternTracker(): (value: string, index: number) => boolean {
+  const cases: Array<{ phase: CasePhase; hasPattern: boolean; mayEnd: boolean }> = [];
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  let word = '';
+  let wordStartedAtCommandBoundary = false;
+  let commandBoundary = true;
+  let skippedTerminatorCharacters = 0;
+
+  const finishWord = (): void => {
+    if (word.length === 0) return;
+    const activeCase = cases.at(-1);
+    if (activeCase?.phase === 'selector') {
+      activeCase.phase = 'await-in';
+    } else if (activeCase?.phase === 'await-in' && word === 'in') {
+      activeCase.phase = 'pattern';
+      activeCase.hasPattern = false;
+      activeCase.mayEnd = false;
+    } else if (activeCase?.phase === 'pattern' && activeCase.mayEnd && word === 'esac') {
+      cases.pop();
+    } else if (
+      activeCase?.phase === 'body'
+      && wordStartedAtCommandBoundary
+      && word === 'esac'
+    ) {
+      cases.pop();
+    } else if (wordStartedAtCommandBoundary && word === 'case') {
+      cases.push({ phase: 'selector', hasPattern: false, mayEnd: false });
+    }
+    word = '';
+  };
+
+  return (value: string, index: number): boolean => {
+    const character = value[index] ?? '';
+    const activeCase = cases.at(-1);
+
+    if (skippedTerminatorCharacters > 0) {
+      skippedTerminatorCharacters--;
+      return false;
+    }
+    if (escaped) {
+      word += character;
+      if (activeCase?.phase === 'pattern') activeCase.hasPattern = true;
+      escaped = false;
+      return false;
+    }
+    if (character === '\\' && quote !== "'") {
+      if (word.length === 0) wordStartedAtCommandBoundary = commandBoundary;
+      word += character;
+      escaped = true;
+      commandBoundary = false;
+      return false;
+    }
+    if (quote !== undefined) {
+      word += character;
+      if (activeCase?.phase === 'pattern') activeCase.hasPattern = true;
+      if (character === quote) quote = undefined;
+      return false;
+    }
+    if (character === '"' || character === "'") {
+      if (word.length === 0) wordStartedAtCommandBoundary = commandBoundary;
+      word += character;
+      quote = character;
+      commandBoundary = false;
+      return false;
+    }
+    if (/\s/u.test(character)) {
+      finishWord();
+      if (character === '\r' || character === '\n') commandBoundary = true;
+      return false;
+    }
+
+    const currentCase = cases.at(-1);
+    if (currentCase?.phase === 'pattern') {
+      if (character === '(' && !currentCase.hasPattern) {
+        return true;
+      } else if (character === ')' && currentCase.hasPattern) {
+        finishWord();
+        if (cases.at(-1) === currentCase) {
+          currentCase.phase = 'body';
+          currentCase.mayEnd = false;
+          commandBoundary = true;
+          return true;
+        }
+      } else if (character !== '|') {
+        if (word.length === 0) wordStartedAtCommandBoundary = commandBoundary;
+        word += character;
+        currentCase.hasPattern = true;
+        commandBoundary = false;
+      }
+      return false;
+    }
+
+    if (currentCase?.phase === 'body' && character === ';') {
+      finishWord();
+      const terminatorLength = value[index + 1] === ';' && value[index + 2] === '&'
+        ? 3
+        : value[index + 1] === ';' || value[index + 1] === '&' ? 2 : 0;
+      if (terminatorLength > 0) {
+        currentCase.phase = 'pattern';
+        currentCase.hasPattern = false;
+        currentCase.mayEnd = true;
+        commandBoundary = true;
+        skippedTerminatorCharacters = terminatorLength - 1;
+        return false;
+      }
+    }
+
+    if (/[;&|()]/u.test(character)) {
+      finishWord();
+      commandBoundary = true;
+      return false;
+    }
+    if (word.length === 0) wordStartedAtCommandBoundary = commandBoundary;
+    word += character;
+    commandBoundary = false;
+    return false;
+  };
 }
 
 function shellExpressionSpans(val: string): Array<readonly [number, number]> {
@@ -296,17 +448,24 @@ function shellExpressionSpans(val: string): Array<readonly [number, number]> {
     if (precedingBackslashes % 2 === 1) continue;
     const opener = val.slice(start, start + 2);
     if (opener === '$(' || opener === '<(' || opener === '>(') {
+      const isCasePatternTerminator = createCasePatternTracker();
       let depth = 1;
       let quote: '"' | "'" | undefined;
       for (let index = start + 2; index < val.length; index++) {
+        const casePatternTerminator = isCasePatternTerminator(val, index);
         if (val[index] === '\\') {
+          if (index + 1 < val.length) isCasePatternTerminator(val, index + 1);
           index++;
         } else if (quote !== undefined) {
           if (val[index] === quote) quote = undefined;
         } else if (val[index] === '"' || val[index] === "'") {
           quote = val[index] as '"' | "'";
+        } else if (val[index] === '(' && casePatternTerminator) {
+          continue;
         } else if (val[index] === '(') {
           depth++;
+        } else if (val[index] === ')' && casePatternTerminator) {
+          continue;
         } else if (val[index] === ')' && --depth === 0) {
           spans.push([start, index + 1]);
           start = index;
@@ -343,6 +502,7 @@ function shellExpressionSpans(val: string): Array<readonly [number, number]> {
 
 function shellValueBoundary(text: string, start: number, boundary: RegExp): number {
   const chunkSize = 65_536;
+  let isCasePatternTerminator = createCasePatternTracker();
   let expression: 'paren' | 'brace' | 'backtick' | undefined;
   let parenDepth = 0;
   let quote: '"' | "'" | undefined;
@@ -361,6 +521,7 @@ function shellValueBoundary(text: string, start: number, boundary: RegExp): numb
         const opener = text.slice(index, index + 2);
         if (!escapedOpener && (opener === '$(' || opener === '<(' || opener === '>(')) {
           expression = 'paren';
+          isCasePatternTerminator = createCasePatternTracker();
           parenDepth = 1;
           quote = undefined;
           escaped = false;
@@ -383,6 +544,16 @@ function shellValueBoundary(text: string, start: number, boundary: RegExp): numb
           firstExpressionBoundary = undefined;
           continue;
         }
+        if (
+          character === '\\'
+          && literalBackslashes % 2 === 0
+          && (text[index + 1] === '\n' || text[index + 1] === '\r')
+        ) {
+          if (text[index + 1] === '\r' && text[index + 2] === '\n') index += 2;
+          else index++;
+          literalBackslashes = 0;
+          continue;
+        }
         if (boundary.test(character)) return index;
         literalBackslashes = character === '\\' ? literalBackslashes + 1 : 0;
         continue;
@@ -392,6 +563,8 @@ function shellValueBoundary(text: string, start: number, boundary: RegExp): numb
         openingDelimiter = false;
         continue;
       }
+      const casePatternTerminator = expression === 'paren'
+        && isCasePatternTerminator(text, index);
       if (firstExpressionBoundary === undefined && boundary.test(character)) {
         firstExpressionBoundary = index;
       }
@@ -417,8 +590,12 @@ function shellValueBoundary(text: string, start: number, boundary: RegExp): numb
       }
       if (character === '"' || character === "'") {
         quote = character;
+      } else if (character === '(' && casePatternTerminator) {
+        continue;
       } else if (character === '(') {
         parenDepth++;
+      } else if (character === ')' && casePatternTerminator) {
+        continue;
       } else if (character === ')' && --parenDepth === 0) {
         expression = undefined;
       }
@@ -519,7 +696,7 @@ function redactArrayLiteralFragments(body: string): string {
 const MAX_SENSITIVE_ARRAY_BODY_LENGTH = 65_536;
 
 function redactSensitiveArrayAssignments(text: string): string {
-  const assignmentStart = /(?:^|[\s{,;(])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*[:=]\s*\(/gmu;
+  const assignmentStart = /(?:^|[\s{,;(])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*(?:\+=|[:=])\s*\(/gmu;
   let result = '';
   let cursor = 0;
 
@@ -598,8 +775,11 @@ function redactEscapedDoubleQuotedAssignments(text: string): string {
     }
 
     if (closingStart < 0) continue;
+    const value = text.slice(valueStart, closingStart);
     result += text.slice(cursor, match.index);
-    result += `${match[1]}[REDACTED]${text.slice(closingStart, closingStart + openingSlashCount + 1)}`;
+    result += `${match[1]}${
+      isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'
+    }${text.slice(closingStart, closingStart + openingSlashCount + 1)}`;
     cursor = closingStart + openingSlashCount + 1;
   }
 
@@ -692,10 +872,15 @@ function redactCompleteStructuredHeaderObject(object: string): string {
     const prefix = match[1] as string;
     const value = match[2] as string;
     const quote = value[0] === '"' || value[0] === "'" ? value[0] : '';
+    const content = quote === '' ? value : value.slice(1, -1);
     replacements.push({
       start: match.index,
       end: match.index + match[0].length,
-      value: `${prefix}${quote}[REDACTED]${quote}`,
+      value: `${prefix}${quote}${
+        quote !== "'" && isShellExpression(content)
+          ? redactPasswordLiteralFragments(content)
+          : '[REDACTED]'
+      }${quote}`,
     });
   }
   const collectionProperty = /(["']value["']\s*:\s*)(?=[\[{])/giu;
@@ -901,6 +1086,20 @@ function redactAuthorizationHeaders(text: string): string {
   );
 
   // 6. Inline unquoted header argument: Authorization:val, Cookie:val, etc.
+  const inlineHeaderStart = new RegExp(`(?<!["'])(\\b${headers}\\s*:\\s*)`, 'giu');
+  let inlineResult = '';
+  let inlineCursor = 0;
+  for (const match of result.matchAll(inlineHeaderStart)) {
+    if (match.index < inlineCursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /[\s"'\r\n&|><;]/u);
+    const value = result.slice(valueStart, valueEnd);
+    if (!isShellExpression(value)) continue;
+    inlineResult += result.slice(inlineCursor, match.index);
+    inlineResult += `${match[1] as string}${redactHeaderLiteralFragments(value)}`;
+    inlineCursor = valueEnd;
+  }
+  result = inlineResult + result.slice(inlineCursor);
   result = result.replace(
     new RegExp(`(?<!["'])(\\b${headers}\\s*:\\s*)(?!\\s*\\\[REDACTED\\\])([^\\s"'\r\n&|><;]+)`, 'giu'),
     (_match, prefix, val) => `${prefix as string}${
@@ -938,6 +1137,9 @@ function redactShellScalarLine(content: string, withinShellContext = false): str
 }
 
 function redactYamlMultilineBlocks(text: string): string {
+  if (!/^[ +\-]?\s*["']?[A-Za-z0-9_-]+["']?\s*:\s*[|>]/mu.test(text)) {
+    return text;
+  }
   const lines = text.split(/\r\n|\n|\r/u);
   const out: string[] = [];
   let inRedactedBlock = false;
@@ -1002,6 +1204,182 @@ function redactYamlMultilineBlocks(text: string): string {
   return out.join('\n');
 }
 
+function redactYamlPlainScalarContinuations(text: string): string {
+  const segments = text.split(/(\r\n|\n|\r)/u);
+  const lines = segments.filter((_segment, index) => index % 2 === 0);
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index]?.match(/^([ +\-]?)(\s*)(["']?)([A-Za-z0-9_-]+)\3\s*:\s*(?![|>"'{\[])(\S.*)$/u);
+    if (match?.[4] === undefined || !isSensitiveKeyToken(match[4])) continue;
+    const propertyIndent = (match[2] ?? '').length;
+    for (let continuation = index + 1; continuation < lines.length; continuation++) {
+      const line = lines[continuation] ?? '';
+      if (line.trim().length === 0) continue;
+      const content = /^[+\-]/u.test(line) ? line.slice(1) : line;
+      const indent = content.match(/^\s*/u)?.[0].length ?? 0;
+      if (indent <= propertyIndent) break;
+      const scalarContent = content.slice(indent);
+      if (/^(?:-\s+)?(?:[A-Za-z0-9_.-]+|"[^"\r\n]+"|'[^'\r\n]+')\s*:(?:\s|$)/u.test(scalarContent)) {
+        break;
+      }
+      const diffPrefix = /^[+\-]/u.test(line) ? line[0] ?? '' : '';
+      lines[continuation] = `${diffPrefix}${content.slice(0, indent)}[REDACTED]`;
+    }
+  }
+  for (let index = 0; index < lines.length; index++) {
+    segments[index * 2] = lines[index] ?? '';
+  }
+  return segments.join('');
+}
+
+function redactSensitiveJsonCollections(text: string): string {
+  const propertyStart = /"((?:[^"\\\r\n]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))+)"\s*:\s*(?=[\[{])/gu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(propertyStart)) {
+    const key = match[1];
+    if (
+      key === undefined
+      || !isSensitiveKeyToken(decodeJsonKeyEscapes(key))
+      || match.index < cursor
+    ) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = balancedStructuredValueEnd(text, valueStart);
+    if (valueEnd === undefined) continue;
+    result += text.slice(cursor, valueStart) + '[REDACTED]';
+    cursor = valueEnd;
+  }
+  return result + text.slice(cursor);
+}
+
+function redactPowerShellDoubleQuotedFragments(value: string): string {
+  const spans: Array<readonly [number, number]> = [];
+  for (let start = 0; start < value.length - 1; start++) {
+    if (value[start] === '`') {
+      start++;
+      continue;
+    }
+    if (value[start] !== '$' || value[start + 1] !== '(') continue;
+    let depth = 1;
+    let quote: '"' | "'" | undefined;
+    for (let index = start + 2; index < value.length; index++) {
+      const character = value[index];
+      if (character === '`') {
+        index++;
+      } else if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '(') {
+        depth++;
+      } else if (character === ')' && --depth === 0) {
+        spans.push([start, index + 1]);
+        start = index;
+        break;
+      }
+    }
+  }
+
+  let result = '';
+  let cursor = 0;
+  for (const [start, end] of spans) {
+    if (start > cursor) result += '[REDACTED]';
+    result += value.slice(start, end);
+    cursor = end;
+  }
+  if (cursor < value.length) result += '[REDACTED]';
+  return result;
+}
+
+function powerShellUnquotedValueBoundary(text: string, start: number): number {
+  const chunkSize = 65_536;
+  let parenDepth = 0;
+  let quote: '"' | "'" | undefined;
+  let firstExpressionBoundary: number | undefined;
+
+  for (let chunkStart = start; chunkStart < text.length; chunkStart += chunkSize) {
+    const chunkEnd = Math.min(text.length, chunkStart + chunkSize);
+    for (let index = chunkStart; index < chunkEnd; index++) {
+      const character = text[index] ?? '';
+      if (character === '`') {
+        if (text[index + 1] === '\r' && text[index + 2] === '\n') index += 2;
+        else if (index + 1 < text.length) index++;
+        continue;
+      }
+      if (parenDepth === 0) {
+        if (character === '$' && text[index + 1] === '(') {
+          parenDepth = 1;
+          quote = undefined;
+          firstExpressionBoundary = undefined;
+          index++;
+          continue;
+        }
+        if (/[\s;&|<>]/u.test(character)) return index;
+        continue;
+      }
+      if (firstExpressionBoundary === undefined && /[\s;&|<>]/u.test(character)) {
+        firstExpressionBoundary = index;
+      }
+      if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '(') {
+        parenDepth++;
+      } else if (character === ')' && --parenDepth === 0) {
+        firstExpressionBoundary = undefined;
+      }
+    }
+  }
+  return parenDepth > 0 && firstExpressionBoundary !== undefined
+    ? firstExpressionBoundary
+    : text.length;
+}
+
+function redactPowerShellAssignments(text: string): string {
+  const assignmentStart = /(\$(?:env:)?([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*)/giu;
+  let result = '';
+  let cursor = 0;
+
+  for (const match of text.matchAll(assignmentStart)) {
+    if (match.index < cursor || match[2] === undefined || !isSensitiveKeyToken(match[2])) continue;
+    const valueStart = match.index + match[0].length;
+    const ansiSingleQuoted = text.startsWith("$'", valueStart);
+    const quote = ansiSingleQuoted ? "'" : text[valueStart];
+    let valueEnd: number;
+
+    if (quote === "'" || quote === '"') {
+      const contentStart = valueStart + (ansiSingleQuoted ? 2 : 1);
+      valueEnd = contentStart;
+      for (; valueEnd < text.length; valueEnd++) {
+        const character = text[valueEnd];
+        if (quote === '"' && character === '`') {
+          valueEnd++;
+        } else if (quote === "'" && character === "'" && text[valueEnd + 1] === "'") {
+          valueEnd++;
+        } else if (character === quote) {
+          valueEnd++;
+          break;
+        } else if (character === '\r' || character === '\n') {
+          break;
+        }
+      }
+    } else {
+      valueEnd = powerShellUnquotedValueBoundary(text, valueStart);
+    }
+
+    const value = text.slice(valueStart, valueEnd);
+    const redactedValue = quote === '"' && value.endsWith('"')
+      ? `"${redactPowerShellDoubleQuotedFragments(value.slice(1, -1))}"`
+      : quote === "'" && value.endsWith("'")
+        ? `${ansiSingleQuoted ? "$'" : "'"}[REDACTED]'`
+        : redactPowerShellDoubleQuotedFragments(value);
+    result += text.slice(cursor, match.index) + match[0] + redactedValue;
+    cursor = valueEnd;
+  }
+
+  return result + text.slice(cursor);
+}
+
 export function redactSecrets(text: string, options?: { isTruncatedTail?: boolean }): string {
   const isTruncatedTail = options?.isTruncatedTail ?? false;
   let result = text;
@@ -1033,13 +1411,42 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   result = redactAuthorizationHeaders(result);
 
   // 6. Standalone Bearer tokens outside Authorization header (including short/single-char tokens)
+  const standaloneBearerStart = /\b(Bearer\s+)/giu;
+  let bearerResult = '';
+  let bearerCursor = 0;
+  for (const match of result.matchAll(standaloneBearerStart)) {
+    if (match.index < bearerCursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /[\s"'\r\n&|><;]/u);
+    const credential = result.slice(valueStart, valueEnd);
+    if (!isShellExpression(credential)) continue;
+    bearerResult += result.slice(bearerCursor, match.index);
+    bearerResult += `${match[1] as string}${redactPasswordLiteralFragments(credential)}`;
+    bearerCursor = valueEnd;
+  }
+  result = bearerResult + result.slice(bearerCursor);
   result = result.replace(
     /\b(Bearer\s+)([^\s"'\r\n&|><;]+)/giu,
-    (_match, prefix, credential) => `${prefix as string}${
-      isShellExpression(credential as string)
-        ? redactPasswordLiteralFragments(credential as string)
-        : '[REDACTED]'
-    }`,
+    (match, prefix, credential, offset, whole) => {
+      if (
+        typeof credential === 'string'
+        && (
+          credential.includes('[REDACTED]$(')
+          || (
+            typeof offset === 'number'
+            && typeof whole === 'string'
+            && shellExpressionSpans(whole.slice(offset + prefix.length))[0]?.[0] === 0
+          )
+        )
+      ) {
+        return match;
+      }
+      return `${prefix as string}${
+        isShellExpression(credential as string)
+          ? redactPasswordLiteralFragments(credential as string)
+          : '[REDACTED]'
+      }`;
+    },
   );
 
   // 7. Explicit token formats (GitHub tokens, OpenAI sk- keys, JWTs)
@@ -1062,14 +1469,31 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // 8. YAML Multiline Block Scalars (| or > with indicators like |2, |2-, >+2)
   result = redactYamlMultilineBlocks(result);
+  result = redactYamlPlainScalarContinuations(result);
 
   // 9. Space-Separated CLI Flags (--flag val, --flag "val", --flag 'val', unterminated, shell expr)
+  const unquotedFlagStart = /(--[A-Za-z0-9_-]+)(\s+)(?=[^\s"'$]|[$<>]\()/giu;
+  let flagResult = '';
+  let flagCursor = 0;
+  for (const match of result.matchAll(unquotedFlagStart)) {
+    const flag = match[1];
+    if (typeof flag !== 'string' || !isSensitiveKeyToken(flag) || match.index < flagCursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /[\s"'\r\n&|><;]/u);
+    const value = result.slice(valueStart, valueEnd);
+    if (!isShellExpression(value)) continue;
+    flagResult += result.slice(flagCursor, match.index);
+    flagResult += `${flag}${match[2] as string}${redactPasswordLiteralFragments(value)}`;
+    flagCursor = valueEnd;
+  }
+  result = flagResult + result.slice(flagCursor);
   const flagRegex = /(--[A-Za-z0-9_-]+)(\s+)(\$'((?:\\.|[^'\r\n\\])*)'|"((?:\\(?:\r\n|[\r\n]|.)|[^"\r\n\\])*)"|'([^'\r\n]*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"'\r\n&|><;]|<\([^)]*\)|>\([^)]*\))+))/gimu;
   result = result.replace(flagRegex, (match, flag, space, valWithQuotes, ansiCVal, dQuoteVal, sQuoteVal, dQuoteUnterm, sQuoteUnterm, unquotedVal) => {
     if (typeof flag !== 'string' || !isSensitiveKeyToken(flag)) {
       return match;
     }
     const val = (ansiCVal ?? dQuoteVal ?? sQuoteVal ?? dQuoteUnterm ?? sQuoteUnterm ?? unquotedVal ?? valWithQuotes) as string;
+    if (typeof unquotedVal === 'string' && unquotedVal.startsWith('[REDACTED]$(')) return match;
     if (ansiCVal !== undefined) {
       return `${flag}${space}$'[REDACTED]'`;
     }
@@ -1092,9 +1516,12 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // 10. Key-Value Assignments & YAML Colon / Equals Assignments
   result = redactSensitiveArrayAssignments(result);
+  result = redactSensitiveJsonCollections(result);
+  result = redactPowerShellAssignments(result);
 
   // Treat shell operators (; && || | &), parenthesis, ?, and flow punctuation as key boundaries
   const keyBoundary = '(?:^[+-]?|(?:\\r\\n|\\n|\\r)[+-]?|\\s|[{,;(]|&&|\\|\\||[&|?])';
+  const assignmentOperator = '(?:\\+=|[:=])';
   const ansiSequencePattern = '(?:(?:\\\\u001b|\\u001b|\\x1b)\\[[0-9;]*m)';
   const ansiPattern = `(?:${ansiSequencePattern})*`;
   const keyTokenPattern = `((?:[A-Za-z0-9_.-]|${ansiSequencePattern})+)`;
@@ -1111,8 +1538,28 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     return `${prefix as string}${quote}[REDACTED]${quote}`;
   });
 
+  const doubleQuotedShellAssignmentStart = new RegExp(
+    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*${assignmentOperator}\\s*)"`,
+    'giu',
+  );
+  let doubleQuotedShellResult = '';
+  let doubleQuotedShellCursor = 0;
+  for (const match of result.matchAll(doubleQuotedShellAssignmentStart)) {
+    const key = match[2];
+    if (key === undefined || !isSensitiveKeyToken(key) || match.index < doubleQuotedShellCursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /["\r\n]/u);
+    if (result[valueEnd] !== '"') continue;
+    const value = result.slice(valueStart, valueEnd);
+    if (!isShellExpression(value)) continue;
+    doubleQuotedShellResult += result.slice(doubleQuotedShellCursor, match.index);
+    doubleQuotedShellResult += `${match[1] as string}"${redactPasswordLiteralFragments(value)}"`;
+    doubleQuotedShellCursor = valueEnd + 1;
+  }
+  result = doubleQuotedShellResult + result.slice(doubleQuotedShellCursor);
+
   const doubleQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*[:=]\\s*)"((?:\\\\.|[^"\\r\\n\\\\])*)"`,
+    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*${assignmentOperator}\\s*)"(?!\\[REDACTED\\]\\$\\()((?:\\\\.|[^"\\r\\n\\\\])*)"`,
     'giu',
   );
   result = result.replace(doubleQuotedAssignment, (match, prefix, key, val) => {
@@ -1133,7 +1580,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   });
 
   const singleQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*[:=]\\s*)'([^'\\r\\n]*)'`,
+    `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*${assignmentOperator}\\s*)'([^'\\r\\n]*)'`,
     'giu',
   );
   result = result.replace(singleQuotedAssignment, (match, prefix, key) => {
@@ -1142,7 +1589,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   });
 
   const ansiCQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?\\s*[:=]\\s*)\\$'((?:\\\\.|[^'\\r\\n\\\\])*)'`,
+    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?\\s*${assignmentOperator}\\s*)\\$'((?:\\\\.|[^'\\r\\n\\\\])*)'`,
     'giu',
   );
   result = result.replace(ansiCQuotedAssignment, (match, prefix, key) => {
@@ -1152,7 +1599,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // Unterminated double/single quoted assignments (opposite quotes are ordinary data)
   const unterminatedQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?\\s*[:=]\\s*)(["'])(?!\\\[REDACTED\\\])([^\\r\\n]+)$`,
+    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?\\s*${assignmentOperator}\\s*)(["'])(?!\\\[REDACTED\\\])([^\\r\\n]+)$`,
     'gimu',
   );
   result = result.replace(unterminatedQuotedAssignment, (match, prefix, key, quote, val) => {
@@ -1189,7 +1636,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // Unquoted multi-token auth assignments (key=Basic creds or key=Bearer creds)
   const unquotedMultiTokenAuthAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)((?:Basic|Bearer)\\s+[^"\\s'\\r\\n&|><;]+)`,
+    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*${assignmentOperator}\\s*)((?:Basic|Bearer|Digest|OAuth|HOBA|Mutual|Negotiate|VAPID|SCRAM-SHA-256|AWS4-HMAC-SHA256)\\s+[^"\\s'\\r\\n&|><;]+)`,
     'giu',
   );
   result = result.replace(unquotedMultiTokenAuthAssignment, (match, prefix, key, val) => {
@@ -1200,7 +1647,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // Standard unquoted assignments (key=val)
   const dynamicUnquotedAssignmentStart = new RegExp(
-    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)`,
+    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*${assignmentOperator}\\s*)`,
     'giu',
   );
   let dynamicResult = '';
@@ -1212,20 +1659,30 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
     const valueEnd = shellValueBoundary(result, valueStart, /[\s"';}\r\n&|><]/u);
     const value = result.slice(valueStart, valueEnd);
     if (value.startsWith('([REDACTED]')) continue;
-    if (!isShellExpression(value)) continue;
+    const hasEscapedPhysicalNewline = /\\(?:\r\n|\n|\r)/u.test(value);
+    if (!isShellExpression(value) && !hasEscapedPhysicalNewline) continue;
     dynamicResult += result.slice(dynamicCursor, match.index);
-    dynamicResult += `${match[1] as string}${redactPasswordLiteralFragments(value)}`;
+    dynamicResult += `${match[1] as string}${
+      isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'
+    }`;
     dynamicCursor = valueEnd;
   }
   result = dynamicResult + result.slice(dynamicCursor);
 
   const valToken = '((?:\\\\.|\\$\\{[^}\\r\\n]*\\}|[^\\s"\';}\\r\\n&|><]|<\\([^)]*\\)|>\\([^)]*\\))+)';
   const unquotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*[:=]\\s*)${valToken}`,
+    `(${keyBoundary}${ansiPattern}${keyTokenPattern}${ansiPattern}\\s*${assignmentOperator}\\s*)${valToken}`,
     'giu',
   );
   result = result.replace(unquotedAssignment, (match, prefix, key, val, offset, whole) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    if (
+      typeof val === 'string'
+      && val.startsWith('$(')
+      && typeof offset === 'number'
+      && typeof whole === 'string'
+      && shellExpressionSpans(whole.slice(offset + (prefix as string).length))[0]?.[0] === 0
+    ) return match;
     if (typeof val === 'string' && val.startsWith('([REDACTED]')) return match;
     if (
       typeof val === 'string'
@@ -1323,6 +1780,18 @@ function isRecognizedUnmatchedKeyCommand(line: string): boolean {
   return false;
 }
 
+function isGeneralCommandShapedLine(line: string): boolean {
+  const tokens = line.trim().split(/[ \t]+/u);
+  let commandIndex = tokens[0] === 'sudo' ? 1 : 0;
+  if (commandBasename(tokens[commandIndex] ?? '') === undefined) return false;
+  const argument = tokens[++commandIndex];
+  if (argument === undefined) return false;
+  return tokens.slice(commandIndex).some((token) =>
+    /^-{1,2}[A-Za-z0-9]/u.test(token)
+    || /^(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/|\/|\.{1,2}\/)/u.test(token))
+    || /^(?:apply|create|delete|destroy|exec|install|move|poweroff|remove|restart|rm|run|start|stop|update|upgrade)$/u.test(argument);
+}
+
 function unmatchedKeyCommandBoundary(value: string): number | undefined {
   const newlinePattern = /\r\n|\n|\r/gu;
   let newline: RegExpExecArray | null;
@@ -1330,7 +1799,8 @@ function unmatchedKeyCommandBoundary(value: string): number | undefined {
     const lineStart = newline.index + newline[0].length;
     const lineEndMatch = /[\r\n]/u.exec(value.slice(lineStart));
     const lineEnd = lineEndMatch === null ? value.length : lineStart + lineEndMatch.index;
-    if (isRecognizedUnmatchedKeyCommand(value.slice(lineStart, lineEnd))) {
+    const line = value.slice(lineStart, lineEnd);
+    if (isRecognizedUnmatchedKeyCommand(line) || isGeneralCommandShapedLine(line)) {
       return newline.index;
     }
   }
