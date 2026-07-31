@@ -2779,11 +2779,18 @@ describe('CliChannel', () => {
 
   it('fails closed through the physical line when a PowerShell closing quote lies beyond the scan cap', () => {
     const overCapValue = 'synthetic-fragment-'.repeat(4_000);
+    const scanMetrics = {
+      mixedShellWordExpressionScans: 0,
+      urlUserinfoSchemeCharacters: 0,
+    };
     expect(redactSecrets(
       `$env:PASSWORD="${overCapValue}synthetic-suffix"; Write-Output hidden_same_line\nWrite-Output visible_next_line`,
+      { scanMetrics },
     )).toBe(
       '$env:PASSWORD=[REDACTED]\nWrite-Output visible_next_line',
     );
+    expect(scanMetrics.urlUserinfoSchemeCharacters)
+      .toBeLessThanOrEqual(overCapValue.length * 2);
   });
 
   it('redacts PowerShell addition-assignment for sensitive variables', () => {
@@ -2861,11 +2868,18 @@ describe('CliChannel', () => {
 
   it('fails closed through the physical line when a multiline POSIX closing quote lies beyond the scan cap', () => {
     const overCapContinuation = 'synthetic-continuation-'.repeat(3_200);
+    const scanMetrics = {
+      mixedShellWordExpressionScans: 0,
+      urlUserinfoSchemeCharacters: 0,
+    };
     expect(redactSecrets(
       `PASSWORD='synthetic-head\n${overCapContinuation}synthetic-suffix' && echo hidden_same_line\necho visible_next_line`,
+      { scanMetrics },
     )).toBe(
       "PASSWORD='[REDACTED]\necho visible_next_line",
     );
+    expect(scanMetrics.urlUserinfoSchemeCharacters)
+      .toBeLessThanOrEqual(overCapContinuation.length * 2);
   });
 
   it('fails closed at EOF for unmatched multiline POSIX sensitive assignment quotes', () => {

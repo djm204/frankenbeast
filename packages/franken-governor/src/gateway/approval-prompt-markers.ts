@@ -224,24 +224,76 @@ function redactPrivateKeyBlocks(text: string): string {
     typeof body === 'string' && isPlausibleArmoredKeyBody(body) ? '[REDACTED]' : match);
 }
 
-function redactUrlPasswords(text: string, isTruncatedTail = false): string {
-  const userinfoStart = /\b([a-z0-9+.-]+:\/\/[a-zA-Z0-9_%+.\-~]*:)/giu;
+function redactUrlPasswords(
+  text: string,
+  isTruncatedTail = false,
+  scanMetrics?: RedactionScanMetrics,
+): string {
+  const isWordCharacter = (character: string): boolean => /[a-z0-9_]/iu.test(character);
+  const isSchemeCharacter = (character: string): boolean => /[a-z0-9+.-]/iu.test(character);
+  const isUsernameCharacter = (character: string): boolean => /[a-z0-9_%+.\-~]/iu.test(character);
   let result = '';
   let cursor = 0;
-  for (const match of text.matchAll(userinfoStart)) {
-    if (match.index < cursor) continue;
-    const passwordStart = match.index + match[0].length;
+  let candidateStart = -1;
+
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index] ?? '';
+    if (scanMetrics !== undefined) {
+      scanMetrics.urlUserinfoSchemeCharacters =
+        (scanMetrics.urlUserinfoSchemeCharacters ?? 0) + 1;
+    }
+    if (isSchemeCharacter(character)) {
+      const previous = text[index - 1] ?? '';
+      if (
+        candidateStart < 0
+        && isWordCharacter(character) !== isWordCharacter(previous)
+      ) {
+        candidateStart = index;
+      }
+      continue;
+    }
+    if (
+      character !== ':'
+      || text[index + 1] !== '/'
+      || text[index + 2] !== '/'
+      || candidateStart < cursor
+    ) {
+      candidateStart = -1;
+      continue;
+    }
+
+    let passwordStart = index + 3;
+    while (passwordStart < text.length && isUsernameCharacter(text[passwordStart] ?? '')) {
+      if (scanMetrics !== undefined) {
+        scanMetrics.urlUserinfoSchemeCharacters =
+          (scanMetrics.urlUserinfoSchemeCharacters ?? 0) + 1;
+      }
+      passwordStart++;
+    }
+    if (text[passwordStart] !== ':') {
+      candidateStart = -1;
+      continue;
+    }
+    passwordStart++;
     const passwordEnd = shellValueBoundary(text, passwordStart, /[@/\s\r\n]/u);
     const hasAuthority = text[passwordEnd] === '@'
       && /^@[a-zA-Z0-9.\[\]:-]+/u.test(text.slice(passwordEnd));
-    if (!hasAuthority && !(isTruncatedTail && passwordEnd === text.length)) continue;
+    if (!hasAuthority && !(isTruncatedTail && passwordEnd === text.length)) {
+      candidateStart = -1;
+      continue;
+    }
     const password = text.slice(passwordStart, passwordEnd);
-    if (password.length === 0) continue;
-    result += text.slice(cursor, match.index);
-    result += `${match[1] as string}${
+    if (password.length === 0) {
+      candidateStart = -1;
+      continue;
+    }
+    result += text.slice(cursor, candidateStart);
+    result += `${text.slice(candidateStart, passwordStart)}${
       isShellExpression(password) ? redactPasswordLiteralFragments(password) : '[REDACTED]'
     }`;
     cursor = passwordEnd;
+    index = passwordStart - 1;
+    candidateStart = -1;
   }
   return result + text.slice(cursor);
 }
@@ -1298,6 +1350,7 @@ function redactSensitiveArrayAssignments(text: string): string {
 
 export interface RedactionScanMetrics {
   mixedShellWordExpressionScans: number;
+  urlUserinfoSchemeCharacters?: number;
 }
 
 function redactMixedShellWordAssignments(
@@ -2238,7 +2291,7 @@ export function redactSecrets(
   );
 
   // 2. URL Userinfo Passwords (supports dots and plus in username, IPv6 authority, cutoff boundary)
-  result = redactUrlPasswords(result, isTruncatedTail);
+  result = redactUrlPasswords(result, isTruncatedTail, options?.scanMetrics);
 
   // 3. URL Query Parameters (?access_token=secret&...)
   result = redactUrlQueryParams(result);
