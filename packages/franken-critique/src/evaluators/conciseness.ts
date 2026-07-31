@@ -1006,7 +1006,11 @@ export class ConcisenessEvaluator implements Evaluator {
   readonly category = 'heuristic' as const;
 
   async evaluate(input: EvaluationInput): Promise<EvaluationResult> {
-    if (!input.content.trim()) {
+    const content = input.content.length > MAX_INPUT_BYTES
+      ? input.content.slice(0, MAX_INPUT_BYTES)
+      : input.content;
+
+    if (!content.trim()) {
       return {
         evaluatorName: this.name,
         verdict: 'pass',
@@ -1015,15 +1019,10 @@ export class ConcisenessEvaluator implements Evaluator {
       };
     }
 
-    const content = input.content.length > MAX_INPUT_BYTES
-      ? input.content.slice(0, MAX_INPUT_BYTES)
-      : input.content;
-
     const findings: EvaluationFinding[] = [];
 
     this.checkCommentRatio(content, findings);
     this.checkTodoComments(content, findings);
-
 
     const score = createScore(Math.max(0, 1 - findings.length * 0.2));
 

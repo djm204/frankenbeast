@@ -624,5 +624,22 @@ const x = 1;
     expect(result.evaluatorName).toBe('conciseness');
     expect(duration).toBeLessThan(1000); // Execution should complete very quickly
   });
+
+  it('bounds execution on oversized all-whitespace inputs (>500KB)', async () => {
+    const evaluator = new ConcisenessEvaluator();
+    // Regression test: the empty-content short-circuit must run on the
+    // truncated content, not the raw input, or an oversized whitespace-only
+    // payload would still be scanned in full by `.trim()` before the
+    // MAX_INPUT_BYTES cap is ever applied — defeating the resource bound.
+    const oversizedWhitespace = ' '.repeat(600_000);
+    expect(oversizedWhitespace.length).toBeGreaterThan(500_000);
+
+    const start = Date.now();
+    const result = await evaluator.evaluate(createInput(oversizedWhitespace));
+    const duration = Date.now() - start;
+
+    expect(result.verdict).toBe('pass');
+    expect(duration).toBeLessThan(1000);
+  });
 });
 
