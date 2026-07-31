@@ -763,7 +763,14 @@ function redactSensitiveArrayAssignments(text: string): string {
   return result + text.slice(cursor);
 }
 
-function redactMixedShellWordAssignments(text: string): string {
+export interface RedactionScanMetrics {
+  mixedShellWordExpressionScans: number;
+}
+
+function redactMixedShellWordAssignments(
+  text: string,
+  scanMetrics?: RedactionScanMetrics,
+): string {
   const assignmentStart = /(?:^|[\s{,;(])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*(?:\+=|[:=])\s*(?=\S)/gmu;
   let result = '';
   let cursor = 0;
@@ -772,7 +779,9 @@ function redactMixedShellWordAssignments(text: string): string {
     const key = match[1];
     if (key === undefined || !isSensitiveKeyToken(key) || match.index < cursor) continue;
     const valueStart = match.index + match[0].length;
+    if (text[valueStart] === '(') continue;
     const scanEnd = Math.min(text.length, valueStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+    if (scanMetrics !== undefined) scanMetrics.mixedShellWordExpressionScans++;
     const spans = shellExpressionSpans(text.slice(valueStart, scanEnd));
     let spanIndex = 0;
     let quote: '"' | "'" | undefined;
@@ -818,7 +827,6 @@ function redactMixedShellWordAssignments(text: string): string {
     }
 
     const value = text.slice(valueStart, valueEnd);
-    if (value.startsWith('(')) continue;
     let hasQuotedSegment = false;
     let hasUnquotedLiteral = false;
     let segmentQuote: '"' | "'" | undefined;
@@ -1592,7 +1600,13 @@ function redactPowerShellAssignments(text: string): string {
   return result + text.slice(cursor);
 }
 
-export function redactSecrets(text: string, options?: { isTruncatedTail?: boolean }): string {
+export function redactSecrets(
+  text: string,
+  options?: {
+    isTruncatedTail?: boolean;
+    scanMetrics?: RedactionScanMetrics;
+  },
+): string {
   const isTruncatedTail = options?.isTruncatedTail ?? false;
   let result = text;
 
@@ -1728,7 +1742,7 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
 
   // 10. Key-Value Assignments & YAML Colon / Equals Assignments
   result = redactBashArrayElementAssignments(result);
-  result = redactMixedShellWordAssignments(result);
+  result = redactMixedShellWordAssignments(result, options?.scanMetrics);
   result = redactSensitiveArrayAssignments(result);
   result = redactSensitiveJsonCollections(result);
   result = redactPowerShellAssignments(result);

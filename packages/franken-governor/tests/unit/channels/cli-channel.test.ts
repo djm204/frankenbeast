@@ -1862,6 +1862,7 @@ describe('CliChannel', () => {
   });
 
   it('bounds sensitive array scans while continuing after unterminated candidates', () => {
+    const scanMetrics = { mixedShellWordExpressionScans: 0 };
     const unterminatedLines = Array.from(
       { length: 256 },
       (_, index) => `PASSWORD=(unterminated-array-${index}`,
@@ -1873,8 +1874,9 @@ describe('CliChannel', () => {
       'PASSWORD=(ordinary-one ordinary-two) && echo visible_bounded_array_context',
     ].join('\n');
 
-    const redacted = redactSecrets(text);
+    const redacted = redactSecrets(text, { scanMetrics });
 
+    expect(scanMetrics.mixedShellWordExpressionScans).toBe(0);
     expect(redacted).not.toContain('unterminated-array-');
     expect(redacted).not.toContain('over-limit-');
     expect(redacted).toContain('PASSWORD=[REDACTED]\n'.repeat(257));
