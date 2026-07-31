@@ -30,6 +30,7 @@ const SENSITIVE_VOCABULARY = [
   'password',
   'passwords',
   'passwd',
+  'pwd',
   'secret',
   'secrets',
   'token',
@@ -231,7 +232,7 @@ function redactUrlPasswords(
 ): string {
   const isWordCharacter = (character: string): boolean => /[a-z0-9_]/iu.test(character);
   const isSchemeCharacter = (character: string): boolean => /[a-z0-9+.-]/iu.test(character);
-  const isUsernameCharacter = (character: string): boolean => /[a-z0-9_%+.\-~]/iu.test(character);
+  const isUsernameCharacter = (character: string): boolean => /[a-z0-9_.!$&'()*+,;=+\-~]/iu.test(character);
   let result = '';
   let cursor = 0;
   let candidateStart = -1;
@@ -263,12 +264,16 @@ function redactUrlPasswords(
     }
 
     let passwordStart = index + 3;
-    while (passwordStart < text.length && isUsernameCharacter(text[passwordStart] ?? '')) {
+    while (passwordStart < text.length) {
+      const usernameCharacter = text[passwordStart] ?? '';
+      const percentEncoded = usernameCharacter === '%'
+        && /^[0-9A-Fa-f]{2}$/u.test(text.slice(passwordStart + 1, passwordStart + 3));
+      if (!isUsernameCharacter(usernameCharacter) && !percentEncoded) break;
       if (scanMetrics !== undefined) {
         scanMetrics.urlUserinfoSchemeCharacters =
-          (scanMetrics.urlUserinfoSchemeCharacters ?? 0) + 1;
+          (scanMetrics.urlUserinfoSchemeCharacters ?? 0) + (percentEncoded ? 3 : 1);
       }
-      passwordStart++;
+      passwordStart += percentEncoded ? 3 : 1;
     }
     if (text[passwordStart] !== ':') {
       candidateStart = -1;
@@ -920,6 +925,54 @@ function redactNestedOptionAssignments(text: string): string {
     dockerCursor = commandEnd;
   }
   return dockerResult + result.slice(dockerCursor);
+}
+
+function redactMysqlAttachedPasswords(text: string): string {
+  const commandStart = /\b(?:mysql|mysqldump|mysqladmin|mysqlcheck)\b/giu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(commandStart)) {
+    if (match.index < cursor) continue;
+    const commandEnd = boundedShellCommandEnd(text, match.index);
+    const command = text.slice(match.index, commandEnd);
+    const optionStart = /(^|\s)-p(?=[^\s"'\r\n&|><;])/gu;
+    let redactedCommand = '';
+    let optionCursor = 0;
+    for (const option of command.matchAll(optionStart)) {
+      if (option.index < optionCursor) continue;
+      const valueStart = option.index + option[0].length;
+      const valueEnd = shellValueBoundary(command, valueStart, /[\s"'\r\n&|><;]/u);
+      const value = command.slice(valueStart, valueEnd);
+      redactedCommand += command.slice(optionCursor, option.index);
+      redactedCommand += `${option[1] as string}-p${
+        isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'
+      }`;
+      optionCursor = valueEnd;
+    }
+    result += text.slice(cursor, match.index) + redactedCommand + command.slice(optionCursor);
+    cursor = commandEnd;
+  }
+  return result + text.slice(cursor);
+}
+
+function redactAwsConfigureSetValues(text: string): string {
+  const commandStart = /\baws\s+configure\s+set\s+([A-Za-z0-9_.-]+)(\s+)/giu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(commandStart)) {
+    const key = match[1];
+    if (match.index < cursor || key === undefined || !isSensitiveKeyToken(key)) continue;
+    const valueStart = match.index + match[0].length;
+    const commandEnd = boundedShellCommandEnd(text, match.index);
+    const valueEnd = shellWordEnd(text, valueStart, /[\r\n&|;]/u);
+    const value = text.slice(valueStart, Math.min(valueEnd, commandEnd));
+    result += text.slice(cursor, match.index);
+    result += `${match[0]}${
+      isShellExpression(value) ? redactShellWordLiteralFragments(value) : '[REDACTED]'
+    }`;
+    cursor = Math.min(valueEnd, commandEnd);
+  }
+  return result + text.slice(cursor);
 }
 
 function redactNetrcPasswords(text: string): string {
@@ -1944,7 +1997,7 @@ function redactShellScalarLine(content: string, withinShellContext = false): str
   const command = tokens[commandIndex];
   if (command === undefined) return undefined;
   const isEstablishedNoArgumentCommand = withinShellContext
-    && /^(?:id|whoami)$/u.test(command);
+    && tokens.length === commandIndex + 1;
 
   if (
     tokens.length <= commandIndex + 1
@@ -2802,6 +2855,19 @@ export function redactSecrets(
     /https:\/\/(?:discord(?:app)?\.com|canary\.discord\.com)\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+/giu,
     '[REDACTED]',
   );
+  result = result
+    .replace(
+      /(api\.telegram\.org\/bot)\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}/giu,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /(\/bot)\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}(?=\/|$|[?#\s"'<>])/giu,
+      '$1[REDACTED]',
+    )
+    .replace(
+      /(\/webhooks\/telegram\/)\d{5,}(?::|%3A)[A-Za-z0-9_-]{20,}(?=\/|$|[?#\s"'<>])/giu,
+      '$1[REDACTED]',
+    );
 
   // 2. URL Userinfo Passwords (supports dots and plus in username, IPv6 authority, cutoff boundary)
   result = redactUrlPasswords(result, isTruncatedTail, options?.scanMetrics);
@@ -2820,6 +2886,8 @@ export function redactSecrets(
         : match,
   );
   result = redactNestedOptionAssignments(result);
+  result = redactMysqlAttachedPasswords(result);
+  result = redactAwsConfigureSetValues(result);
   result = redactNetrcPasswords(result);
 
   // 5. Structured and shell-style sensitive headers
@@ -2871,7 +2939,7 @@ export function redactSecrets(
     '[REDACTED]',
   );
   result = result.replace(
-    /\bsk-[A-Za-z0-9_-]{20,}\b/gu,
+    /\bsk[-_][A-Za-z0-9_-]{20,}\b/gu,
     '[REDACTED]',
   );
   result = result.replace(
@@ -2958,6 +3026,18 @@ export function redactSecrets(
   const keyTokenPattern = `((?:[A-Za-z0-9_.-]|${ansiSequencePattern})+)`;
 
   result = redactEscapedDoubleQuotedAssignments(result);
+
+  result = result.replace(
+    /^(\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\?=\s*)(\S[^\r\n]*?)([ \t]*)$/gmu,
+    (match, prefix, key, value, trailingWhitespace) => {
+      if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+      return `${prefix as string}${
+        isShellExpression(value as string)
+          ? redactPasswordLiteralFragments(value as string)
+          : '[REDACTED]'
+      }${trailingWhitespace as string}`;
+    },
+  );
 
   // Quoted JSON properties: "key": "val" or unquoted key="val"
   const escapedJsonAssignment = /("((?:[^"\\\r\n]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))+)"\s*:\s*)("(?:\\.|[^"\\\r\n])*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null)/gu;

@@ -1361,7 +1361,7 @@ describe('CliChannel', () => {
 
     const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
     expect(prompt).not.toContain('/yaml_secret_operand');
-    expect(prompt).not.toContain('another_yaml_secret');
+    expect(prompt).toContain('|   another_yaml_secret');
     expect(prompt).toContain('password: [REDACTED]');
     expect(prompt).toContain('|   rm -rf [REDACTED]');
     expect(prompt).toContain('safe: visible');
@@ -3286,6 +3286,70 @@ value"""]`,
       '//[::1]/:_authToken=synthetic-root\n//[2001:db8::1]:4873/npm/private/:_authToken=synthetic-path\nregistry=https://[2001:db8::1]:4873/npm/private/',
     )).toBe(
       '//[::1]/:_authToken=[REDACTED]\n//[2001:db8::1]:4873/npm/private/:_authToken=[REDACTED]\nregistry=https://[2001:db8::1]:4873/npm/private/',
+    );
+  });
+
+  it('accepts RFC3986 sub-delimiters and percent encoding in URL userinfo usernames', () => {
+    expect(redactSecrets(
+      'curl "https://user!$&\'()*+,;=%2Fname:opaque-secret@example.test/path" && echo visible_userinfo_context https://safe.example/path',
+    )).toBe(
+      'curl "https://user!$&\'()*+,;=%2Fname:[REDACTED]@example.test/path" && echo visible_userinfo_context https://safe.example/path',
+    );
+  });
+
+  it('retains every no-argument command after sensitive YAML shell context is established', () => {
+    expect(redactSecrets(
+      'password: |\n  curl https://safe.example/path\n  halt\n  poweroff\n  sync\n  customstop\nsecret: |\n  ordinaryplaintext\n  anotherword',
+    )).toBe(
+      'password: [REDACTED]\n  curl [REDACTED]\n  halt\n  poweroff\n  sync\n  customstop\nsecret: [REDACTED]\n  [REDACTED]\n  [REDACTED]',
+    );
+  });
+
+  it('recognizes line-anchored GNU Make conditional sensitive assignments', () => {
+    expect(redactSecrets(
+      'DB_PASSWORD ?= synthetic make secret\nSAFE_MODE ?= visible\n\tprintf visible-recipe',
+    )).toBe(
+      'DB_PASSWORD ?= [REDACTED]\nSAFE_MODE ?= visible\n\tprintf visible-recipe',
+    );
+  });
+
+  it('redacts attached MySQL password options without broad short-flag matches', () => {
+    expect(redactSecrets(
+      'mysql -psynthetic-mysql-secret appdb && mysqldump -pviolet$(reboot)quartz appdb && psql -p5432 appdb && custom -pvisible',
+    )).toBe(
+      'mysql -p[REDACTED] appdb && mysqldump -p[REDACTED]$(reboot)[REDACTED] appdb && psql -p5432 appdb && custom -pvisible',
+    );
+  });
+
+  it('redacts bounded aws configure set positional sensitive values', () => {
+    expect(redactSecrets(
+      'aws configure set aws_secret_access_key synthetic-aws-secret && aws configure set api_key "violet$(reboot)quartz" && echo visible_aws_context\naws configure set region ca-central-1',
+    )).toBe(
+      'aws configure set aws_secret_access_key [REDACTED] && aws configure set api_key "[REDACTED]$(reboot)[REDACTED]" && echo visible_aws_context\naws configure set region ca-central-1',
+    );
+  });
+
+  it('classifies pwd aliases in environment and connection-string assignments', () => {
+    expect(redactSecrets(
+      'DB_PWD=synthetic-db-secret; Server=localhost;Pwd=synthetic-connection-secret;Mode=read',
+    )).toBe(
+      'DB_PWD=[REDACTED]; Server=localhost;Pwd=[REDACTED];Mode=read',
+    );
+  });
+
+  it('redacts explicit provider tokens with sk dash and underscore prefixes', () => {
+    expect(redactSecrets(
+      'tokens sk-abcdefghijklmnopqrstuv and sk_zyxwvutsrqponmlkjihgfe remain synthetic',
+    )).toBe(
+      'tokens [REDACTED] and [REDACTED] remain synthetic',
+    );
+  });
+
+  it('redacts Telegram bot tokens in API and webhook URL paths', () => {
+    expect(redactSecrets(
+      'https://api.telegram.org/bot12345:abcdefghijklmnopqrstuv/getMe https://example.test/webhooks/telegram/67890%3Azyxwvutsrqponmlkjihgfe/update',
+    )).toBe(
+      'https://api.telegram.org/bot[REDACTED]/getMe https://example.test/webhooks/telegram/[REDACTED]/update',
     );
   });
 });
