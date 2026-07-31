@@ -1,5 +1,6 @@
 import { createSqliteStore } from '../shared/sqlite-store.js';
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 
 export interface PlannerTask {
   id: string;
@@ -148,65 +149,203 @@ function createUniquePlanId(store: ReturnType<typeof createSqliteStore>): string
   return randomUUID();
 }
 
+// Untrusted input: `rawDag` is read back from SQLite storage, which may have
+// been written by an older schema version, hand-edited, or tampered with by
+// a compromised process. It is validated against `storedPlanSchema` (shape
+// and type correctness) and scanned for prototype-pollution-shaped keys
+// before any field is trusted, and every rejection is a deterministic
+// "corrupt" result rather than a thrown exception — callers never see an
+// uncaught error from malformed storage.
+const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Scans an already-parsed JSON value for own keys named `__proto__`,
+ * `constructor`, or `prototype` at any depth. These keys are broadly safe
+ * as JSON.parse output (JSON.parse never mutates the real prototype
+ * chain), but rejecting them defensively — mirroring the @franken/brain
+ * working-memory hydration guard — protects any downstream consumer that
+ * might later merge or spread this value unsafely.
+ *
+ * Uses an explicit work stack instead of function recursion: a tampered
+ * row can be JSON-valid but thousands of arrays deep (JSON.parse itself
+ * has no meaningful nesting limit), and a JS-recursive walk over that
+ * shape would blow the call stack — turning a malformed-storage case that
+ * must fail closed into an uncaught `RangeError` instead.
+ */
+function findUnsafeObjectKey(root: unknown): string | null {
+  const stack: unknown[] = [root];
+
+  while (stack.length > 0) {
+    const value = stack.pop();
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        stack.push(item);
+      }
+      continue;
+    }
+
+    if (isRecord(value)) {
+      for (const key of Object.keys(value)) {
+        if (UNSAFE_OBJECT_KEYS.has(key)) {
+          return key;
+        }
+        stack.push(value[key]);
+      }
+    }
+  }
+
+  return null;
+}
+
+const plannerTaskSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string(),
+    deps: z.array(z.string()),
+    status: z.enum(['pending', 'done']),
+  })
+  .strict();
+
+const storedPlanSchema = z
+  .object({
+    objective: z.string(),
+    constraints: z.string().nullable().optional(),
+    tasks: z.array(plannerTaskSchema),
+  })
+  .strict()
+  .superRefine((plan, ctx) => {
+    const seenIds = new Set<string>();
+    plan.tasks.forEach((task, index) => {
+      if (seenIds.has(task.id)) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `duplicate:${task.id}`,
+          path: ['tasks', index, 'id'],
+        });
+      } else {
+        seenIds.add(task.id);
+      }
+    });
+  });
+
+interface StoredPlanIssueLike {
+  code: string;
+  path: ReadonlyArray<string | number>;
+  message: string;
+  keys?: string[];
+}
+
+function formatZodPath(path: ReadonlyArray<string | number>): string {
+  let out = '';
+  for (const segment of path) {
+    if (typeof segment === 'number') {
+      out += `[${segment}]`;
+    } else {
+      out += out.length > 0 ? `.${segment}` : segment;
+    }
+  }
+  return out;
+}
+
+function describeStoredPlanIssue(issue: StoredPlanIssueLike): string {
+  if (issue.code === 'custom' && issue.message.startsWith('duplicate:')) {
+    return `stored plan DAG contains duplicate task id: ${issue.message.slice('duplicate:'.length)}`;
+  }
+
+  const path = formatZodPath(issue.path);
+
+  if (issue.code === 'unrecognized_keys') {
+    const keys = issue.keys?.join(', ') ?? '';
+    return `stored plan DAG${path ? ` ${path}` : ''} contains unexpected field(s): ${keys}`;
+  }
+  if (path === '') {
+    return 'stored plan DAG must be an object';
+  }
+  if (path === 'objective') {
+    return 'stored plan DAG objective must be a string';
+  }
+  if (path === 'constraints') {
+    return 'stored plan DAG constraints must be a string or null';
+  }
+  if (path === 'tasks') {
+    return 'stored plan DAG tasks must be an array';
+  }
+
+  const taskObjectMatch = /^tasks\[(\d+)\]$/.exec(path);
+  if (taskObjectMatch) {
+    return `stored plan DAG tasks[${taskObjectMatch[1]}] must be an object`;
+  }
+
+  const taskFieldMatch = /^tasks\[(\d+)\]\.(\w+)/.exec(path);
+  if (taskFieldMatch) {
+    const [, index, field] = taskFieldMatch;
+    switch (field) {
+      case 'id':
+        return `stored plan DAG tasks[${index}].id must be a non-empty string`;
+      case 'title':
+        return `stored plan DAG tasks[${index}].title must be a string`;
+      case 'deps':
+        return `stored plan DAG tasks[${index}].deps must be an array of strings`;
+      case 'status':
+        return `stored plan DAG tasks[${index}].status must be pending or done`;
+    }
+  }
+
+  return `stored plan DAG${path ? ` ${path}` : ''} is invalid: ${issue.message}`;
+}
+
+/**
+ * Escapes characters that can be abused to forge log entries or manipulate
+ * a terminal before untrusted text reaches a log call: ASCII C0 controls
+ * and DEL (0x00-0x1F, 0x7F), C1 controls (0x80-0x9F, which include further
+ * ANSI-adjacent escape codes), and the Unicode line-breaking separators
+ * U+2028/U+2029 (treated as line terminators by many consumers even though
+ * they aren't ASCII newlines). `reason` strings can embed raw field names
+ * or values copied directly out of a tampered stored plan row (e.g. a
+ * duplicate task id or an unrecognized field name), so logging them
+ * verbatim would let a crafted payload forge multiline log entries or
+ * inject terminal control sequences into server logs. This only affects
+ * what is written to stderr; the structured `reason` returned to callers
+ * is left untouched.
+ */
+function sanitizeForLog(value: string): string {
+  return value.replace(
+    /[\x00-\x1f\x7f-\x9f\u2028\u2029]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}
+
 function decodeStoredPlan(rawDag: string): { kind: 'found'; plan: StoredPlan } | { kind: 'corrupt'; reason: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawDag);
   } catch (error) {
-    return { kind: 'corrupt', reason: `stored plan DAG is not valid JSON: ${error instanceof Error ? error.message : String(error)}` };
+    const reason = `stored plan DAG is not valid JSON: ${error instanceof Error ? error.message : String(error)}`;
+    console.error(`[planner-adapter] failed to parse stored plan DAG; aborting: ${sanitizeForLog(reason)}`);
+    return { kind: 'corrupt', reason };
   }
 
-  if (!isRecord(parsed)) {
-    return { kind: 'corrupt', reason: 'stored plan DAG must be an object' };
+  const unsafeKey = findUnsafeObjectKey(parsed);
+  if (unsafeKey !== null) {
+    const reason = `stored plan DAG contains unsafe key "${unsafeKey}" and was rejected`;
+    console.error(`[planner-adapter] rejected malformed stored plan DAG; aborting: ${sanitizeForLog(reason)}`);
+    return { kind: 'corrupt', reason };
   }
 
-  if (typeof parsed.objective !== 'string') {
-    return { kind: 'corrupt', reason: 'stored plan DAG objective must be a string' };
-  }
-  if (parsed.constraints !== null && parsed.constraints !== undefined && typeof parsed.constraints !== 'string') {
-    return { kind: 'corrupt', reason: 'stored plan DAG constraints must be a string or null' };
-  }
-  if (!Array.isArray(parsed.tasks)) {
-    return { kind: 'corrupt', reason: 'stored plan DAG tasks must be an array' };
-  }
-
-  const tasks: PlannerTask[] = [];
-  const taskIds = new Set<string>();
-  for (const [index, task] of parsed.tasks.entries()) {
-    if (!isRecord(task)) {
-      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}] must be an object` };
-    }
-    if (typeof task.id !== 'string' || task.id.length === 0) {
-      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].id must be a non-empty string` };
-    }
-    if (taskIds.has(task.id)) {
-      return { kind: 'corrupt', reason: `stored plan DAG contains duplicate task id: ${task.id}` };
-    }
-    if (typeof task.title !== 'string') {
-      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].title must be a string` };
-    }
-    if (!Array.isArray(task.deps) || !task.deps.every((dep) => typeof dep === 'string')) {
-      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].deps must be an array of strings` };
-    }
-    if (task.status !== 'pending' && task.status !== 'done') {
-      return { kind: 'corrupt', reason: `stored plan DAG tasks[${index}].status must be pending or done` };
-    }
-
-    taskIds.add(task.id);
-    tasks.push({
-      id: task.id,
-      title: task.title,
-      deps: task.deps,
-      status: task.status,
-    });
+  const result = storedPlanSchema.safeParse(parsed);
+  if (!result.success) {
+    const reason = describeStoredPlanIssue(result.error.issues[0] as StoredPlanIssueLike);
+    console.error(`[planner-adapter] rejected malformed stored plan DAG; aborting: ${sanitizeForLog(reason)}`);
+    return { kind: 'corrupt', reason };
   }
 
   return {
     kind: 'found',
     plan: {
-      objective: parsed.objective,
-      constraints: parsed.constraints ?? null,
-      tasks,
+      objective: result.data.objective,
+      constraints: result.data.constraints ?? null,
+      tasks: result.data.tasks,
     },
   };
 }
