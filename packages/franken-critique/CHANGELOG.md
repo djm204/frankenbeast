@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.11.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.2...franken-critique-v0.11.3) (2026-07-31)
+
+
+### Bug Fixes
+
+* **critique:** keep conciseness feedback non-blocking ([#3930](https://github.com/djm204/frankenbeast/issues/3930)) ([1888318](https://github.com/djm204/frankenbeast/commit/188831898e3155a07256b7d3268d2650e738a522))
+* **critique:** reject non-finite costBudgetUsd in TokenBudgetBreaker ([#3886](https://github.com/djm204/frankenbeast/issues/3886)) ([cef923c](https://github.com/djm204/frankenbeast/commit/cef923c8ddef13e82ac0b402e4838f68e5f3d56f)), closes [#3843](https://github.com/djm204/frankenbeast/issues/3843)
+* **critique:** reject non-finite token budgets ([#3896](https://github.com/djm204/frankenbeast/issues/3896)) ([82465a9](https://github.com/djm204/frankenbeast/commit/82465a92858fed8633bf3fe1900f083e0370ff1f))
+* **critique:** report lesson persistence failures ([#3928](https://github.com/djm204/frankenbeast/issues/3928)) ([8d611ab](https://github.com/djm204/frankenbeast/commit/8d611ab1fc96b55eda4d728013b03ca4db4fc4b9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.19.0 to 0.19.1
+
 ## [0.11.2](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.1...franken-critique-v0.11.2) (2026-07-26)
 
 

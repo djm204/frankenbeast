@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.61.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.61.0...@franken/orchestrator-v0.61.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **critique:** reject non-finite token budgets ([#3896](https://github.com/djm204/frankenbeast/issues/3896)) ([82465a9](https://github.com/djm204/frankenbeast/commit/82465a92858fed8633bf3fe1900f083e0370ff1f))
+* **orchestrator:** bound adapter LLM requests ([#3931](https://github.com/djm204/frankenbeast/issues/3931)) ([d0fda93](https://github.com/djm204/frankenbeast/commit/d0fda93ebfa407a5a1e373a9621448cd33dfcbce))
+* **orchestrator:** filter secret-shaped env vars before spawning LLM CLIs ([#3925](https://github.com/djm204/frankenbeast/issues/3925)) ([0907db8](https://github.com/djm204/frankenbeast/commit/0907db8fc322d211c5b453f16d243df4c058020a))
+* **orchestrator:** inject planning faculty clock ([#3933](https://github.com/djm204/frankenbeast/issues/3933)) ([8392035](https://github.com/djm204/frankenbeast/commit/8392035e29b00e43eac1491e0b866d9a60750cd1))
+* **orchestrator:** isolate planning telemetry failures ([#3937](https://github.com/djm204/frankenbeast/issues/3937)) ([3c7ba01](https://github.com/djm204/frankenbeast/commit/3c7ba011d2d1f2a66aa83ae87bb47afe2ce0db36))
+* **orchestrator:** preserve launch diagnostics and run design interviews unattended ([#3884](https://github.com/djm204/frankenbeast/issues/3884)) ([d7486e4](https://github.com/djm204/frankenbeast/commit/d7486e498f803dc10ce300a34d5dabe6a081feac))
+* **orchestrator:** sanitize adapter error messages ([#3927](https://github.com/djm204/frankenbeast/issues/3927)) ([21df895](https://github.com/djm204/frankenbeast/commit/21df895f257413f0013f30d7b54289eeca3065f9))
+* **orchestrator:** secure adapter request IDs ([#3894](https://github.com/djm204/frankenbeast/issues/3894)) ([78eecdb](https://github.com/djm204/frankenbeast/commit/78eecdbdc7e68305da5d0d6e3a5d780104adfe82))
+* **orchestrator:** validate completion token limits ([#3936](https://github.com/djm204/frankenbeast/issues/3936)) ([6dc4b50](https://github.com/djm204/frankenbeast/commit/6dc4b503ec5093d55590396ef72aaf685118a76f))
+* **web:** populate LLM Targets model list for providers without a pinned model ([#3888](https://github.com/djm204/frankenbeast/issues/3888)) ([65007bf](https://github.com/djm204/frankenbeast/commit/65007bf758e53bc4c3647134e84411ceaaa4a1d8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.11.2 to 0.11.3
+    * @franken/governor bumped from 0.9.2 to 0.9.3
+    * @franken/types bumped from 0.19.0 to 0.19.1
+    * @franken/observer bumped from 0.13.0 to 0.13.1
+    * @franken/planner bumped from 0.4.28 to 0.4.29
+    * @franken/brain bumped from 0.18.1 to 0.18.2
+
 ## [0.61.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.60.0...@franken/orchestrator-v0.61.0) (2026-07-28)
 
 

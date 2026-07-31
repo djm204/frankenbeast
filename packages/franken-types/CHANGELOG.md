@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1](https://github.com/djm204/frankenbeast/compare/franken-types-v0.19.0...franken-types-v0.19.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **orchestrator:** bound adapter LLM requests ([#3931](https://github.com/djm204/frankenbeast/issues/3931)) ([d0fda93](https://github.com/djm204/frankenbeast/commit/d0fda93ebfa407a5a1e373a9621448cd33dfcbce))
+* **orchestrator:** validate completion token limits ([#3936](https://github.com/djm204/frankenbeast/issues/3936)) ([6dc4b50](https://github.com/djm204/frankenbeast/commit/6dc4b503ec5093d55590396ef72aaf685118a76f))
+
 ## [0.19.0](https://github.com/djm204/frankenbeast/compare/franken-types-v0.18.0...franken-types-v0.19.0) (2026-07-26)
 
 
