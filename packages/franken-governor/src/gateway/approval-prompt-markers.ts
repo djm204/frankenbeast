@@ -226,36 +226,41 @@ function redactPrivateKeyBlocks(text: string): string {
 }
 
 function redactUrlPasswords(text: string, isTruncatedTail = false): string {
-  if (isTruncatedTail) {
-    return text.replace(
-      /\b([a-z0-9+.-]+:\/\/(?:[a-zA-Z0-9_%+.-]*:))([^@/\s]+)(?:(@[a-zA-Z0-9.\[\]:-]+)|(?=$))/giu,
-      (_match, prefix, password, atHost) => {
-        const redactedPassword = isShellExpression(password)
-          ? redactPasswordLiteralFragments(password)
-          : '[REDACTED]';
-        return `${prefix}${redactedPassword}${atHost ?? ''}`;
-      },
-    );
+  const userinfoStart = /\b([a-z0-9+.-]+:\/\/[a-zA-Z0-9_%+.-]*:)/giu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(userinfoStart)) {
+    if (match.index < cursor) continue;
+    const passwordStart = match.index + match[0].length;
+    const passwordEnd = shellValueBoundary(text, passwordStart, /[@/\s\r\n]/u);
+    const hasAuthority = text[passwordEnd] === '@'
+      && /^@[a-zA-Z0-9.\[\]:-]+/u.test(text.slice(passwordEnd));
+    if (!hasAuthority && !(isTruncatedTail && passwordEnd === text.length)) continue;
+    const password = text.slice(passwordStart, passwordEnd);
+    if (password.length === 0) continue;
+    result += text.slice(cursor, match.index);
+    result += `${match[1] as string}${
+      isShellExpression(password) ? redactPasswordLiteralFragments(password) : '[REDACTED]'
+    }`;
+    cursor = passwordEnd;
   }
-
-  return text.replace(
-    /\b([a-z0-9+.-]+:\/\/(?:[a-zA-Z0-9_%+.-]*:))([^@/\s]+)(@[a-zA-Z0-9.\[\]:-]+)/giu,
-    (_match, prefix, password, atHost) => {
-      const redactedPassword = isShellExpression(password)
-        ? redactPasswordLiteralFragments(password)
-        : '[REDACTED]';
-      return `${prefix}${redactedPassword}${atHost}`;
-    },
-  );
+  return result + text.slice(cursor);
 }
 
 function redactUrlQueryParams(text: string): string {
-  const parameterStart = /([?&])([A-Za-z0-9_.-]+)(=)/giu;
+  const parameterStart = /([?&])((?:[A-Za-z0-9_.-]|%[0-9A-Fa-f]{2})+)(=)/giu;
   let result = '';
   let cursor = 0;
   for (const match of text.matchAll(parameterStart)) {
     const key = match[2];
-    if (key === undefined || !isSensitiveKeyToken(key) || match.index < cursor) continue;
+    if (key === undefined || match.index < cursor) continue;
+    let classifiedKey = key;
+    try {
+      classifiedKey = decodeURIComponent(key);
+    } catch {
+      // The regex accepts only complete bytes, but malformed UTF-8 remains non-sensitive.
+    }
+    if (!isSensitiveKeyToken(classifiedKey)) continue;
     const valueStart = match.index + match[0].length;
     const valueEnd = shellValueBoundary(text, valueStart, /[&\s"'\r\n#;|<>]/u);
     const value = text.slice(valueStart, valueEnd);
@@ -271,6 +276,22 @@ function redactUrlQueryParams(text: string): string {
 function redactCurlUserCredentials(text: string): string {
   const curlUserRegex = /(--user|--proxy-user|-u|-U)(\s+|=)(?:\$'([^:'\r\n]+:)((?:\\.|[^'\\\r\n])*)'|"([^:"\r\n]+:)((?:\\.|[^"\\\r\n])*)"|'([^:'\r\n]+:)([^'\r\n]*)'|([^:\s"'\r\n]+:)([^\s"'\r\n&|><;]+))/giu;
   let result = text;
+  const attachedStart = /(?<![-A-Za-z0-9])(-[uU])([^:\s"'\r\n]+:)/gu;
+  let attachedResult = '';
+  let attachedCursor = 0;
+  for (const match of result.matchAll(attachedStart)) {
+    if (match.index < attachedCursor) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = shellValueBoundary(result, valueStart, /[\s"'\r\n&|><;]/u);
+    const password = result.slice(valueStart, valueEnd);
+    if (password.length === 0) continue;
+    attachedResult += result.slice(attachedCursor, match.index);
+    attachedResult += `${match[1] as string}${match[2] as string}${
+      isShellExpression(password) ? redactPasswordLiteralFragments(password) : '[REDACTED]'
+    }`;
+    attachedCursor = valueEnd;
+  }
+  result = attachedResult + result.slice(attachedCursor);
   const bareStart = /(--user|--proxy-user|-u|-U)(\s+|=)([^:\s"'\r\n]+:)/giu;
   let output = '';
   let cursor = 0;
@@ -742,6 +763,128 @@ function redactSensitiveArrayAssignments(text: string): string {
   return result + text.slice(cursor);
 }
 
+function redactMixedShellWordAssignments(text: string): string {
+  const assignmentStart = /(?:^|[\s{,;(])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*(?:\+=|[:=])\s*(?=\S)/gmu;
+  let result = '';
+  let cursor = 0;
+
+  for (const match of text.matchAll(assignmentStart)) {
+    const key = match[1];
+    if (key === undefined || !isSensitiveKeyToken(key) || match.index < cursor) continue;
+    const valueStart = match.index + match[0].length;
+    const scanEnd = Math.min(text.length, valueStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+    const spans = shellExpressionSpans(text.slice(valueStart, scanEnd));
+    let spanIndex = 0;
+    let quote: '"' | "'" | undefined;
+    let escaped = false;
+    let valueEnd = scanEnd;
+
+    for (let index = valueStart; index < scanEnd; index++) {
+      const span = spans[spanIndex];
+      if (span?.[0] === index - valueStart && quote !== "'") {
+        index = valueStart + span[1] - 1;
+        spanIndex++;
+        continue;
+      }
+      const character = text[index] ?? '';
+      if (character === '\r' || character === '\n') {
+        valueEnd = index;
+        break;
+      } else if (escaped) {
+        escaped = false;
+      } else if (character === '\\' && quote !== "'") {
+        escaped = true;
+      } else if (quote !== undefined) {
+        if (character === quote) quote = undefined;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (/[\s;&|<>{}]/u.test(character)) {
+        valueEnd = index;
+        break;
+      }
+    }
+
+    if (valueEnd === scanEnd && scanEnd < text.length) {
+      const carriageReturn = text.indexOf('\r', scanEnd);
+      const lineFeed = text.indexOf('\n', scanEnd);
+      const physicalLineEnd = Math.min(
+        carriageReturn < 0 ? text.length : carriageReturn,
+        lineFeed < 0 ? text.length : lineFeed,
+      );
+      result += text.slice(cursor, match.index);
+      result += match[0] + '[REDACTED]';
+      cursor = physicalLineEnd;
+      continue;
+    }
+
+    const value = text.slice(valueStart, valueEnd);
+    if (value.startsWith('(')) continue;
+    let hasQuotedSegment = false;
+    let hasUnquotedLiteral = false;
+    let segmentQuote: '"' | "'" | undefined;
+    let segmentEscaped = false;
+    for (let index = 0; index < value.length; index++) {
+      const character = value[index] ?? '';
+      if (segmentEscaped) {
+        if (segmentQuote === undefined) hasUnquotedLiteral = true;
+        segmentEscaped = false;
+      } else if (character === '\\' && segmentQuote !== "'") {
+        segmentEscaped = true;
+      } else if (segmentQuote !== undefined) {
+        if (character === segmentQuote) segmentQuote = undefined;
+      } else if (character === '$' && value[index + 1] === "'") {
+        hasQuotedSegment = true;
+        segmentQuote = "'";
+        index++;
+      } else if (character === '"' || character === "'") {
+        hasQuotedSegment = true;
+        segmentQuote = character;
+      } else {
+        hasUnquotedLiteral = true;
+      }
+    }
+    if (!hasQuotedSegment || !hasUnquotedLiteral) continue;
+    result += text.slice(cursor, match.index);
+    result += match[0] + redactArrayLiteralFragments(value);
+    cursor = valueEnd;
+  }
+  return result + text.slice(cursor);
+}
+
+function redactBashArrayElementAssignments(text: string): string {
+  const assignmentStart = /(?:^|[\s{,;(])([A-Za-z_][A-Za-z0-9_]*)\[("[A-Za-z0-9_.-]{1,256}"|'[A-Za-z0-9_.-]{1,256}'|[A-Za-z0-9_.-]{1,256})\](\s*(?:\+=|=)\s*)/gmu;
+  let result = '';
+  let cursor = 0;
+
+  for (const match of text.matchAll(assignmentStart)) {
+    const base = match[1];
+    const subscript = match[2];
+    if (base === undefined || subscript === undefined || match.index < cursor) continue;
+    const classifiedSubscript = subscript.replace(/^["']|["']$/gu, '');
+    if (!isSensitiveKeyToken(base) && !isSensitiveKeyToken(classifiedSubscript)) continue;
+    const valueStart = match.index + match[0].length;
+    const quote = text[valueStart] === '"' || text[valueStart] === "'"
+      ? text[valueStart]
+      : undefined;
+    const contentStart = quote === undefined ? valueStart : valueStart + 1;
+    const valueEnd = shellValueBoundary(
+      text,
+      contentStart,
+      quote === undefined ? /[\s"';}\r\n&|><]/u : new RegExp(`[${quote}\\r\\n]`, 'u'),
+    );
+    const hasClosingQuote = quote !== undefined && text[valueEnd] === quote;
+    const value = text.slice(contentStart, valueEnd);
+    result += text.slice(cursor, match.index) + match[0];
+    result += quote === "'"
+      ? `'[REDACTED]${hasClosingQuote ? "'" : ''}`
+      : quote === '"'
+        ? `"${isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'}${hasClosingQuote ? '"' : ''}`
+        : isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]';
+    cursor = valueEnd + (hasClosingQuote ? 1 : 0);
+  }
+  return result + text.slice(cursor);
+}
+
 function redactEscapedDoubleQuotedAssignments(text: string): string {
   const assignmentStart = /((\\+)"(.*?)\2"\s*:\s*\2")/gu;
   const maxValueLength = 65_536;
@@ -1124,7 +1267,13 @@ function redactShellScalarLine(content: string, withinShellContext = false): str
   ) return undefined;
   const isEstablishedVisibleFollowup = withinShellContext
     && /^(?:echo|printf)\s/u.test(content);
-  if (!isRecognizedUnmatchedKeyCommand(content) && !isEstablishedVisibleFollowup) return undefined;
+  const isEstablishedGeneralCommand = withinShellContext
+    && isGeneralCommandShapedLine(content);
+  if (
+    !isRecognizedUnmatchedKeyCommand(content)
+    && !isEstablishedVisibleFollowup
+    && !isEstablishedGeneralCommand
+  ) return undefined;
 
   const prefix = commandIndex === 1 ? ['sudo', command] : [command];
   let tokenIndex = commandIndex + 1;
@@ -1231,6 +1380,67 @@ function redactYamlPlainScalarContinuations(text: string): string {
   return segments.join('');
 }
 
+function redactJsonCollectionLiteralFragments(value: string): string {
+  const spans = shellExpressionSpans(value);
+  let spanIndex = 0;
+  let result = '';
+
+  for (let index = 0; index < value.length;) {
+    const span = spans[spanIndex];
+    if (span?.[0] === index) {
+      result += value.slice(span[0], span[1]);
+      index = span[1];
+      spanIndex++;
+      continue;
+    }
+
+    const character = value[index] ?? '';
+    if (character === '"') {
+      let closingIndex = index + 1;
+      for (; closingIndex < value.length; closingIndex++) {
+        const nestedSpan = spans[spanIndex];
+        if (nestedSpan?.[0] === closingIndex) {
+          closingIndex = nestedSpan[1] - 1;
+          spanIndex++;
+          continue;
+        }
+        if (value[closingIndex] === '\\') {
+          closingIndex++;
+        } else if (value[closingIndex] === '"') {
+          break;
+        }
+      }
+      const content = value.slice(index + 1, closingIndex);
+      let nextIndex = closingIndex + 1;
+      while (/\s/u.test(value[nextIndex] ?? '')) nextIndex++;
+      result += value.slice(index, index + 1);
+      result += value[nextIndex] === ':'
+        ? content
+        : redactPasswordLiteralFragments(content);
+      result += value.slice(closingIndex, closingIndex + 1);
+      index = closingIndex + 1;
+      continue;
+    }
+
+    if (/[\s[\]{},:]/u.test(character)) {
+      result += character;
+      index++;
+      continue;
+    }
+    let literalEnd = index + 1;
+    while (
+      literalEnd < value.length
+      && !/[\s[\]{},:"]/u.test(value[literalEnd] ?? '')
+      && spans[spanIndex]?.[0] !== literalEnd
+    ) {
+      literalEnd++;
+    }
+    result += '[REDACTED]';
+    index = literalEnd;
+  }
+  return result;
+}
+
 function redactSensitiveJsonCollections(text: string): string {
   const propertyStart = /"((?:[^"\\\r\n]|\\(?:["\\/bfnrt]|u[0-9A-Fa-f]{4}))+)"\s*:\s*(?=[\[{])/gu;
   let result = '';
@@ -1245,7 +1455,9 @@ function redactSensitiveJsonCollections(text: string): string {
     const valueStart = match.index + match[0].length;
     const valueEnd = balancedStructuredValueEnd(text, valueStart);
     if (valueEnd === undefined) continue;
-    result += text.slice(cursor, valueStart) + '[REDACTED]';
+    const value = text.slice(valueStart, valueEnd);
+    result += text.slice(cursor, valueStart)
+      + (isShellExpression(value) ? redactJsonCollectionLiteralFragments(value) : '[REDACTED]');
     cursor = valueEnd;
   }
   return result + text.slice(cursor);
@@ -1515,6 +1727,8 @@ export function redactSecrets(text: string, options?: { isTruncatedTail?: boolea
   });
 
   // 10. Key-Value Assignments & YAML Colon / Equals Assignments
+  result = redactBashArrayElementAssignments(result);
+  result = redactMixedShellWordAssignments(result);
   result = redactSensitiveArrayAssignments(result);
   result = redactSensitiveJsonCollections(result);
   result = redactPowerShellAssignments(result);

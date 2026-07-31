@@ -1350,6 +1350,20 @@ describe('CliChannel', () => {
     expect(prompt).toContain('safe: visible');
   });
 
+  it('retains later general command-shaped lines after YAML shell context is established', async () => {
+    const readline = makeFakeReadline(['a']);
+    const channel = new CliChannel({ readline, operatorName: 'dev' });
+
+    await channel.requestApproval(makeRequest({
+      summary: 'password: |\n  systemctl stop synthetic-service\n  terraform destroy --auto-approve\nsafe: visible',
+    }));
+
+    const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
+    expect(prompt).toContain('|   systemctl [REDACTED]');
+    expect(prompt).toContain('|   terraform [REDACTED]');
+    expect(prompt).toContain('safe: visible');
+  });
+
   it('preserves previously supported argumentless destructive command words', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -2050,6 +2064,14 @@ describe('CliChannel', () => {
     expect(redacted).toBe('https://safe.example/?token=[REDACTED]$(reboot;shutdown)[REDACTED]&safe=visible');
   });
 
+  it('classifies percent-encoded URL query keys while preserving their spelling', () => {
+    expect(redactSecrets(
+      'https://safe.example/?access%5Ftoken=synthetic-query-secret&safe=visible',
+    )).toBe(
+      'https://safe.example/?access%5Ftoken=[REDACTED]&safe=visible',
+    );
+  });
+
   it('redacts over-cap sensitive query values through their real boundary', () => {
     const overCapLiteral = 'x'.repeat(65_536);
     const redacted = redactSecrets(
@@ -2084,6 +2106,23 @@ describe('CliChannel', () => {
   it('scans balanced substitutions before unquoted sensitive-assignment operator boundaries', () => {
     const redacted = redactSecrets('PASSWORD=secret$(reboot;shutdown)tail && echo visible_assignment_command');
     expect(redacted).toBe('PASSWORD=[REDACTED]$(reboot;shutdown)[REDACTED] && echo visible_assignment_command');
+  });
+
+  it('consumes mixed quoted and unquoted sensitive assignment shell words', () => {
+    expect(redactSecrets(
+      "PASSWORD=violet\"amber$(reboot)stone\"'quartz$(shutdown)'opal && echo visible_mixed_word_context",
+    )).toBe(
+      "PASSWORD=[REDACTED]\"[REDACTED]$(reboot)[REDACTED]\"'[REDACTED]'[REDACTED] && echo visible_mixed_word_context",
+    );
+  });
+
+  it('fails closed for over-cap mixed sensitive assignment shell words', () => {
+    const overCapPrefix = 'x'.repeat(65_536);
+    expect(redactSecrets(
+      `PASSWORD=${overCapPrefix}"violetquartz"\necho visible_after_over_cap_mixed_word`,
+    )).toBe(
+      'PASSWORD=[REDACTED]\necho visible_after_over_cap_mixed_word',
+    );
   });
 
   it('recognizes established short sensitive aliases without overmatching', () => {
@@ -2188,9 +2227,25 @@ describe('CliChannel', () => {
       .toBe('curl --user alice:[REDACTED]$(reboot;shutdown)[REDACTED] https://safe.example');
   });
 
+  it('locates URL userinfo authority separators outside balanced substitutions', () => {
+    expect(redactSecrets(
+      "https://alice:violet$(printf '%s' @)quartz@example.com/path",
+    )).toBe(
+      "https://alice:[REDACTED]$(printf '%s' @)[REDACTED]@example.com/path",
+    );
+  });
+
   it('does not rematch expression-aware unquoted curl credentials in the fallback pass', () => {
     expect(redactSecrets('curl -u user:$(echo hi)secret x'))
       .toBe('curl -u user:$(echo hi)[REDACTED] x');
+  });
+
+  it('redacts attached curl short-option credentials without matching longer options', () => {
+    expect(redactSecrets(
+      'curl -ualice:synthetic-password -Uproxy:synthetic-proxy-password --user-agent:visible https://safe.example',
+    )).toBe(
+      'curl -ualice:[REDACTED] -Uproxy:[REDACTED] --user-agent:visible https://safe.example',
+    );
   });
 
   it('preserves substitutions in structured-header string values', () => {
@@ -2213,6 +2268,14 @@ describe('CliChannel', () => {
       .toBe('{"password":[REDACTED],"safe":"visible"}');
     expect(redactSecrets('{"password":{"primary":"violet"},"safe":"visible"}'))
       .toBe('{"password":[REDACTED],"safe":"visible"}');
+  });
+
+  it('preserves active substitutions inside sensitive JSON collections', () => {
+    expect(redactSecrets(
+      '{"password":["violet$(reboot; shutdown)quartz",{"nested":"amber${TOKEN}stone"}],"safe":"visible"}',
+    )).toBe(
+      '{"password":["[REDACTED]$(reboot; shutdown)[REDACTED]",{"nested":"[REDACTED]${TOKEN}[REDACTED]"}],"safe":"visible"}',
+    );
   });
 
   it('parses case-pattern terminators inside command substitutions', () => {
@@ -2416,5 +2479,13 @@ describe('CliChannel', () => {
     expect(redactSecrets('PASSWORD+=synthetic-password')).toBe('PASSWORD+=[REDACTED]');
     expect(redactSecrets('declare PASSWORD+=synthetic-password')).toBe('declare PASSWORD+=[REDACTED]');
     expect(redactSecrets('PASSWORD+=(violet quartz)')).toBe('PASSWORD+=([REDACTED])');
+  });
+
+  it('redacts bounded Bash indexed and associative array-element assignments', () => {
+    expect(redactSecrets(
+      'PASSWORDS[2]=synthetic-indexed config[password]=synthetic-associated safe[mode]=visible',
+    )).toBe(
+      'PASSWORDS[2]=[REDACTED] config[password]=[REDACTED] safe[mode]=visible',
+    );
   });
 });
