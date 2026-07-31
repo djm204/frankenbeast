@@ -641,5 +641,116 @@ const x = 1;
     expect(result.verdict).toBe('pass');
     expect(duration).toBeLessThan(1000);
   });
+
+  describe('resource-bounding regressions after rebase', () => {
+    it('bounds work on inputs with many regex literals after control-condition parens', async () => {
+      // Regression test for a quadratic path in collectCodeMarkers():
+      // findMatchingOpeningParen() previously rescanned the entire
+      // preceding prefix from scratch every time a `/` immediately
+      // followed a `)`, so many `if (x) /a/;`-shaped lines degrade to
+      // O(n^2). A crafted ~24KB input of this shape was clocked at ~7s
+      // pre-fix; a correctly linear scan should stay well under a second
+      // even for a substantially larger input.
+      const evaluator = new ConcisenessEvaluator();
+      const pathologicalLine = 'if (x) /a/;\n';
+      const pathologicalContent = pathologicalLine.repeat(5_000); // ~65KB
+
+      const start = Date.now();
+      const result = await evaluator.evaluate(createInput(pathologicalContent));
+      const duration = Date.now() - start;
+
+      expect(result.evaluatorName).toBe('conciseness');
+      expect(duration).toBeLessThan(1000);
+    });
+
+    it('scales roughly linearly (not quadratically) as pathological input grows', async () => {
+      // Complexity-based check that avoids relying on a single fragile
+      // wall-clock threshold: quadratic behavior means an 8x larger input
+      // takes ~64x longer, while linear behavior takes ~8x longer. Assert
+      // a generous bound that a quadratic regression would blow through
+      // but ordinary CI timing jitter should not.
+      const evaluator = new ConcisenessEvaluator();
+      const pathologicalLine = 'if (x) /a/;\n';
+      const small = pathologicalLine.repeat(1_000);
+      const large = pathologicalLine.repeat(8_000);
+
+      const smallStart = Date.now();
+      await evaluator.evaluate(createInput(small));
+      const smallDuration = Math.max(Date.now() - smallStart, 1);
+
+      const largeStart = Date.now();
+      await evaluator.evaluate(createInput(large));
+      const largeDuration = Date.now() - largeStart;
+
+      expect(largeDuration).toBeLessThan(smallDuration * 20);
+    });
+
+    it('preserves an open block comment that spans the truncation boundary', async () => {
+      // Regression test: if truncation cuts through a block comment before
+      // its closing `*/`, the naive BLOCK_COMMENT_PATTERN regex used for
+      // comment-ratio scoring requires a literal closing delimiter and so
+      // silently drops the entire (truncated) comment from the ratio,
+      // making an almost-all-comment payload score as if it had ~0%
+      // comments instead of the ~99%+ it should.
+      const evaluator = new ConcisenessEvaluator();
+      const commentLine = 'x'.repeat(78);
+      const linesNeeded = Math.ceil(600_000 / (commentLine.length + 1));
+      const body = `${commentLine}\n`.repeat(linesNeeded);
+      // The closing `*/` sits well past the 500,000-byte cutoff, so the
+      // truncated content ends mid-comment with no closing delimiter.
+      const content = `/*\n${body}*/\n`;
+      expect(Buffer.byteLength(content, 'utf8')).toBeGreaterThan(500_000);
+
+      const result = await evaluator.evaluate(createInput(content));
+
+      const ratioFinding = result.findings.find((f) =>
+        f.message.startsWith('Excessive comment ratio:'),
+      );
+      expect(ratioFinding).toBeTruthy();
+      const percentage = Number(
+        ratioFinding?.message.match(/Excessive comment ratio: (\d+)%/)?.[1],
+      );
+      expect(percentage).toBeGreaterThan(90);
+    });
+
+    it('truncates at a UTF-8 byte boundary, not a UTF-16 code-unit boundary', async () => {
+      // Regression test: MAX_INPUT_BYTES is measured against
+      // `String.length`, which counts UTF-16 code units, not bytes. Each
+      // '中' character is 1 UTF-16 code unit but 3 UTF-8 bytes, so 170,000
+      // of them is only ~170K by `.length` (nowhere near the old
+      // character-count cap) yet ~510KB by actual byte size -- past the
+      // intended 500,000-byte memory bound.
+      const evaluator = new ConcisenessEvaluator();
+      const marker = ['TO', 'DO'].join('');
+      const filler = '中'.repeat(170_000);
+      const content = `${filler}\n// ${marker}: filler marker\n`;
+      expect(content.length).toBeLessThan(500_000);
+      expect(Buffer.byteLength(content, 'utf8')).toBeGreaterThan(500_000);
+
+      const result = await evaluator.evaluate(createInput(content));
+
+      // The marker sits after the true 500,000-byte cutoff, so a
+      // byte-accurate truncation must drop it entirely.
+      expect(
+        result.findings.some((f) =>
+          f.message.includes('unresolved marker comment'),
+        ),
+      ).toBe(false);
+    });
+
+    it('does not corrupt output when the byte cutoff lands mid-character', async () => {
+      // 500,000 is not a multiple of 3, so a naive byte slice at exactly
+      // MAX_INPUT_BYTES would split the last multi-byte character in half,
+      // producing invalid UTF-8 / mojibake. The evaluator should still
+      // resolve cleanly.
+      const evaluator = new ConcisenessEvaluator();
+      const filler = '中'.repeat(200_000); // 600,000 bytes
+
+      const result = await evaluator.evaluate(createInput(filler));
+
+      expect(result.evaluatorName).toBe('conciseness');
+      expect(result.verdict).toBe('pass');
+    });
+  });
 });
 
