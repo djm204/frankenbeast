@@ -430,13 +430,13 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   // POST /v1/approval/respond — respond to an approval request
   app.post('/v1/approval/respond', async (c) => {
     const rawBody = Buffer.from(await c.req.arrayBuffer());
-    const body = parseJsonBody(rawBody);
-    if (!body) {
-      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
-    }
 
-    // Fail closed: unsigned approval responses are rejected unless a signing
-    // secret is configured (then verified) or an explicit test flag is set.
+    // Fail closed: authenticate the raw bytes with the governor signature
+    // BEFORE parsing JSON, so untrusted/unauthenticated input never reaches
+    // JSON.parse or registry dispatch. Unsigned approval responses are
+    // rejected unless a signing secret is configured (then verified) or an
+    // explicit test flag is set; the test-only unsigned path is still
+    // gated here, ahead of parsing.
     if (!options.signingSecret) {
       if (!options.allowUnsignedApprovalsForTests) {
         return c.json({ error: { message: 'Signing secret required for approval responses' } }, 401);
@@ -456,6 +456,11 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       if (!verification.ok) {
         return c.json({ error: { message: 'Invalid signature' } }, 401);
       }
+    }
+
+    const body = parseJsonBody(rawBody);
+    if (!body) {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
     }
 
     if (typeof body.requestId !== 'string' || typeof body.decision !== 'string') {
