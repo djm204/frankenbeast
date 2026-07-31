@@ -290,13 +290,17 @@ function extractSlackActionFeedback(actionId: unknown): string | undefined {
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
-  const registry = options.registry ?? new ApprovalWaiterRegistry();
   const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
   const slackResponsePoster = options.slackResponsePoster ?? DEFAULT_SLACK_RESPONSE_POSTER;
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
   const approvalRequestTimeoutMs = normalizeGovernorConfig(
     options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
   ).timeoutMs;
+  // Reuse the same timeoutMs for the registry's pending-approval TTL so
+  // "how stale may an inbound request be" and "how long may an approval sit
+  // unresolved before it expires and is purged" stay a single knob (#3736,
+  // #3751). An externally supplied registry manages its own timeoutMs.
+  const registry = options.registry ?? new ApprovalWaiterRegistry({ timeoutMs: approvalRequestTimeoutMs });
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
     try {
@@ -481,6 +485,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       );
     }
 
+    // Reject a decision for an approval past its TTL with a distinct error
+    // code before the generic `has()` lazy-eviction check below (which would
+    // otherwise report it identically to a requestId that never existed) —
+    // see #3736. Peeking via `isExpired` (non-mutating) rather than relying
+    // solely on `has`/`resolve` also lets the purge that follows be explicit.
+    if (registry.isExpired(body.requestId)) {
+      registry.delete(body.requestId);
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
+
     if (!registry.has(body.requestId)) {
       return c.json({ error: { message: 'Approval request not found' } }, 404);
     }
@@ -499,7 +518,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // a caller blocked on `ApprovalGateway.requestApproval()` actually
     // unblocks with this decision instead of the request silently resolving
     // only from the HTTP caller's point of view.
-    registry.resolve(body.requestId, {
+    const resolved = registry.resolve(body.requestId, {
       requestId: body.requestId,
       decision,
       respondedBy,
@@ -507,6 +526,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ...(feedback !== undefined ? { feedback } : {}),
       ...(signature !== undefined ? { signature } : {}),
     });
+
+    // The TTL can be crossed between the preflight checks above and this
+    // call (e.g. a decision arriving in the request's final milliseconds).
+    // `resolve()` is the actual source of truth for whether the decision
+    // was honored: trust its return value rather than the earlier `has()`
+    // check, so an operator is never told "resolved" for a decision that
+    // silently failed to wake anything.
+    if (!resolved) {
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
 
     return c.json({
       requestId: body.requestId,
@@ -682,6 +716,18 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       });
     }
 
+    // Reject a Slack decision for an approval past its TTL with a distinct
+    // error code, same as the HTTP respond endpoint above (#3736).
+    if (registry.isExpired(requestId)) {
+      registry.delete(requestId);
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
+
     // Look up the pending approval; unknown requests are rejected.
     if (!registry.has(requestId)) {
       return c.json({ error: { message: 'Approval request not found' } }, 404);
@@ -703,7 +749,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       )
       : undefined;
 
-    registry.resolve(requestId, {
+    const resolved = registry.resolve(requestId, {
       requestId,
       decision,
       respondedBy: slackUserId,
@@ -711,6 +757,19 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ...(feedback !== undefined ? { feedback } : {}),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
+
+    // Same rationale as the HTTP respond endpoint above: the TTL can be
+    // crossed between the preflight checks and this call, so `resolve()`'s
+    // actual return value -- not the earlier `has()` check -- decides
+    // whether this is reported as resolved.
+    if (!resolved) {
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
 
     return c.json({
       requestId,
