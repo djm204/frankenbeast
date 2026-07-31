@@ -751,6 +751,72 @@ const x = 1;
       expect(result.evaluatorName).toBe('conciseness');
       expect(result.verdict).toBe('pass');
     });
+
+    it('bounds encoding work instead of encoding the entire uncapped input', async () => {
+      // Regression test: truncateToByteLimit() previously called
+      // `Buffer.from(content, 'utf8')` on the *full* input before checking
+      // its length, so a review far larger than 500KB still incurred an
+      // allocation and encode pass proportional to the whole payload --
+      // the byte-boundary fix for the UTF-16-vs-byte finding didn't
+      // actually bound memory/CPU, it just moved where the check happened.
+      // A multi-megabyte pathological input should still resolve quickly.
+      const evaluator = new ConcisenessEvaluator();
+      const veryLargeContent = 'x'.repeat(20_000_000); // 20MB, ASCII
+
+      const start = Date.now();
+      const result = await evaluator.evaluate(createInput(veryLargeContent));
+      const duration = Date.now() - start;
+
+      expect(result.evaluatorName).toBe('conciseness');
+      expect(duration).toBeLessThan(1000);
+    });
+
+    it('does not treat a "/*"-shaped string literal near the truncation tail as an open comment', async () => {
+      // Regression test: closeUnterminatedBlockComment() previously used a
+      // raw lastIndexOf('/*') / lastIndexOf('*/') comparison with no
+      // lexical awareness, so a `/*`-looking substring inside a string
+      // literal (not a real comment opener) was misidentified as an open
+      // block comment, and the synthetic closing `*/` made
+      // BLOCK_COMMENT_PATTERN match from that string literal all the way
+      // to the truncation boundary -- scoring ordinary code as ~100%
+      // comments.
+      const evaluator = new ConcisenessEvaluator();
+      const sentinel = 'const sentinel = "/*";\n';
+      const ordinaryLine = 'const value = 1;\n';
+      const body = ordinaryLine.repeat(
+        Math.ceil(600_000 / ordinaryLine.length),
+      );
+      const content = `${sentinel}${body}`;
+      expect(Buffer.byteLength(content, 'utf8')).toBeGreaterThan(500_000);
+
+      const result = await evaluator.evaluate(createInput(content));
+
+      expect(
+        result.findings.some((f) =>
+          f.message.startsWith('Excessive comment ratio:'),
+        ),
+      ).toBe(false);
+    });
+
+    it('still closes a genuinely open block comment that spans the truncation boundary', async () => {
+      // Companion to the lexical-awareness test above: a *real* unterminated
+      // block comment at the truncation boundary must still be detected
+      // and accounted for (this is finding #2 from the prior round,
+      // re-verified against the lexical-scanner-based implementation).
+      const evaluator = new ConcisenessEvaluator();
+      const commentLine = 'x'.repeat(78);
+      const linesNeeded = Math.ceil(600_000 / (commentLine.length + 1));
+      const body = `${commentLine}\n`.repeat(linesNeeded);
+      const content = `/*\n${body}*/\n`;
+      expect(Buffer.byteLength(content, 'utf8')).toBeGreaterThan(500_000);
+
+      const result = await evaluator.evaluate(createInput(content));
+
+      const ratioFinding = result.findings.find((f) =>
+        f.message.startsWith('Excessive comment ratio:'),
+      );
+      expect(ratioFinding).toBeTruthy();
+    });
   });
 });
 

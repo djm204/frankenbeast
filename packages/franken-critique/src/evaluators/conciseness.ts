@@ -43,17 +43,28 @@ interface UnresolvedMarkerOccurrence {
  * truncates on the actual encoded byte size and backs off from the cut
  * point while it lands inside a multi-byte sequence, so a character is
  * never split and the result is always valid UTF-8.
+ *
+ * Every UTF-16 code unit encodes to at least 1 UTF-8 byte, so a
+ * `maxBytes`-code-unit prefix of `content` is always long enough (in
+ * bytes) to reach `maxBytes` if the full content would. We take that
+ * bounded prefix *before* encoding, so `Buffer.from` never has to
+ * materialize or scan an arbitrarily large uncapped input just to
+ * discover it needs truncating -- encode/scan work is bounded by
+ * `maxBytes`, not by `content.length`.
  */
 function truncateToByteLimit(
   content: string,
   maxBytes: number,
 ): { content: string; truncated: boolean } {
-  const encoded = Buffer.from(content, 'utf8');
-  if (encoded.length <= maxBytes) {
+  const isEntireContent = content.length <= maxBytes;
+  const candidate = isEntireContent ? content : content.slice(0, maxBytes);
+  const encoded = Buffer.from(candidate, 'utf8');
+
+  if (isEntireContent && encoded.length <= maxBytes) {
     return { content, truncated: false };
   }
 
-  let end = maxBytes;
+  let end = Math.min(encoded.length, maxBytes);
   // Continuation bytes match the 10xxxxxx bit pattern; back off until we
   // land right after a complete character.
   while (end > 0 && ((encoded[end] ?? 0) & 0xc0) === 0x80) {
@@ -67,6 +78,55 @@ function truncateToByteLimit(
 }
 
 /**
+ * Determines whether scanning `content` to its end leaves us inside an
+ * unterminated block comment. This mirrors the same quote/comment/regex
+ * skip logic `collectCodeMarkers` uses (reusing `skipQuotedLiteral`,
+ * `canStartRegexLiteral`, and `skipRegexLiteral`) so a `/*`-looking
+ * substring inside a string or regex literal -- e.g. `const sentinel =
+ * "/*";` -- is never mistaken for a real comment opener. It is a single
+ * forward O(n) pass over `content`, which is already bounded to at most
+ * `maxBytes` by `truncateToByteLimit`.
+ */
+function isInsideOpenBlockComment(content: string): boolean {
+  const state = createParenScanState();
+  let index = 0;
+
+  while (index < content.length) {
+    const current = content[index];
+    const next = content[index + 1];
+
+    if (current === '"' || current === "'" || current === '`') {
+      index = skipQuotedLiteral(content, index);
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      const lineEnd = content.indexOf('\n', index + 2);
+      index = lineEnd === -1 ? content.length : lineEnd + 1;
+      continue;
+    }
+
+    if (current === '/' && next === '*') {
+      const commentEnd = content.indexOf('*/', index + 2);
+      if (commentEnd === -1) {
+        return true;
+      }
+      index = commentEnd + 2;
+      continue;
+    }
+
+    if (current === '/' && canStartRegexLiteral(content, index, state)) {
+      index = skipRegexLiteral(content, index);
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return false;
+}
+
+/**
  * If truncation cut through an open block comment (its `/*` appeared
  * before the cutoff but its closing `*\/` would have appeared after it),
  * the naive `BLOCK_COMMENT_PATTERN` regex used for comment-ratio scoring
@@ -75,17 +135,7 @@ function truncateToByteLimit(
  * calculation honest about the content that was actually scanned.
  */
 function closeUnterminatedBlockComment(content: string): string {
-  const lastOpen = content.lastIndexOf('/*');
-  if (lastOpen === -1) {
-    return content;
-  }
-
-  const lastClose = content.lastIndexOf('*/');
-  if (lastClose > lastOpen) {
-    return content;
-  }
-
-  return `${content}*/`;
+  return isInsideOpenBlockComment(content) ? `${content}*/` : content;
 }
 
 function skipQuotedLiteral(content: string, start: number): number {
