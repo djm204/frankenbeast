@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.12.2](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.12.1...franken-mcp-suite-v0.12.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **mcp-suite:** fail closed on unreadable hook context ([#3716](https://github.com/djm204/frankenbeast/issues/3716)) ([bceb427](https://github.com/djm204/frankenbeast/commit/bceb42750285bbbe0f8396f9d83472547d528b79))
+* **mcp-suite:** redact credential-shaped text from hook entrypoint failure logs ([#3920](https://github.com/djm204/frankenbeast/issues/3920)) ([7c60aab](https://github.com/djm204/frankenbeast/commit/7c60aabbb8cb4084c73711720b0fcfc46d87c3d9))
+* **mcp-suite:** roll back failed brain flushes ([#3929](https://github.com/djm204/frankenbeast/issues/3929)) ([84471cf](https://github.com/djm204/frankenbeast/commit/84471cf1d636bccb2d61e8caa99b760092ea0569))
+* **mcp-suite:** sanitize uninstall failure output ([#3893](https://github.com/djm204/frankenbeast/issues/3893)) ([43cb372](https://github.com/djm204/frankenbeast/commit/43cb372b6d16a7ba5eabff26dc6b7cc29a17643e))
+* **mcp-suite:** validate PlannerAdapter stored plan JSON with zod ([#3923](https://github.com/djm204/frankenbeast/issues/3923)) ([4dfe3af](https://github.com/djm204/frankenbeast/commit/4dfe3af287a333e7323ab4bcf7c9bf92b5a201fd))
+* **mcp:** redact bare credential-shaped values in post-tool payloads ([#3891](https://github.com/djm204/frankenbeast/issues/3891)) ([95e49be](https://github.com/djm204/frankenbeast/commit/95e49befda2d3c92de69ab546182258ccaedcb49))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.19.0 to 0.19.1
+    * @franken/brain bumped from 0.18.1 to 0.18.2
+    * @franken/critique bumped from 0.11.2 to 0.11.3
+    * @franken/governor bumped from 0.9.2 to 0.9.3
+    * @franken/observer bumped from 0.13.0 to 0.13.1
+    * @franken/orchestrator bumped from 0.61.0 to 0.61.1
+    * @franken/planner bumped from 0.4.28 to 0.4.29
+
 ## [0.12.1](https://github.com/djm204/frankenbeast/compare/franken-mcp-suite-v0.12.0...franken-mcp-suite-v0.12.1) (2026-07-28)
 
 

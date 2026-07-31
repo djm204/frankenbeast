@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.1](https://github.com/djm204/frankenbeast/compare/franken-web-v0.13.0...franken-web-v0.13.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **web:** announce empty activity state ([#3935](https://github.com/djm204/frankenbeast/issues/3935)) ([ffc3b2c](https://github.com/djm204/frankenbeast/commit/ffc3b2c37c21468cb654a569bc18c4ac334bacad))
+* **web:** announce network service status changes ([#3926](https://github.com/djm204/frankenbeast/issues/3926)) ([a9edaed](https://github.com/djm204/frankenbeast/commit/a9edaedc53aad0ad041df0efba94d22f6607046d))
+* **web:** populate LLM Targets model list for providers without a pinned model ([#3888](https://github.com/djm204/frankenbeast/issues/3888)) ([65007bf](https://github.com/djm204/frankenbeast/commit/65007bf758e53bc4c3647134e84411ceaaa4a1d8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.19.0 to 0.19.1
+
 ## [0.13.0](https://github.com/djm204/frankenbeast/compare/franken-web-v0.12.0...franken-web-v0.13.0) (2026-07-28)
 
 

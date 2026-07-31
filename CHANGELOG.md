@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.67.1](https://github.com/djm204/frankenbeast/compare/v0.67.0...v0.67.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **brain:** bound faculty outcome scans ([#3934](https://github.com/djm204/frankenbeast/issues/3934)) ([a2b414c](https://github.com/djm204/frankenbeast/commit/a2b414c167235d9fbfc1a7110f03e040a6458885))
+* **critique:** keep conciseness feedback non-blocking ([#3930](https://github.com/djm204/frankenbeast/issues/3930)) ([1888318](https://github.com/djm204/frankenbeast/commit/188831898e3155a07256b7d3268d2650e738a522))
+* **critique:** report lesson persistence failures ([#3928](https://github.com/djm204/frankenbeast/issues/3928)) ([8d611ab](https://github.com/djm204/frankenbeast/commit/8d611ab1fc96b55eda4d728013b03ca4db4fc4b9))
+* **governor:** expire stale approval requests ([#3895](https://github.com/djm204/frankenbeast/issues/3895)) ([3da0db8](https://github.com/djm204/frankenbeast/commit/3da0db87b10b8013dc5e059fc61a5753eb65f721))
+* **mcp-suite:** roll back failed brain flushes ([#3929](https://github.com/djm204/frankenbeast/issues/3929)) ([84471cf](https://github.com/djm204/frankenbeast/commit/84471cf1d636bccb2d61e8caa99b760092ea0569))
+* **mcp-suite:** sanitize uninstall failure output ([#3893](https://github.com/djm204/frankenbeast/issues/3893)) ([43cb372](https://github.com/djm204/frankenbeast/commit/43cb372b6d16a7ba5eabff26dc6b7cc29a17643e))
+* **mcp-suite:** validate PlannerAdapter stored plan JSON with zod ([#3923](https://github.com/djm204/frankenbeast/issues/3923)) ([4dfe3af](https://github.com/djm204/frankenbeast/commit/4dfe3af287a333e7323ab4bcf7c9bf92b5a201fd))
+* **orchestrator:** bound adapter LLM requests ([#3931](https://github.com/djm204/frankenbeast/issues/3931)) ([d0fda93](https://github.com/djm204/frankenbeast/commit/d0fda93ebfa407a5a1e373a9621448cd33dfcbce))
+* **orchestrator:** inject planning faculty clock ([#3933](https://github.com/djm204/frankenbeast/issues/3933)) ([8392035](https://github.com/djm204/frankenbeast/commit/8392035e29b00e43eac1491e0b866d9a60750cd1))
+* **orchestrator:** isolate planning telemetry failures ([#3937](https://github.com/djm204/frankenbeast/issues/3937)) ([3c7ba01](https://github.com/djm204/frankenbeast/commit/3c7ba011d2d1f2a66aa83ae87bb47afe2ce0db36))
+* **orchestrator:** preserve launch diagnostics and run design interviews unattended ([#3884](https://github.com/djm204/frankenbeast/issues/3884)) ([d7486e4](https://github.com/djm204/frankenbeast/commit/d7486e498f803dc10ce300a34d5dabe6a081feac))
+* **orchestrator:** sanitize adapter error messages ([#3927](https://github.com/djm204/frankenbeast/issues/3927)) ([21df895](https://github.com/djm204/frankenbeast/commit/21df895f257413f0013f30d7b54289eeca3065f9))
+* **orchestrator:** secure adapter request IDs ([#3894](https://github.com/djm204/frankenbeast/issues/3894)) ([78eecdb](https://github.com/djm204/frankenbeast/commit/78eecdbdc7e68305da5d0d6e3a5d780104adfe82))
+* **orchestrator:** validate completion token limits ([#3936](https://github.com/djm204/frankenbeast/issues/3936)) ([6dc4b50](https://github.com/djm204/frankenbeast/commit/6dc4b503ec5093d55590396ef72aaf685118a76f))
+* **web:** announce empty activity state ([#3935](https://github.com/djm204/frankenbeast/issues/3935)) ([ffc3b2c](https://github.com/djm204/frankenbeast/commit/ffc3b2c37c21468cb654a569bc18c4ac334bacad))
+* **web:** announce network service status changes ([#3926](https://github.com/djm204/frankenbeast/issues/3926)) ([a9edaed](https://github.com/djm204/frankenbeast/commit/a9edaedc53aad0ad041df0efba94d22f6607046d))
+
+
+### Tests
+
+* **docs:** reject unresolved merge markers ([#3932](https://github.com/djm204/frankenbeast/issues/3932)) ([6747774](https://github.com/djm204/frankenbeast/commit/674777417f0ab47cfc6f06bb8bdff1b77d11b1b4))
+
 ## [0.67.0](https://github.com/djm204/frankenbeast/compare/v0.66.0...v0.67.0) (2026-07-28)
 
 
