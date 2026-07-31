@@ -72,7 +72,7 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
-import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, resolveProviderType, resolveWizardExecutionProvider, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
 import type { NetworkServiceHealthStatus } from '../network/network-health.js';
@@ -670,13 +670,17 @@ export function buildDashboardProviderSnapshot(
   extraProviderNames: readonly string[] = [],
 ): DashboardProviderSnapshot[] {
   if (config.consolidatedProviders?.length) {
-    return config.consolidatedProviders.map((provider, index) => ({
-      name: provider.name,
-      type: provider.type,
-      available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
-      failoverOrder: index,
-      ...(provider.model ? { model: provider.model } : {}),
-    }));
+    return config.consolidatedProviders.map((provider, index) => {
+      const executionProvider = resolveWizardExecutionProvider(provider.name, config.consolidatedProviders);
+      return {
+        name: provider.name,
+        type: provider.type,
+        available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
+        failoverOrder: index,
+        ...(provider.model ? { model: provider.model } : {}),
+        ...(executionProvider ? { executionProvider } : {}),
+      };
+    });
   }
 
   const registryProviders = providerRegistry?.getProviders() ?? [];
@@ -714,12 +718,14 @@ export function buildDashboardProviderSnapshot(
     const registryProvider = registryByName.get(name);
     const type: string = registryProvider?.type ?? resolveDashboardProviderType(name, registryProviders[index]?.type);
     const model = config.providers.overrides?.[name]?.model;
+    const executionProvider = resolveWizardExecutionProvider(name, config.consolidatedProviders);
     return {
       name,
       type,
       available: resolveDashboardProviderAvailability(name, type, config),
       failoverOrder: index,
       ...(model ? { model } : {}),
+      ...(executionProvider ? { executionProvider } : {}),
     };
   });
 }
