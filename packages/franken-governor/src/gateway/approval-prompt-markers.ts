@@ -225,7 +225,7 @@ function redactPrivateKeyBlocks(text: string): string {
 }
 
 function redactUrlPasswords(text: string, isTruncatedTail = false): string {
-  const userinfoStart = /\b([a-z0-9+.-]+:\/\/[a-zA-Z0-9_%+.-]*:)/giu;
+  const userinfoStart = /\b([a-z0-9+.-]+:\/\/[a-zA-Z0-9_%+.\-~]*:)/giu;
   let result = '';
   let cursor = 0;
   for (const match of text.matchAll(userinfoStart)) {
@@ -246,6 +246,202 @@ function redactUrlPasswords(text: string, isTruncatedTail = false): string {
   return result + text.slice(cursor);
 }
 
+function enclosingShellQuoteAt(text: string, position: number): '"' | "'" | undefined {
+  const scanStart = Math.max(
+    text.lastIndexOf('\n', position - 1) + 1,
+    text.lastIndexOf('\r', position - 1) + 1,
+    position - MAX_SENSITIVE_ARRAY_BODY_LENGTH,
+  );
+  const prefix = text.slice(scanStart, position);
+  const expressionSpans = shellExpressionSpans(prefix);
+  let spanIndex = 0;
+  let quote: '"' | "'" | undefined;
+
+  for (let index = 0; index < prefix.length; index++) {
+    while ((expressionSpans[spanIndex]?.[1] ?? prefix.length + 1) <= index) spanIndex++;
+    const activeSpan = expressionSpans[spanIndex];
+    if (
+      quote !== "'"
+      && activeSpan !== undefined
+      && index === activeSpan[0]
+    ) {
+      index = activeSpan[1] - 1;
+      continue;
+    }
+    const character = prefix[index];
+    if (quote === "'") {
+      if (character === "'") quote = undefined;
+    } else if (character === '\\') {
+      index++;
+    } else if (quote === '"') {
+      if (character === '"') quote = undefined;
+    } else if (
+      character === "'"
+      && /[A-Za-z0-9]/u.test(prefix[index - 1] ?? '')
+      && /[A-Za-z0-9]/u.test(prefix[index + 1] ?? '')
+      && prefix.indexOf("'", index + 1) < 0
+    ) {
+      continue;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    }
+  }
+  return quote;
+}
+
+function shellWordEnd(
+  text: string,
+  start: number,
+  structuralBoundary: RegExp,
+  initialQuote?: '"' | "'",
+): number {
+  const candidateEnd = shellValueBoundary(
+    text,
+    start,
+    initialQuote === '"' ? /["\r\n]/u : /[\r\n]/u,
+  );
+  const candidate = text.slice(start, candidateEnd);
+  const expressionSpans = shellExpressionSpans(candidate);
+  let expressionIndex = 0;
+  let quote: '"' | "'" | undefined;
+  let ansiCQuote = false;
+
+  for (let index = 0; index < candidate.length; index++) {
+    while ((expressionSpans[expressionIndex]?.[1] ?? candidate.length + 1) <= index) {
+      expressionIndex++;
+    }
+    const expression = expressionSpans[expressionIndex];
+    if (quote !== "'" && expression !== undefined && expression[0] === index) {
+      index = expression[1] - 1;
+      continue;
+    }
+    const character = candidate[index];
+    if (quote === "'") {
+      if (ansiCQuote && character === '\\') {
+        index++;
+      } else if (character === "'") {
+        quote = undefined;
+        ansiCQuote = false;
+      }
+    } else if (character === '\\') {
+      index++;
+    } else if (quote === '"') {
+      if (character === '"') quote = undefined;
+    } else if (character === '$' && candidate[index + 1] === "'") {
+      quote = "'";
+      ansiCQuote = true;
+      index++;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (
+      structuralBoundary.test(character ?? '')
+      || (initialQuote === undefined && /[\s;|<>]/u.test(character ?? ''))
+    ) {
+      return start + index;
+    }
+  }
+  return candidateEnd;
+}
+
+function redactShellWordLiteralFragments(word: string): string {
+  const expressionSpans = shellExpressionSpans(word);
+  let expressionIndex = 0;
+  let result = '';
+  let literal = '';
+  let quote: '"' | "'" | undefined;
+  let ansiCQuote = false;
+  const flushLiteral = (): void => {
+    if (literal.length > 0) result += '[REDACTED]';
+    literal = '';
+  };
+
+  for (let index = 0; index < word.length; index++) {
+    while ((expressionSpans[expressionIndex]?.[1] ?? word.length + 1) <= index) {
+      expressionIndex++;
+    }
+    const expression = expressionSpans[expressionIndex];
+    if (quote !== "'" && expression !== undefined && expression[0] === index) {
+      flushLiteral();
+      result += word.slice(expression[0], expression[1]);
+      index = expression[1] - 1;
+      continue;
+    }
+    const character = word[index] ?? '';
+    if (quote === "'") {
+      if (ansiCQuote && character === '\\') {
+        literal += character + (word[index + 1] ?? '');
+        index++;
+      } else if (character === "'") {
+        flushLiteral();
+        result += character;
+        quote = undefined;
+        ansiCQuote = false;
+      } else {
+        literal += character;
+      }
+    } else if (quote === '"') {
+      if (character === '"') {
+        flushLiteral();
+        result += character;
+        quote = undefined;
+      } else {
+        literal += character;
+      }
+    } else if (character === '$' && word[index + 1] === "'") {
+      flushLiteral();
+      result += "$'";
+      quote = "'";
+      ansiCQuote = true;
+      index++;
+    } else if (character === '"' || character === "'") {
+      flushLiteral();
+      result += character;
+      quote = character;
+    } else {
+      literal += character;
+    }
+  }
+  flushLiteral();
+  return result;
+}
+
+function boundedClosingShellQuoteIndex(
+  value: string,
+  start: number,
+  quote: '"' | "'",
+  escapeAware: boolean,
+): number {
+  const scanEnd = Math.min(value.length, start + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+  for (let index = start; index < scanEnd; index++) {
+    if (escapeAware && value[index] === '\\') {
+      index++;
+    } else if (value[index] === quote) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function hasUnquotedFirstShellWordConcatenation(value: string): boolean {
+  const expressionSpans = shellExpressionSpans(value);
+  let expressionIndex = 0;
+  for (let index = 0; index < value.length; index++) {
+    while ((expressionSpans[expressionIndex]?.[1] ?? value.length + 1) <= index) {
+      expressionIndex++;
+    }
+    const expression = expressionSpans[expressionIndex];
+    if (expression !== undefined && expression[0] === index) {
+      if (index > 0 || expression[1] < value.length) return true;
+      index = expression[1] - 1;
+    } else if (value[index] === '\\') {
+      index++;
+    } else if (index > 0 && (value[index] === '"' || value[index] === "'")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function redactUrlQueryParams(text: string): string {
   const parameterStart = /([?&])((?:[A-Za-z0-9_.-]|%[0-9A-Fa-f]{2})+)(=)/giu;
   let result = '';
@@ -261,11 +457,68 @@ function redactUrlQueryParams(text: string): string {
     }
     if (!isSensitiveKeyToken(classifiedKey)) continue;
     const valueStart = match.index + match[0].length;
-    const valueEnd = shellValueBoundary(text, valueStart, /[&\s"'\r\n#;|<>]/u);
+    const enclosingQuote = enclosingShellQuoteAt(text, valueStart);
+    const quote = enclosingQuote === undefined
+      && (text[valueStart] === '"' || text[valueStart] === "'")
+      ? text[valueStart]
+      : undefined;
+    const wordEnd = shellWordEnd(text, valueStart, /[&\r\n#]/u, enclosingQuote);
+    let valueEnd = wordEnd;
+    let concatenatedWord = false;
+    let unmatchedQuote = false;
+    if (quote !== undefined) {
+      const scanEnd = Math.min(text.length, valueStart + 1 + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+      let hasClosingQuote = false;
+      for (let index = valueStart + 1; index < scanEnd; index++) {
+        if (quote === '"' && text[index] === '\\') {
+          index++;
+        } else if (text[index] === quote) {
+          valueEnd = index + 1;
+          hasClosingQuote = true;
+          if (valueEnd < wordEnd) {
+            valueEnd = wordEnd;
+            concatenatedWord = true;
+          }
+          break;
+        }
+      }
+      if (!hasClosingQuote) {
+        unmatchedQuote = true;
+        const carriageReturn = text.indexOf('\r', valueStart);
+        const lineFeed = text.indexOf('\n', valueStart);
+        valueEnd = Math.min(
+          carriageReturn < 0 ? text.length : carriageReturn,
+          lineFeed < 0 ? text.length : lineFeed,
+        );
+      }
+    } else if (enclosingQuote === '"') {
+      valueEnd = wordEnd;
+    } else if (enclosingQuote !== undefined) {
+      valueEnd = shellValueBoundary(
+        text,
+        valueStart,
+        /[&'#]/u,
+      );
+    }
     const value = text.slice(valueStart, valueEnd);
+    const content = quote !== undefined && value.endsWith(quote)
+      ? value.slice(1, -1)
+      : value;
     result += text.slice(cursor, match.index);
     result += `${match[1] as string}${key}${match[3] as string}${
-      isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'
+      unmatchedQuote
+        ? '[REDACTED]'
+        : quote !== undefined && value.endsWith(quote) && !concatenatedWord
+        ? `${quote}${
+          quote === '"' && isShellExpression(content)
+            ? redactPasswordLiteralFragments(content)
+            : '[REDACTED]'
+        }${quote}`
+        : enclosingQuote === "'"
+          ? '[REDACTED]'
+          : enclosingQuote === '"' && !isShellExpression(value)
+            ? '[REDACTED]'
+          : redactShellWordLiteralFragments(value)
     }`;
     cursor = valueEnd;
   }
@@ -334,6 +587,283 @@ function redactCurlUserCredentials(text: string): string {
     return `${flag}${separator}${bareUser as string}${redactedPassword}`;
   });
   return result;
+}
+
+function boundedShellCommandEnd(text: string, start: number): number {
+  const scanEnd = Math.min(text.length, start + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+  const expressionSpans = shellExpressionSpans(text.slice(start, scanEnd));
+  let expressionIndex = 0;
+  let quote: '"' | "'" | "$'" | undefined;
+  let firstQuotedNewline = -1;
+  for (let index = start; index < scanEnd; index++) {
+    const relativeIndex = index - start;
+    while ((expressionSpans[expressionIndex]?.[1] ?? scanEnd - start + 1) <= relativeIndex) {
+      expressionIndex++;
+    }
+    const expression = expressionSpans[expressionIndex];
+    if (
+      quote !== "'"
+      && quote !== "$'"
+      && expression !== undefined
+      && expression[0] === relativeIndex
+    ) {
+      index = start + expression[1] - 1;
+      continue;
+    }
+    const character = text[index];
+    if (quote === "$'") {
+      if (character === '\\') {
+        index += text[index + 1] === '\r' && text[index + 2] === '\n' ? 2 : 1;
+      } else if (character === "'") quote = undefined;
+      else if (firstQuotedNewline < 0 && (character === '\r' || character === '\n')) {
+        firstQuotedNewline = index;
+      }
+    } else if (quote === "'") {
+      if (character === "'") quote = undefined;
+      else if (firstQuotedNewline < 0 && (character === '\r' || character === '\n')) {
+        firstQuotedNewline = index;
+      }
+    } else if (character === '\\') {
+      index += text[index + 1] === '\r' && text[index + 2] === '\n' ? 2 : 1;
+    } else if (quote === '"') {
+      if (character === '"') quote = undefined;
+      else if (firstQuotedNewline < 0 && (character === '\r' || character === '\n')) {
+        firstQuotedNewline = index;
+      }
+    } else if (character === '$' && text[index + 1] === "'") {
+      quote = "$'";
+      index++;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (
+      character === ';'
+      || character === '&'
+      || character === '|'
+      || character === '\r'
+      || character === '\n'
+    ) {
+      return index;
+    }
+  }
+  return quote !== undefined && firstQuotedNewline >= 0 ? firstQuotedNewline : scanEnd;
+}
+
+function redactCurlOauth2Bearer(text: string): string {
+  const commandStart = /\bcurl\b/giu;
+  const option = /(\s)(--oauth2-bearer)(=|(?:[ \t]|\\(?:\r\n|\n|\r))+)(?!\\(?:\r\n|\n|\r))(\$'(?:\\.|[^'\\\r\n])*(?:'|(?=\r|\n|$))|"(?:\\.|[^"\\\r\n])*(?:"|(?=\r|\n|$))|'[^'\r\n]*(?:'|(?=\r|\n|$))|[^\s"'\r\n&|><;]+)/giu;
+  const optionStart = /(\s)(--oauth2-bearer)(=|(?:[ \t]|\\(?:\r\n|\n|\r))+)(?!\\(?:\r\n|\n|\r))/giu;
+  let result = '';
+  let cursor = 0;
+
+  for (const match of text.matchAll(commandStart)) {
+    if (match.index < cursor) continue;
+    const commandEnd = boundedShellCommandEnd(text, match.index);
+    const rawCommand = text.slice(match.index, commandEnd);
+    const replaceSimpleOptions = (commandSegment: string): string => commandSegment.replace(
+      option,
+      (_optionMatch, leadingSpace, flag, separator, argument) => {
+        const value = argument as string;
+        const renderedSeparator = /\\(?:\r\n|\n|\r)/u.test(separator as string)
+          ? ' '
+          : separator as string;
+        if (value.startsWith("$'")) {
+          if (value === "$'[REDACTED]'") {
+            return `${leadingSpace as string}${flag as string}${renderedSeparator}${value}`;
+          }
+          return `${leadingSpace as string}${flag as string}${renderedSeparator}[REDACTED]`;
+        }
+        if (value.startsWith('"')) {
+          if (!value.endsWith('"')) {
+            return `${leadingSpace as string}${flag as string}${renderedSeparator}[REDACTED]`;
+          }
+          const content = value.slice(1, -1);
+          return `${leadingSpace as string}${flag as string}${renderedSeparator}"${
+            isShellExpression(content) ? redactPasswordLiteralFragments(content) : '[REDACTED]'
+          }"`;
+        }
+        if (value.startsWith("'")) {
+          return `${leadingSpace as string}${flag as string}${renderedSeparator}${
+            value.endsWith("'") ? "'[REDACTED]'" : '[REDACTED]'
+          }`;
+        }
+        return `${leadingSpace as string}${flag as string}${renderedSeparator}${
+          isShellExpression(value) ? redactPasswordLiteralFragments(value) : '[REDACTED]'
+        }`;
+      },
+    );
+    let concatenatedCommand = '';
+    let concatenatedCursor = 0;
+    for (const optionMatch of rawCommand.matchAll(optionStart)) {
+      if (optionMatch.index < concatenatedCursor) continue;
+      const valueStart = optionMatch.index + optionMatch[0].length;
+      const valueEnd = shellWordEnd(rawCommand, valueStart, /[\r\n&|;]/u);
+      const value = rawCommand.slice(valueStart, valueEnd);
+      const firstQuote = value[0];
+      const ansiCQuote = value.startsWith("$'");
+      const quoteStart = ansiCQuote ? 1 : 0;
+      const closingQuote: '"' | "'" | undefined = ansiCQuote
+        ? "'"
+        : firstQuote === '"' || firstQuote === "'" ? firstQuote : undefined;
+      const closingQuoteIndex = closingQuote === undefined
+        ? -1
+        : boundedClosingShellQuoteIndex(
+          value,
+          quoteStart + 1,
+          closingQuote,
+          ansiCQuote || closingQuote === '"',
+        );
+      const unquotedFirstConcatenation = !ansiCQuote
+        && firstQuote !== '"'
+        && firstQuote !== "'"
+        && hasUnquotedFirstShellWordConcatenation(value);
+      const escapedWhitespace = /\\[ \t]/u.test(value);
+      const expressionSpans = shellExpressionSpans(value);
+      const pureShellExpression = expressionSpans.length === 1
+        && expressionSpans[0]?.[0] === 0
+        && expressionSpans[0]?.[1] === value.length;
+      if (
+        (
+          !unquotedFirstConcatenation
+          && !escapedWhitespace
+          && !pureShellExpression
+          && closingQuote === undefined
+        )
+        || (
+          closingQuote !== undefined
+          && (closingQuoteIndex < 0 || closingQuoteIndex === value.length - 1)
+        )
+      ) {
+        continue;
+      }
+      concatenatedCommand += replaceSimpleOptions(
+        rawCommand.slice(concatenatedCursor, valueStart),
+      );
+      concatenatedCommand += redactShellWordLiteralFragments(value);
+      concatenatedCursor = valueEnd;
+    }
+    const command = concatenatedCommand + replaceSimpleOptions(
+      rawCommand.slice(concatenatedCursor),
+    );
+    result += text.slice(cursor, match.index) + command;
+    cursor = commandEnd;
+  }
+  return result + text.slice(cursor);
+}
+
+function redactNestedOptionAssignments(text: string): string {
+  const commandStart = /\bterraform\b/giu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(commandStart)) {
+    if (match.index < cursor) continue;
+    const commandEnd = boundedShellCommandEnd(text, match.index);
+    const command = text.slice(match.index, commandEnd);
+    const assignmentStart = /(-var(?:=|(?:\\(?:\r\n|\n|\r)|\s)+))(?!\\(?:\r\n|\n|\r))(?:(["'])([A-Za-z_][A-Za-z0-9_.-]*)=|([A-Za-z_][A-Za-z0-9_.-]*)=)/giu;
+    let redactedCommand = '';
+    let assignmentCursor = 0;
+    for (const assignment of command.matchAll(assignmentStart)) {
+      if (assignment.index < assignmentCursor) continue;
+      const assignmentQuote = assignment[2];
+      const key = assignment[3] ?? assignment[4];
+      if (
+        key === undefined
+        || (
+          assignmentQuote !== '"'
+          && assignmentQuote !== "'"
+          && assignment[1]?.toLowerCase() !== '-var='
+        )
+      ) continue;
+      const valueStart = assignment.index + assignment[0].length;
+      let valueEnd = valueStart;
+      if (assignmentQuote === '"' || assignmentQuote === "'") {
+        for (; valueEnd < command.length; valueEnd++) {
+          if (assignmentQuote === '"' && command[valueEnd] === '\\') {
+            valueEnd++;
+          } else if (command[valueEnd] === assignmentQuote) {
+            break;
+          }
+        }
+        if (valueEnd >= command.length) {
+          if (!isSensitiveKeyToken(key)) continue;
+          redactedCommand += command.slice(assignmentCursor, assignment.index);
+          redactedCommand += `${assignment[1] as string}${assignmentQuote}${key}=[REDACTED]`;
+          assignmentCursor = command.length;
+          break;
+        }
+      } else {
+        valueEnd = shellValueBoundary(command, valueStart, /[\s"'\r\n&|><;]/u);
+      }
+      const value = command.slice(valueStart, valueEnd);
+      redactedCommand += command.slice(assignmentCursor, assignment.index);
+      redactedCommand += isSensitiveKeyToken(key)
+        ? `${assignment[1] as string}${assignmentQuote ?? ''}${key}=${
+          assignmentQuote !== "'" && isShellExpression(value)
+            ? redactPasswordLiteralFragments(value)
+            : '[REDACTED]'
+        }${assignmentQuote ?? ''}`
+        : command.slice(assignment.index, valueEnd + (assignmentQuote === undefined ? 0 : 1));
+      assignmentCursor = valueEnd + (assignmentQuote === undefined ? 0 : 1);
+    }
+    redactedCommand += command.slice(assignmentCursor);
+    result += text.slice(cursor, match.index) + redactedCommand;
+    cursor = commandEnd;
+  }
+  result += text.slice(cursor);
+  let dockerResult = '';
+  let dockerCursor = 0;
+  for (const dockerMatch of result.matchAll(/\bdocker\b/giu)) {
+    if (dockerMatch.index < dockerCursor) continue;
+    const commandEnd = boundedShellCommandEnd(result, dockerMatch.index);
+    const command = result.slice(dockerMatch.index, commandEnd)
+      .replace(
+        /((?:^|\s)(?:--env(?:=|\s+)|-e(?:=|\s+)?))(["'])([A-Za-z_][A-Za-z0-9_.-]*)=((?:\\.|(?!\2)[^\\\r\n])*)\2/giu,
+        (match, option, quote, key, value) => {
+          if (!isSensitiveKeyToken(key as string)) return match;
+          return `${option as string}${quote as string}${key as string}=${
+            quote === '"' && isShellExpression(value as string)
+              ? redactPasswordLiteralFragments(value as string)
+              : '[REDACTED]'
+          }${quote as string}`;
+        },
+      )
+      .replace(
+        /((?:^|\s)(?:-e|--env=))([A-Za-z_][A-Za-z0-9_.-]*)=([^\s"'\r\n&|><;]+)/giu,
+      (match, option, key, value) => {
+        if (!isSensitiveKeyToken(key as string)) return match;
+        return `${option as string}${key as string}=${
+          isShellExpression(value as string)
+            ? redactPasswordLiteralFragments(value as string)
+            : '[REDACTED]'
+        }`;
+      },
+      );
+    dockerResult += result.slice(dockerCursor, dockerMatch.index) + command;
+    dockerCursor = commandEnd;
+  }
+  return dockerResult + result.slice(dockerCursor);
+}
+
+function redactNetrcPasswords(text: string): string {
+  const segments = text.split(/(\r\n|\n|\r)/u);
+  let inRecord = false;
+  for (let index = 0; index < segments.length; index += 2) {
+    const line = segments[index] ?? '';
+    if (/^\s*(?:machine\s+\S+|default)(?:\s|$)/iu.test(line)) {
+      inRecord = true;
+    } else if (
+      inRecord
+      && !/^\s*(?:#.*)?$/u.test(line)
+      && !/^\s*(?:login|password|account|macdef)(?:\s|$)/iu.test(line)
+    ) {
+      inRecord = false;
+    }
+    if (!inRecord) continue;
+    segments[index] = line.replace(
+      /(\bpassword[ \t]+)("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^\s"'\r\n]+)/giu,
+      '$1[REDACTED]',
+    );
+  }
+  return segments.join('');
 }
 
 type CasePhase = 'selector' | 'await-in' | 'pattern' | 'body';
@@ -574,7 +1104,11 @@ function shellValueBoundary(text: string, start: number, boundary: RegExp): numb
           literalBackslashes = 0;
           continue;
         }
-        if (boundary.test(character)) return index;
+        if (boundary.test(character)) {
+          if (literalBackslashes % 2 === 0) return index;
+          literalBackslashes = 0;
+          continue;
+        }
         literalBackslashes = character === '\\' ? literalBackslashes + 1 : 0;
         continue;
       }
@@ -1145,8 +1679,12 @@ function redactStructuredHeaders(text: string): string {
   );
   result = result.replace(
     tupleHeader,
-    (_match, open, headerQuote, headerName, separator, valueQuote) =>
-      `${open}${headerQuote}${headerName}${headerQuote}${separator}${valueQuote}[REDACTED]${valueQuote}`,
+    (_match, open, headerQuote, headerName, separator, valueQuote, value) =>
+      `${open}${headerQuote}${headerName}${headerQuote}${separator}${valueQuote}${
+        valueQuote !== "'" && isShellExpression(value)
+          ? redactPasswordLiteralFragments(value)
+          : '[REDACTED]'
+      }${valueQuote}`,
   );
 
   return result;
@@ -1283,6 +1821,7 @@ function redactShellScalarLine(content: string, withinShellContext = false): str
     !isRecognizedUnmatchedKeyCommand(content)
     && !isEstablishedVisibleFollowup
     && !isEstablishedGeneralCommand
+    && !withinShellContext
   ) return undefined;
 
   const prefix = commandIndex === 1 ? ['sudo', command] : [command];
@@ -1557,8 +2096,16 @@ function powerShellUnquotedValueBoundary(text: string, start: number): number {
     : text.length;
 }
 
+function physicalLineBoundaryAtOrAfter(text: string, start: number): number {
+  const lf = text.indexOf('\n', start);
+  const cr = text.indexOf('\r', start);
+  if (lf < 0) return cr < 0 ? text.length : cr;
+  if (cr < 0) return lf;
+  return Math.min(lf, cr);
+}
+
 function redactPowerShellAssignments(text: string): string {
-  const assignmentStart = /(\$(?:(?:env|global|script):([A-Za-z_][A-Za-z0-9_-]*)|\{(?:env|global|script):([A-Za-z_][A-Za-z0-9_-]*)\}|([A-Za-z_][A-Za-z0-9_-]*))\s*=\s*)/giu;
+  const assignmentStart = /(\$(?:(?:env|global|script):([A-Za-z_][A-Za-z0-9_-]*)|\{(?:env|global|script):([A-Za-z_][A-Za-z0-9_-]*)\}|([A-Za-z_][A-Za-z0-9_-]*))\s*(?:\+=|=)\s*)/giu;
   let result = '';
   let cursor = 0;
 
@@ -1573,7 +2120,10 @@ function redactPowerShellAssignments(text: string): string {
     if (quote === "'" || quote === '"') {
       const contentStart = valueStart + (ansiSingleQuoted ? 2 : 1);
       valueEnd = contentStart;
-      for (; valueEnd < text.length; valueEnd++) {
+      const scanEnd = Math.min(text.length, contentStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+      let firstNewline = -1;
+      let matchedQuote = false;
+      for (; valueEnd < scanEnd; valueEnd++) {
         const character = text[valueEnd];
         if (quote === '"' && character === '`') {
           valueEnd++;
@@ -1581,10 +2131,16 @@ function redactPowerShellAssignments(text: string): string {
           valueEnd++;
         } else if (character === quote) {
           valueEnd++;
+          matchedQuote = true;
           break;
-        } else if (character === '\r' || character === '\n') {
-          break;
+        } else if (firstNewline < 0 && (character === '\r' || character === '\n')) {
+          firstNewline = valueEnd;
         }
+      }
+      if (!matchedQuote) {
+        valueEnd = scanEnd < text.length
+          ? physicalLineBoundaryAtOrAfter(text, scanEnd)
+          : firstNewline >= 0 ? firstNewline : valueEnd;
       }
     } else {
       valueEnd = powerShellUnquotedValueBoundary(text, valueStart);
@@ -1600,6 +2156,61 @@ function redactPowerShellAssignments(text: string): string {
     cursor = valueEnd;
   }
 
+  return result + text.slice(cursor);
+}
+
+function redactMultilinePosixQuotedAssignments(text: string): string {
+  const assignmentStart = /(?:^|[\s{,;(])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*(?:\+=|[:=])\s*(["'])/gmu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(assignmentStart)) {
+    const key = match[1];
+    const quote = match[2];
+    if (
+      key === undefined
+      || (quote !== '"' && quote !== "'")
+      || !isSensitiveKeyToken(key)
+      || match.index < cursor
+    ) continue;
+    const valueStart = match.index + match[0].length;
+    const scanEnd = Math.min(text.length, valueStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+    let valueEnd = -1;
+    let sawNewline = false;
+    for (let index = valueStart; index < scanEnd; index++) {
+      const character = text[index];
+      if (quote === '"' && character === '\\') {
+        index++;
+      } else if (character === quote) {
+        valueEnd = index;
+        break;
+      } else if (character === '\r' || character === '\n') {
+        sawNewline = true;
+      }
+    }
+    if (valueEnd < 0 && sawNewline) {
+      const failClosedEnd = physicalLineBoundaryAtOrAfter(text, scanEnd);
+      result += text.slice(cursor, match.index) + match[0] + '[REDACTED]';
+      cursor = failClosedEnd;
+      continue;
+    }
+    const value = valueEnd < 0 ? '' : text.slice(valueStart, valueEnd);
+    const nestedQuotedAssignment = /(?:\r\n|\n|\r)\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:\+=|[:=])\s*(["'])/u.exec(value);
+    if (
+      valueEnd < 0
+      || !/[\r\n]/u.test(value)
+      || (
+        nestedQuotedAssignment?.[1] !== undefined
+        && isSensitiveKeyToken(nestedQuotedAssignment[1])
+        && nestedQuotedAssignment[2] !== quote
+      )
+    ) continue;
+    result += text.slice(cursor, match.index) + match[0];
+    result += quote === '"' && isShellExpression(value)
+      ? redactPasswordLiteralFragments(value)
+      : '[REDACTED]';
+    result += quote;
+    cursor = valueEnd + 1;
+  }
   return result + text.slice(cursor);
 }
 
@@ -1634,6 +2245,9 @@ export function redactSecrets(
 
   // 4. Curl --user and --proxy-user credentials (user:password)
   result = redactCurlUserCredentials(result);
+  result = redactCurlOauth2Bearer(result);
+  result = redactNestedOptionAssignments(result);
+  result = redactNetrcPasswords(result);
 
   // 5. Structured and shell-style sensitive headers
   result = redactStructuredHeaders(result);
@@ -1701,7 +2315,7 @@ export function redactSecrets(
   result = redactYamlPlainScalarContinuations(result);
 
   // 9. Space-Separated CLI Flags (--flag val, --flag "val", --flag 'val', unterminated, shell expr)
-  const unquotedFlagStart = /(--[A-Za-z0-9_-]+)(\s+)(?=[^\s"'$]|[$<>]\()/giu;
+  const unquotedFlagStart = /(--[A-Za-z0-9_-]+)((?:\\(?:\r\n|\n|\r)|\s)+)(?=[^\s"'$]|[$<>]\()/giu;
   let flagResult = '';
   let flagCursor = 0;
   for (const match of result.matchAll(unquotedFlagStart)) {
@@ -1716,7 +2330,7 @@ export function redactSecrets(
     flagCursor = valueEnd;
   }
   result = flagResult + result.slice(flagCursor);
-  const flagRegex = /(--[A-Za-z0-9_-]+)(\s+)(\$'((?:\\.|[^'\r\n\\])*)'|"((?:\\(?:\r\n|[\r\n]|.)|[^"\r\n\\])*)"|'([^'\r\n]*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"'\r\n&|><;]|<\([^)]*\)|>\([^)]*\))+))/gimu;
+  const flagRegex = /(--[A-Za-z0-9_-]+)((?:\\(?:\r\n|\n|\r)|\s)+)(?!\\(?:\r\n|\n|\r))(\$'((?:\\.|[^'\r\n\\])*)'|"((?:\\(?:\r\n|[\r\n]|.)|[^"\r\n\\])*)"|'([^'\r\n]*)'|"([^"\r\n]+)$|'([^'\r\n]+)$|(?!--)((?:\\.|[^\s"'\r\n&|><;]|<\([^)]*\)|>\([^)]*\))+))/gimu;
   result = result.replace(flagRegex, (match, flag, space, valWithQuotes, ansiCVal, dQuoteVal, sQuoteVal, dQuoteUnterm, sQuoteUnterm, unquotedVal) => {
     if (typeof flag !== 'string' || !isSensitiveKeyToken(flag)) {
       return match;
@@ -1749,6 +2363,7 @@ export function redactSecrets(
   result = redactSensitiveArrayAssignments(result);
   result = redactSensitiveJsonCollections(result);
   result = redactPowerShellAssignments(result);
+  result = redactMultilinePosixQuotedAssignments(result);
 
   // Treat shell operators (; && || | &), parenthesis, ?, and flow punctuation as key boundaries
   const keyBoundary = '(?:^[+-]?|(?:\\r\\n|\\n|\\r)[+-]?|\\s|[{,;(]|&&|\\|\\||[&|?])';
@@ -1918,6 +2533,17 @@ export function redactSecrets(
   );
   result = result.replace(unquotedAssignment, (match, prefix, key, val, offset, whole) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    if (
+      typeof offset === 'number'
+      && typeof whole === 'string'
+      && whole[offset - 1] === '$'
+      && (prefix as string).startsWith('{')
+      && shellExpressionSpans(
+        whole.slice(offset - 1, offset - 1 + MAX_SENSITIVE_ARRAY_BODY_LENGTH),
+      )[0]?.[0] === 0
+    ) {
+      return match;
+    }
     if (
       typeof val === 'string'
       && val.startsWith('$(')

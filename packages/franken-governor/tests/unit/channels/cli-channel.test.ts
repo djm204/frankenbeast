@@ -942,6 +942,14 @@ describe('CliChannel', () => {
     );
   });
 
+  it('preserves active expressions in tuple structured sensitive headers', () => {
+    expect(redactSecrets(
+      'headers=[["Authorization","violet$(printf harmless-tuple)quartz"],["Safe","visible"]]',
+    )).toBe(
+      'headers=[["Authorization","[REDACTED]$(printf harmless-tuple)[REDACTED]"],["Safe","visible"]]',
+    );
+  });
+
   it('redacts unterminated double-quoted X-Auth-Token header without swallowing line boundary', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
@@ -1241,7 +1249,7 @@ describe('CliChannel', () => {
     expect(prompt).toContain('|   systemctl [REDACTED]');
   });
 
-  it('requires independent shell evidence after a recognized service-manager line in sensitive YAML', async () => {
+  it('keeps established shell context for every later nonempty sensitive YAML line', async () => {
     const readline = makeFakeReadline(['a']);
     const channel = new CliChannel({ readline, operatorName: 'dev' });
 
@@ -1251,7 +1259,8 @@ describe('CliChannel', () => {
 
     const prompt = vi.mocked(readline.question).mock.calls[0]?.[0] ?? '';
     expect(prompt).toContain('|   systemctl [REDACTED]');
-    for (const word of ['violetquartz', 'amberfalcon', 'silvermeadow']) {
+    expect(prompt).toContain('|   violetquartz [REDACTED]');
+    for (const word of ['amberfalcon', 'silvermeadow']) {
       expect(prompt).not.toContain(word);
     }
     expect(prompt).toContain('safe: visible');
@@ -1377,6 +1386,14 @@ describe('CliChannel', () => {
       'password: |\n  systemctl stop synthetic-service\n  bash evil.sh\n  node exploit.js\nsafe: visible',
     )).toBe(
       'password: [REDACTED]\n  systemctl [REDACTED]\n  bash [REDACTED]\n  node [REDACTED]\nsafe: visible',
+    );
+  });
+
+  it('retains later unclassified executables after YAML shell context is established', () => {
+    expect(redactSecrets(
+      'password: |\n  ordinary plaintext remains hidden\n  systemctl stop synthetic-service\n  ruby synthetic_task.rb\n  ./tools/synthetic-runner harmless-operand\nsafe: visible',
+    )).toBe(
+      'password: [REDACTED]\n  [REDACTED]\n  systemctl [REDACTED]\n  ruby [REDACTED]\n  ./tools/synthetic-runner [REDACTED]\nsafe: visible',
     );
   });
 
@@ -2090,6 +2107,37 @@ describe('CliChannel', () => {
     expect(redacted).toBe('https://safe.example/?token=[REDACTED]$(reboot;shutdown)[REDACTED]&safe=visible');
   });
 
+  it('keeps prose after sensitive URLs visible when contractions precede them', () => {
+    expect(redactSecrets(
+      "Here's https://safe.example/?token=synthetic-query-secret and this must remain visible",
+    )).toBe(
+      "Here's https://safe.example/?token=[REDACTED] and this must remain visible",
+    );
+  });
+
+  it('keeps prose after sensitive URLs visible when possessives precede them', () => {
+    expect(redactSecrets(
+      "The operator's link is https://safe.example/?api_key=synthetic-query-secret with ordinary prose after it",
+    )).toBe(
+      "The operator's link is https://safe.example/?api_key=[REDACTED] with ordinary prose after it",
+    );
+  });
+
+  it('treats RFC3986 sub-delimiters as data in quoted sensitive query values', () => {
+    expect(redactSecrets(
+      'curl "https://safe.example/?access_token=violet;quartz$(printf harmless-query)amber&safe=visible" && echo visible_query_context',
+    )).toBe(
+      'curl "https://safe.example/?access_token=[REDACTED]$(printf harmless-query)[REDACTED]&safe=visible" && echo visible_query_context',
+    );
+    expect(redactSecrets(
+      "curl 'https://safe.example/?access_token=violet;$(printf harmless-literal)quartz&safe=visible' && echo visible_single_quote_context",
+    )).toBe(
+      "curl 'https://safe.example/?access_token=[REDACTED]&safe=visible' && echo visible_single_quote_context",
+    );
+    expect(redactSecrets('https://safe.example/?token=violet; echo visible_unquoted_operator'))
+      .toBe('https://safe.example/?token=[REDACTED]; echo visible_unquoted_operator');
+  });
+
   it('classifies percent-encoded URL query keys while preserving their spelling', () => {
     expect(redactSecrets(
       'https://safe.example/?access%5Ftoken=synthetic-query-secret&safe=visible',
@@ -2112,6 +2160,30 @@ describe('CliChannel', () => {
     );
     expect(splitExpression).toBe(
       'https://safe.example/?token=[REDACTED]$(reboot;shutdown)[REDACTED]&safe=visible',
+    );
+  });
+
+  it('fails closed through the physical line for unmatched quoted sensitive query values', () => {
+    expect(redactSecrets(
+      "https://safe.example/?token='violetquartz\r\necho visible_after_single_query\r\nhttps://safe.example/?api_key=\"amberstone\necho visible_after_double_query",
+    )).toBe(
+      'https://safe.example/?token=[REDACTED]\r\necho visible_after_single_query\r\nhttps://safe.example/?api_key=[REDACTED]\necho visible_after_double_query',
+    );
+  });
+
+  it('redacts concatenated shell fragments in sensitive query values', () => {
+    expect(redactSecrets(
+      `https://safe.example/?access_token='violet'"quartz"amber$(printf harmless-query)opal&safe=visible && echo visible_after_query_word`,
+    )).toBe(
+      `https://safe.example/?access_token='[REDACTED]'"[REDACTED]"[REDACTED]$(printf harmless-query)[REDACTED]&safe=visible && echo visible_after_query_word`,
+    );
+  });
+
+  it('does not end sensitive query shell words at operators inside the first quoted fragment', () => {
+    expect(redactSecrets(
+      `curl "https://safe.example/?token='aa&bb'LEAK" && echo visible_after_query_operator`,
+    )).toBe(
+      `curl "https://safe.example/?token=[REDACTED]" && echo visible_after_query_operator`,
     );
   });
 
@@ -2252,6 +2324,16 @@ describe('CliChannel', () => {
       .toBe('Bearer [REDACTED]$(reboot;shutdown)[REDACTED] && echo visible_bearer_context');
   });
 
+  it('honors backslash parity at curl-user and Bearer value boundaries', () => {
+    expect(redactSecrets(
+      String.raw`curl --user alice:violet\ quartz$(printf harmless-boundary)amber && Bearer stone\;opal$(printf harmless-bearer)tail ; echo visible_parity_context`,
+    )).toBe(
+      'curl --user alice:[REDACTED]$(printf harmless-boundary)[REDACTED] && Bearer [REDACTED]$(printf harmless-bearer)[REDACTED] ; echo visible_parity_context',
+    );
+    expect(redactSecrets(String.raw`Bearer violet\\ quartz && echo visible_even_boundary`))
+      .toBe('Bearer [REDACTED] quartz && echo visible_even_boundary');
+  });
+
   it('does not rematch substitution-first standalone Bearer credentials in the fallback pass', () => {
     expect(redactSecrets('Bearer $(echo hi)secret'))
       .toBe('Bearer $(echo hi)[REDACTED]');
@@ -2285,6 +2367,251 @@ describe('CliChannel', () => {
       'curl -ualice:synthetic-password -Uproxy:synthetic-proxy-password --user-agent:visible https://safe.example',
     )).toBe(
       'curl -ualice:[REDACTED] -Uproxy:[REDACTED] --user-agent:visible https://safe.example',
+    );
+  });
+
+  it('redacts quoted and unquoted curl oauth2 bearer arguments', () => {
+    expect(redactSecrets(
+      'curl --oauth2-bearer "violet$(printf harmless-oauth)quartz" https://example.test && curl --oauth2-bearer=amberstone https://example.test/next && echo visible_oauth_context',
+    )).toBe(
+      'curl --oauth2-bearer "[REDACTED]$(printf harmless-oauth)[REDACTED]" https://example.test && curl --oauth2-bearer=[REDACTED] https://example.test/next && echo visible_oauth_context',
+    );
+  });
+
+  it('redacts concatenated shell fragments in curl oauth2 bearer arguments', () => {
+    expect(redactSecrets(
+      `curl --oauth2-bearer 'violet'"quartz"amber$(printf harmless-oauth)opal https://example.test && echo visible_after_oauth_word`,
+    )).toBe(
+      `curl --oauth2-bearer '[REDACTED]'"[REDACTED]"[REDACTED]$(printf harmless-oauth)[REDACTED] https://example.test && echo visible_after_oauth_word`,
+    );
+  });
+
+  it('redacts unquoted-first concatenated shell fragments in curl oauth2 bearer arguments', () => {
+    expect(redactSecrets(
+      `curl --oauth2-bearer violet"quartz"'amber'$(printf harmless-unquoted-oauth)opal https://example.test/path && echo visible_after_unquoted_oauth_word`,
+    )).toBe(
+      `curl --oauth2-bearer [REDACTED]"[REDACTED]"'[REDACTED]'$(printf harmless-unquoted-oauth)[REDACTED] https://example.test/path && echo visible_after_unquoted_oauth_word`,
+    );
+  });
+
+  it('redacts complete curl oauth2 bearer shell words containing escaped spaces', () => {
+    expect(redactSecrets(
+      String.raw`curl --oauth2-bearer foo\ barZZ https://example.test/escaped && echo visible_after_escaped_oauth_word`,
+    )).toBe(
+      'curl --oauth2-bearer [REDACTED] https://example.test/escaped && echo visible_after_escaped_oauth_word',
+    );
+  });
+
+  it('redacts complete curl oauth2 bearer shell words containing spaced substitutions', () => {
+    expect(redactSecrets(
+      `curl --oauth2-bearer foo$(printf '%s %s' harmless spaced)barZZ https://example.test/substitution && echo visible_after_spaced_oauth_word`,
+    )).toBe(
+      `curl --oauth2-bearer [REDACTED]$(printf '%s %s' harmless spaced)[REDACTED] https://example.test/substitution && echo visible_after_spaced_oauth_word`,
+    );
+  });
+
+  it('preserves pure spaced command substitutions in curl oauth2 bearer arguments', () => {
+    expect(redactSecrets(
+      'curl --oauth2-bearer $(cat /tmp/token) https://example.test/pure-substitution && echo visible_after_pure_oauth_expression',
+    )).toBe(
+      'curl --oauth2-bearer $(cat /tmp/token) https://example.test/pure-substitution && echo visible_after_pure_oauth_expression',
+    );
+    expect(redactSecrets(
+      'curl --oauth2-bearer ${TOKEN:-fallback value} https://example.test/pure-expansion && echo visible_after_pure_oauth_expansion',
+    )).toBe(
+      'curl --oauth2-bearer ${TOKEN:-fallback value} https://example.test/pure-expansion && echo visible_after_pure_oauth_expansion',
+    );
+  });
+
+  it('does not end curl oauth2 shell words at operators inside the first quoted fragment', () => {
+    expect(redactSecrets(
+      `curl --oauth2-bearer 'aa&bb'LEAK https://example.test && echo visible_after_oauth_operator`,
+    )).toBe(
+      `curl --oauth2-bearer '[REDACTED]'[REDACTED] https://example.test && echo visible_after_oauth_operator`,
+    );
+  });
+
+  it('redacts ANSI-C-prefixed concatenated shell fragments in curl oauth2 bearer arguments', () => {
+    expect(redactSecrets(
+      `curl --oauth2-bearer=$'violet\\n'"quartz"'amber'opal$(printf harmless-ansi-oauth)jade https://example.test && echo visible_after_ansi_oauth_word`,
+    )).toBe(
+      `curl --oauth2-bearer=$'[REDACTED]'"[REDACTED]"'[REDACTED]'[REDACTED]$(printf harmless-ansi-oauth)[REDACTED] https://example.test && echo visible_after_ansi_oauth_word`,
+    );
+  });
+
+  it('treats escaped apostrophes as content in ANSI-C quoted curl oauth2 bearer values', () => {
+    expect(redactSecrets(
+      `curl --oauth2-bearer=$'violet\\'quartz' https://example.test/path && echo visible_after_escaped_ansi_oauth`,
+    )).toBe(
+      'curl --oauth2-bearer=[REDACTED] https://example.test/path && echo visible_after_escaped_ansi_oauth',
+    );
+  });
+
+  it('does not end curl oauth scanning at separators inside earlier quoted arguments', () => {
+    expect(redactSecrets(
+      'curl "https://example.test/path;safe=visible" --oauth2-bearer --violetquartz https://example.test/next && echo visible_oauth_quote_context',
+    )).toBe(
+      'curl "https://example.test/path;safe=visible" --oauth2-bearer [REDACTED] https://example.test/next && echo visible_oauth_quote_context',
+    );
+  });
+
+  it('fails closed for unmatched and ANSI-C quoted curl oauth2 bearer values', () => {
+    expect(redactSecrets(
+      "curl --oauth2-bearer \"violetquartz\nprintf visible_after_unmatched_oauth\ncurl --oauth2-bearer $'amber\\nstone' https://example.test && echo visible_ansi_oauth_context",
+    )).toBe(
+      'curl --oauth2-bearer [REDACTED]\nprintf visible_after_unmatched_oauth\ncurl --oauth2-bearer [REDACTED] https://example.test && echo visible_ansi_oauth_context',
+    );
+  });
+
+  it('accepts shell continuations before curl oauth2 bearer values', () => {
+    expect(redactSecrets(
+      'curl --oauth2-bearer \\\n  violetquartz https://example.test/lf && echo visible_after_lf_oauth\r\ncurl --oauth2-bearer \\\r\n  amberstone https://example.test/crlf && echo visible_after_crlf_oauth',
+    )).toBe(
+      'curl --oauth2-bearer [REDACTED] https://example.test/lf && echo visible_after_lf_oauth\r\ncurl --oauth2-bearer [REDACTED] https://example.test/crlf && echo visible_after_crlf_oauth',
+    );
+  });
+
+  it('redacts sensitive assignments nested in Terraform and Docker option payloads', () => {
+    expect(redactSecrets(
+      "terraform apply -var 'password=violetquartz' -var 'notpassword=visible_tf' && docker run -ePASSWORD=amberstone -eNOTPASSWORD=visible_docker --env=API_KEY=opalstone synthetic-image",
+    )).toBe(
+      "terraform apply -var 'password=[REDACTED]' -var 'notpassword=visible_tf' && docker run -ePASSWORD=[REDACTED] -eNOTPASSWORD=visible_docker --env=API_KEY=[REDACTED] synthetic-image",
+    );
+  });
+
+  it('keeps separators in earlier Docker arguments while scanning later env credentials', () => {
+    expect(redactSecrets(
+      'docker run "synthetic-label;still-one-argument" --env=API_KEY=violetquartz synthetic-image && echo visible_docker_bound_context',
+    )).toBe(
+      'docker run "synthetic-label;still-one-argument" --env=API_KEY=[REDACTED] synthetic-image && echo visible_docker_bound_context',
+    );
+  });
+
+  it('keeps separators in balanced substitutions before Terraform credentials', () => {
+    expect(redactSecrets(
+      "terraform apply $(echo x; echo y) -var 'password=violetquartz' && echo visible_terraform_substitution_context",
+    )).toBe(
+      "terraform apply $(echo x; echo y) -var 'password=[REDACTED]' && echo visible_terraform_substitution_context",
+    );
+  });
+
+  it('keeps escaped apostrophes and separators inside ANSI-C arguments before Terraform credentials', () => {
+    expect(redactSecrets(
+      String.raw`terraform apply $'it\'s;one-argument' -var 'password=synthetic-terraform-credential' && echo visible_after_terraform_ansi`,
+    )).toBe(
+      String.raw`terraform apply $'it\'s;one-argument' -var 'password=[REDACTED]' && echo visible_after_terraform_ansi`,
+    );
+  });
+
+  it('keeps separators in balanced substitutions before Docker credentials', () => {
+    expect(redactSecrets(
+      'docker run $(echo x; echo y) --env=API_KEY=amberstone synthetic-image && echo visible_docker_substitution_context',
+    )).toBe(
+      'docker run $(echo x; echo y) --env=API_KEY=[REDACTED] synthetic-image && echo visible_docker_substitution_context',
+    );
+  });
+
+  it('redacts quoted Docker --env and -e assignment payloads', () => {
+    expect(redactSecrets(
+      "docker run --env \"PASSWORD=violet quartz\" -e 'API_KEY=amber stone' synthetic-image && echo visible_docker_quote_context",
+    )).toBe(
+      "docker run --env \"PASSWORD=[REDACTED]\" -e 'API_KEY=[REDACTED]' synthetic-image && echo visible_docker_quote_context",
+    );
+  });
+
+  it('keeps quoted separators inside the bounded Terraform command scan', () => {
+    expect(redactSecrets(
+      "terraform apply -var 'password=violet;quartz' && echo visible_terraform_context",
+    )).toBe(
+      "terraform apply -var 'password=[REDACTED]' && echo visible_terraform_context",
+    );
+  });
+
+  it('redacts attached Terraform var assignments', () => {
+    expect(redactSecrets(
+      "terraform apply -var='password=violetquartz' && echo visible_attached_context",
+    )).toBe(
+      "terraform apply -var='password=[REDACTED]' && echo visible_attached_context",
+    );
+  });
+
+  it('redacts unquoted attached Terraform var assignments', () => {
+    expect(redactSecrets(
+      'terraform apply -var=password=violetquartz -var=notpassword=visible_tf synthetic.tfvars && echo visible_unquoted_attached_context',
+    )).toBe(
+      'terraform apply -var=password=[REDACTED] -var=notpassword=visible_tf synthetic.tfvars && echo visible_unquoted_attached_context',
+    );
+  });
+
+  it('preserves active shell expressions in unquoted attached Terraform var assignments', () => {
+    expect(redactSecrets(
+      'terraform apply -var=password=$(dangerous-command) -var=api_key=violet$(dangerous-command)quartz && echo visible_terraform_expression_context',
+    )).toBe(
+      'terraform apply -var=password=$(dangerous-command) -var=api_key=[REDACTED]$(dangerous-command)[REDACTED] && echo visible_terraform_expression_context',
+    );
+  });
+
+  it('stops unquoted attached Terraform var values at shell operators and redirections', () => {
+    expect(redactSecrets(
+      'terraform apply -var=password=violet>output.log; terraform plan -var=api_key=amber|tee visible.log && echo visible_terraform_operator_context',
+    )).toBe(
+      'terraform apply -var=password=[REDACTED]>output.log; terraform plan -var=api_key=[REDACTED]|tee visible.log && echo visible_terraform_operator_context',
+    );
+  });
+
+  it('consumes escaped quotes in double-quoted Terraform var assignments', () => {
+    expect(redactSecrets(
+      String.raw`terraform apply -var "password=violet\"quartz" && echo visible_terraform_escape_context`,
+    )).toBe(
+      'terraform apply -var "password=[REDACTED]" && echo visible_terraform_escape_context',
+    );
+  });
+
+  it('fails closed for a Terraform sensitive var with no bounded closing quote', () => {
+    expect(redactSecrets(
+      "terraform apply -var 'password=violetquartz\nprintf visible_after_unmatched_terraform",
+    )).toBe(
+      "terraform apply -var 'password=[REDACTED]\nprintf visible_after_unmatched_terraform",
+    );
+  });
+
+  it('accepts shell continuations before quoted Terraform var assignments', () => {
+    expect(redactSecrets(
+      "terraform apply -var \\\n  'password=violetquartz' && echo visible_after_lf_terraform\r\nterraform plan -var \\\r\n  \"api_key=amberstone\" && echo visible_after_crlf_terraform",
+    )).toBe(
+      "terraform apply -var \\\n  'password=[REDACTED]' && echo visible_after_lf_terraform\r\nterraform plan -var \\\r\n  \"api_key=[REDACTED]\" && echo visible_after_crlf_terraform",
+    );
+  });
+
+  it('redacts netrc password whitespace syntax only within netrc records', () => {
+    expect(redactSecrets(
+      'machine example.test login synthetic-user\n  password "violet quartz" account visible-account\nmachine second.test password amberstone\nnote password visible_plaintext',
+    )).toBe(
+      'machine example.test login synthetic-user\n  password [REDACTED] account visible-account\nmachine second.test password [REDACTED]\nnote password visible_plaintext',
+    );
+  });
+
+  it('keeps column-zero netrc directives in the active machine record', () => {
+    expect(redactSecrets(
+      'machine example.test\nlogin synthetic-user\npassword violetquartz\nnote password visible_plaintext',
+    )).toBe(
+      'machine example.test\nlogin synthetic-user\npassword [REDACTED]\nnote password visible_plaintext',
+    );
+  });
+
+  it('keeps blank and comment-only lines inside an active netrc record', () => {
+    expect(redactSecrets(
+      'machine example.test\n\n  # synthetic account comment\npassword violetquartz\nnote password visible_plaintext',
+    )).toBe(
+      'machine example.test\n\n  # synthetic account comment\npassword [REDACTED]\nnote password visible_plaintext',
+    );
+  });
+
+  it('supports RFC3986-unreserved characters in URL userinfo usernames', () => {
+    expect(redactSecrets(
+      'fetch https://user~name:violetquartz@example.test/path && echo visible_userinfo_context',
+    )).toBe(
+      'fetch https://user~name:[REDACTED]@example.test/path && echo visible_userinfo_context',
     );
   });
 
@@ -2442,6 +2769,31 @@ describe('CliChannel', () => {
       .toBe('$env:PASSWORD="[REDACTED]" && echo visible_double_quote_context');
   });
 
+  it('redacts multiline PowerShell quoted credential assignments through matching quotes', () => {
+    expect(redactSecrets(
+      "$env:PASSWORD='violet\nquartz'; $env:API_KEY=\"amber\nstone\"; Write-Output visible_ps_context",
+    )).toBe(
+      "$env:PASSWORD='[REDACTED]'; $env:API_KEY=\"[REDACTED]\"; Write-Output visible_ps_context",
+    );
+  });
+
+  it('fails closed through the physical line when a PowerShell closing quote lies beyond the scan cap', () => {
+    const overCapValue = 'synthetic-fragment-'.repeat(4_000);
+    expect(redactSecrets(
+      `$env:PASSWORD="${overCapValue}synthetic-suffix"; Write-Output hidden_same_line\nWrite-Output visible_next_line`,
+    )).toBe(
+      '$env:PASSWORD=[REDACTED]\nWrite-Output visible_next_line',
+    );
+  });
+
+  it('redacts PowerShell addition-assignment for sensitive variables', () => {
+    expect(redactSecrets(
+      '$env:PASSWORD += "violet$(printf harmless-append)quartz"; $script:API_KEY+=amber; Write-Output visible_append_context',
+    )).toBe(
+      '$env:PASSWORD += "[REDACTED]$(printf harmless-append)[REDACTED]"; $script:API_KEY+=[REDACTED]; Write-Output visible_append_context',
+    );
+  });
+
   it('treats trailing backslashes as literals in PowerShell quoted assignments', () => {
     expect(redactSecrets(String.raw`$env:PASSWORD='violet\'; reboot`))
       .toBe(`$env:PASSWORD='[REDACTED]'; reboot`);
@@ -2484,6 +2836,43 @@ describe('CliChannel', () => {
       expect(redactSecrets(`PASSWORD=violet\\${newline}quartz && echo visible_continuation_context`))
         .toBe('PASSWORD=[REDACTED] && echo visible_continuation_context');
     }
+  });
+
+  it('redacts multiline POSIX quoted sensitive assignments through matching quotes', () => {
+    expect(redactSecrets(
+      "PASSWORD='violet\nquartz' && API_KEY=\"amber\nstone$(printf harmless-posix)opal\" && echo visible_posix_context",
+    )).toBe(
+      "PASSWORD='[REDACTED]' && API_KEY=\"[REDACTED]$(printf harmless-posix)[REDACTED]\" && echo visible_posix_context",
+    );
+  });
+
+  it('redacts matched multiline POSIX sensitive quotes containing assignment-like lines', () => {
+    expect(redactSecrets(
+      'PASSWORD="head\nfoo=bar\ntail$(printf harmless-multiline)" && echo visible_double_context',
+    )).toBe(
+      'PASSWORD="[REDACTED]$(printf harmless-multiline)" && echo visible_double_context',
+    );
+    expect(redactSecrets(
+      "API_KEY='head\nfoo=bar\ntail' && safe=\"head\nfoo=bar\ntail\" && echo visible_single_context",
+    )).toBe(
+      "API_KEY='[REDACTED]' && safe=\"head\nfoo=bar\ntail\" && echo visible_single_context",
+    );
+  });
+
+  it('fails closed through the physical line when a multiline POSIX closing quote lies beyond the scan cap', () => {
+    const overCapContinuation = 'synthetic-continuation-'.repeat(3_200);
+    expect(redactSecrets(
+      `PASSWORD='synthetic-head\n${overCapContinuation}synthetic-suffix' && echo hidden_same_line\necho visible_next_line`,
+    )).toBe(
+      "PASSWORD='[REDACTED]\necho visible_next_line",
+    );
+  });
+
+  it('fails closed at EOF for unmatched multiline POSIX sensitive assignment quotes', () => {
+    expect(redactSecrets("PASSWORD='synthetic-head\nsynthetic-single-continuation"))
+      .toBe("PASSWORD='[REDACTED]");
+    expect(redactSecrets('API_KEY="synthetic-head\nsynthetic-double-continuation'))
+      .toBe('API_KEY="[REDACTED]');
   });
 
   it('keeps commands after even Bash backslash runs and physical newlines visible', () => {

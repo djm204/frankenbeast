@@ -421,3 +421,226 @@
 - [x] Full Governor verification passed 517/517 across 25 files.
 - [x] Package typecheck and build passed; lint passed with zero errors and exactly the known three pre-existing warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
 - [x] `git diff --check` passed; exact hunk, status, name, and stat inspection confirmed only the production redactor, focused CLI-channel test, and this existing progress document changed. The new scans remain line/balanced-value bounded, literal credentials are concealed, and asserted shell substitutions/operators/commands remain visible.
+
+## Trigger-17 current-head eleven-finding remediation (`760bc515`)
+
+- [x] Finding 1 RED→GREEN: isolated tuple-header test failed 1/1 by collapsing the active expression, then passed 1/1 with the full harmless substitution retained between redacted literal fragments.
+- [x] Finding 2 RED→GREEN: isolated multiline PowerShell test failed 1/1 by leaking both continuation lines, then passed 1/1 with bounded matching-quote scans for single and double quotes.
+- [x] Finding 3 RED→GREEN: isolated PowerShell `+=` test failed 1/1 with both values visible, then passed 1/1 after narrowly extending the assignment operator.
+- [x] Finding 4 RED→GREEN: isolated established-YAML-context test failed 1/1 by omitting `ruby` and a dot-relative executable, then passed 1/1 while hiding pre-context plaintext and all command operands.
+- [x] Finding 5 RED→GREEN: isolated parity test failed 1/1 by leaking suffixes after escaped space/semicolon boundaries, then passed 1/1 while retaining an even-parity real boundary.
+- [x] Finding 6 RED→GREEN: isolated multiline POSIX test failed 1/1 by leaking both continuation lines, then passed 1/1 with a 65,536-character matching-quote bound; the unterminated-opposite-quote interaction selection passed 2/2.
+- [x] Finding 7 RED→GREEN: isolated tilde-userinfo test failed 1/1 with the password visible, then passed 1/1 while retaining existing authority/host validation.
+- [x] Finding 8 RED→GREEN: isolated curl OAuth bearer test failed 1/1 with quoted and unquoted arguments visible, then passed 1/1 with following URLs/operators/commands intact.
+- [x] Finding 9 RED→GREEN: isolated quoted-query test failed 1/1 by inserting a marker before the quote and leaking the full value, then passed 1/1 with quoted semicolon data consumed and an unquoted semicolon preserved as an operator.
+- [x] Finding 10 RED→GREEN: isolated nested-option test failed 1/1 for Terraform and Docker `--env=` payloads, then passed 1/1 while the `notpassword` near misses stayed visible.
+- [x] Finding 11 RED→GREEN: isolated netrc test failed 1/1 with both record passwords visible, then passed 1/1 while unrelated `note password visible_plaintext` remained unchanged.
+- [x] Exact eleven-test selection passed 11/11; the complete CLI-channel file passed 209/209 after repairing the multiline-POSIX unterminated-quote interaction and preserving argumentless YAML plaintext concealment.
+- [x] All Governor tests passed 528/528 across 25 files; package typecheck and build passed; lint reported zero errors and exactly the three known pre-existing warnings.
+- [x] `git diff --check` passed. Bounds, literal hiding, executable-context assertions, and status/name/diff inspection confirm exact scope is the production redactor, focused CLI-channel test, and this progress document.
+
+## Trigger-17 Finding 9 whole-URL-quote follow-up
+
+- [x] Replaced the query-value-only Finding 9 fixture with the harmless immutable-report shape `curl "https://safe.example/?access_token=violet;quartz$(printf harmless-query)amber&safe=visible"` before changing production.
+- [x] Strict RED observed: the isolated test failed 1/1 because production returned `access_token=[REDACTED];quartz$(printf harmless-query)amber`, exposing the suffix after treating the quoted URL's semicolon as an unquoted shell boundary.
+- [x] Narrow GREEN: a line- and 65,536-character-bounded enclosing-shell-quote scan now supplies query-value context. Double-quoted URL data consumes the semicolon while retaining the complete active substitution between redacted literal fragments; single-quoted URL contents are wholly literal and redacted; an unquoted semicolon remains visible as a shell operator boundary.
+- [x] The focused Finding 9 selection passed 1/1. The first complete-file run exposed a compatibility regression in ordinary unquoted active-expression values (2 failures); the focused correction selection passed 3/3 after restricting forced-literal treatment to inherited single quotes, and the full CLI-channel file then passed 209/209.
+- [x] Re-audited the exact eleven Finding 1–11 tests against the immutable reports; no other material fixture mismatch was found. The exact eleven-test selection passed 11/11.
+- [x] Verified established sensitive-YAML shell context retains the presumed executable token from every later nonempty more-indented multi-word line and hides every remaining word. This necessarily cannot distinguish an arbitrary first plaintext word from an executable after shell context is established; the tests keep pre-context plaintext completely hidden and avoid broadening recognition beyond that report-required context.
+- [x] Final validation: full CLI-channel 209/209; all Governor tests 528/528 across 25 files; typecheck and build passed; lint reported zero errors and exactly the three known pre-existing warnings; `git diff --check` and exact scoped status/diff inspection passed.
+
+## Trigger-17 local-review P1 follow-up
+
+- [x] P1 A regression added for a quoted curl URL containing `;` before `--oauth2-bearer`, using an option-looking synthetic credential to exercise the reviewed edge. The end-to-end regression was already GREEN before the targeted change because a later generic sensitive-flag fallback also concealed the credential, so an isolated behavioral RED could not be honestly recorded. Replaced the independently defective separator regex with a 65,536-character-bounded shell-quote state scan: semicolons and other separators inside single or double quotes remain in the curl command, while unquoted separators end it. Focused post-change verification passed 1/1.
+- [x] P1 B strict RED→GREEN: the isolated column-zero netrc directive regression failed 1/1 with `password violetquartz` visible after column-zero `login synthetic-user`; after making recognized `login`, `password`, `account`, and `macdef` directives indentation-independent, it passed 1/1 while the unrelated `note password visible_plaintext` line still ended the record and remained unchanged.
+- [x] Both new local-review tests passed together 2/2. The exact original eleven Trigger-17 selections plus both follow-ups passed 13/13.
+- [x] Full CLI-channel verification passed 211/211; all Governor tests passed 530/530 across 25 files.
+- [x] Governor typecheck and build passed. Lint reported zero errors and exactly the three known pre-existing warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed. Final scope inspection confirmed only the existing production redactor, focused CLI-channel test, and this progress document are modified.
+
+## Latest local-review three-P1 follow-up
+
+- [x] Add focused regressions for quoted Terraform separators, attached `-var=`, and blank/comment-only netrc record lines.
+- [x] Observe all three focused regressions RED before changing production: the combined isolated run failed 3/3, exposing both Terraform values and the netrc password.
+- [x] Implement narrow, bounded fixes in the existing production redactor: use a 65,536-character quote-state Terraform command scan, accept only the standard separated/attached `-var` spellings, and treat only blank/comment-only lines as netrc record continuations.
+- [x] Run the three focused tests together: 3/3 passed (211 skipped).
+- [x] Run the complete CLI-channel file: 214/214 passed.
+- [x] Run all Governor tests: 533/533 passed across 25 files.
+- [x] Run Governor typecheck, lint, and build: all passed; lint retained exactly the three known unrelated warnings and reported zero errors.
+- [x] Run `git diff --check` successfully and confirm the unchanged three-file scope: production redactor, focused CLI-channel test, and this progress document only. No external side effects were performed.
+
+## Escaped-quote Terraform P1 follow-up
+
+- [x] Focused RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "consumes escaped quotes in double-quoted Terraform var assignments"` failed 1/1 (214 skipped), receiving `password=[REDACTED]"quartz"` and proving the escaped quote was treated as the value close.
+- [x] Narrow bounded GREEN: replace only the nested Terraform assignment regex's closing-quote detection with a cursor scan over the already 65,536-character-capped command; double-quoted values skip escaped characters, single-quoted behavior is retained, and active expression redaction remains unchanged. The identical focused command passed 1/1 (214 skipped).
+- [x] Relevant Terraform/nested-option sibling selection passed 4/4 (211 skipped); the complete CLI-channel file passed 215/215.
+- [x] All Governor tests passed 534/534 across 25 files. Package typecheck and build passed; lint passed with zero errors and the same three pre-existing unrelated warnings.
+- [x] `git diff --check` passed, and status/name inspection confirmed the exact existing three-file scope. No commit, push, GitHub/Kanban mutation, review trigger, merge, unrelated file change, or secret inspection was performed.
+
+## Post-fix Codex review two-P1 over-cap follow-up
+
+- [x] PowerShell strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed through the physical line when a PowerShell closing quote lies beyond the scan cap"` failed 1/1 (215 skipped). The received output contained the synthetic credential remainder, closing quote, and same-line suffix after the initial `[REDACTED]`, proving the 65,536-character cap was incorrectly treated as a value boundary.
+- [x] PowerShell narrow bounded GREEN: when a quoted sensitive assignment exhausts the existing scan cap without a matching quote, advance the redaction cursor through the next CR/LF (or end of input) instead of emitting the uncertain remainder. The identical focused command passed 1/1 (215 skipped), preserving `Write-Output visible_next_line`.
+- [x] PowerShell sibling compatibility: the focused quoted/escape/boundary selection passed 5/5 (211 skipped).
+- [x] Multiline POSIX strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed through the physical line when a multiline POSIX closing quote lies beyond the scan cap"` failed 1/1 (216 skipped). The received output redacted only the first physical line and exposed the complete synthetic continuation and same-line suffix because the bounded matching-quote prepass skipped the candidate.
+- [x] Multiline POSIX narrow bounded GREEN: only when the existing scan cap is exhausted after a physical newline without a matching quote, retain the assignment/opening quote, emit one marker, and advance through the next CR/LF (or end of input). The identical focused command passed 1/1 (216 skipped), preserving `echo visible_next_line`.
+- [x] Multiline POSIX sibling compatibility: the multiline/unterminated/opposite-quote/escaped-newline/even-backslash selection passed 7/7 (210 skipped).
+- [x] Complete CLI-channel verification passed 217/217.
+- [x] Full Governor verification passed 536/536 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the three known pre-existing warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed. The work remained within the existing production redactor, CLI-channel unit test, and this progress document; no commit, push, GitHub/Kanban mutation, review trigger, merge, extra file, or secret inspection was performed.
+
+## Latest independent Codex review four-P1 follow-up
+
+- [x] Curl strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed for unmatched and ANSI-C quoted curl oauth2 bearer values"` failed 1/1 (217 skipped). The unmatched double-quoted synthetic value was emitted verbatim, and the ANSI-C value retained its synthetic literal tail after a marker.
+- [x] Curl narrow bounded GREEN: reuse a 65,536-character quote-aware command-end scan that falls back to the first physical newline only when a quote remains unmatched; accept unmatched ordinary quotes and ANSI-C single-quoted bearer arguments and replace uncertain literal payloads with one marker. The identical focused command passed 1/1 (217 skipped), preserving both following lines/commands.
+- [x] Terraform strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed for a Terraform sensitive var with no bounded closing quote"` failed 1/1 (218 skipped), emitting the entire synthetic value unchanged.
+- [x] Terraform narrow bounded GREEN: reuse the bounded quote-aware command scan and, for a classified `-var` key with no closing quote in that bounded command, retain only the option/opening quote/key and emit one marker through the physical-line boundary. The identical focused command passed 1/1 (218 skipped), preserving the next line.
+- [x] Docker-bound strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "keeps separators in earlier Docker arguments while scanning later env credentials"` failed 1/1 (219 skipped), leaving the later synthetic `--env=API_KEY` value visible after a semicolon inside an earlier quoted argument.
+- [x] Docker-bound narrow bounded GREEN: replace the separator regex command slice with the shared 65,536-character quote-aware command-end scan. The identical focused command passed 1/1 (219 skipped), retaining the quoted argument and following command.
+- [x] Docker-quote strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts quoted Docker --env and -e assignment payloads"` failed 1/1 (220 skipped), exposing both synthetic quoted assignment values.
+- [x] Docker-quote narrow bounded GREEN: add a command-local quoted payload pass for separated/attached `--env` and `-e` forms, classify only the nested assignment key, preserve its quote form, and redact its literal value. The identical focused command passed 1/1 (220 skipped).
+- [x] Exact four-finding selection passed 4/4 (217 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed for unmatched and ANSI-C quoted curl oauth2 bearer values|fails closed for a Terraform sensitive var with no bounded closing quote|keeps separators in earlier Docker arguments while scanning later env credentials|redacts quoted Docker --env and -e assignment payloads"`.
+- [x] Relevant curl/Terraform/Docker sibling compatibility selection passed 9/9 (212 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "curl oauth2|Terraform|Docker option payloads|Docker arguments|Docker --env"`.
+- [x] Complete CLI-channel verification passed 221/221; full Governor verification passed 540/540 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the three known pre-existing warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed after the evidence append. Status, name-only, stat, and scoped diff inspection confirmed that only the existing production redactor, CLI-channel test, and this progress document are modified; no prohibited external or repository side effects were performed.
+
+## Latest independent review three-P1 continuation follow-up
+
+- [x] Sensitive-query strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed through the physical line for unmatched quoted sensitive query values"` failed 1/1 (221 skipped). Both unmatched single- and double-quoted synthetic values remained visible after the initial marker, across CRLF and LF fixtures respectively.
+- [x] Sensitive-query bounded GREEN: when the existing 65,536-character quote scan finds no matching delimiter, consume only through the next physical CR/LF (or end of input). The identical focused command passed 1/1 (221 skipped), preserving both following commands.
+- [x] Curl-continuation strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "accepts shell continuations before curl oauth2 bearer values"` failed 1/1 (222 skipped). Production replaced only each continuation backslash and left both synthetic bearer values visible.
+- [x] Curl-continuation narrow GREEN: accept POSIX backslash-LF/CRLF/CR continuations in the existing bearer-option separator and bounded command scan, consume the real argument, and normalize the consumed separator to one space so the later generic sensitive-flag pass cannot add a second marker. The identical focused command passed 1/1 (222 skipped), preserving both following URLs and commands.
+- [x] Terraform-continuation strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "accepts shell continuations before quoted Terraform var assignments"` failed 1/1 (223 skipped), leaving both quoted synthetic sensitive assignments visible.
+- [x] Terraform-continuation narrow GREEN: accept POSIX backslash-LF/CRLF/CR continuations in the established separated `-var` whitespace form while retaining the option spelling and physical continuation. The identical focused command passed 1/1 (223 skipped), preserving both following commands.
+- [x] Exact three-test selection passed 3/3 (221 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "fails closed through the physical line for unmatched quoted sensitive query values|accepts shell continuations before curl oauth2 bearer values|accepts shell continuations before quoted Terraform var assignments"`.
+- [x] Relevant sibling selection passed 16/16 (208 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "query|curl oauth2|Terraform"`.
+- [x] Complete CLI-channel verification passed 224/224; full Governor verification passed 543/543 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the three known pre-existing warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed before this evidence append. Status and name-only inspection confirmed exact scope remains the production redactor, CLI-channel test, and this progress document; no prohibited external or repository side effects were performed.
+
+## Latest independent review concatenated-shell-fragment follow-up
+
+- [x] Sensitive-query strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts concatenated shell fragments in sensitive query values"` failed 1/1 (224 skipped). The received value redacted only the first single-quoted fragment and exposed the following double-quoted/unquoted synthetic literals around the retained harmless substitution.
+- [x] Sensitive-query bounded GREEN: scan the complete shell word through its real URL/shell boundary, retain single/double quote delimiters and the complete active substitution, and redact every literal fragment. The identical focused command passed 1/1 (224 skipped), preserving the safe query sibling and adjacent `&& echo` command.
+- [x] Curl OAuth strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts concatenated shell fragments in curl oauth2 bearer arguments"` failed 1/1 (225 skipped). The received argument redacted only the first single-quoted fragment and exposed the following double-quoted/unquoted synthetic literals around the retained harmless substitution.
+- [x] Curl OAuth bounded GREEN: a command-local full-shell-word prepass now consumes concatenated bearer fragments before the established option redactor, retains quote delimiters and the complete active substitution, and redacts every literal fragment. The identical focused command passed 1/1 (225 skipped), preserving the following URL and adjacent `&& echo` command.
+- [x] Exact two-test selection passed 2/2 (224 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts concatenated shell fragments in sensitive query values|redacts concatenated shell fragments in curl oauth2 bearer arguments"`.
+- [x] Relevant query/OAuth sibling selection initially found one unmatched-query compatibility regression; after restoring the established whole-value fail-closed marker, `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "query|curl oauth2"` passed 12/12 (214 skipped).
+- [x] Complete CLI-channel verification passed 226/226; full Governor verification passed 545/545 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the three known pre-existing warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed after this evidence append. Status, name-only, stat, and scoped-diff inspection confirmed exact scope remains the production redactor, CLI-channel test, and this progress document; no prohibited external or repository side effects were performed.
+
+## Latest independent review ANSI-C concatenated-shell-word follow-up
+
+- [x] Added one deterministic curl OAuth regression combining ANSI-C, double-quoted, single-quoted, and unquoted bearer fragments with a retained `$(printf harmless-ansi-oauth)` substitution and adjacent `&& echo visible_after_ansi_oauth_word` command.
+- [x] Isolated strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts ANSI-C-prefixed concatenated shell fragments in curl oauth2 bearer arguments"` failed 1/1 (226 skipped). The received output was `--oauth2-bearer=[REDACTED]"quartz"'amber'opal$(printf harmless-ansi-oauth)jade`, proving the full-word prepass skipped the leading `$` and every later literal fragment leaked.
+- [x] Minimal repair: recognize `$'` as an ANSI-C quote opener in the shared literal-fragment redactor, admit a closed ANSI-C-prefixed concatenated word to the curl OAuth full-word prepass, and prevent the later option fallback from collapsing the prepass's canonical `$'[REDACTED]'` fragment. Original or unmatched ANSI-C values retain the established whole-marker fail-closed behavior.
+- [x] The first post-change isolated run still failed 1/1 (226 skipped) only because the generic fallback collapsed the already-redacted ANSI-C fragment to `[REDACTED]`; after the narrow canonical-marker guard, the identical isolated command passed 1/1 (226 skipped).
+- [x] Relevant OAuth and concatenation siblings passed 6/6 (221 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "curl oauth2|concatenated shell fragments"`.
+- [x] Complete CLI-channel verification passed 227/227. Full Governor verification passed 546/546 across 25 files.
+- [x] `npm run typecheck --workspace @franken/governor` and `npm run build --workspace @franken/governor` passed. `npm run lint --workspace @franken/governor` passed with zero errors and exactly the three known unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed before this evidence append. Status, name-only, stat, and scoped-diff inspection confirmed the exact existing three-file scope: production redactor, CLI-channel test, and this progress document. No commit, push, GitHub/Kanban mutation, review trigger, merge, added file, unrelated edit, or secret inspection was performed.
+
+## Independent-review TypeScript compile follow-up
+
+- [x] RED: `npm run typecheck --workspace @franken/governor` failed with TS2345 at `approval-prompt-markers.ts:606` because `closingQuote` widened to `string`, outside `boundedClosingShellQuoteIndex`'s `"'" | '"'` parameter.
+- [x] GREEN: explicitly narrow `closingQuote` to recognized shell quote literals or `undefined`; the exact package typecheck passed, and the focused ANSI-C concatenated OAuth regression passed 1/1 (228 skipped).
+
+## Latest independent-review quoted-operator shell-word follow-up
+
+- [x] Added focused sensitive-query and curl OAuth regressions for a first quoted fragment containing `&` followed by a concatenated `LEAK` literal.
+- [x] Strict RED: the combined focused run failed 2/2 (229 skipped); both received values retained `LEAK` after the first redacted quoted fragment.
+- [x] Narrow bounded GREEN: determine enclosing quote context before classifying a value-opening quote, scan the shell-word candidate through its enclosing quote/physical-line boundary, and apply structural boundaries only outside local quote fragments. Existing active-substitution fragment redaction remains in place.
+- [x] The identical focused selection passed 2/2 (229 skipped); relevant query/OAuth siblings passed 16/16 (215 skipped).
+- [x] Full CLI-channel passed 231/231; all Governor tests passed 550/550 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and the same three known unrelated warnings.
+- [x] Final `git diff --check` passed; status/name inspection confirmed the unchanged three-file scope.
+
+## Latest independent-review unquoted-first curl OAuth shell-word follow-up
+
+- [x] Added one focused regression for an unquoted-first bearer word concatenated with double-quoted, single-quoted, substitution, and trailing unquoted fragments, followed by a real URL and `&& echo` command.
+- [x] Strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts unquoted-first concatenated shell fragments in curl oauth2 bearer arguments"` failed 1/1 (231 skipped). The received output redacted only `violet`; `"quartz"'amber'$(printf harmless-unquoted-oauth)opal` remained exposed.
+- [x] Minimal bounded GREEN: admit an unquoted-first word to the existing full-word prepass only when its already bounded scan finds a genuine unescaped quote fragment or concatenated shell expression. The established literal-fragment redactor then preserves quote delimiters and substitutions while redacting every literal fragment; ordinary whole values and subsequent URLs/operators/commands retain their current paths.
+- [x] The identical focused command passed 1/1 (231 skipped). OAuth siblings passed 8/8 (224 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "curl oauth2|unquoted-first concatenated shell fragments"`.
+- [x] Complete CLI-channel verification passed 232/232. Full Governor verification passed 551/551 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three known unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed; status and name-only inspection confirmed the exact existing three-file scope: production redactor, CLI-channel unit test, and this progress document.
+
+## Latest independent-review unquoted attached Terraform var follow-up
+
+- [x] Added one focused regression for `terraform apply -var=password=violetquartz`, with an adjacent unquoted non-sensitive `-var=`, following tfvars argument, `&&` boundary, and next command pinned unchanged.
+- [x] Strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "redacts unquoted attached Terraform var assignments"` failed 1/1 (232 skipped), returning the sensitive nested value unchanged.
+- [x] Narrow GREEN: allow a quote-free nested assignment only for the attached `-var=` spelling, classify its nested key with the existing sensitive-key predicate, and consume its value only through the unquoted shell-word boundary. Existing quoted and separated forms retain their established quote-aware paths.
+- [x] The identical focused command passed 1/1 (232 skipped). Terraform/nested-option siblings passed 7/7 (226 skipped): `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "Terraform|sensitive assignments nested in Terraform and Docker option payloads"`.
+- [x] Complete CLI-channel verification passed 233/233. Full Governor verification passed 552/552 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three known unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed; status, name-only, stat, and scoped-diff inspection confirmed the exact existing three-file scope: production redactor, CLI-channel unit test, and this progress document. No prohibited repository or external side effects were performed.
+
+## Final-review Terraform expression and operator-boundary follow-up
+
+- [x] Added focused regressions for pure and literal-surrounded command substitutions in unquoted attached sensitive `-var=` values, plus `>` and `|` shell boundaries with their following command context pinned unchanged.
+- [x] Strict RED: the combined isolated run failed 2/2 (233 skipped). Both command substitutions were collapsed to markers, and `>output.log` was consumed with the sensitive value.
+- [x] Minimal bounded GREEN: replace only the Terraform unquoted whitespace loop with the existing balanced `shellValueBoundary` helper and apply the existing password literal-fragment redactor to expression-bearing unquoted values. Quoted, separated, non-sensitive, and command-boundary paths were otherwise unchanged.
+- [x] The identical focused selection passed 2/2 (233 skipped). Terraform/nested-option siblings passed 9/9 (226 skipped).
+- [x] Complete CLI-channel verification passed 235/235. Full Governor verification passed 554/554 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three known unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed; status, name-only, stat, and scoped diff inspection confirmed the exact existing three-file scope. No prohibited repository or external side effects were performed.
+
+## Latest independent-review balanced-substitution command-boundary follow-up
+
+- [x] Added minimal Terraform and Docker regressions with a credential option after `$(echo x; echo y)` and the following outer `&& echo` context pinned unchanged.
+- [x] Strict RED: `npm test --workspace @franken/governor -- --run tests/unit/channels/cli-channel.test.ts -t "keeps separators in balanced substitutions before Terraform credentials|keeps separators in balanced substitutions before Docker credentials"` failed 2/2 (235 skipped); both synthetic credential literals remained visible because the bounded command scan stopped at the substitution's semicolon.
+- [x] Minimal bounded GREEN: use the established balanced-expression parser on only the existing 65,536-character command window and skip parser-confirmed expression spans while scanning. Outer quotes and operators retain their existing handling; unmatched or over-cap expressions produce no skippable span and therefore retain fail-closed behavior.
+- [x] The identical focused selection passed 2/2 (235 skipped). Terraform/Docker siblings passed 13/13 (224 skipped).
+- [x] Complete CLI-channel verification passed 237/237. Full Governor verification passed 556/556 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three known unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed; status, name-only, stat, and scoped diff inspection confirmed the exact existing three-file scope. No commit, push, GitHub/Kanban mutation, review trigger, merge, secret inspection, or unrelated edit was performed.
+
+## Latest independent-review matched multiline POSIX quote follow-up
+
+- [x] Added focused matched single- and double-quote regressions whose interior contains an assignment-like line, while pinning active expressions, following commands, and non-sensitive assignments.
+- [x] Strict RED: the isolated regression failed 1/1 (237 skipped); the double-quoted value was cut after its first line and exposed `foo=bar`, the trailing literal, active substitution, closing quote, and following command.
+- [x] Narrowed the interior assignment-like-line bypass after the bounded matching-quote scan to only a following sensitive assignment with an opposite opening quote, which preserves the established truly-unmatched-quote case; scan-cap handling and non-multiline candidates retain their existing branches.
+- [x] The focused/multiline/unmatched/continuation selection passed 8/8 (230 skipped), including matched single and double quotes, active expressions, the opposite-quote unmatched guard, scan-cap handling, and following-command boundaries.
+- [x] Complete CLI-channel verification passed 238/238; full Governor verification passed 557/557 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed; status, name-only, stat, and scoped-diff inspection confirmed the exact three-file scope. No prohibited repository or external side effects were performed.
+
+## Latest independent-review curl OAuth bounded-shell-word follow-up
+
+- [x] Added focused regressions for an unquoted bearer word containing escaped whitespace and an unquoted bearer word containing a command substitution with spaced arguments; both pin the following URL, `&&` operator, and command.
+- [x] Strict RED: the combined focused run failed 2/2 (238 skipped). The replacement regex exposed `barZZ` after `foo\ ` and exposed the spaced substitution body after truncating at its first internal space.
+- [x] Minimal bounded GREEN: admit escaped-whitespace values to the already computed `shellWordEnd` prepass and apply the legacy option regex only to command segments not claimed by that prepass. Complete bounded arguments are therefore redacted once, active substitutions remain intact, and following URLs/operators remain outside the redaction.
+- [x] The identical focused selection passed 2/2 (238 skipped). OAuth siblings passed 10/10 (230 skipped).
+- [x] Complete CLI-channel verification passed 240/240 on a standalone rerun. Its first concurrent run hit one existing 5-second scan-cap stress-test timeout under contention; the same test passed both in the full Governor run and the standalone CLI rerun.
+- [x] Full Governor verification passed 559/559 across 25 files. Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings.
+- [x] Final `git diff --check` passed; status, name-only, stat, and scoped-diff inspection confirmed the exact existing three-file scope. No prohibited repository or external side effects were performed.
+
+## Latest independent-review prose-apostrophe P2 follow-up
+
+- [x] Added focused contraction and possessive regressions that place ordinary prose apostrophes before sensitive query URLs and pin all following prose as visible.
+- [x] Strict RED: the exact two-test selection failed 2/2 (240 skipped); both received strings ended at the redaction marker, proving the earlier apostrophe was misclassified as an enclosing single quote and whitespace no longer bounded the query value.
+- [x] Minimal GREEN: ignore an embedded alphanumeric apostrophe only when no later single quote exists before the sensitive URL position. Immediate URL-opening quotes and matched shell quotes—including concatenated fragments—retain the existing shell paths, while ordinary prose restores the unquoted whitespace boundary.
+- [x] The identical focused selection passed 2/2 (240 skipped). Query, quoted URL, concatenation, operator, substitution, and fail-closed siblings passed 61/61 (181 skipped).
+- [x] Complete CLI-channel verification passed 242/242. Full Governor verification passed 561/561 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] Final `git diff --check` passed; status, name-only, stat, and scoped-diff inspection confirmed the exact existing three-file scope. No prohibited repository or external side effects were performed.
+
+## Latest independent-review ANSI-C command-boundary P1 follow-up
+
+- [x] Added a focused Terraform regression with an escaped apostrophe and internal semicolon in an earlier ANSI-C argument, followed by a synthetic sensitive `-var`. Strict RED failed 1/1 (242 skipped): the received output retained the complete synthetic credential after the scan truncated at the internal semicolon.
+- [x] Minimally taught the bounded shared command scan to distinguish `$'…'`, suppress expression-span skipping inside that single-quoted mode, and skip its backslash-escaped characters before recognizing a closing apostrophe. Normal single/double quotes, unmatched-newline fallback, bounded expression spans, and outer operators retain their existing paths.
+- [x] Focused GREEN passed 1/1 (242 skipped); Terraform/Docker/curl OAuth siblings passed 24/24 (219 skipped); full CLI passed 243/243; full Governor passed 562/562 across 25 files. Governor typecheck and build passed. Lint passed with zero errors and the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`. An initial typecheck exposed that the widened local union had mechanically landed on an earlier helper; moving it to the intended bounded scanner restored type safety, and the focused regression was rerun GREEN afterward.
+- [x] Final `git diff --check` passed; status, name-only, and scoped-diff inspection confirmed the exact existing three-file scope: production redactor, CLI-channel unit test, and this progress document. No commit, push, GitHub/Kanban mutation, review trigger, merge, secret inspection, or unrelated edit was performed.
+
+## Latest independent-review pure spaced curl OAuth expression P1 follow-up
+
+- [x] Added the minimal deterministic pure command-substitution regression for `curl --oauth2-bearer $(cat /tmp/token)`, with the following URL, `&&` operator, and command pinned unchanged. Strict RED failed 1/1 (243 skipped): expected the complete active expression, but received `--oauth2-bearer [REDACTED] /tmp/token)`, proving the fallback redacted only the first whitespace-delimited prefix.
+- [x] Covered the same behavior slice for the pure braced expansion `${TOKEN:-fallback value}`. The first post-production focused run retained the command substitution but failed the braced assertion as `${TOKEN:[REDACTED] value}`, identifying the later generic assignment pass as a second prefix-corruption path.
+- [x] Minimal bounded GREEN: admit only a single parser-confirmed expression span covering the entire already-bounded OAuth word to the full-word prepass, and skip the later generic assignment replacement only when a bounded parser-confirmed braced expression starts immediately before that match. Both complete active expressions and all following context remain unchanged. The identical focused command passed 1/1 (243 skipped).
+- [x] OAuth siblings passed 11/11 (233 skipped). The complete CLI-channel file passed 244/244; all Governor tests passed 563/563 across 25 files.
+- [x] Governor typecheck and build passed. Lint passed with zero errors and exactly the same three unrelated warnings in `src/policy.ts` and `tests/integration/full-approval-flow.test.ts`.
+- [x] `git diff --check` passed. Status, name-only, stat, and scoped-diff inspection confirmed the exact existing three-file scope. No commit, push, GitHub/Kanban mutation, review trigger, merge, secret inspection, dependency/file addition, or unrelated edit was performed.
+- [x] Fresh independent `codex review --uncommitted` after the pure-expression repair found no discrete correctness, security, or compatibility regression. Independent orchestrator verification then passed CLI-channel 244/244, full Governor 563/563 across 25 files, typecheck, build, lint with zero errors and the same three unrelated warnings, and `git diff --check`.
