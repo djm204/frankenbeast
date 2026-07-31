@@ -693,12 +693,58 @@ export async function runHook(
   }
 }
 
+/** Upper bound on how much of a redacted error message is ever logged. */
+const MAX_HOOK_FAILURE_SUMMARY_CHARS = 500;
+
+/**
+ * Generic net for credential-shaped substrings that the named-pattern
+ * redaction in `redactSecrets`/`redactRawSecrets` does not recognize —
+ * e.g. presigned-URL query params (`X-Amz-Signature=...`), OAuth
+ * `code=...` exchanges, or a bare high-entropy token/JWT with no
+ * recognizable key name at all. `redactSecrets` is a best-effort,
+ * named-pattern redactor; it can leave an unrecognized credential shape
+ * completely untouched. This scan runs on text that has ALREADY been
+ * through `redactSecrets`, so a match here means redaction could not
+ * confirm the text is safe to log.
+ */
+const GENERIC_QUERY_CREDENTIAL_PATTERN = /[?&]?[A-Za-z][A-Za-z0-9_.-]*=[A-Za-z0-9%_.~+/-]{12,}/;
+const GENERIC_HIGH_ENTROPY_TOKEN_PATTERN = /\b(?:[A-Za-z0-9_-]{24,}|[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{10,})\b/;
+
+function mayContainUnredactedCredential(text: string): boolean {
+  return GENERIC_QUERY_CREDENTIAL_PATTERN.test(text) || GENERIC_HIGH_ENTROPY_TOKEN_PATTERN.test(text);
+}
+
+/**
+ * Summarizes a rejected value for the entrypoint failure log. Hook failures
+ * can wrap arbitrary tool/provider payloads, so only a genuine `Error`'s
+ * `message` is ever considered — never its `stack`, and never an arbitrary
+ * rejected object/value, which could carry raw provider or tool output.
+ *
+ * The message is run through `redactSecrets` first, but that redaction is
+ * necessarily best-effort (named patterns only). Since this is a
+ * safety-critical logging path with no way to verify every possible
+ * credential shape has been stripped, the default on any residual
+ * uncertainty is to suppress the message entirely rather than risk
+ * printing a partially-redacted secret ("when in doubt, suppress").
+ */
+function summarizeHookFailure(error: unknown): string | undefined {
+  if (!(error instanceof Error) || typeof error.message !== 'string' || error.message.length === 0) {
+    return undefined;
+  }
+  const redacted = redactSecrets(error.message);
+  if (mayContainUnredactedCredential(redacted)) {
+    return undefined;
+  }
+  return redacted.length > MAX_HOOK_FAILURE_SUMMARY_CHARS
+    ? `${redacted.slice(0, MAX_HOOK_FAILURE_SUMMARY_CHARS)}…`
+    : redacted;
+}
+
 const isMain = (await import('../shared/is-main.js')).isMain(import.meta.url);
 if (isMain) {
-  runHook().catch(() => {
-    // Hook failures can wrap arbitrary tool/provider payloads. Keep the
-    // entrypoint diagnostic stable without serializing the rejected value.
-    console.error('fbeast-hook failed');
+  runHook().catch((error) => {
+    const summary = summarizeHookFailure(error);
+    console.error(summary ? `fbeast-hook failed: ${summary}` : 'fbeast-hook failed');
     process.exit(1);
   });
 }
