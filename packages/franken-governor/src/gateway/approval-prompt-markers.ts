@@ -1328,6 +1328,13 @@ function redactArrayLiteralFragments(body: string): string {
 
 const MAX_SENSITIVE_ARRAY_BODY_LENGTH = 65_536;
 
+function isAlreadyRedactedStructuredValue(text: string, start: number): boolean {
+  if (text[start] !== '[' && text[start] !== '{') return false;
+  const boundedText = text.slice(0, Math.min(text.length, start + MAX_SENSITIVE_ARRAY_BODY_LENGTH + 1));
+  const end = balancedStructuredValueEnd(boundedText, start);
+  return end !== undefined && text.slice(start, end).includes('[REDACTED]');
+}
+
 function redactSensitiveArrayAssignments(text: string): string {
   const assignmentStart = /(?:^|[\s{,;(])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\s*(?:\+=|[:=])\s*\(/gmu;
   let result = '';
@@ -1392,6 +1399,8 @@ function redactMixedShellWordAssignments(
     const key = match[1];
     if (key === undefined || !isSensitiveKeyToken(key) || match.index < cursor) continue;
     const valueStart = match.index + match[0].length;
+    if (text.startsWith('"""', valueStart) || text.startsWith("'''", valueStart)) continue;
+    if (isAlreadyRedactedStructuredValue(text, valueStart)) continue;
     if (text[valueStart] === '(') continue;
     const scanEnd = Math.min(text.length, valueStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
     if (scanMetrics !== undefined) scanMetrics.mixedShellWordExpressionScans++;
@@ -1579,6 +1588,52 @@ function balancedStructuredValueEnd(value: string, start: number): number | unde
       } else if (character === quote) {
         quote = undefined;
       }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === '[' || character === '{') {
+      if (stack.length >= MAX_STRUCTURED_HEADER_OBJECT_DEPTH) return undefined;
+      stack.push(character);
+      continue;
+    }
+    if (character !== ']' && character !== '}') continue;
+    const expectedOpening = character === ']' ? '[' : '{';
+    if (stack.pop() !== expectedOpening) return undefined;
+    if (stack.length === 0) return index + 1;
+  }
+  return undefined;
+}
+
+function balancedTomlCollectionEnd(value: string, start: number): number | undefined {
+  const opening = value[start];
+  if (opening !== '[' && opening !== '{') return undefined;
+  const stack = [opening];
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  let lineComment = false;
+  const scanEnd = Math.min(value.length, start + MAX_STRUCTURED_HEADER_OBJECT_LENGTH);
+
+  for (let index = start + 1; index < scanEnd; index++) {
+    const character = value[index];
+    if (lineComment) {
+      if (character === '\r' || character === '\n') lineComment = false;
+      continue;
+    }
+    if (quote !== undefined) {
+      if (quote === '"' && escaped) {
+        escaped = false;
+      } else if (quote === '"' && character === '\\') {
+        escaped = true;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === '#') {
+      lineComment = true;
       continue;
     }
     if (character === '"' || character === "'") {
@@ -2180,6 +2235,168 @@ function redactPowerShellDoubleQuotedFragments(value: string): string {
   return result;
 }
 
+function redactPowerShellCollectionFragments(value: string): string {
+  const spans = shellExpressionSpans(value);
+  let result = '';
+  let index = 0;
+  let spanIndex = 0;
+  while (index < value.length) {
+    const span = spans[spanIndex];
+    if (span?.[0] === index) {
+      result += value.slice(span[0], span[1]);
+      index = span[1];
+      spanIndex++;
+      continue;
+    }
+    const character = value[index] ?? '';
+    if (character === '"' || character === "'") {
+      const quote = character;
+      let end = index + 1;
+      for (; end < value.length; end++) {
+        if (quote === '"' && value[end] === '`') end++;
+        else if (value[end] === quote) break;
+      }
+      const content = value.slice(index + 1, end);
+      result += `${quote}${quote === '"' && isShellExpression(content)
+        ? redactPasswordLiteralFragments(content)
+        : '[REDACTED]'}${end < value.length ? quote : ''}`;
+      index = Math.min(value.length, end + 1);
+      continue;
+    }
+    if (/[A-Za-z0-9_-]/u.test(character)) {
+      let end = index + 1;
+      while (/[A-Za-z0-9_-]/u.test(value[end] ?? '')) end++;
+      let next = end;
+      while (/[ \t]/u.test(value[next] ?? '')) next++;
+      result += value[next] === '=' ? value.slice(index, end) : '[REDACTED]';
+      index = end;
+      continue;
+    }
+    result += character;
+    index++;
+  }
+  return result;
+}
+
+function isQuotedStructuredCollectionKey(value: string, tokenEnd: number): boolean {
+  const scanEnd = Math.min(value.length, tokenEnd + 65_536);
+  let index = tokenEnd;
+  while (index < scanEnd && /[ \t]/u.test(value[index] ?? '')) index++;
+  if (value[index] === '=' || value[index] === ':') return true;
+
+  while (value[index] === '.') {
+    index++;
+    while (index < scanEnd && /[ \t]/u.test(value[index] ?? '')) index++;
+    const quote = value[index];
+    if (quote === '"' || quote === "'") {
+      index++;
+      while (index < scanEnd) {
+        if (quote === '"' && value[index] === '\\') index += 2;
+        else if (value[index] === quote) {
+          index++;
+          break;
+        } else index++;
+      }
+    } else {
+      const segmentStart = index;
+      while (index < scanEnd && /[A-Za-z0-9_-]/u.test(value[index] ?? '')) index++;
+      if (index === segmentStart) return false;
+    }
+    while (index < scanEnd && /[ \t]/u.test(value[index] ?? '')) index++;
+    if (value[index] === '=' || value[index] === ':') return true;
+  }
+  return false;
+}
+
+function redactTomlCollectionFragments(value: string): string {
+  const spans = shellExpressionSpans(value);
+  let result = '';
+  let index = 0;
+  let spanIndex = 0;
+  while (index < value.length) {
+    while ((spans[spanIndex]?.[1] ?? value.length + 1) <= index) spanIndex++;
+    const span = spans[spanIndex];
+    if (span?.[0] === index) {
+      result += value.slice(span[0], span[1]);
+      index = span[1];
+      spanIndex++;
+      continue;
+    }
+    if (value[index] === '#') {
+      const commentEnd = physicalLineBoundaryAtOrAfter(value, index + 1);
+      result += value.slice(index, commentEnd);
+      index = commentEnd;
+      continue;
+    }
+    const quote = value[index];
+    if (quote !== '"' && quote !== "'") {
+      result += quote ?? '';
+      index++;
+      continue;
+    }
+    const delimiter = quote.repeat(3);
+    if (value.startsWith(delimiter, index)) {
+      const bodyStart = index + delimiter.length;
+      let closingIndex = -1;
+      if (quote === "'") {
+        closingIndex = value.indexOf(delimiter, bodyStart);
+      } else {
+        for (let candidate = bodyStart; candidate + delimiter.length <= value.length; candidate++) {
+          if (!value.startsWith(delimiter, candidate)) continue;
+          let backslashes = 0;
+          for (let cursor = candidate - 1; cursor >= bodyStart && value[cursor] === '\\'; cursor--) {
+            backslashes++;
+          }
+          if (backslashes % 2 === 0) {
+            closingIndex = candidate;
+            break;
+          }
+        }
+      }
+      if (closingIndex >= bodyStart) {
+        const content = value.slice(bodyStart, closingIndex);
+        const redacted = quote === '"' && isShellExpression(content)
+          ? redactPasswordLiteralFragments(content)
+          : '[REDACTED]';
+        result += delimiter + redacted + delimiter;
+        index = closingIndex + delimiter.length;
+        continue;
+      }
+    }
+    let end = index + 1;
+    while (end < value.length) {
+      if (quote === '"' && value[end] === '\\') {
+        end = Math.min(value.length, end + 2);
+        continue;
+      }
+      if (value[end] !== quote) {
+        end++;
+        continue;
+      }
+      if (quote === "'" && value[end + 1] === "'") {
+        end += 2;
+        continue;
+      }
+      break;
+    }
+    const hasClosingQuote = end < value.length;
+    let next = hasClosingQuote ? end + 1 : end;
+    while (/[ \t]/u.test(value[next] ?? '')) next++;
+    const token = value.slice(index, hasClosingQuote ? end + 1 : end);
+    if (isQuotedStructuredCollectionKey(value, hasClosingQuote ? end + 1 : end)) {
+      result += token;
+    } else {
+      const content = value.slice(index + 1, end);
+      const redacted = quote === '"' && isShellExpression(content)
+        ? redactPasswordLiteralFragments(content)
+        : '[REDACTED]';
+      result += quote + redacted + (hasClosingQuote ? quote : '');
+    }
+    index = hasClosingQuote ? end + 1 : end;
+  }
+  return result;
+}
+
 function powerShellUnquotedValueBoundary(text: string, start: number): number {
   const chunkSize = 65_536;
   let parenDepth = 0;
@@ -2233,13 +2450,163 @@ function physicalLineBoundaryAtOrAfter(text: string, start: number): number {
   return Math.min(lf, cr);
 }
 
+function redactTomlTripleQuotedAssignments(text: string): string {
+  const segment = `(?:"(?:\\\\.|[^"\\r\\n])+"|'(?:''|[^'\\r\\n])+'|[A-Za-z_][A-Za-z0-9_-]*)`;
+  const assignmentStart = new RegExp(
+    `^(\\s*(${segment}(?:\\s*\\.\\s*${segment})*)\\s*=\\s*)("""|''')`,
+    'gmu',
+  );
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(assignmentStart)) {
+    const key = match[2];
+    const delimiter = match[3];
+    if (
+      match.index < cursor
+      || key === undefined
+      || delimiter === undefined
+      || !isSensitiveTomlKeyPath(key)
+    ) continue;
+    const bodyStart = match.index + match[0].length;
+    const scanEnd = Math.min(text.length, bodyStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+    let closingIndex = -1;
+    if (delimiter === "'''") {
+      const boundedClosingIndex = text.slice(bodyStart, scanEnd).indexOf(delimiter);
+      if (boundedClosingIndex >= 0) closingIndex = bodyStart + boundedClosingIndex;
+    } else {
+      for (let index = bodyStart; index + delimiter.length <= scanEnd; index++) {
+        if (!text.startsWith(delimiter, index)) continue;
+        let backslashes = 0;
+        for (let cursor = index - 1; cursor >= bodyStart && text[cursor] === '\\'; cursor--) {
+          backslashes++;
+        }
+        if (backslashes % 2 === 0) {
+          closingIndex = index;
+          break;
+        }
+      }
+    }
+    if (closingIndex < bodyStart || closingIndex + delimiter.length > scanEnd) continue;
+    const body = text.slice(bodyStart, closingIndex);
+    const redactedBody = delimiter === '"""' && isShellExpression(body)
+      ? redactPasswordLiteralFragments(body)
+      : '[REDACTED]';
+    result += text.slice(cursor, match.index) + match[1] + delimiter + redactedBody + delimiter;
+    cursor = closingIndex + delimiter.length;
+  }
+  return result + text.slice(cursor);
+}
+
+function decodeTomlBasicString(value: string): string | undefined {
+  let result = '';
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index] ?? '';
+    if (character !== '\\') {
+      result += character;
+      continue;
+    }
+    const escape = value[++index];
+    const shortEscapes: Readonly<Record<string, string>> = {
+      '"': '"',
+      '\\': '\\',
+      b: '\b',
+      t: '\t',
+      n: '\n',
+      f: '\f',
+      r: '\r',
+    };
+    if (escape !== undefined && shortEscapes[escape] !== undefined) {
+      result += shortEscapes[escape];
+      continue;
+    }
+    const digits = escape === 'u' ? 4 : escape === 'U' ? 8 : 0;
+    const encoded = digits === 0 ? '' : value.slice(index + 1, index + 1 + digits);
+    if (encoded.length !== digits || !/^[0-9A-Fa-f]+$/u.test(encoded)) return undefined;
+    const codePoint = Number.parseInt(encoded, 16);
+    if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) return undefined;
+    result += String.fromCodePoint(codePoint);
+    index += digits;
+  }
+  return result;
+}
+
+function isSensitiveTomlKeyPath(keyPath: string): boolean {
+  const terminal = keyPath.match(/("(?:\\.|[^"\r\n])+"|'(?:''|[^'\r\n])+'|[A-Za-z_][A-Za-z0-9_-]*)\s*$/u)?.[1];
+  if (terminal === undefined) return false;
+  const decoded = terminal.startsWith('"')
+    ? decodeTomlBasicString(terminal.slice(1, -1))
+    : terminal.startsWith("'") ? terminal.slice(1, -1).replace(/''/gu, "'") : terminal;
+  return decoded !== undefined && isSensitiveKeyToken(decoded);
+}
+
+function redactTomlQuotedDottedAssignments(text: string): string {
+  const segment = `(?:"(?:\\\\.|[^"\\r\\n])+"|'(?:''|[^'\\r\\n])+'|[A-Za-z_][A-Za-z0-9_-]*)`;
+  const assignment = new RegExp(
+    `^(\\s*(${segment}(?:\\s*\\.\\s*${segment})+)\\s*=\\s*)((?!""")"(?:\\\\.|[^"\\r\\n])*"|(?!''')'(?:''|[^'\\r\\n])*')`,
+    'gmu',
+  );
+  return text.replace(assignment, (match, prefix, keyPath, value) => {
+    if (typeof keyPath !== 'string' || typeof value !== 'string') return match;
+    if (!isSensitiveTomlKeyPath(keyPath)) return match;
+    const quote = value[0] ?? '';
+    return `${prefix as string}${quote}[REDACTED]${quote}`;
+  });
+}
+
+function redactHclHeredocAssignments(text: string): string {
+  const assignmentStart = /^(\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*<<(-?)([A-Za-z_][A-Za-z0-9_-]*)[ \t]*(?:\r\n|\n|\r))/gmu;
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(assignmentStart)) {
+    const key = match[2];
+    const indented = match[3] === '-';
+    const identifier = match[4];
+    if (
+      match.index < cursor
+      || key === undefined
+      || identifier === undefined
+      || !isSensitiveKeyToken(key)
+    ) continue;
+    const bodyStart = match.index + match[0].length;
+    const scanEnd = Math.min(text.length, bodyStart + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+    const candidate = text.slice(bodyStart, scanEnd);
+    const terminator = new RegExp(`^${indented ? '[ \\t]*' : ''}${identifier}[ \\t]*(?=\\r\\n|\\n|\\r|$)`, 'mu');
+    const closing = terminator.exec(candidate);
+    if (closing === null) continue;
+    const closingIndex = bodyStart + closing.index;
+    const body = text.slice(bodyStart, closingIndex);
+    const trailingBreak = body.match(/(?:\r\n|\n|\r)$/u)?.[0] ?? '';
+    result += text.slice(cursor, bodyStart) + '[REDACTED]' + trailingBreak;
+    cursor = closingIndex;
+  }
+  return result + text.slice(cursor);
+}
+
+function redactTomlCollectionAssignments(text: string): string {
+  const segment = `(?:"(?:\\\\.|[^"\\r\\n])+"|'(?:''|[^'\\r\\n])+'|[A-Za-z_][A-Za-z0-9_-]*)`;
+  const assignmentStart = new RegExp(`^(\\s*(${segment}(?:\\s*\\.\\s*${segment})*)\\s*=\\s*)(?=[\\[{])`, 'gmu');
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(assignmentStart)) {
+    const key = match[2];
+    if (match.index < cursor || key === undefined || !isSensitiveTomlKeyPath(key)) continue;
+    const valueStart = match.index + match[0].length;
+    const valueEnd = balancedTomlCollectionEnd(text, valueStart);
+    if (valueEnd === undefined) continue;
+    result += text.slice(cursor, valueStart)
+      + redactTomlCollectionFragments(text.slice(valueStart, valueEnd));
+    cursor = valueEnd;
+  }
+  return result + text.slice(cursor);
+}
+
 function redactPowerShellAssignments(text: string): string {
-  const assignmentStart = /(\$(?:(?:env|global|script|local|private):([A-Za-z_][A-Za-z0-9_-]*)|\{(?:env|global|script|local|private):([A-Za-z_][A-Za-z0-9_-]*)\}|([A-Za-z_][A-Za-z0-9_-]*))\s*(?:\+=|=)\s*)/giu;
+  const assignmentStart = /(\$(?:(?:env|global|script|local|private):([A-Za-z_][A-Za-z0-9_-]*)|\{(?:env|global|script|local|private):([A-Za-z_][A-Za-z0-9_-]*)\}|\{([A-Za-z_][A-Za-z0-9_-]*)\}|([A-Za-z_][A-Za-z0-9_-]*))\s*(?:\+=|=)\s*)/giu;
   let result = '';
   let cursor = 0;
 
   for (const match of text.matchAll(assignmentStart)) {
-    const key = match[2] ?? match[3] ?? match[4];
+    const key = match[2] ?? match[3] ?? match[4] ?? match[5];
     if (match.index < cursor || key === undefined || !isSensitiveKeyToken(key)) continue;
     const valueStart = match.index + match[0].length;
     const hereStringQuote = text.startsWith('@"', valueStart)
@@ -2266,6 +2633,51 @@ function redactPowerShellAssignments(text: string): string {
       result += text.slice(cursor, match.index) + match[0] + redactedHereString;
       cursor = valueEnd;
       continue;
+    }
+    const collectionCloser = text.startsWith('@(', valueStart)
+      ? ')'
+      : text.startsWith('@{', valueStart) ? '}' : undefined;
+    if (collectionCloser !== undefined) {
+      const opener = text[valueStart + 1] ?? '';
+      let depth = 1;
+      let quote: '"' | "'" | undefined;
+      let comment: 'line' | 'block' | undefined;
+      let closingIndex = -1;
+      const scanEnd = Math.min(text.length, valueStart + 2 + MAX_SENSITIVE_ARRAY_BODY_LENGTH);
+      for (let index = valueStart + 2; index < scanEnd; index++) {
+        const character = text[index];
+        if (comment === 'line') {
+          if (character === '\r' || character === '\n') comment = undefined;
+        } else if (comment === 'block') {
+          if (character === '#' && text[index + 1] === '>') {
+            comment = undefined;
+            index++;
+          }
+        } else if (character === '`') index++;
+        else if (quote !== undefined) {
+          if (character === quote) quote = undefined;
+        } else if (character === '"' || character === "'") quote = character;
+        else if (character === '#') comment = 'line';
+        else if (character === '<' && text[index + 1] === '#') {
+          comment = 'block';
+          index++;
+        }
+        else if (character === opener) {
+          if (depth >= MAX_STRUCTURED_HEADER_OBJECT_DEPTH) break;
+          depth++;
+        }
+        else if (character === collectionCloser && --depth === 0) {
+          closingIndex = index;
+          break;
+        }
+      }
+      if (closingIndex >= 0) {
+        const collection = text.slice(valueStart, closingIndex + 1);
+        result += text.slice(cursor, match.index) + match[0]
+          + redactPowerShellCollectionFragments(collection);
+        cursor = closingIndex + 1;
+        continue;
+      }
     }
     const ansiSingleQuoted = text.startsWith("$'", valueStart);
     const quote = ansiSingleQuoted ? "'" : text[valueStart];
@@ -2528,9 +2940,13 @@ export function redactSecrets(
         : match,
   );
   result = redactBashArrayElementAssignments(result);
+  result = redactTomlCollectionAssignments(result);
   result = redactMixedShellWordAssignments(result, options?.scanMetrics);
   result = redactSensitiveArrayAssignments(result);
   result = redactSensitiveJsonCollections(result);
+  result = redactTomlTripleQuotedAssignments(result);
+  result = redactTomlQuotedDottedAssignments(result);
+  result = redactHclHeredocAssignments(result);
   result = redactPowerShellAssignments(result);
   result = redactMultilinePosixQuotedAssignments(result);
 
@@ -2554,7 +2970,7 @@ export function redactSecrets(
   });
 
   const doubleQuotedShellAssignmentStart = new RegExp(
-    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*${assignmentOperator}\\s*)"`,
+    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*${assignmentOperator}\\s*)"(?!"")`,
     'giu',
   );
   let doubleQuotedShellResult = '';
@@ -2574,7 +2990,7 @@ export function redactSecrets(
   result = doubleQuotedShellResult + result.slice(doubleQuotedShellCursor);
 
   const doubleQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*${assignmentOperator}\\s*)"(?!\\[REDACTED\\]\\$\\()((?:\\\\.|[^"\\r\\n\\\\])*)"`,
+    `(${keyBoundary}${ansiPattern}"?${keyTokenPattern}"?${ansiPattern}\\s*${assignmentOperator}\\s*)"(?!""|\\[REDACTED\\]\\$\\()((?:\\\\.|[^"\\r\\n\\\\])*)"`,
     'giu',
   );
   result = result.replace(doubleQuotedAssignment, (match, prefix, key, val) => {
@@ -2595,7 +3011,7 @@ export function redactSecrets(
   });
 
   const singleQuotedAssignment = new RegExp(
-    `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*${assignmentOperator}\\s*)'([^'\\r\\n]*)'`,
+    `(${keyBoundary}${ansiPattern}'?${keyTokenPattern}'?\\s*${assignmentOperator}\\s*)'(?!'')([^'\\r\\n]*)'`,
     'giu',
   );
   result = result.replace(singleQuotedAssignment, (match, prefix, key) => {
@@ -2682,6 +3098,7 @@ export function redactSecrets(
     const key = match[2];
     if (key === undefined || !isSensitiveKeyToken(key) || match.index < dynamicCursor) continue;
     const valueStart = match.index + match[0].length;
+    if (isAlreadyRedactedStructuredValue(result, valueStart)) continue;
     const valueEnd = shellValueBoundary(result, valueStart, /[\s"';}\r\n&|><]/u);
     const value = result.slice(valueStart, valueEnd);
     if (value.startsWith('([REDACTED]')) continue;
@@ -2702,6 +3119,11 @@ export function redactSecrets(
   );
   result = result.replace(unquotedAssignment, (match, prefix, key, val, offset, whole) => {
     if (typeof key !== 'string' || !isSensitiveKeyToken(key)) return match;
+    if (
+      typeof offset === 'number'
+      && typeof whole === 'string'
+      && isAlreadyRedactedStructuredValue(whole, offset + (prefix as string).length)
+    ) return match;
     if (
       typeof prefix === 'string'
       && prefix.trimEnd().endsWith(':')
@@ -2724,7 +3146,7 @@ export function redactSecrets(
     }
     if (
       typeof val === 'string'
-      && val.startsWith('$(')
+      && (val.startsWith('$(') || val.startsWith('`'))
       && typeof offset === 'number'
       && typeof whole === 'string'
       && shellExpressionSpans(whole.slice(offset + (prefix as string).length))[0]?.[0] === 0

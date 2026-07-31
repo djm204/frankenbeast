@@ -2762,6 +2762,174 @@ describe('CliChannel', () => {
     );
   });
 
+  it('redacts ordinary braced PowerShell variables while preserving executable substitutions', () => {
+    expect(redactSecrets(
+      '${PASSWORD} = \'synthetic-braced-password\'; ${API_KEY} += "violet$(Write-Output harmless-braced)quartz"; Restart-Computer',
+    )).toBe(
+      '${PASSWORD} = \'[REDACTED]\'; ${API_KEY} += "[REDACTED]$(Write-Output harmless-braced)[REDACTED]"; Restart-Computer',
+    );
+  });
+
+  it('redacts complete TOML triple-quoted sensitive strings', () => {
+    expect(redactSecrets(
+      'password = """synthetic-basic\ncontinued-basic"""\napi_key = \'\'\'synthetic-literal\ncontinued-literal\'\'\'\nsafe = "visible"',
+    )).toBe(
+      'password = """[REDACTED]"""\napi_key = \'\'\'[REDACTED]\'\'\'\nsafe = "visible"',
+    );
+  });
+
+  it('redacts triple-quoted values for quoted and dotted TOML sensitive keys', () => {
+    expect(redactSecrets(
+      '"password" = """synthetic-quoted"""\ndb.password = \'\'\'synthetic-bare-dotted\'\'\'\ndb."api_key" = """synthetic-quoted-terminal"""\ndb."safe" = """visible"""',
+    )).toBe(
+      '"password" = """[REDACTED]"""\ndb.password = \'\'\'[REDACTED]\'\'\'\ndb."api_key" = """[REDACTED]"""\ndb."safe" = """visible"""',
+    );
+  });
+
+  it('ignores escaped quote runs when closing TOML multiline basic strings', () => {
+    expect(redactSecrets(
+      'password = """synthetic-prefix' + '\\' + '"""synthetic-suffix"""\nsafe = "visible"',
+    )).toBe(
+      'password = """[REDACTED]"""\nsafe = "visible"',
+    );
+  });
+
+  it('bounds TOML multiline literal closer lookup to the configured scan budget', () => {
+    const body = 'x'.repeat(65_537);
+    const input = `password = '''${body}'''\nsafe = "visible"`;
+    let modeledCloserScan = 0;
+    const originalIndexOf = String.prototype.indexOf;
+    const indexOfSpy = vi.spyOn(String.prototype, 'indexOf').mockImplementation(function (search, position) {
+      const receiver = this.toString();
+      if (search === "'''" && receiver.includes(body)) {
+        modeledCloserScan += Math.max(0, receiver.length - (position ?? 0));
+      }
+      return originalIndexOf.call(this, search, position);
+    });
+
+    try {
+      redactSecrets(input);
+      expect(modeledCloserScan).toBeLessThanOrEqual(65_536);
+    } finally {
+      indexOfSpy.mockRestore();
+    }
+  });
+
+  it('preserves pure spaced legacy backtick substitutions in sensitive values', () => {
+    expect(redactSecrets(
+      'PASSWORD=`printf harmless legacy` && echo visible_legacy_context',
+    )).toBe(
+      'PASSWORD=`printf harmless legacy` && echo visible_legacy_context',
+    );
+  });
+
+  it('redacts complete HCL heredoc sensitive values', () => {
+    expect(redactSecrets(
+      'password = <<EOT\nsynthetic-heredoc\nEOT\napi_key = <<-TOKEN\n  synthetic-indented\n  TOKEN\ncommand = "reboot"',
+    )).toBe(
+      'password = <<EOT\n[REDACTED]\nEOT\napi_key = <<-TOKEN\n[REDACTED]\n  TOKEN\ncommand = "reboot"',
+    );
+  });
+
+  it('classifies quoted terminal segments in dotted TOML keys', () => {
+    expect(redactSecrets(
+      'database."password" = "synthetic-dotted-password"\n"database"."api_key" = \'synthetic-dotted-key\'\ndatabase."safe" = "visible"',
+    )).toBe(
+      'database."password" = "[REDACTED]"\n"database"."api_key" = \'[REDACTED]\'\ndatabase."safe" = "visible"',
+    );
+  });
+
+  it('decodes TOML Unicode escapes in quoted dotted sensitive keys', () => {
+    expect(redactSecrets(String.raw`db."pass\u0077ord" = "synthetic-unicode-password"`))
+      .toBe(String.raw`db."pass\u0077ord" = "[REDACTED]"`);
+    expect(redactSecrets(String.raw`db."api_\U0000006Bey" = "synthetic-unicode-key"`))
+      .toBe(String.raw`db."api_\U0000006Bey" = "[REDACTED]"`);
+    expect(redactSecrets(String.raw`db."safe\u005fkey" = "visible"`))
+      .toBe(String.raw`db."safe\u005fkey" = "visible"`);
+  });
+
+  it('consumes complete PowerShell collection literals in sensitive assignments', () => {
+    expect(redactSecrets(
+      '$PASSWORD=@("synthetic array value"; $(Write-Output harmless-array)); $API_KEY=@{ item = "synthetic table value"; nested = $(Write-Output harmless-table) }; Restart-Computer',
+    )).toBe(
+      '$PASSWORD=@("[REDACTED]"; $(Write-Output harmless-array)); $API_KEY=@{ item = "[REDACTED]"; nested = $(Write-Output harmless-table) }; Restart-Computer',
+    );
+  });
+
+  it('ignores PowerShell comment closers while balancing both collection forms', () => {
+    expect([
+      redactSecrets('$PASSWORD=@("synthetic-first" # )\n"synthetic-second"; $(Write-Output harmless-array)); Write-Output visible-array'),
+      redactSecrets('$PASSWORD=@("synthetic-first" <# ) #> "synthetic-second"; $(Write-Output harmless-block-array)); Write-Output visible-block-array'),
+      redactSecrets('$API_KEY=@{ first = "synthetic-first" # }\nsecond = "synthetic-second"; active = $(Write-Output harmless-table) }; Write-Output visible-table'),
+      redactSecrets('$API_KEY=@{ first = "synthetic-first" <# } #> second = "synthetic-second"; active = $(Write-Output harmless-block-table) }; Write-Output visible-block-table'),
+    ]).toEqual([
+      '$PASSWORD=@("[REDACTED]" # )\n"[REDACTED]"; $(Write-Output harmless-array)); Write-Output visible-array',
+      '$PASSWORD=@("[REDACTED]" <# ) #> "[REDACTED]"; $(Write-Output harmless-block-array)); Write-Output visible-block-array',
+      '$API_KEY=@{ first = "[REDACTED]" # }\nsecond = "[REDACTED]"; active = $(Write-Output harmless-table) }; Write-Output visible-table',
+      '$API_KEY=@{ first = "[REDACTED]" <# } #> second = "[REDACTED]"; active = $(Write-Output harmless-block-table) }; Write-Output visible-block-table',
+    ]);
+  });
+
+  it('consumes complete TOML arrays and inline tables for sensitive keys', () => {
+    expect(redactSecrets(
+      'password = ["synthetic array value", "violet$(printf harmless-toml-array)quartz"]\napi_key = { item = "synthetic table value", nested = "violet$(printf harmless-toml-table)quartz" }\nsafe = ["visible"]',
+    )).toBe(
+      'password = ["[REDACTED]", "[REDACTED]$(printf harmless-toml-array)[REDACTED]"]\napi_key = { item = "[REDACTED]", nested = "[REDACTED]$(printf harmless-toml-table)[REDACTED]" }\nsafe = ["visible"]',
+    );
+  });
+
+  it('ignores TOML line-comment syntax while balancing multiline sensitive collections', () => {
+    expect(redactSecrets(
+      'password = ["synthetic-first", # ] " comment\n"synthetic-second"]\napi_key = { item = "synthetic-table", # } \' comment\nnext = "synthetic-next" }\nsafe = "visible"',
+    )).toBe(
+      'password = ["[REDACTED]", # ] " comment\n"[REDACTED]"]\napi_key = { item = "[REDACTED]", # } \' comment\nnext = "[REDACTED]" }\nsafe = "visible"',
+    );
+  });
+
+  it('consumes TOML collections assigned through quoted dotted sensitive keys', () => {
+    expect(redactSecrets(
+      'db."password" = ["synthetic-dotted-array", "violet$(printf harmless-dotted-array)quartz"]\ndb.\'api_key\' = { item = "synthetic-dotted-table", active = "$(printf harmless-dotted-table)" }\ndb."safe" = ["visible"]',
+    )).toBe(
+      'db."password" = ["[REDACTED]", "[REDACTED]$(printf harmless-dotted-array)[REDACTED]"]\ndb.\'api_key\' = { item = "[REDACTED]", active = "$(printf harmless-dotted-table)" }\ndb."safe" = ["visible"]',
+    );
+  });
+
+  it('preserves TOML collection syntax while redacting credential strings', () => {
+    expect(redactSecrets(
+      String.raw`password = ["it\"s", "two", true, 42, "violet$(printf harmless-toml)quartz"]
+api_key = { foo.bar = "synthetic-table", x = true, count = 42 }
+safe = { foo.bar = "visible", x = true }`,
+    )).toBe(
+      'password = ["[REDACTED]", "[REDACTED]", true, 42, "[REDACTED]$(printf harmless-toml)[REDACTED]"]\napi_key = { foo.bar = "[REDACTED]", x = true, count = 42 }\nsafe = { foo.bar = "visible", x = true }',
+    );
+  });
+
+  it('preserves quoted dotted TOML and JSON colon keys inside sensitive collections', () => {
+    expect(redactSecrets(
+      String.raw`api_key = { "foo"."bar" = "synthetic-dotted", "escaped\"toml"."leaf" = "synthetic-escaped", "json-key": "synthetic-json", "escaped\"json": "synthetic-json-escaped", note = "synthetic:value" }
+safe = { "foo"."bar" = "visible", "json-key": "visible" }`,
+    )).toBe(
+      String.raw`api_key = { "foo"."bar" = "[REDACTED]", "escaped\"toml"."leaf" = "[REDACTED]", "json-key": "[REDACTED]", "escaped\"json": "[REDACTED]", note = "[REDACTED]" }
+safe = { "foo"."bar" = "visible", "json-key": "visible" }`,
+    );
+  });
+
+  it('redacts complete TOML multiline strings inside sensitive collections', () => {
+    expect(redactSecrets(
+      String.raw`password = ["""synthetic \"quoted\" \\ prefix$(printf harmless-basic)tail
+value"""] # visible-array-comment
+api_key = { literal = '''synthetic $(printf hidden-literal)
+value''' } # visible-table-comment
+safe = ["""visible
+value"""]`,
+    )).toBe(
+      `password = ["""[REDACTED]$(printf harmless-basic)[REDACTED]"""] # visible-array-comment
+api_key = { literal = '''[REDACTED]''' } # visible-table-comment
+safe = ["""visible
+value"""]`,
+    );
+  });
+
   it('consumes PowerShell-native escapes in quoted assignment values', () => {
     expect(redactSecrets('$env:PASSWORD=\'violet\'\'quartz\' && echo visible_single_quote_context'))
       .toBe('$env:PASSWORD=\'[REDACTED]\' && echo visible_single_quote_context');
