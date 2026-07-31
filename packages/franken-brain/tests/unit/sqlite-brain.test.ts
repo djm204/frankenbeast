@@ -18,6 +18,7 @@ import {
   WorkingMemoryKeyError,
   WorkingMemoryHydrationLimitError,
   CorruptWorkingMemoryRowError,
+  UnsafeWorkingMemoryValueError,
   UnsupportedMemorySchemaVersionError,
   MemoryEncryptionKeyUnavailableError,
   MemoryEncryptionMigrationRequiredError,
@@ -4192,6 +4193,353 @@ describe('SqliteBrain', () => {
         db?.close();
         reopened?.close();
         seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a persisted __proto__ payload during hydration without polluting Object.prototype', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-hydration-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('healthy', { enabled: true });
+        seeded.working.set('malicious', { safe: true });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        // Simulate an attacker who can influence persisted memory rows,
+        // e.g. via a compromised sync source or direct DB tampering.
+        db = new Database(dbPath);
+        // Object-literal syntax `{ __proto__: ... }` sets the actual
+        // prototype instead of creating an own key, so it would never
+        // round-trip through JSON.stringify. A real attacker's payload
+        // arrives as raw JSON text with a literal "__proto__" key, which is
+        // what an untrusted sync source or direct DB write would produce.
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+          '{"__proto__":{"polluted":true}}',
+          'malicious',
+        );
+        db.close();
+        db = undefined;
+
+        let hydrationError: unknown;
+        try {
+          reopened = new SqliteBrain(dbPath);
+        } catch (error) {
+          hydrationError = error;
+        }
+
+        expect(hydrationError).toBeInstanceOf(UnsafeWorkingMemoryValueError);
+        expect(hydrationError).toMatchObject({
+          code: 'UNSAFE_WORKING_MEMORY_VALUE',
+          key: 'malicious',
+          unsafeKey: '__proto__',
+        });
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a persisted constructor.prototype payload during hydration without polluting Object.prototype', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-ctor-pollution-hydration-'));
+      const dbPath = join(dir, 'brain.db');
+      let seeded: SqliteBrain | undefined;
+      let reopened: SqliteBrain | undefined;
+      let db: Database.Database | undefined;
+
+      try {
+        seeded = new SqliteBrain(dbPath);
+        seeded.working.set('malicious', { safe: true });
+        seeded.flush();
+        seeded.close();
+        seeded = undefined;
+
+        db = new Database(dbPath);
+        db.prepare(`UPDATE working_memory SET value = ? WHERE key = ?`).run(
+          JSON.stringify({ constructor: { prototype: { polluted: true } } }),
+          'malicious',
+        );
+        db.close();
+        db = undefined;
+
+        let hydrationError: unknown;
+        try {
+          reopened = new SqliteBrain(dbPath);
+        } catch (error) {
+          hydrationError = error;
+        }
+
+        expect(hydrationError).toBeInstanceOf(UnsafeWorkingMemoryValueError);
+        expect(hydrationError).toMatchObject({
+          code: 'UNSAFE_WORKING_MEMORY_VALUE',
+          key: 'malicious',
+          unsafeKey: 'constructor',
+        });
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        db?.close();
+        reopened?.close();
+        seeded?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a __proto__ payload nested in an array during snapshot restore without polluting Object.prototype', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-restore-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        brainInstance.working.set('healthy', { enabled: true });
+
+        // Parse raw JSON text (as an untrusted snapshot import/backup file
+        // would be read) so the nested "__proto__" key round-trips as a
+        // literal own property rather than being interpreted as
+        // object-literal prototype syntax.
+        const maliciousSnapshot = JSON.parse(
+          '{"healthy":{"enabled":true},"malicious":{"items":[{"__proto__":{"polluted":true}}]}}',
+        ) as Record<string, unknown>;
+
+        expect(() => brainInstance!.working.restore(maliciousSnapshot)).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+        // The previous state must remain intact after the rejected restore.
+        expect(brainInstance.working.get('healthy')).toEqual({ enabled: true });
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects unsafe keys on ordinary set()/persistKey() writes, not just restore() and hydration', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-set-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+
+        expect(() =>
+          brainInstance!.working.set('malicious', JSON.parse('{"__proto__":{"polluted":true}}')),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(brainInstance.working.has('malicious')).toBe(false);
+
+        expect(() =>
+          brainInstance!.working.persistKey(
+            'malicious',
+            JSON.parse('{"constructor":{"prototype":{"polluted":true}}}'),
+          ),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(brainInstance.working.has('malicious')).toBe(false);
+
+        expect(() =>
+          brainInstance!.working.persistKeyAfterCommit(
+            'malicious',
+            JSON.parse('{"__proto__":{"polluted":true}}'),
+          ),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(brainInstance.working.has('malicious')).toBe(false);
+
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+
+        // The invariant this closes: a value rejected by set()/persistKey()
+        // must never reach the DB, so a fresh reopen of the same database
+        // must succeed cleanly (previously, an unsafe value that slipped
+        // past set() could be flushed successfully and only surface as an
+        // UnsafeWorkingMemoryValueError on the *next* startup, leaving the
+        // caller with a database it could no longer reopen).
+        brainInstance.working.set('healthy', { enabled: true });
+        brainInstance.flush();
+        brainInstance.close();
+        brainInstance = undefined;
+
+        const reopened = new SqliteBrain(dbPath);
+        try {
+          expect(reopened.working.has('malicious')).toBe(false);
+          expect(reopened.working.get('healthy')).toEqual({ enabled: true });
+        } finally {
+          reopened.close();
+        }
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects a value whose toJSON() smuggles an unsafe key past the own-key scan', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-tojson-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+
+        // No unsafe own key on the input object itself — the payload only
+        // appears once JSON.stringify() invokes toJSON() during
+        // serialization, which is what actually gets persisted.
+        const sneaky = {
+          safe: true,
+          toJSON(): unknown {
+            return JSON.parse('{"__proto__":{"polluted":true}}');
+          },
+        };
+
+        expect(() => brainInstance!.working.set('malicious', sneaky)).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(brainInstance.working.has('malicious')).toBe(false);
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects an unsafe row inserted by another connection when read via reviewValueState()', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-review-state-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+      let otherConnection: Database.Database | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        brainInstance.working.set('healthy', { enabled: true });
+        brainInstance.flush();
+
+        // Simulate a compromised sync source or another process inserting a
+        // malicious row directly into the DB after this instance started —
+        // it never passes through this instance's set()/prepareEntry().
+        otherConnection = new Database(dbPath);
+        otherConnection
+          .prepare(
+            `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          )
+          .run('malicious', '{"__proto__":{"polluted":true}}', new Date().toISOString());
+        otherConnection.close();
+        otherConnection = undefined;
+
+        expect(() => brainInstance!.working.reviewValueState('malicious')).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+        // A legitimate, already-known key must remain readable.
+        expect(brainInstance.working.reviewValueState('healthy')).toEqual({
+          state: 'present',
+          value: { enabled: true },
+        });
+      } finally {
+        otherConnection?.close();
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects an unsafe row inserted by another connection when read via retentionEntries()', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-retention-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+      let otherConnection: Database.Database | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        brainInstance.working.set('healthy', { enabled: true });
+        brainInstance.flush();
+
+        otherConnection = new Database(dbPath);
+        otherConnection
+          .prepare(
+            `INSERT INTO working_memory (key, value, updated_at, schema_version) VALUES (?, ?, ?, ${CURRENT_MEMORY_SCHEMA_VERSION})`,
+          )
+          .run('malicious', '{"__proto__":{"polluted":true}}', new Date().toISOString());
+        otherConnection.close();
+        otherConnection = undefined;
+
+        expect(() => brainInstance!.working.retentionEntries()).toThrow(
+          UnsafeWorkingMemoryValueError,
+        );
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        otherConnection?.close();
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('does not reject ordinary values that merely use "constructor" or "prototype" as field names', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-false-positive-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+
+        // Neither shape can pollute anything: "constructor" here is just a
+        // plain string field, and "prototype" isn't paired with
+        // "constructor" at all. Only __proto__ (any value) and a
+        // constructor value that itself has an own "prototype" key are
+        // unsafe.
+        brainInstance.working.set('widget', { constructor: 'Widget', version: 1 });
+        brainInstance.working.set('release', { prototype: 'v2', channel: 'stable' });
+        brainInstance.working.set('component', {
+          constructor: { name: 'Widget', args: ['a', 'b'] },
+        });
+
+        expect(brainInstance.working.get('widget')).toEqual({ constructor: 'Widget', version: 1 });
+        expect(brainInstance.working.get('release')).toEqual({ prototype: 'v2', channel: 'stable' });
+        expect(brainInstance.working.get('component')).toEqual({
+          constructor: { name: 'Widget', args: ['a', 'b'] },
+        });
+
+        brainInstance.flush();
+        brainInstance.close();
+        const reopened = new SqliteBrain(dbPath);
+        try {
+          expect(reopened.working.get('widget')).toEqual({ constructor: 'Widget', version: 1 });
+          expect(reopened.working.get('release')).toEqual({ prototype: 'v2', channel: 'stable' });
+        } finally {
+          reopened.close();
+        }
+        brainInstance = undefined;
+      } finally {
+        brainInstance?.close();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('still rejects the genuinely dangerous constructor.prototype nesting', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sqlite-brain-proto-pollution-ctor-proto-'));
+      const dbPath = join(dir, 'brain.db');
+      let brainInstance: SqliteBrain | undefined;
+
+      try {
+        brainInstance = new SqliteBrain(dbPath);
+        expect(() =>
+          brainInstance!.working.set('malicious', {
+            constructor: { prototype: { polluted: true } },
+          }),
+        ).toThrow(UnsafeWorkingMemoryValueError);
+        expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+        expect(Object.prototype).not.toHaveProperty('polluted');
+      } finally {
+        brainInstance?.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });

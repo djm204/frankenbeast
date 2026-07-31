@@ -1056,6 +1056,28 @@ export class CorruptWorkingMemoryRowError extends Error {
   }
 }
 
+/**
+ * Thrown when a persisted or restored working-memory value contains an
+ * object key (`__proto__`, `constructor`, or `prototype`) that could be used
+ * to pollute the JavaScript prototype chain if the parsed value were later
+ * merged or spread by a downstream consumer. Rejected fail-closed, the same
+ * way a corrupt-JSON row is rejected, so untrusted persisted data can never
+ * become part of in-memory state.
+ */
+export class UnsafeWorkingMemoryValueError extends Error {
+  readonly code = 'UNSAFE_WORKING_MEMORY_VALUE';
+
+  constructor(
+    readonly key: string,
+    readonly unsafeKey: string,
+  ) {
+    super(
+      `Persisted working memory row "${key}" contains a "${unsafeKey}" property, which could be used for prototype pollution, and was not hydrated; the row was preserved for recovery`,
+    );
+    this.name = 'UnsafeWorkingMemoryValueError';
+  }
+}
+
 export class MemoryDeletionGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -2202,7 +2224,16 @@ class SqliteWorkingMemory implements IWorkingMemory {
     }
     // Keys are retained by the Map and the SQLite table too — count them.
     const size = Buffer.byteLength(key, 'utf8') + valueBytes;
-    return { normalized: JSON.parse(serialized) as unknown, serialized, size };
+    const normalized = JSON.parse(serialized) as unknown;
+    // All working-memory writes funnel through here (set, persistKey,
+    // persistKeyAfterCommit, restore, and DB-driven hydration), so this is
+    // the single place to reject values that could pollute the prototype
+    // chain if a downstream consumer ever merges or spreads them. Checking
+    // the *serialized-then-reparsed* value (not the raw input) matters: a
+    // custom toJSON()/getter could smuggle an unsafe key into what actually
+    // gets persisted without it being an own key of the input object.
+    assertNoUnsafeWorkingMemoryValue(key, normalized);
+    return { normalized, serialized, size };
   }
 
   set(key: string, value: unknown): void {
@@ -2398,9 +2429,14 @@ class SqliteWorkingMemory implements IWorkingMemory {
     const entries = new Map<string, { key: string; value: unknown; updatedAt: string }>();
     for (const row of rows) {
       const serialized = this.encryption?.decrypt(row.value) ?? row.value;
+      const value = parseStoredWorkingMemoryValue(serialized);
+      // Reads directly from the DB and can observe a row written by another
+      // connection after this instance started, so it doesn't pass through
+      // prepareEntry() — guard it before it's exposed to the caller.
+      assertNoUnsafeWorkingMemoryValue(row.key, value);
       entries.set(row.key, {
         key: row.key,
-        value: parseStoredWorkingMemoryValue(serialized),
+        value,
         updatedAt: row.updatedAt,
       });
     }
@@ -2444,6 +2480,10 @@ class SqliteWorkingMemory implements IWorkingMemory {
           continue;
         }
       }
+      // This reads directly from the DB and can observe a row written by
+      // another connection after this instance started, so it doesn't pass
+      // through prepareEntry() — guard it explicitly before it's exposed.
+      assertNoUnsafeWorkingMemoryValue(key, value);
       result.push({
         key,
         value,
@@ -2488,10 +2528,16 @@ class SqliteWorkingMemory implements IWorkingMemory {
         return { state: 'absent' };
       }
       const preservedValue = parseStoredWorkingMemoryValue(preserved.serialized);
+      // This row may have been written by a compromised sync source or
+      // another connection after this instance started, so it hasn't
+      // necessarily passed through prepareEntry() yet — guard it before it's
+      // returned as MemoryConflict.existingValue or similar caller data.
+      assertNoUnsafeWorkingMemoryValue(key, preservedValue);
       this.persistedSerialized.set(key, preserved.serialized);
       this.syncCleanRuntimeKeyToPersisted(key, preservedValue, preserved.serialized);
       return { state: 'present', value: preservedValue };
     }
+    assertNoUnsafeWorkingMemoryValue(key, value);
     this.persistedSerialized.set(key, serialized);
     this.syncCleanRuntimeKeyToPersisted(key, value, serialized);
     return { state: 'present', value };
@@ -2703,6 +2749,9 @@ class SqliteWorkingMemory implements IWorkingMemory {
     for (const [key, value] of entries) {
       deniedKey = key;
       try {
+        // prepareEntry() rejects values containing prototype-pollution-prone
+        // keys (__proto__, constructor, prototype) for every write path,
+        // restore() included.
         const { normalized, serialized, size } = this.prepareEntry(key, value);
         assertNotDeletionGuarded(this.db, key, serialized, this.encryption);
         total += size;
@@ -10621,6 +10670,77 @@ function chunkArray<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
+function isPlainObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Recursively scans an already-parsed JSON value for the specific own-key
+ * shapes that can actually be used for prototype pollution if the value
+ * were later merged, spread, or assigned into another object by a
+ * downstream consumer:
+ *
+ * - an own `__proto__` key, at any depth, with any value — assigning
+ *   `target[key] = value` for a literal "__proto__" key reassigns
+ *   `target`'s prototype via the inherited accessor.
+ * - an own `constructor` key whose value is itself a plain object with an
+ *   own `prototype` key — the `constructor.prototype` path is how a
+ *   recursive merge reaches a class's (or `Object`'s) actually-shared
+ *   prototype object.
+ *
+ * Deliberately narrower than "any key named __proto__/constructor/prototype
+ * anywhere": working-memory values are unrestricted `unknown`, and ordinary
+ * fields like `{"constructor":"Widget"}` or `{"prototype":"v2"}` are
+ * legitimate data that cannot pollute anything on their own — rejecting
+ * them outright would make upgrading reject/orphan pre-existing rows for no
+ * security benefit.
+ *
+ * Returns the first unsafe key found, or undefined if the value is safe.
+ */
+function findUnsafeObjectKey(value: unknown, seen: Set<unknown> = new Set()): string | undefined {
+  if (!isPlainObjectRecord(value) && !Array.isArray(value)) return undefined;
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findUnsafeObjectKey(item, seen);
+      if (found) return found;
+    }
+    return undefined;
+  }
+  const record = value;
+  const keys = Object.keys(record);
+  if (keys.includes('__proto__')) return '__proto__';
+  if (
+    keys.includes('constructor')
+    && isPlainObjectRecord(record.constructor)
+    && Object.keys(record.constructor).includes('prototype')
+  ) {
+    return 'constructor';
+  }
+  for (const key of keys) {
+    const found = findUnsafeObjectKey(record[key], seen);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Throws UnsafeWorkingMemoryValueError if `value` contains a key that could
+ * pollute the prototype chain. Call this at every point a persisted working-
+ * memory value is decoded and handed to a caller as live data — not only the
+ * write path (prepareEntry), but also read paths that can observe a row
+ * written by another connection/process after this instance started, such as
+ * SqliteWorkingMemory.reviewValueState() and
+ * SqliteWorkingMemory.snapshotIncludingPersistedEntries().
+ */
+function assertNoUnsafeWorkingMemoryValue(key: string, value: unknown): void {
+  const unsafeKey = findUnsafeObjectKey(value);
+  if (unsafeKey) {
+    throw new UnsafeWorkingMemoryValueError(key, unsafeKey);
+  }
+}
+
 function parseStoredWorkingMemoryValue(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
@@ -10630,6 +10750,9 @@ function parseStoredWorkingMemoryValue(value: string): unknown {
 }
 
 function parseHydratedWorkingMemoryValue(key: string, value: string): unknown {
+  // Prototype-pollution-prone keys (__proto__, constructor, prototype) are
+  // rejected uniformly in prepareEntry(), which every hydrated row passes
+  // through via prepareRow() below — no need to duplicate the check here.
   try {
     return JSON.parse(value) as unknown;
   } catch {
