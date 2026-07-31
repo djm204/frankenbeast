@@ -36,12 +36,12 @@
   },
   "dependencies": {
     "@franken/types": "0.19.1",
-    "hono": "^4.12.31"
+    "hono": "^4.12.32"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vitest": "^4.1.9"
   }
 }
