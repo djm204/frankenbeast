@@ -30,7 +30,11 @@ export { createGovernorAdapter, type GovernorAdapter } from './adapters/governor
 export { createPlannerAdapter, type PlannerAdapter } from './adapters/planner-adapter.js';
 export { createCritiqueAdapter, type CritiqueAdapter } from './adapters/critique-adapter.js';
 export { createFirewallAdapter, type FirewallAdapter } from './adapters/firewall-adapter.js';
-export { createSkillsAdapter, type SkillsAdapter } from './adapters/skills-adapter.js';
+export {
+  createSkillsAdapter,
+  SkillManifestValidationError,
+  type SkillsAdapter,
+} from './adapters/skills-adapter.js';
 
 // Servers
 export { createMemoryServer } from './servers/memory.js';

@@ -5,15 +5,26 @@ import { ToolDefinitionSchema } from './provider.js';
  * mcp.json format — collection of MCP servers for a skill.
  * The inner object matches McpServerConfig from provider.ts.
  */
+const StdioMcpServerSchema = z.object({
+  type: z.literal('stdio').optional(),
+  command: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  // Retain compatibility with existing command-based entries that also carry a URL.
+  url: z.string().url().optional(),
+}).passthrough();
+
+const RemoteMcpServerSchema = z.object({
+  type: z.enum(['http', 'sse', 'streamable-http', 'ws']),
+  // Claude Code preserves an empty URL as an intentionally unconfigured placeholder.
+  url: z.union([z.literal(''), z.string().url()]),
+  headers: z.record(z.string(), z.string()).optional(),
+}).passthrough();
+
 export const McpConfigSchema = z.object({
   mcpServers: z.record(
     z.string(),
-    z.object({
-      command: z.string().min(1),
-      args: z.array(z.string()).optional(),
-      env: z.record(z.string(), z.string()).optional(),
-      url: z.string().url().optional(),
-    }),
+    z.union([StdioMcpServerSchema, RemoteMcpServerSchema]),
   ),
 });
 export type McpConfig = z.infer<typeof McpConfigSchema>;
@@ -30,7 +41,7 @@ export const SkillInfoSchema = z.object({
 export type SkillInfo = z.infer<typeof SkillInfoSchema>;
 
 /** Optional API-provider tool manifest (tools.json) */
-export const SkillToolManifestSchema = z.array(ToolDefinitionSchema);
+export const SkillToolManifestSchema = z.array(ToolDefinitionSchema.passthrough());
 export type SkillToolManifest = z.infer<typeof SkillToolManifestSchema>;
 
 /** Run config skills array */
