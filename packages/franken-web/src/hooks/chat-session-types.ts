@@ -1,4 +1,4 @@
-import type { PendingApproval, TokenTotals } from '@franken/types';
+import type { ApprovalDecisionRequest, PendingApproval, TokenTotals } from '@franken/types';
 
 export type SessionStatus = 'idle' | 'connecting' | 'sending' | 'streaming' | 'error';
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'offline' | 'error';
@@ -43,7 +43,7 @@ export interface UseChatSessionOptions {
 
 export interface UseChatSessionResult {
   activity: ActivityEvent[];
-  approve: (approved: boolean) => Promise<void>;
+  approve: (approved: boolean, request?: ApprovalDecisionRequest) => Promise<void>;
   approvalError: string | null;
   approvalResolving: boolean;
   connectionStatus: ConnectionStatus;

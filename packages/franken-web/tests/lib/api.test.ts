@@ -246,7 +246,7 @@ describe('ChatApiClient', () => {
   });
 
   describe('approve', () => {
-    it('sends POST to /v1/chat/sessions/:id/approve with approved flag', async () => {
+    it('sends POST to /v1/chat/sessions/:id/approve with the rendered request scope', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -255,7 +255,10 @@ describe('ChatApiClient', () => {
           }),
       });
 
-      const result = await client.approve('sess-1', true);
+      const result = await client.approve('sess-1', true, {
+        requestedAt: '2026-07-23T20:00:00Z',
+        command: 'npm run deploy',
+      });
       expect(result.approved).toBe(true);
       expect(result.state).toBe('approved');
       expect(mockFetch).toHaveBeenCalledWith(
@@ -263,7 +266,13 @@ describe('ChatApiClient', () => {
         expect.objectContaining({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ approved: true }),
+          body: JSON.stringify({
+            approved: true,
+            request: {
+              requestedAt: '2026-07-23T20:00:00Z',
+              command: 'npm run deploy',
+            },
+          }),
         }),
       );
     });

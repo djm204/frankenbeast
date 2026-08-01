@@ -1,4 +1,5 @@
-import type { PendingApproval } from '../lib/api';
+import { useEffect, useRef, useState } from 'react';
+import type { ApprovalDecisionRequest, PendingApproval } from '../lib/api';
 
 export interface ApprovalCardProps {
   pending: boolean;
@@ -7,8 +8,8 @@ export interface ApprovalCardProps {
   resolving?: boolean;
   error?: string | null;
   sessionId?: string | null;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove: (scope: ApprovalDecisionRequest) => void;
+  onReject: (scope: ApprovalDecisionRequest) => void;
 }
 
 function formatRequestedAt(value: string): string {
@@ -58,6 +59,44 @@ export function ApprovalCard({
 }: ApprovalCardProps) {
   const approvalDescription = approval?.description ?? description ?? '';
   const effectiveSessionId = approval?.sessionId ?? sessionId ?? undefined;
+  const requestKey = approval?.approvalToken ?? JSON.stringify([
+    effectiveSessionId ?? null,
+    approval?.requestedAt ?? null,
+    approval?.command ?? null,
+  ]);
+  const decisionScope: ApprovalDecisionRequest = {
+    ...(effectiveSessionId ? { sessionId: effectiveSessionId } : {}),
+    ...(approval?.requestedAt ? { requestedAt: approval.requestedAt } : {}),
+    ...(approval?.command ? { command: approval.command } : {}),
+    ...(approval?.approvalToken ? { approvalToken: approval.approvalToken } : {}),
+  };
+  const submittedRequestKeyRef = useRef<string | null>(null);
+  const [submittedRequestKey, setSubmittedRequestKey] = useState<string | null>(null);
+  const locallySubmitting = submittedRequestKey === requestKey;
+  const isSubmitting = resolving || locallySubmitting;
+
+  useEffect(() => {
+    if (error && submittedRequestKeyRef.current === requestKey) {
+      submittedRequestKeyRef.current = null;
+      setSubmittedRequestKey(null);
+    }
+  }, [error, requestKey]);
+
+  function submitDecision(callback: (scope: ApprovalDecisionRequest) => void) {
+    if (resolving || submittedRequestKeyRef.current === requestKey) {
+      return;
+    }
+
+    submittedRequestKeyRef.current = requestKey;
+    setSubmittedRequestKey(requestKey);
+    try {
+      callback(decisionScope);
+    } catch (error) {
+      submittedRequestKeyRef.current = null;
+      setSubmittedRequestKey(null);
+      throw error;
+    }
+  }
 
   return (
     <section
@@ -77,7 +116,7 @@ export function ApprovalCard({
       {!pending ? (
         <p className="rail-card__empty">No approval required.</p>
       ) : (
-        <div aria-busy={resolving}>
+        <div aria-busy={isSubmitting}>
           <p className="approval-card__description">{approvalDescription}</p>
           <dl className="approval-card__details" aria-label="Approval context">
             <DetailRow label="Tool" children={approval?.tool} />
@@ -87,7 +126,7 @@ export function ApprovalCard({
             <DetailRow label="Affected files" children={approval?.affectedFiles} />
             <DetailRow label="Session" children={effectiveSessionId} />
           </dl>
-          {resolving ? (
+          {isSubmitting ? (
             <p className="approval-card__status" role="status">
               Waiting for approval response…
             </p>
@@ -98,10 +137,10 @@ export function ApprovalCard({
             </p>
           ) : null}
           <div className="approval-card__actions">
-            <button className="button button--primary" disabled={resolving} onClick={onApprove}>
-              {resolving ? 'Submitting…' : 'Approve'}
+            <button className="button button--primary" disabled={isSubmitting} onClick={() => submitDecision(onApprove)}>
+              {isSubmitting ? 'Submitting…' : 'Approve'}
             </button>
-            <button className="button button--secondary" disabled={resolving} onClick={onReject}>Reject</button>
+            <button className="button button--secondary" disabled={isSubmitting} onClick={() => submitDecision(onReject)}>Reject</button>
           </div>
         </div>
       )}

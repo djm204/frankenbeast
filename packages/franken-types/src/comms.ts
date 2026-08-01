@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { TokenUsageSchema } from './provider.js';
-import { ProviderContextSchema } from './api-contracts.js';
+import { ApprovalDecisionRequestSchema, ProviderContextSchema } from './api-contracts.js';
 
 // Keep below the default 16 KiB HTTP body cap so the JSON envelope has
 // headroom while REST and WebSocket enforce one shared content limit.
@@ -16,6 +16,7 @@ export const ClientSocketEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('approval.respond'),
     approved: z.boolean(),
+    request: ApprovalDecisionRequestSchema.optional(),
   }).strict(),
   z.object({
     type: z.literal('message.read'),

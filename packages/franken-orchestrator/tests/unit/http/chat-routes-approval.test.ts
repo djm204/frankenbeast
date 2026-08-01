@@ -58,6 +58,43 @@ describe('chat approval route persistence', () => {
     expect(stored?.pendingApproval).toBeUndefined();
   });
 
+  it('rejects an HTTP decision captured for an older approval request', async () => {
+    const runtime = { run: vi.fn() };
+    const app = createChatApp({
+      sessionStore,
+      engine: {} as never,
+      runtime: runtime as never,
+      turnRunner: {} as never,
+    });
+    const session = pendingApprovalSession(sessionStore.create('project-1'));
+    session.pendingApproval = {
+      ...session.pendingApproval!,
+      command: 'npm run deploy',
+      approvalToken: 'approval-token-current',
+    };
+    sessionStore.save(session);
+
+    const response = await app.request(`/v1/chat/sessions/${session.id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        approved: true,
+        request: {
+          requestedAt: '2026-07-07T15:23:06.000Z',
+          command: 'npm run deploy',
+          approvalToken: 'approval-token-stale',
+        },
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    const body = await response.json() as { error: { code: string } };
+    expect(body.error.code).toBe('APPROVAL_REQUEST_CHANGED');
+    expect(runtime.run).not.toHaveBeenCalled();
+    expect(sessionStore.get(session.id)?.pendingApproval?.requestedAt)
+      .toBe('2026-07-07T15:23:06.000Z');
+  });
+
   it('rejects stale state-only HTTP approval responses without changing session state', async () => {
     const app = createChatApp({
       sessionStore,
