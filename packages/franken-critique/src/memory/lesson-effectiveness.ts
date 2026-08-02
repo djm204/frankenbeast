@@ -8,6 +8,7 @@ import type {
   LessonLifecycleRecommendation,
   LessonScopeKind,
   LessonScopeMetadata,
+  LessonScopeSnapshot,
 } from '../types/contracts.js';
 import type { TaskId } from '../types/common.js';
 import { isLessonApplicable } from './lesson-recorder.js';
@@ -216,13 +217,25 @@ function requireApplicableScope(
   injectedAt: string,
 ): void {
   const injectionTime = Date.parse(injectedAt);
-  const effectiveAuditTrail = lessonScope.auditTrail.filter((entry) => {
-    const changedAt = normalizeTimestamp(
-      entry.changedAt,
-      'lessonScope.auditTrail.changedAt',
-    );
-    return Date.parse(changedAt) <= injectionTime;
-  });
+  const orderedAuditTrail = lessonScope.auditTrail
+    .map((entry) => ({
+      entry,
+      changedAt: Date.parse(
+        normalizeTimestamp(entry.changedAt, 'lessonScope.auditTrail.changedAt'),
+      ),
+    }))
+    .sort((left, right) => left.changedAt - right.changedAt);
+  const effectiveAuditTrail = orderedAuditTrail
+    .filter(({ changedAt }) => changedAt <= injectionTime)
+    .map(({ entry }) => entry);
+  const firstFutureReview = orderedAuditTrail.find(
+    ({ changedAt }) => changedAt > injectionTime,
+  )?.entry;
+  const latestEffectiveReview = effectiveAuditTrail.at(-1);
+  const effectiveSnapshot =
+    firstFutureReview?.fromSnapshot ??
+    latestEffectiveReview?.toSnapshot ??
+    (firstFutureReview === undefined ? lessonScope : undefined);
   const attributionLesson: CritiqueLesson = {
     evaluatorName: 'lesson-effectiveness-attribution',
     failureDescription: lessonId,
@@ -233,7 +246,7 @@ function requireApplicableScope(
     timestamp: injectedAt,
     lifecycleStatus: 'active',
     lessonScope: {
-      ...lessonScope,
+      ...scopeSnapshotToMetadata(effectiveSnapshot, lessonScope),
       auditTrail: effectiveAuditTrail,
     },
   };
@@ -247,6 +260,41 @@ function requireApplicableScope(
       'Lesson effectiveness injection context is outside the reviewed lesson scope.',
     );
   }
+}
+
+function scopeSnapshotToMetadata(
+  snapshot: LessonScopeSnapshot | undefined,
+  source: LessonScopeMetadata,
+): LessonScopeMetadata {
+  if (snapshot === undefined) {
+    return {
+      ...source,
+      // Historical allowlists cannot be inferred safely from current state.
+      // An empty audit trail makes the shared applicability gate fail closed.
+      auditTrail: [],
+    };
+  }
+  return {
+    schemaVersion: source.schemaVersion,
+    scope: snapshot.scope,
+    ...(snapshot.allowedRepos !== undefined
+      ? { allowedRepos: snapshot.allowedRepos }
+      : {}),
+    ...(snapshot.allowedRoles !== undefined
+      ? { allowedRoles: snapshot.allowedRoles }
+      : {}),
+    ...(snapshot.allowedProfiles !== undefined
+      ? { allowedProfiles: snapshot.allowedProfiles }
+      : {}),
+    ...(snapshot.allowedTasks !== undefined
+      ? { allowedTasks: snapshot.allowedTasks }
+      : {}),
+    provenance: source.provenance,
+    ...(snapshot.expiresAt !== undefined
+      ? { expiresAt: snapshot.expiresAt }
+      : {}),
+    auditTrail: source.auditTrail,
+  };
 }
 
 function normalizeInjectionContext(

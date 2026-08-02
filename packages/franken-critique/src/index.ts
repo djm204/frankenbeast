@@ -75,6 +75,7 @@ export type {
   LessonScopeKind,
   LessonScopeMetadata,
   LessonScopeProvenance,
+  LessonScopeSnapshot,
   PostTaskLessonCandidate,
   PostTaskLessonDestination,
   PostTaskLessonEvidence,

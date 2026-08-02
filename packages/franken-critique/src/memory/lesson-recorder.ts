@@ -30,6 +30,7 @@ import type {
   LessonScopeKind,
   LessonScopeMetadata,
   LessonScopeProvenance,
+  LessonScopeSnapshot,
   PostTaskLessonCandidate,
   PostTaskLessonDestination,
   PostTaskLessonEvidence,
@@ -465,15 +466,6 @@ export function updateLessonScope(
   const actor = requireNonEmptyString(request.actor, 'scope reviewer actor');
   const reason = requireNonEmptyString(request.reason, 'scope review reason');
   const scope = normalizeLessonScopeKind(request.scope);
-  const auditEntry: LessonScopeAuditEntry = {
-    changedAt,
-    actor,
-    ...(lesson.lessonScope?.scope !== undefined
-      ? { fromScope: lesson.lessonScope.scope }
-      : {}),
-    toScope: scope,
-    reason,
-  };
   const clearedAllowlists = new Set(request.clearAllowlists ?? []);
   const allowedRepos = resolveReviewedAllowlist(
     request.allowedRepos,
@@ -496,6 +488,27 @@ export function updateLessonScope(
     clearedAllowlists.has('tasks'),
   );
   const expiresAt = request.expiresAt ?? lesson.lessonScope?.expiresAt;
+  const toSnapshot = createLessonScopeSnapshot({
+    scope,
+    ...(allowedRepos !== undefined ? { allowedRepos } : {}),
+    ...(allowedRoles !== undefined ? { allowedRoles } : {}),
+    ...(allowedProfiles !== undefined ? { allowedProfiles } : {}),
+    ...(allowedTasks !== undefined ? { allowedTasks } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+  });
+  const auditEntry: LessonScopeAuditEntry = {
+    changedAt,
+    actor,
+    ...(lesson.lessonScope !== undefined
+      ? {
+          fromScope: lesson.lessonScope.scope,
+          fromSnapshot: createLessonScopeSnapshot(lesson.lessonScope),
+        }
+      : {}),
+    toScope: scope,
+    reason,
+    toSnapshot,
+  };
   const lessonScope = createLessonScopeMetadata({
     scope,
     ...(allowedRepos !== undefined ? { allowedRepos } : {}),
@@ -2708,6 +2721,46 @@ interface LessonScopeMetadataInput {
   readonly auditTrail: readonly LessonScopeAuditEntry[];
 }
 
+type LessonScopeSnapshotInput = Omit<
+  LessonScopeMetadataInput,
+  'provenance' | 'auditTrail'
+>;
+
+function createLessonScopeSnapshot(
+  input: LessonScopeSnapshotInput,
+): LessonScopeSnapshot {
+  const snapshot: LessonScopeSnapshot = {
+    scope: normalizeLessonScopeKind(input.scope),
+    ...(input.allowedRepos !== undefined
+      ? { allowedRepos: normalizeScopeList(input.allowedRepos, 'allowedRepos') }
+      : {}),
+    ...(input.allowedRoles !== undefined
+      ? { allowedRoles: normalizeScopeList(input.allowedRoles, 'allowedRoles') }
+      : {}),
+    ...(input.allowedProfiles !== undefined
+      ? {
+          allowedProfiles: normalizeScopeList(
+            input.allowedProfiles,
+            'allowedProfiles',
+          ),
+        }
+      : {}),
+    ...(input.allowedTasks !== undefined
+      ? {
+          allowedTasks: normalizeScopeList(
+            input.allowedTasks,
+            'allowedTasks',
+          ) as TaskId[],
+        }
+      : {}),
+    ...(input.expiresAt !== undefined
+      ? { expiresAt: normalizeTimestamp(input.expiresAt) }
+      : {}),
+  };
+  assertScopeHasRequiredAllowlist(snapshot);
+  return snapshot;
+}
+
 function createLessonScopeMetadata(
   input: LessonScopeMetadataInput,
 ): LessonScopeMetadata {
@@ -2750,6 +2803,12 @@ function createLessonScopeMetadata(
       ...(entry.fromScope !== undefined
         ? { fromScope: normalizeLessonScopeKind(entry.fromScope) }
         : {}),
+      ...(entry.fromSnapshot !== undefined
+        ? { fromSnapshot: createLessonScopeSnapshot(entry.fromSnapshot) }
+        : {}),
+      ...(entry.toSnapshot !== undefined
+        ? { toSnapshot: createLessonScopeSnapshot(entry.toSnapshot) }
+        : {}),
     })),
   };
   assertScopeHasRequiredAllowlist(metadata);
@@ -2784,7 +2843,7 @@ function normalizeScopeList(
   return Array.from(new Set(normalized)).sort();
 }
 
-function assertScopeHasRequiredAllowlist(scope: LessonScopeMetadata): void {
+function assertScopeHasRequiredAllowlist(scope: LessonScopeSnapshot): void {
   if (scope.scope === 'repo' && (scope.allowedRepos?.length ?? 0) === 0) {
     throw new RangeError(
       'Repo-scoped lessons require at least one allowed repo.',

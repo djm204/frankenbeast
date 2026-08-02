@@ -394,6 +394,16 @@ export interface LessonScopeProvenance {
   readonly note?: string;
 }
 
+/** All injection-relevant scope fields captured at one review boundary. */
+export interface LessonScopeSnapshot {
+  readonly scope: LessonScopeKind;
+  readonly allowedRepos?: readonly string[];
+  readonly allowedRoles?: readonly string[];
+  readonly allowedProfiles?: readonly string[];
+  readonly allowedTasks?: readonly TaskId[];
+  readonly expiresAt?: string;
+}
+
 /** Audit entry emitted whenever a reviewer changes lesson scope. */
 export interface LessonScopeAuditEntry {
   readonly changedAt: string;
@@ -401,6 +411,10 @@ export interface LessonScopeAuditEntry {
   readonly fromScope?: LessonScopeKind;
   readonly toScope: LessonScopeKind;
   readonly reason: string;
+  /** Scope state before this review, used for historical injection attribution. */
+  readonly fromSnapshot?: LessonScopeSnapshot;
+  /** Scope state after this review. */
+  readonly toSnapshot?: LessonScopeSnapshot;
 }
 
 /** Scope controls used before injecting or sharing a lesson with another agent. */

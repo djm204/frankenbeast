@@ -422,4 +422,67 @@ describe('LessonEffectivenessTelemetry', () => {
     ).toThrow('injection context is outside the reviewed lesson scope');
     expect(telemetry.report().totalEvents).toBe(0);
   });
+
+  it('uses the allowlist snapshot effective at injection time', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const widenedScope: LessonScopeMetadata = {
+      schemaVersion: 'lesson-scope-v1',
+      scope: 'repo',
+      allowedRepos: ['repo-a', 'repo-b'],
+      provenance: { source: 'human-review' },
+      auditTrail: [
+        {
+          changedAt: '2026-07-01T00:00:00.000Z',
+          actor: 'reviewer',
+          toScope: 'repo',
+          reason: 'Initially approved for repo A.',
+        },
+        {
+          changedAt: '2026-07-25T00:00:00.000Z',
+          actor: 'reviewer',
+          fromScope: 'repo',
+          toScope: 'repo',
+          reason: 'Later widened to repo B.',
+          fromSnapshot: { scope: 'repo', allowedRepos: ['repo-a'] },
+          toSnapshot: {
+            scope: 'repo',
+            allowedRepos: ['repo-a', 'repo-b'],
+          },
+        },
+      ],
+    };
+
+    expect(() =>
+      telemetry.record({
+        lessonId: 'lesson-historical-allowlist',
+        lessonScope: widenedScope,
+        injectionContext: { repo: 'repo-b', taskId: 'task-before-widening' },
+        injectedAt: '2026-07-24T00:00:00.000Z',
+        observedAt: '2026-07-24T00:01:00.000Z',
+        taskSucceeded: true,
+        blockersBefore: 1,
+        blockersAfter: 0,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      }),
+    ).toThrow('injection context is outside the reviewed lesson scope');
+    expect(
+      telemetry.record({
+        lessonId: 'lesson-historical-allowlist',
+        lessonScope: widenedScope,
+        injectionContext: {
+          repo: 'repo-a',
+          taskId: createTaskId('task-before-widening'),
+        },
+        injectedAt: '2026-07-24T00:00:00.000Z',
+        observedAt: '2026-07-24T00:01:00.000Z',
+        taskSucceeded: true,
+        blockersBefore: 1,
+        blockersAfter: 0,
+        reviewFindingCount: 0,
+        userCorrection: false,
+      }).outcome,
+    ).toBe('positive');
+    expect(telemetry.report().totalEvents).toBe(1);
+  });
 });
