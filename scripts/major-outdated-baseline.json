@@ -20,6 +20,66 @@
     "reason": "Upstream released a new major after PR #3446 was verified, causing the repository-wide major-version freshness gate to fail independently of this PR's changes."
   },
   {
+    "name": "@types/better-sqlite3",
+    "dependent": "@franken/brain",
+    "location": "node_modules/@types/better-sqlite3",
+    "currentMajor": 7,
+    "latestMajor": 9,
+    "current": "7.6.13",
+    "latest": "9.6.0",
+    "reason": "Upstream released @types/better-sqlite3 9 after the issue #2311 PR was verified; keep the existing 7.x typings until the native SQLite type upgrade receives dedicated compatibility validation."
+  },
+  {
+    "name": "@types/better-sqlite3",
+    "dependent": "@franken/mcp-suite",
+    "location": "node_modules/@types/better-sqlite3",
+    "currentMajor": 7,
+    "latestMajor": 9,
+    "current": "7.6.13",
+    "latest": "9.6.0",
+    "reason": "Upstream released @types/better-sqlite3 9 after the issue #2311 PR was verified; keep the existing 7.x typings until the native SQLite type upgrade receives dedicated compatibility validation."
+  },
+  {
+    "name": "@types/better-sqlite3",
+    "dependent": "@franken/observer",
+    "location": "node_modules/@types/better-sqlite3",
+    "currentMajor": 7,
+    "latestMajor": 9,
+    "current": "7.6.13",
+    "latest": "9.6.0",
+    "reason": "Upstream released @types/better-sqlite3 9 after the issue #2311 PR was verified; keep the existing 7.x typings until the native SQLite type upgrade receives dedicated compatibility validation."
+  },
+  {
+    "name": "@types/better-sqlite3",
+    "dependent": "@franken/orchestrator",
+    "location": "node_modules/@types/better-sqlite3",
+    "currentMajor": 7,
+    "latestMajor": 9,
+    "current": "7.6.13",
+    "latest": "9.6.0",
+    "reason": "Upstream released @types/better-sqlite3 9 after the issue #2311 PR was verified; keep the existing 7.x typings until the native SQLite type upgrade receives dedicated compatibility validation."
+  },
+  {
+    "name": "@types/better-sqlite3",
+    "dependent": "frankenbeast",
+    "location": "node_modules/@types/better-sqlite3",
+    "currentMajor": 7,
+    "latestMajor": 9,
+    "current": "7.6.13",
+    "latest": "9.6.0",
+    "reason": "Upstream released @types/better-sqlite3 9 after the issue #2311 PR was verified; keep the existing 7.x typings until the native SQLite type upgrade receives dedicated compatibility validation."
+  },
+  {
+    "name": "@types/better-sqlite3",
+    "dependent": "@franken/live-bench",
+    "location": "node_modules/@types/better-sqlite3",
+    "currentMajor": 7,
+    "latestMajor": 9,
+    "current": "7.6.13",
+    "latest": "9.6.0",
+    "reason": "Upstream released @types/better-sqlite3 9 after the issue #2311 PR was verified; keep the existing 7.x typings until the native SQLite type upgrade receives dedicated compatibility validation."
+  },
+  {
     "name": "@types/node",
     "dependent": "@franken/brain",
     "location": "node_modules/@types/node",
