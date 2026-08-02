@@ -61,14 +61,14 @@ export class LessonEffectivenessTelemetry {
 
   record(input: LessonEffectivenessRecordInput): LessonEffectivenessEvent {
     const lessonId = requireNonEmptyString(input.lessonId, 'lessonId');
-    const lessonScope = normalizeLessonScope(input.lessonScope?.scope);
+    normalizeLessonScope(input.lessonScope?.scope);
     const injectedAt = normalizeTimestamp(input.injectedAt, 'injectedAt');
     const observedAt = normalizeTimestamp(input.observedAt, 'observedAt');
     if (Date.parse(observedAt) < Date.parse(injectedAt)) {
       throw new RangeError('observedAt must not precede injectedAt.');
     }
     const injectionContext = normalizeInjectionContext(input.injectionContext);
-    requireApplicableScope(
+    const lessonScope = requireApplicableScope(
       lessonId,
       input.lessonScope,
       injectionContext,
@@ -215,7 +215,7 @@ function requireApplicableScope(
   lessonScope: LessonScopeMetadata,
   injectionContext: Omit<LessonInjectionContext, 'now'>,
   injectedAt: string,
-): void {
+): LessonScopeKind {
   const injectionTime = Date.parse(injectedAt);
   const orderedAuditTrail = lessonScope.auditTrail
     .map((entry) => ({
@@ -260,6 +260,7 @@ function requireApplicableScope(
       'Lesson effectiveness injection context is outside the reviewed lesson scope.',
     );
   }
+  return attributionLesson.lessonScope!.scope;
 }
 
 function scopeSnapshotToMetadata(

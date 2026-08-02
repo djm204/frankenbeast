@@ -485,4 +485,54 @@ describe('LessonEffectivenessTelemetry', () => {
     ).toBe('positive');
     expect(telemetry.report().totalEvents).toBe(1);
   });
+
+  it('records evidence under the scope effective at injection time', () => {
+    const telemetry = new LessonEffectivenessTelemetry();
+    const promotedScope: LessonScopeMetadata = {
+      schemaVersion: 'lesson-scope-v1',
+      scope: 'repo',
+      allowedRepos: ['repo-a'],
+      provenance: { source: 'human-review' },
+      auditTrail: [
+        {
+          changedAt: '2026-07-01T00:00:00.000Z',
+          actor: 'reviewer',
+          toScope: 'task',
+          reason: 'Initially approved for one task.',
+          toSnapshot: {
+            scope: 'task',
+            allowedTasks: [createTaskId('task-before-promotion')],
+          },
+        },
+        {
+          changedAt: '2026-07-25T00:00:00.000Z',
+          actor: 'reviewer',
+          fromScope: 'task',
+          toScope: 'repo',
+          reason: 'Later promoted to repo scope.',
+          fromSnapshot: {
+            scope: 'task',
+            allowedTasks: [createTaskId('task-before-promotion')],
+          },
+          toSnapshot: { scope: 'repo', allowedRepos: ['repo-a'] },
+        },
+      ],
+    };
+
+    const event = telemetry.record({
+      lessonId: 'lesson-promoted-scope',
+      lessonScope: promotedScope,
+      injectionContext: { taskId: createTaskId('task-before-promotion') },
+      injectedAt: '2026-07-24T00:00:00.000Z',
+      observedAt: '2026-07-24T00:01:00.000Z',
+      taskSucceeded: true,
+      blockersBefore: 1,
+      blockersAfter: 0,
+      reviewFindingCount: 0,
+      userCorrection: false,
+    });
+
+    expect(event.lessonScope).toBe('task');
+    expect(telemetry.report().lessons[0]?.lessonScope).toBe('task');
+  });
 });
