@@ -172,6 +172,18 @@ Every `LessonRecorder.record()` result exposes `learningBacklogPrioritizationRep
 
 Report items identify their source as `recorded-lesson`, `blocker-pattern`, or `cooldown-suppression`, include task/evaluator context when available, and carry a concise rationale plus recommended next action. High-priority recorded lessons should go through promotion review with their traceability verifier, blocker patterns should route to a durable mitigation owner, and low-priority cooldown suppressions should reuse the existing in-cooldown lesson instead of creating duplicate backlog churn.
 
+## Lesson effectiveness telemetry
+
+`LessonEffectivenessTelemetry` correlates an injected lesson with the task result that follows it. Call `record()` after the task outcome is known with the stable lesson id, reviewed lesson scope, injection context, injection/outcome timestamps, task success, blocker counts before/after injection, review-finding count, and whether the user corrected the result. Scope expiry and audit approval are validated at the injection timestamp so a valid lesson remains attributable when a long-running task finishes after expiry, while later scope approvals cannot legitimize earlier injections. Outcomes timestamped before injection are rejected. The emitted `lesson-effectiveness-event-v1` contains only those bounded signals; its schema deliberately has no raw prompt, reviewer finding text, or correction text fields.
+
+Outcome attribution is deterministic:
+
+- `positive`: the task succeeded, blockers decreased, no review findings remained, and no user correction was recorded.
+- `negative`: the task failed, blockers increased, or the user corrected the result.
+- `neutral`: the remaining mixed or unchanged outcomes, including successful work with unchanged blockers or residual review findings.
+
+`report()` aggregates events by stable lesson id and scope. Its score ranges from `-1` (all negative) to `1` (all positive), alongside correction, blocker-reduction, and blocker-regression counts. A positive majority recommends `promote`, a negative majority recommends `retire`, and ties/no demonstrated improvement recommend `monitor`. These are evidence inputs to the existing reviewed lifecycle—not automatic mutations: promotion still requires traceability and scope review, while retirement should use the quarantine/rollback workflow so operators can audit the decision.
+
 ## Package scripts
 
 Run these from the package directory with `npm run <script>`, or from the repository root with `npm run <script> --workspace @franken/critique`.

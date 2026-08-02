@@ -3860,6 +3860,28 @@ describe('LessonRecorder', () => {
       isLessonApplicable(repoScoped, { repo: 'djm204/frankenbeast' }),
     ).toBe(true);
     expect(isLessonApplicable(repoScoped, { repo: 'other/repo' })).toBe(false);
+    expect(repoScoped.lessonScope?.auditTrail.at(-1)?.toSnapshot).toEqual({
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast'],
+    });
+
+    const widenedRepoScope = updateLessonScope(repoScoped, {
+      scope: 'repo',
+      allowedRepos: ['djm204/frankenbeast', 'djm204/smart-swarm'],
+      actor: 'pm-reviewer',
+      reason: 'Reviewed for a second repository.',
+      changedAt: '2026-07-14T01:00:00.000Z',
+    });
+    expect(widenedRepoScope.lessonScope?.auditTrail.at(-1)).toMatchObject({
+      fromSnapshot: {
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast'],
+      },
+      toSnapshot: {
+        scope: 'repo',
+        allowedRepos: ['djm204/frankenbeast', 'djm204/smart-swarm'],
+      },
+    });
 
     const profileScoped = updateLessonScope(baseLesson, {
       scope: 'profile',

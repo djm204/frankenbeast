@@ -394,6 +394,16 @@ export interface LessonScopeProvenance {
   readonly note?: string;
 }
 
+/** All injection-relevant scope fields captured at one review boundary. */
+export interface LessonScopeSnapshot {
+  readonly scope: LessonScopeKind;
+  readonly allowedRepos?: readonly string[];
+  readonly allowedRoles?: readonly string[];
+  readonly allowedProfiles?: readonly string[];
+  readonly allowedTasks?: readonly TaskId[];
+  readonly expiresAt?: string;
+}
+
 /** Audit entry emitted whenever a reviewer changes lesson scope. */
 export interface LessonScopeAuditEntry {
   readonly changedAt: string;
@@ -401,6 +411,10 @@ export interface LessonScopeAuditEntry {
   readonly fromScope?: LessonScopeKind;
   readonly toScope: LessonScopeKind;
   readonly reason: string;
+  /** Scope state before this review, used for historical injection attribution. */
+  readonly fromSnapshot?: LessonScopeSnapshot;
+  /** Scope state after this review. */
+  readonly toSnapshot?: LessonScopeSnapshot;
 }
 
 /** Scope controls used before injecting or sharing a lesson with another agent. */
@@ -428,6 +442,58 @@ export interface LessonInjectionContext {
   readonly profile?: string;
   readonly taskId?: TaskId;
   readonly now?: string;
+}
+
+/** Outcome attributed after an active lesson was injected into a task context. */
+export type LessonEffectivenessOutcome = 'positive' | 'neutral' | 'negative';
+
+/** Transcript-free signals used to attribute an injected lesson's outcome. */
+export interface LessonEffectivenessSignals {
+  readonly taskSucceeded: boolean;
+  /** blockersAfter - blockersBefore; negative values mean blockers were reduced. */
+  readonly blockerDelta: number;
+  readonly blockerReduced: boolean;
+  readonly reviewFindingCount: number;
+  readonly userCorrection: boolean;
+}
+
+/** Transcript-free telemetry event connecting a lesson injection to later outcomes. */
+export interface LessonEffectivenessEvent {
+  readonly schemaVersion: 'lesson-effectiveness-event-v1';
+  readonly lessonId: string;
+  readonly lessonScope: LessonScopeKind;
+  readonly injectionContext: Omit<LessonInjectionContext, 'now'>;
+  /** Timestamp when the lesson was injected; scope expiry is evaluated here. */
+  readonly injectedAt: string;
+  readonly observedAt: string;
+  readonly outcome: LessonEffectivenessOutcome;
+  readonly signals: LessonEffectivenessSignals;
+}
+
+export type LessonLifecycleRecommendation = 'promote' | 'monitor' | 'retire';
+
+/** Aggregated trend for one stable lesson id and scope. */
+export interface LessonEffectivenessTrend {
+  readonly lessonId: string;
+  readonly lessonScope: LessonScopeKind;
+  readonly observations: number;
+  readonly positive: number;
+  readonly neutral: number;
+  readonly negative: number;
+  /** Normalized range from -1 (all negative) to 1 (all positive). */
+  readonly effectivenessScore: number;
+  readonly correctionSignals: number;
+  readonly blockerReductions: number;
+  readonly blockerRegressions: number;
+  readonly lifecycleRecommendation: LessonLifecycleRecommendation;
+}
+
+/** Aggregate report that never stores raw prompts, findings, or correction text. */
+export interface LessonEffectivenessReport {
+  readonly schemaVersion: 'lesson-effectiveness-report-v1';
+  readonly generatedAt: string;
+  readonly totalEvents: number;
+  readonly lessons: readonly LessonEffectivenessTrend[];
 }
 
 /** Cooldown metadata attached to a recorded lesson so PM/liveness tooling can prevent churn. */

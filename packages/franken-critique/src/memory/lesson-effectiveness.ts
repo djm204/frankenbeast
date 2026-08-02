@@ -1,0 +1,369 @@
+import type {
+  CritiqueLesson,
+  LessonEffectivenessEvent,
+  LessonEffectivenessOutcome,
+  LessonEffectivenessReport,
+  LessonEffectivenessTrend,
+  LessonInjectionContext,
+  LessonLifecycleRecommendation,
+  LessonScopeKind,
+  LessonScopeMetadata,
+  LessonScopeSnapshot,
+} from '../types/contracts.js';
+import type { TaskId } from '../types/common.js';
+import { isLessonApplicable } from './lesson-recorder.js';
+
+const LESSON_SCOPE_KINDS: readonly LessonScopeKind[] = [
+  'global',
+  'repo',
+  'role',
+  'profile',
+  'task',
+];
+
+export interface LessonEffectivenessRecordInput {
+  readonly lessonId: string;
+  readonly lessonScope: LessonScopeMetadata;
+  readonly injectionContext: Omit<LessonInjectionContext, 'now'>;
+  readonly injectedAt: string;
+  readonly observedAt: string;
+  readonly taskSucceeded: boolean;
+  readonly blockersBefore: number;
+  readonly blockersAfter: number;
+  readonly reviewFindingCount: number;
+  readonly userCorrection: boolean;
+}
+
+interface MutableLessonEffectivenessTrend {
+  lessonId: string;
+  lessonScope: LessonScopeKind;
+  observations: number;
+  positive: number;
+  neutral: number;
+  negative: number;
+  correctionSignals: number;
+  blockerReductions: number;
+  blockerRegressions: number;
+}
+
+/**
+ * Records transcript-free outcome signals for injected lessons and aggregates
+ * them into deterministic lifecycle trends. Raw prompts, finding text, and
+ * correction text are deliberately absent from the input and event schemas.
+ */
+export class LessonEffectivenessTelemetry {
+  private readonly events: LessonEffectivenessEvent[] = [];
+  private readonly now: () => string;
+
+  constructor(now: () => Date | string = (): Date => new Date()) {
+    this.now = (): string => normalizeTimestamp(now(), 'report timestamp');
+  }
+
+  record(input: LessonEffectivenessRecordInput): LessonEffectivenessEvent {
+    const lessonId = requireNonEmptyString(input.lessonId, 'lessonId');
+    normalizeLessonScope(input.lessonScope?.scope);
+    const injectedAt = normalizeTimestamp(input.injectedAt, 'injectedAt');
+    const observedAt = normalizeTimestamp(input.observedAt, 'observedAt');
+    if (Date.parse(observedAt) < Date.parse(injectedAt)) {
+      throw new RangeError('observedAt must not precede injectedAt.');
+    }
+    const injectionContext = normalizeInjectionContext(input.injectionContext);
+    const lessonScope = requireApplicableScope(
+      lessonId,
+      input.lessonScope,
+      injectionContext,
+      injectedAt,
+    );
+    const blockersBefore = requireCount(input.blockersBefore, 'blockersBefore');
+    const blockersAfter = requireCount(input.blockersAfter, 'blockersAfter');
+    const reviewFindingCount = requireCount(
+      input.reviewFindingCount,
+      'reviewFindingCount',
+    );
+    if (typeof input.taskSucceeded !== 'boolean') {
+      throw new TypeError('taskSucceeded must be a boolean.');
+    }
+    if (typeof input.userCorrection !== 'boolean') {
+      throw new TypeError('userCorrection must be a boolean.');
+    }
+
+    const blockerDelta = blockersAfter - blockersBefore;
+    const outcome = attributeOutcome({
+      taskSucceeded: input.taskSucceeded,
+      blockerDelta,
+      reviewFindingCount,
+      userCorrection: input.userCorrection,
+    });
+    const event: LessonEffectivenessEvent = {
+      schemaVersion: 'lesson-effectiveness-event-v1',
+      lessonId,
+      lessonScope,
+      injectionContext,
+      injectedAt,
+      observedAt,
+      outcome,
+      signals: {
+        taskSucceeded: input.taskSucceeded,
+        blockerDelta,
+        blockerReduced: blockerDelta < 0,
+        reviewFindingCount,
+        userCorrection: input.userCorrection,
+      },
+    };
+    this.events.push({
+      ...event,
+      injectionContext: { ...event.injectionContext },
+      signals: { ...event.signals },
+    });
+    return event;
+  }
+
+  report(): LessonEffectivenessReport {
+    const trends = new Map<string, MutableLessonEffectivenessTrend>();
+    for (const event of this.events) {
+      const key = `${event.lessonScope}\u0000${event.lessonId}`;
+      const trend = trends.get(key) ?? {
+        lessonId: event.lessonId,
+        lessonScope: event.lessonScope,
+        observations: 0,
+        positive: 0,
+        neutral: 0,
+        negative: 0,
+        correctionSignals: 0,
+        blockerReductions: 0,
+        blockerRegressions: 0,
+      };
+      trend.observations += 1;
+      trend[event.outcome] += 1;
+      if (event.signals.userCorrection) trend.correctionSignals += 1;
+      if (event.signals.blockerDelta < 0) trend.blockerReductions += 1;
+      if (event.signals.blockerDelta > 0) trend.blockerRegressions += 1;
+      trends.set(key, trend);
+    }
+
+    const lessons = [...trends.values()]
+      .sort(
+        (left, right) =>
+          left.lessonId.localeCompare(right.lessonId) ||
+          left.lessonScope.localeCompare(right.lessonScope),
+      )
+      .map(toPublicTrend);
+
+    return {
+      schemaVersion: 'lesson-effectiveness-report-v1',
+      generatedAt: this.now(),
+      totalEvents: this.events.length,
+      lessons,
+    };
+  }
+}
+
+function attributeOutcome(signals: {
+  readonly taskSucceeded: boolean;
+  readonly blockerDelta: number;
+  readonly reviewFindingCount: number;
+  readonly userCorrection: boolean;
+}): LessonEffectivenessOutcome {
+  if (
+    signals.userCorrection ||
+    !signals.taskSucceeded ||
+    signals.blockerDelta > 0
+  ) {
+    return 'negative';
+  }
+  if (
+    signals.taskSucceeded &&
+    signals.blockerDelta < 0 &&
+    signals.reviewFindingCount === 0
+  ) {
+    return 'positive';
+  }
+  return 'neutral';
+}
+
+function toPublicTrend(
+  trend: MutableLessonEffectivenessTrend,
+): LessonEffectivenessTrend {
+  const effectivenessScore = roundScore(
+    (trend.positive - trend.negative) / trend.observations,
+  );
+  return {
+    lessonId: trend.lessonId,
+    lessonScope: trend.lessonScope,
+    observations: trend.observations,
+    positive: trend.positive,
+    neutral: trend.neutral,
+    negative: trend.negative,
+    effectivenessScore,
+    correctionSignals: trend.correctionSignals,
+    blockerReductions: trend.blockerReductions,
+    blockerRegressions: trend.blockerRegressions,
+    lifecycleRecommendation: recommendLifecycle(trend),
+  };
+}
+
+function recommendLifecycle(
+  trend: MutableLessonEffectivenessTrend,
+): LessonLifecycleRecommendation {
+  if (trend.negative * 2 > trend.observations) return 'retire';
+  if (trend.positive * 2 > trend.observations) return 'promote';
+  return 'monitor';
+}
+
+function requireApplicableScope(
+  lessonId: string,
+  lessonScope: LessonScopeMetadata,
+  injectionContext: Omit<LessonInjectionContext, 'now'>,
+  injectedAt: string,
+): LessonScopeKind {
+  const injectionTime = Date.parse(injectedAt);
+  const orderedAuditTrail = lessonScope.auditTrail
+    .map((entry) => ({
+      entry,
+      changedAt: Date.parse(
+        normalizeTimestamp(entry.changedAt, 'lessonScope.auditTrail.changedAt'),
+      ),
+    }))
+    .sort((left, right) => left.changedAt - right.changedAt);
+  const effectiveAuditTrail = orderedAuditTrail
+    .filter(({ changedAt }) => changedAt <= injectionTime)
+    .map(({ entry }) => entry);
+  const firstFutureReview = orderedAuditTrail.find(
+    ({ changedAt }) => changedAt > injectionTime,
+  )?.entry;
+  const latestEffectiveReview = effectiveAuditTrail.at(-1);
+  const effectiveSnapshot =
+    firstFutureReview?.fromSnapshot ??
+    latestEffectiveReview?.toSnapshot ??
+    (firstFutureReview === undefined ? lessonScope : undefined);
+  const attributionLesson: CritiqueLesson = {
+    evaluatorName: 'lesson-effectiveness-attribution',
+    failureDescription: lessonId,
+    correctionApplied: 'Effectiveness observation',
+    taskId: (injectionContext.taskId ??
+      lessonScope.provenance.taskId ??
+      'lesson-effectiveness-attribution') as TaskId,
+    timestamp: injectedAt,
+    lifecycleStatus: 'active',
+    lessonScope: {
+      ...scopeSnapshotToMetadata(effectiveSnapshot, lessonScope),
+      auditTrail: effectiveAuditTrail,
+    },
+  };
+  if (
+    !isLessonApplicable(attributionLesson, {
+      ...injectionContext,
+      now: injectedAt,
+    })
+  ) {
+    throw new RangeError(
+      'Lesson effectiveness injection context is outside the reviewed lesson scope.',
+    );
+  }
+  return attributionLesson.lessonScope!.scope;
+}
+
+function scopeSnapshotToMetadata(
+  snapshot: LessonScopeSnapshot | undefined,
+  source: LessonScopeMetadata,
+): LessonScopeMetadata {
+  if (snapshot === undefined) {
+    return {
+      ...source,
+      // Historical allowlists cannot be inferred safely from current state.
+      // An empty audit trail makes the shared applicability gate fail closed.
+      auditTrail: [],
+    };
+  }
+  return {
+    schemaVersion: source.schemaVersion,
+    scope: snapshot.scope,
+    ...(snapshot.allowedRepos !== undefined
+      ? { allowedRepos: snapshot.allowedRepos }
+      : {}),
+    ...(snapshot.allowedRoles !== undefined
+      ? { allowedRoles: snapshot.allowedRoles }
+      : {}),
+    ...(snapshot.allowedProfiles !== undefined
+      ? { allowedProfiles: snapshot.allowedProfiles }
+      : {}),
+    ...(snapshot.allowedTasks !== undefined
+      ? { allowedTasks: snapshot.allowedTasks }
+      : {}),
+    provenance: source.provenance,
+    ...(snapshot.expiresAt !== undefined
+      ? { expiresAt: snapshot.expiresAt }
+      : {}),
+    auditTrail: source.auditTrail,
+  };
+}
+
+function normalizeInjectionContext(
+  context: Omit<LessonInjectionContext, 'now'>,
+): Omit<LessonInjectionContext, 'now'> {
+  if (!context || typeof context !== 'object') {
+    throw new TypeError('injectionContext must be an object.');
+  }
+  return {
+    ...(context.repo !== undefined
+      ? { repo: requireNonEmptyString(context.repo, 'injectionContext.repo') }
+      : {}),
+    ...(context.role !== undefined
+      ? { role: requireNonEmptyString(context.role, 'injectionContext.role') }
+      : {}),
+    ...(context.profile !== undefined
+      ? {
+          profile: requireNonEmptyString(
+            context.profile,
+            'injectionContext.profile',
+          ),
+        }
+      : {}),
+    ...(context.taskId !== undefined
+      ? {
+          taskId: requireTaskId(context.taskId),
+        }
+      : {}),
+  };
+}
+
+function normalizeLessonScope(scope: LessonScopeKind): LessonScopeKind {
+  if (!LESSON_SCOPE_KINDS.includes(scope)) {
+    throw new RangeError(`Unsupported lesson scope: ${String(scope)}.`);
+  }
+  return scope;
+}
+
+function requireNonEmptyString(value: string, label: string): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
+function requireTaskId(
+  value: NonNullable<LessonInjectionContext['taskId']>,
+): NonNullable<LessonInjectionContext['taskId']> {
+  return requireNonEmptyString(value, 'injectionContext.taskId') as NonNullable<
+    LessonInjectionContext['taskId']
+  >;
+}
+
+function requireCount(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${label} must be a non-negative safe integer.`);
+  }
+  return value;
+}
+
+function normalizeTimestamp(value: Date | string, label: string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    throw new RangeError(`${label} must be a valid timestamp.`);
+  }
+  return date.toISOString();
+}
+
+function roundScore(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
