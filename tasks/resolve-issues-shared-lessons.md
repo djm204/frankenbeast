@@ -1,5 +1,9 @@
 # Resolve Issues Shared Lessons
 
+## 2026-08-02 — Historical lesson effectiveness attribution
+- Preserve normalized before/after snapshots of every injection-relevant scope field at each review boundary; filtering audit entries while retaining current allowlists can retroactively authorize or reject outcomes.
+- Attribute telemetry under the scope effective when the lesson was injected, not the scope current when the task outcome is recorded. Keep stable lesson identity bound to reviewed scope or a trusted injection attestation so unrelated evidence cannot affect lifecycle recommendations.
+
 ## 2026-07-30 — Maintained-docs conflict-marker integrity
 - A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots and skip generated/vendor directories. Reject standard-width opening/closing remnants independently, but require a coherent same-width block for shorter configurable markers so custom Git conflicts are caught without misclassifying standalone Setext headings or Markdown blockquotes. Preserve an active short block after its separator, normalize BOM and CR-only inputs, and test those parser boundaries directly.
 
