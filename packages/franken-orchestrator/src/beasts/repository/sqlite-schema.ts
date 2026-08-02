@@ -24,6 +24,14 @@ export const BEAST_SQLITE_SCHEMA_STATEMENTS = [
     ON beast_runs(created_at DESC, id DESC)`,
   `CREATE INDEX IF NOT EXISTS idx_beast_runs_definition_created_at_id
     ON beast_runs(definition_id, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_beast_runs_definition_status_created_at_id
+    ON beast_runs(definition_id, status, created_at DESC, id DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_beast_runs_definition_activity_at_id
+    ON beast_runs(
+      definition_id,
+      COALESCE(finished_at, last_heartbeat_at, started_at, created_at) DESC,
+      id DESC
+    )`,
   `CREATE TABLE IF NOT EXISTS beast_run_attempts (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,

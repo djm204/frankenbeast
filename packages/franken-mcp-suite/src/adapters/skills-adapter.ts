@@ -89,7 +89,16 @@ function readSkillSummary(
   const skillDir = join(skillsDir, name);
   const mcpPath = join(skillDir, 'mcp.json');
 
+  // Defensive check: ensure mcp.json exists and contains valid JSON before accepting the skill.
   if (!existsSync(mcpPath)) {
+    console.error(`Skill "${name}" missing mcp.json; skipping.`);
+    return undefined;
+  }
+  const mcpContent = readFileSync(mcpPath, 'utf8');
+  try {
+    JSON.parse(mcpContent);
+  } catch (e) {
+    console.error(`Skill "${name}" has malformed mcp.json: ${e instanceof Error ? e.message : e}`);
     return undefined;
   }
 
@@ -97,6 +106,7 @@ function readSkillSummary(
   try {
     stat = statSync(skillDir);
   } catch {
+    console.error(`Unable to stat skill directory for "${name}"; skipping.`);
     return undefined;
   }
 

@@ -1,0 +1,348 @@
+import { describe, expect, it, vi } from 'vitest';
+import {
+  CodexRuntimeAdapter,
+  RuntimeAdapterRegistry,
+  RuntimeAgentSchema,
+  RuntimeApprovalSchema,
+  RuntimeBlockerSchema,
+  RuntimeCursorError,
+  RuntimeEventPageSchema,
+  RuntimeEventSchema,
+  RuntimeHealthSchema,
+  RuntimeMetadataSchema,
+  OllamaRuntimeAdapter,
+  RuntimeProviderSchema,
+  RuntimeActionRequestSchema,
+  RuntimeActionResultSchema,
+  RuntimeRunSchema,
+  RuntimeSnapshotSchema,
+  RuntimeTaskSchema,
+  RuntimeWorkspaceSchema,
+  createDefaultRuntimeAdapterRegistry,
+  type RuntimeAdapter,
+  type RuntimeApproval,
+} from '../../../src/runtime/index.js';
+import {
+  RuntimeActionUncertainError as PublicRuntimeActionUncertainError,
+  type RuntimeApproval as PublicRuntimeApproval,
+} from '../../../src/index.js';
+
+function adapter(id: string): RuntimeAdapter {
+  return {
+    id,
+    describe: vi.fn(async () => RuntimeProviderSchema.parse({
+      id,
+      runtime: 'test-runtime',
+      displayName: `Runtime ${id}`,
+      health: { state: 'connected', checkedAt: '2026-07-26T12:00:00.000Z' },
+      capabilities: {
+        snapshot: { status: 'supported' },
+        streaming: { status: 'supported' },
+        logs: { status: 'unsupported', reason: 'No log source' },
+        blockers: { status: 'supported' },
+        approvals: { status: 'unsupported', reason: 'No approval source' },
+        pause: { status: 'unsupported', reason: 'Read-only adapter' },
+        resume: { status: 'unsupported', reason: 'Read-only adapter' },
+        cancellation: { status: 'unsupported', reason: 'Read-only adapter' },
+        policyActions: { status: 'unsupported', reason: 'Read-only adapter' },
+      },
+    })),
+    getSnapshot: vi.fn(async () => RuntimeSnapshotSchema.parse({
+      providerId: id,
+      state: 'empty',
+      capturedAt: '2026-07-26T12:00:00.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: { status: 'available', data: [] },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'unsupported', reason: 'No approval source' },
+    })),
+    getEvents: vi.fn(async () => ({ events: [], nextCursor: null })),
+    validateEventCursor: vi.fn(),
+    executeAction: vi.fn(async (request) => RuntimeActionResultSchema.parse({
+      status: 'unsupported', providerId: id, correlationId: request.correlationId, reason: 'No mutations',
+      audit: {
+        requestedBy: 'authenticated-operator', actionType: request.action.type,
+        targetId: request.action.type === 'approval.resolve' ? request.action.approvalId : request.action.taskId,
+        outcome: 'unsupported',
+      },
+    })),
+  };
+}
+
+describe('provider-neutral runtime contract', () => {
+  it('exports the approval DTO type through both runtime entry points', () => {
+    const approval: RuntimeApproval = RuntimeApprovalSchema.parse({
+      id: 'approval-1',
+      workspaceId: 'workspace-1',
+      taskId: null,
+      state: 'pending',
+      summary: 'Approve publication',
+      createdAt: '2026-07-26T12:00:00.000Z',
+      resolvedAt: null,
+    });
+    const publicApproval: PublicRuntimeApproval = approval;
+
+    expect(publicApproval.id).toBe('approval-1');
+  });
+
+  it('exports the runtime action uncertainty error from the package entry point', () => {
+    expect(new PublicRuntimeActionUncertainError()).toMatchObject({
+      name: 'RuntimeActionUncertainError',
+    });
+  });
+
+  it('validates normalized governed action requests and typed unsupported results', () => {
+    const request = RuntimeActionRequestSchema.parse({
+      correlationId: '018f6f2d-c734-7cc9-b1b6-112233445566',
+      causationId: '018f6f2d-c734-7cc9-b1b6-665544332211',
+      idempotencyKey: 'ui:block:t_deadbeef:1',
+      action: {
+        type: 'blocker.add',
+        workspaceId: 'hermes:global',
+        taskId: 'hermes:global:t_deadbeef',
+        category: 'needs-input',
+        reason: 'Operator input is required',
+      },
+    });
+
+    expect(request.action.type).toBe('blocker.add');
+    expect(RuntimeActionResultSchema.parse({
+      status: 'unsupported',
+      providerId: 'test',
+      correlationId: request.correlationId,
+      reason: 'Approval decisions are unavailable',
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'approval.resolve',
+        targetId: 'approval-1',
+        outcome: 'unsupported',
+      },
+    })).toEqual(expect.objectContaining({ status: 'unsupported' }));
+
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, taskId: 'provider/task @ shard 1' },
+    }).action).toEqual(expect.objectContaining({ taskId: 'provider/task @ shard 1' }));
+
+    const approvalId = `provider approval/${'x'.repeat(220)}`;
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: {
+        type: 'approval.resolve', workspaceId: 'workspace-1', approvalId, decision: 'approve',
+      },
+    }).action).toEqual(expect.objectContaining({ approvalId }));
+
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, workspaceId: 'provider/workspace @ shard 1' },
+    }).action).toEqual(expect.objectContaining({ workspaceId: 'provider/workspace @ shard 1' }));
+
+    expect(RuntimeActionRequestSchema.parse({
+      ...request,
+      action: { ...request.action, taskId: 'x'.repeat(201) },
+    }).action).toEqual(expect.objectContaining({ taskId: 'x'.repeat(201) }));
+
+    expect(RuntimeActionResultSchema.parse({
+      status: 'applied',
+      providerId: 'test',
+      correlationId: request.correlationId,
+      audit: {
+        requestedBy: 'authenticated-operator',
+        actionType: 'blocker.add',
+        targetId: 'x'.repeat(201),
+        outcome: 'applied',
+      },
+    })).toEqual(expect.objectContaining({
+      audit: expect.objectContaining({ targetId: 'x'.repeat(201) }),
+    }));
+  });
+
+  it('preserves provider-owned opaque identifiers in emitted snapshots', () => {
+    expect(RuntimeWorkspaceSchema.parse({
+      id: 'w'.repeat(201),
+      name: 'workspace',
+      kind: 'workspace',
+      state: 'available',
+    })).toEqual(expect.objectContaining({ id: 'w'.repeat(201) }));
+
+    expect(RuntimeTaskSchema.parse({
+      id: 't'.repeat(201),
+      workspaceId: 'workspace',
+      title: 'task',
+      state: 'ready',
+      parentIds: [],
+      dependencyIds: [],
+      ownerIds: [],
+      priority: null,
+      createdAt: '2026-07-26T12:00:00.000Z',
+      updatedAt: null,
+    })).toEqual(expect.objectContaining({ id: 't'.repeat(201) }));
+  });
+
+  it('bounds normalized event summaries consistently with browser validation', () => {
+    const event = {
+      id: 'event-1',
+      cursor: 'cursor-1',
+      workspaceId: 'workspace-1',
+      taskId: null,
+      runId: null,
+      type: 'log',
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      summary: 'x'.repeat(16_384),
+    } as const;
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(RuntimeEventSchema.safeParse({ ...event, summary: `${event.summary}x` }).success).toBe(false);
+  });
+
+  it('bounds normalized event identifiers and cursors consistently with browser validation', () => {
+    const event = {
+      id: 'x'.repeat(1_024),
+      cursor: 'x'.repeat(4_096),
+      workspaceId: 'x'.repeat(1_024),
+      taskId: 'x'.repeat(1_024),
+      runId: 'x'.repeat(1_024),
+      type: 'log',
+      occurredAt: '2026-07-26T12:00:00.000Z',
+      summary: 'bounded identifiers',
+    } as const;
+
+    expect(RuntimeEventSchema.safeParse(event).success).toBe(true);
+    expect(RuntimeEventSchema.safeParse({ ...event, id: `${event.id}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, workspaceId: `${event.workspaceId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, taskId: `${event.taskId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, runId: `${event.runId}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, cursor: `${event.cursor}x` }).success).toBe(false);
+    expect(RuntimeEventSchema.safeParse({ ...event, cursor: '🚀'.repeat(1_025) }).success).toBe(false);
+  });
+
+  it('bounds checkpoint-only event page cursors by UTF-8 transport bytes', () => {
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: 'x'.repeat(4_096) }).success).toBe(true);
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: 'x'.repeat(4_097) }).success).toBe(false);
+    expect(RuntimeEventPageSchema.safeParse({ events: [], nextCursor: '🚀'.repeat(1_025) }).success).toBe(false);
+  });
+
+  it('bounds normalized metadata consistently with browser validation', () => {
+    const metadata = Object.fromEntries(Array.from({ length: 64 }, (_, index) => [`key-${index}`, index]));
+
+    expect(RuntimeMetadataSchema.safeParse(metadata).success).toBe(true);
+    expect(RuntimeMetadataSchema.safeParse({ ...metadata, overflow: true }).success).toBe(false);
+    expect(RuntimeMetadataSchema.safeParse({ key: 'x'.repeat(4_097) }).success).toBe(false);
+    expect(RuntimeMetadataSchema.safeParse({ ['x'.repeat(257)]: true }).success).toBe(false);
+  });
+
+  it('requires every capability to declare supported or unsupported state', async () => {
+    const value = adapter('one').describe();
+    await expect(value).resolves.toMatchObject({ id: 'one' });
+
+    expect(() => RuntimeProviderSchema.parse({
+      id: 'broken',
+      runtime: 'test-runtime',
+      displayName: 'Broken',
+      health: { state: 'connected', checkedAt: '2026-07-26T12:00:00.000Z' },
+      capabilities: { snapshot: { status: 'supported' } },
+    })).toThrow();
+  });
+
+  it('rejects provider ids that are not route-safe path segments', async () => {
+    const provider = await adapter('valid-provider').describe();
+
+    expect(RuntimeProviderSchema.safeParse({ ...provider, id: '..' }).success).toBe(false);
+    expect(() => new RuntimeAdapterRegistry([adapter('..')])).toThrow(/route-safe path segment/);
+  });
+
+  it('rejects provider storage fields from normalized task DTOs', () => {
+    expect(() => RuntimeSnapshotSchema.parse({
+      providerId: 'test',
+      state: 'ready',
+      capturedAt: '2026-07-26T12:00:00.000Z',
+      workspaces: { status: 'available', data: [] },
+      agents: { status: 'available', data: [] },
+      tasks: {
+        status: 'available',
+        data: [{
+          id: 'task-1',
+          workspaceId: 'workspace-1',
+          title: 'Task',
+          state: 'ready',
+          parentIds: [],
+          dependencyIds: [],
+          ownerIds: [],
+          priority: null,
+          createdAt: '2026-07-26T12:00:00.000Z',
+          updatedAt: null,
+          tableName: 'tasks',
+        }],
+      },
+      runs: { status: 'available', data: [] },
+      events: { status: 'available', data: [] },
+      blockers: { status: 'available', data: [] },
+      approvals: { status: 'unsupported', reason: 'No approval source' },
+    })).toThrow();
+  });
+
+  it('registers adapters by stable id and rejects ambiguous duplicates', async () => {
+    const registry = new RuntimeAdapterRegistry([adapter('alpha'), adapter('beta')]);
+
+    await expect(registry.list()).resolves.toEqual([
+      expect.objectContaining({ id: 'alpha' }),
+      expect.objectContaining({ id: 'beta' }),
+    ]);
+    expect(registry.get('alpha').id).toBe('alpha');
+    expect(() => registry.get('missing')).toThrow("Runtime adapter 'missing' is not registered");
+    expect(() => registry.register(adapter('alpha'))).toThrow("Runtime adapter 'alpha' is already registered");
+  });
+
+  it('rejects adapters that cannot prevalidate event cursors', () => {
+    const missingValidator = { ...adapter('missing-validator'), validateEventCursor: undefined } as unknown as RuntimeAdapter;
+    expect(() => new RuntimeAdapterRegistry([missingValidator]))
+      .toThrow(/must implement validateEventCursor/);
+  });
+
+  it('rejects adapters whose described provider id differs from their registry id', async () => {
+    const mismatched = adapter('foo');
+    vi.mocked(mismatched.describe).mockResolvedValue({
+      ...await adapter('bar').describe(),
+      id: 'bar',
+    });
+    const registry = new RuntimeAdapterRegistry([mismatched]);
+    await expect(registry.list()).rejects.toThrow(/does not match registered id/);
+  });
+
+  it('registers read-only runtime adapters without inventing availability', async () => {
+    const registry = createDefaultRuntimeAdapterRegistry({
+      env: { PATH: '' },
+      codex: { requestTimeoutMs: 25 },
+    });
+
+    await expect(registry.list()).resolves.toEqual([
+      expect.objectContaining({ id: 'hermes', health: expect.objectContaining({ state: 'unavailable' }) }),
+      expect.objectContaining({ id: 'ollama', health: expect.objectContaining({ state: 'unavailable' }) }),
+      expect.objectContaining({ id: 'codex', health: expect.objectContaining({ state: 'unavailable' }) }),
+    ]);
+  });
+
+  it('exports the runtime adapter boundary from the orchestrator package surface', async () => {
+    const orchestrator = await import('../../../src/index.js');
+
+    expect(orchestrator.RuntimeAdapterRegistry).toBe(RuntimeAdapterRegistry);
+    expect(orchestrator.RuntimeCursorError).toBe(RuntimeCursorError);
+    expect(orchestrator.HermesRuntimeAdapter).toEqual(expect.any(Function));
+    expect(orchestrator.OllamaRuntimeAdapter).toBe(OllamaRuntimeAdapter);
+    expect(orchestrator.CodexRuntimeAdapter).toBe(CodexRuntimeAdapter);
+    expect(RuntimeAgentSchema).toEqual(expect.any(Object));
+    expect(RuntimeRunSchema).toEqual(expect.any(Object));
+    expect(orchestrator.RuntimeAgentSchema).toBe(RuntimeAgentSchema);
+    expect(orchestrator.RuntimeApprovalSchema).toBe(RuntimeApprovalSchema);
+    expect(orchestrator.RuntimeBlockerSchema).toBe(RuntimeBlockerSchema);
+    expect(orchestrator.RuntimeHealthSchema).toBe(RuntimeHealthSchema);
+    expect(orchestrator.RuntimeMetadataSchema).toBe(RuntimeMetadataSchema);
+    expect(orchestrator.RuntimeRunSchema).toBe(RuntimeRunSchema);
+    expect(orchestrator.RuntimeSnapshotSchema).toBe(RuntimeSnapshotSchema);
+    expect(orchestrator.RuntimeTaskSchema).toBe(RuntimeTaskSchema);
+    expect(orchestrator.RuntimeWorkspaceSchema).toBe(RuntimeWorkspaceSchema);
+  }, 20_000);
+});

@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.18.2](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.18.1...@franken/brain-v0.18.2) (2026-07-31)
+
+
+### Bug Fixes
+
+* **brain:** bound faculty outcome scans ([#3934](https://github.com/djm204/frankenbeast/issues/3934)) ([a2b414c](https://github.com/djm204/frankenbeast/commit/a2b414c167235d9fbfc1a7110f03e040a6458885))
+* **brain:** reject prototype-pollution keys in persisted working memory JSON ([#3889](https://github.com/djm204/frankenbeast/issues/3889)) ([82106e5](https://github.com/djm204/frankenbeast/commit/82106e5c424ef91450f4535eab91be435a27ecb5))
+* **mcp-suite:** roll back failed brain flushes ([#3929](https://github.com/djm204/frankenbeast/issues/3929)) ([84471cf](https://github.com/djm204/frankenbeast/commit/84471cf1d636bccb2d61e8caa99b760092ea0569))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.19.0 to 0.19.1
+
+## [0.18.1](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.18.0...@franken/brain-v0.18.1) (2026-07-26)
+
+
+### Bug Fixes
+
+* **brain:** remediate hive privacy findings ([#3788](https://github.com/djm204/frankenbeast/issues/3788)) ([1275e4d](https://github.com/djm204/frankenbeast/commit/1275e4da6cd9199dcacae21ceda39323dbdbef88))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.18.0 to 0.19.0
+
 ## [0.18.0](https://github.com/djm204/frankenbeast/compare/@franken/brain-v0.17.0...@franken/brain-v0.18.0) (2026-07-25)
 
 

@@ -1,4 +1,21 @@
 import { extractResponseErrorMessage, toError } from './http-error';
+import {
+  BrainVitalsApiClient,
+  type BrainVitalsActivity,
+  type BrainHealthSample,
+  type BrainVitalsRunDetail,
+  type BrainVitalsSnapshot,
+  type BrainVitalsWindow,
+} from './brain-vitals-api';
+
+export type {
+  BrainHealthSample,
+  BrainVitalsActivity,
+  BrainVitalsDimension,
+  BrainVitalsRunDetail,
+  BrainVitalsSnapshot,
+  BrainVitalsWindow,
+} from './brain-vitals-api';
 
 export interface DashboardSkill {
   name: string;
@@ -23,6 +40,19 @@ export interface DashboardProvider {
   available: boolean;
   failoverOrder: number;
   model?: string;
+  /**
+   * The CLI registry name (claude/codex/gemini/aider) this provider actually
+   * executes as when selected as a Beast's default/override provider — the
+   * backend's own resolveWizardExecutionProvider result (franken-orchestrator's
+   * providers/provider-config.ts), which mirrors the real launch-resolution
+   * pipeline (resolveCliRegistryName in cli/dep-factory.ts). Undefined when
+   * this provider identity doesn't resolve to a known CLI-executable provider.
+   * The wizard's model fallback (provider-catalog.ts) must key off this field
+   * directly rather than re-deriving it from name/type itself — re-deriving it
+   * client-side repeatedly diverged from the real backend resolution (#3820,
+   * #3888).
+   */
+  executionProvider?: string;
 }
 
 export type DashboardDependencyStatus = 'healthy' | 'degraded' | 'unavailable' | 'unknown';
@@ -138,7 +168,39 @@ export interface DashboardBrainLesson {
 }
 
 export class DashboardApiClient {
-  constructor(private readonly baseUrl: string) {}
+  private readonly brainVitals: BrainVitalsApiClient;
+
+  constructor(private readonly baseUrl: string) {
+    this.brainVitals = new BrainVitalsApiClient(baseUrl);
+  }
+
+  listBrainVitalsRuns(limit = 100, cursor?: string) {
+    return this.brainVitals.listRuns(limit, cursor);
+  }
+
+  fetchBrainVitalsSnapshot(brainId: string): Promise<BrainVitalsSnapshot> {
+    return this.brainVitals.fetchSnapshot(brainId);
+  }
+
+  fetchBrainVitalsHistory(
+    brainId: string,
+    window = '1h',
+  ): Promise<{ data: BrainHealthSample[]; window: BrainVitalsWindow }> {
+    return this.brainVitals.fetchHistory(brainId, window);
+  }
+
+  fetchBrainVitalsRun(brainId: string, runId: string): Promise<BrainVitalsRunDetail> {
+    return this.brainVitals.fetchRun(brainId, runId);
+  }
+
+  subscribeToBrainVitals(
+    brainId: string,
+    onSnapshot: (snapshot: BrainVitalsSnapshot) => void,
+    onError?: (error: Error) => void,
+    onActivity?: (activity: BrainVitalsActivity) => void,
+  ) {
+    return this.brainVitals.subscribe(brainId, onSnapshot, onError, onActivity);
+  }
 
   async fetchSnapshot(): Promise<DashboardSnapshot> {
     const res = await fetch(`${this.baseUrl}/api/dashboard`);

@@ -14,6 +14,7 @@ import { AgentInitService } from '../beasts/services/agent-init-service.js';
 import { createBeastSseRoutes } from './routes/beast-sse-routes.js';
 import { beastRoutes, type BeastRoutesDeps } from './routes/beast-routes.js';
 import { brainRoutes, type BrainRouteContext } from './routes/brain-routes.js';
+import { createBrainVitalsRoutes, type BrainVitalsService } from './routes/brain-vitals-routes.js';
 import { chatRoutes } from './routes/chat-routes.js';
 import { networkRoutes } from './routes/network-routes.js';
 import { commsRoutes } from './routes/comms-routes.js';
@@ -44,6 +45,15 @@ import { createAnalyticsRoutes, type AnalyticsRouteDeps } from './routes/analyti
 import { ChatMutationAdmission, createChatRateLimiter, DEFAULT_CHAT_RATE_LIMIT, type ChatRateLimitOptions } from './chat-rate-limit.js';
 import type { InMemoryRateLimiter } from '../beasts/http/beast-rate-limit.js';
 import { DEFAULT_TRACKED_AGENT_PAGE_LIMIT } from '../beasts/repository/sqlite-beast-repository.js';
+import { createDefaultRuntimeAdapterRegistry } from '../runtime/runtime-defaults.js';
+import type { RuntimeAdapterRegistry } from '../runtime/runtime-adapter-registry.js';
+import type { RuntimeActionStore } from '../runtime/runtime-action-store.js';
+import {
+  createRuntimeRoutes,
+  type MissionCompletionRouteDeps,
+  type RuntimeActionAuditEvent,
+} from './routes/runtime-routes.js';
+import type { IGovernorModule } from '../deps.js';
 
 export interface ChatAppOptions {
   sessionStoreDir?: string;
@@ -70,6 +80,7 @@ export interface ChatAppOptions {
   beastControl?: BeastRoutesDeps & {
     brains?: BrainRegistry;
     resolveBrainContext?: (agentTypeId: string) => BrainRouteContext | undefined;
+    brainVitals?: BrainVitalsService;
   };
   commsConfig?: CommsConfig;
   commsRuntime?: CommsRuntimePort;
@@ -85,6 +96,18 @@ export interface ChatAppOptions {
   analyticsDeps?: AnalyticsRouteDeps;
   /** Optional owner-managed ticket store for browser EventSource chat streams. */
   chatStreamTicketStore?: SseConnectionTicketStore;
+  /** Provider-neutral smart-swarm runtime adapters. Hermes is registered by default. */
+  runtimeRegistry?: RuntimeAdapterRegistry;
+  /** Explicit Hermes home for the default runtime adapter; HERMES_HOME is used otherwise. */
+  hermesHome?: string;
+  /** Governor used for high-risk runtime task mutations. Missing governors fail closed. */
+  runtimeActionGovernor?: IGovernorModule;
+  /** Durable audit integration for every runtime mutation attempt. */
+  runtimeActionAudit?: (event: RuntimeActionAuditEvent) => void | Promise<void>;
+  /** Shared durable idempotency and audit store for runtime mutations. */
+  runtimeActionStore?: RuntimeActionStore;
+  /** Authoritative completion evidence and stop-once job control for smart-swarm missions. */
+  missionCompletion?: MissionCompletionRouteDeps;
   /** Rate/concurrency guard shared by chat REST, websocket, and comms mutations. */
   chatRateLimit?: ChatRateLimitOptions;
   chatRateLimiter?: InMemoryRateLimiter;
@@ -168,6 +191,12 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   const transportSecurity = opts.transportSecurity ?? new TransportSecurityService();
   const effectiveOperatorToken = opts.operatorToken ?? opts.beastControl?.operatorToken ?? opts.beastDaemon?.operatorToken;
   const chatStreamTicketStore = opts.chatStreamTicketStore ?? (effectiveOperatorToken ? new SseConnectionTicketStore() : undefined);
+  const runtimeRegistry = opts.runtimeRegistry ?? createDefaultRuntimeAdapterRegistry({
+    ...(opts.hermesHome ? { hermesHome: opts.hermesHome } : {}),
+    ...(opts.networkControl
+      ? { egressPolicyProvider: () => opts.networkControl?.getConfig().network.egressPolicy }
+      : {}),
+  });
   const chatRateLimiter = opts.chatRateLimiter
     ?? createChatRateLimiter(opts.chatRateLimit ?? opts.beastControl?.rateLimit ?? DEFAULT_CHAT_RATE_LIMIT);
   const chatMutationAdmission = opts.chatMutationAdmission ?? new ChatMutationAdmission(chatRateLimiter);
@@ -224,6 +253,15 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     });
     app.use('/v1/brain', requireAuth());
     app.use('/v1/brain/*', requireAuth());
+    app.use('/v1/brain-vitals', requireAuth());
+    app.use('/v1/brain-vitals/*', async (c, next) => {
+      const pathname = new URL(c.req.url).pathname;
+      if (c.req.method === 'GET' && /^\/v1\/brain-vitals\/[^/]+\/events\/[^/]+$/.test(pathname)) {
+        await next();
+        return;
+      }
+      return requireAuth()(c, next);
+    });
     app.use('/api/dashboard', requireAuth());
     app.use('/api/dashboard/*', async (c, next) => {
       if (new URL(c.req.url).pathname === '/api/dashboard/events') {
@@ -304,6 +342,16 @@ export function createChatApp(opts: ChatAppOptions): Hono {
         rateLimit: opts.beastControl.rateLimit,
       }));
     }
+    if (opts.beastControl.brainVitals) {
+      app.route('/', createBrainVitalsRoutes({
+        service: opts.beastControl.brainVitals,
+        eventBus: opts.beastControl.eventBus,
+        ticketStore: opts.beastControl.ticketStore,
+        operatorToken: opts.beastControl.operatorToken,
+        security: opts.beastControl.security ?? transportSecurity,
+        rateLimit: opts.beastControl.rateLimit,
+      }));
+    }
     const bc = opts.beastControl;
     app.route('/', createBeastSseRoutes({
       bus: bc.eventBus,
@@ -327,6 +375,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
     const proxyOperatorToken = opts.beastDaemon.operatorToken ?? effectiveOperatorToken;
     app.all('/v1/beasts/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
     app.all('/v1/brain/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
+    app.all('/v1/brain-vitals/*', async (c) => proxyToBeastDaemon(c.req.raw, opts.beastDaemon!, proxyOperatorToken));
   }
   if (opts.networkControl) {
     app.route('/', networkRoutes(opts.networkControl));
@@ -362,6 +411,19 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   }
   if (opts.analyticsDeps) {
     app.route('/api/analytics', createAnalyticsRoutes(opts.analyticsDeps));
+  }
+  if (effectiveOperatorToken && chatStreamTicketStore) {
+    app.route('/', createRuntimeRoutes({
+      registry: runtimeRegistry,
+      operatorToken: effectiveOperatorToken,
+      security: operatorSecurity,
+      ticketStore: chatStreamTicketStore,
+      ...(opts.beastControl?.rateLimit ? { rateLimit: opts.beastControl.rateLimit } : {}),
+      ...(opts.runtimeActionGovernor ? { actionGovernor: opts.runtimeActionGovernor } : {}),
+      ...(opts.runtimeActionAudit ? { actionAudit: opts.runtimeActionAudit } : {}),
+      ...(opts.runtimeActionStore ? { actionStore: opts.runtimeActionStore } : {}),
+      ...(opts.missionCompletion ? { missionCompletion: opts.missionCompletion } : {}),
+    }));
   }
 
   return app;

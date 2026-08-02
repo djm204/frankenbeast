@@ -1,0 +1,155 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import { readdir, readFile } from 'node:fs/promises';
+import { extname, join, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const defaultRoot = fileURLToPath(new URL('..', import.meta.url));
+const root = process.env.FRANKENBEAST_DOCS_SCAN_ROOT ?? defaultRoot;
+const docsRoot = join(root, 'docs');
+const openingMarkerPattern = /^(<{1,})(?:\s.*)?$/u;
+const ancestorMarkerPattern = /^(\|{7,})(?:\s.*)?$/u;
+const separatorMarkerPattern = /^(={1,})(?:\s.*)?$/u;
+const closingMarkerPattern = /^(>{1,})(?:\s.*)?$/u;
+const ignoredDirectories = new Set(['generated', 'node_modules', 'vendor']);
+
+function readConfiguredMarkerWidths(paths) {
+  const repoPaths = paths.map(toRepoPath);
+  if (repoPaths.length === 0) return new Map();
+
+  let output;
+  try {
+    output = execFileSync(
+      'git',
+      ['check-attr', '-z', 'conflict-marker-size', '--', ...repoPaths],
+      { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+  } catch (error) {
+    if (error?.status === 128) return new Map();
+    throw error;
+  }
+
+  const fields = output.split('\0');
+  const widths = new Map();
+  for (let index = 0; index + 2 < fields.length; index += 3) {
+    const [path, , value] = fields.slice(index, index + 3);
+    if (/^\d+$/u.test(value)) widths.set(path, Number(value));
+  }
+  return widths;
+}
+
+function toRepoPath(path) {
+  return relative(root, path).split(sep).join('/');
+}
+
+async function* walkMarkdown(dir) {
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return;
+    throw error;
+  }
+
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!ignoredDirectories.has(entry.name)) {
+        yield* walkMarkdown(path);
+      }
+    } else if (entry.isFile() && extname(entry.name).toLowerCase() === '.md') {
+      yield path;
+    }
+  }
+}
+
+async function scanFile(path, configuredMarkerWidth) {
+  const source = (await readFile(path, 'utf8')).replace(/^\uFEFF/u, '');
+  const findings = [];
+  const conflicts = new Map();
+
+  for (const [index, line] of source.split(/\r\n|\r|\n/u).entries()) {
+    const openingMatch = openingMarkerPattern.exec(line);
+    if (openingMatch) {
+      const width = openingMatch[1].length;
+      if (width < 7 && configuredMarkerWidth !== width) continue;
+      const finding = { path: toRepoPath(path), line: index + 1, marker: openingMatch[1] };
+      if (width >= 7) {
+        findings.push(finding);
+      } else if (!conflicts.has(width)) {
+        conflicts.set(width, {
+          width,
+          sawSeparator: false,
+          findings: [finding],
+        });
+      }
+      continue;
+    }
+
+    const ancestorMatch = ancestorMarkerPattern.exec(line);
+    if (ancestorMatch) {
+      findings.push({ path: toRepoPath(path), line: index + 1, marker: ancestorMatch[1] });
+      continue;
+    }
+
+    const closingMatch = closingMarkerPattern.exec(line);
+    if (closingMatch?.[1].length >= 7) {
+      findings.push({ path: toRepoPath(path), line: index + 1, marker: closingMatch[1] });
+      conflicts.clear();
+      continue;
+    }
+
+    const separatorMatch = separatorMarkerPattern.exec(line);
+    const separatorConflict = separatorMatch
+      ? conflicts.get(separatorMatch[1].length)
+      : undefined;
+    if (separatorConflict) {
+      separatorConflict.sawSeparator = true;
+      separatorConflict.findings.push({
+        path: toRepoPath(path),
+        line: index + 1,
+        marker: separatorMatch[1],
+      });
+      continue;
+    }
+
+    const closingConflict = closingMatch
+      ? conflicts.get(closingMatch[1].length)
+      : undefined;
+    if (closingConflict?.sawSeparator) {
+      closingConflict.findings.push({
+        path: toRepoPath(path),
+        line: index + 1,
+        marker: closingMatch[1],
+      });
+      findings.push(...closingConflict.findings);
+      conflicts.delete(closingMatch[1].length);
+    }
+  }
+
+  return findings;
+}
+
+const findings = [];
+const paths = [];
+for await (const path of walkMarkdown(docsRoot)) paths.push(path);
+const configuredMarkerWidths = readConfiguredMarkerWidths(paths);
+for (const path of paths) {
+  findings.push(...await scanFile(path, configuredMarkerWidths.get(toRepoPath(path))));
+}
+findings.sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
+
+if (process.argv.includes('--json')) {
+  console.log(JSON.stringify({ scannedRoots: ['docs'], totalFindings: findings.length, findings }, null, 2));
+} else if (findings.length === 0) {
+  console.log('No unresolved merge markers found in maintained Markdown under docs/.');
+} else {
+  console.error(`Unresolved merge markers found in maintained Markdown (${findings.length}):`);
+  for (const finding of findings) {
+    console.error(`- ${finding.path}:${finding.line}: ${finding.marker}`);
+  }
+}
+
+if (findings.length > 0) {
+  process.exitCode = 1;
+}

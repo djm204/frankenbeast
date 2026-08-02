@@ -177,6 +177,7 @@ function announcementForActivity(event: ActivityEvent, activityNumber: number): 
 }
 
 const UNABLE_TO_STRINGIFY_EVENT_DATA = '[unserializable event data]';
+const EMPTY_ACTIVITY_ANNOUNCEMENT = 'Waiting for execution events.';
 
 function formatEventData(data: Record<string, unknown>): string {
   const ancestors: object[] = [];
@@ -243,10 +244,14 @@ export function ActivityPane({ events, resetKey }: ActivityPaneProps) {
         <p className="eyebrow">Activity</p>
         <h2>Runtime Events</h2>
       </div>
-      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {announcement}
+      <p
+        className={events.length === 0 ? 'rail-card__empty' : 'sr-only'}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {events.length === 0 ? EMPTY_ACTIVITY_ANNOUNCEMENT : announcement}
       </p>
-      {events.length === 0 && <p className="rail-card__empty">Waiting for execution events.</p>}
       <ol ref={containerRef} className="activity-list" aria-label="Runtime activity timeline" onScroll={handleScroll}>
         {events.map((event, index) => {
           const viewModel = viewModelForActivity(event);

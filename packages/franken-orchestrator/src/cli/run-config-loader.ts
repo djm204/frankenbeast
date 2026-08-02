@@ -66,6 +66,7 @@ export const RunConfigSchema = z.object({
   gitConfig: GitConfigSchema.optional(),
   promptConfig: PromptConfigSchema.optional(),
   maxTotalTokens: z.number().optional(),
+  budget: z.number().positive().optional(),
   reflection: z.boolean().optional(),
 }).passthrough();
 

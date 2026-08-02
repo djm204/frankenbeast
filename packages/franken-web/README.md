@@ -72,6 +72,20 @@ that no unfiltered recent feed exists instead of fabricating one. These requests
 stay behind the same-origin `/v1` proxy and never attach a browser-readable
 operator credential.
 
+**Smart Swarm** at `#/smart-swarm` is the only live operations surface. It reads
+normalized runtime adapters, presents the adapter-supplied provider label, and
+shows section counts only when the selected adapter marks that section
+available. Each count names its adapter provenance and snapshot capture time;
+unsupported sections render `unsupported` plus the adapter reason instead of a
+misleading zero. The retired `#/brain-vitals` hash redirects to Smart Swarm.
+
+The legacy `/v1/brain-vitals/*` Beast telemetry API remains available for
+bounded diagnostics and compatibility, but `franken-web` does not mount its old
+acceptance panel or query its run-discovery path. Consequently an isolated or
+stale `design-interview` acceptance run cannot populate the production
+dashboard. The read-only faculty **Brain** panel remains separate because it
+answers what a named brain knows; it is not an operational runtime monitor.
+
 If you use a non-default backend port in local development, keep `VITE_API_URL` unset and set `VITE_API_PROXY_TARGET` so the Vite `/v1/chat` proxy keeps chat auth server-side. Beast routes (`/v1/beasts/*`) reuse that same target by default. Set `VITE_BEAST_API_PROXY_TARGET` only when Beast controls run on a different backend, for example a separate local orchestrator or daemon port:
 
 | Local workflow | Backend topology | Vite env vars to set |

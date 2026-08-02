@@ -14,19 +14,33 @@ export function readSettingsJson(content: string): Record<string, unknown> {
   return parseJsonObjectWithComments(content);
 }
 
-export function recoverInvalidJsonFile(path: string, error: unknown): Record<string, unknown> {
+export interface JsonRecoveryOptions {
+  reportRecovery?: boolean;
+}
+
+export function recoverInvalidJsonFile(
+  path: string,
+  error: unknown,
+  options: JsonRecoveryOptions = {},
+): Record<string, unknown> {
   const backupPath = join(dirname(path), `${basename(path)}.invalid-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.bak`);
   copyFileSync(path, backupPath);
-  const reason = error instanceof Error ? error.message : String(error);
-  console.warn(`fbeast: ${path} is not valid JSON (${reason}); backed it up to ${backupPath} and will recreate it.`);
+  if (options.reportRecovery !== false) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`fbeast: ${path} is not valid JSON (${reason}); backed it up to ${backupPath} and will recreate it.`);
+  }
   return {};
 }
 
-export function readJsonObjectFileOrRecover(path: string, content: string): Record<string, unknown> {
+export function readJsonObjectFileOrRecover(
+  path: string,
+  content: string,
+  options: JsonRecoveryOptions = {},
+): Record<string, unknown> {
   try {
     return parseJsonObjectWithComments(content);
   } catch (error) {
-    return recoverInvalidJsonFile(path, error);
+    return recoverInvalidJsonFile(path, error, options);
   }
 }
 

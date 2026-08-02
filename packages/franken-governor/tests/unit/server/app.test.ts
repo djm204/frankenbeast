@@ -27,6 +27,135 @@ describe('Governor Hono Server', () => {
   });
 
   describe('POST /v1/approval/request', () => {
+    it('rejects an approval request without a timestamp', async () => {
+      const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+      const res = await app.request('/v1/approval/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: 'req-missing-timestamp',
+          taskId: 'task-1',
+          summary: 'Deploy to production',
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error: {
+          code: 'invalid_approval_request_timestamp',
+          message: 'Approval request timestamp must be a valid ISO-8601 string',
+        },
+      });
+    });
+
+    it('rejects a date-only approval request timestamp as invalid', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-29T00:01:00.000Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-date-only',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-07-29',
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+          error: {
+            code: 'invalid_approval_request_timestamp',
+            message: 'Approval request timestamp must be a valid ISO-8601 string',
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects an impossible calendar date in an approval request timestamp', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-03-01T00:00:00.000Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-invalid-calendar-date',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-02-29T00:00:00.000Z',
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+          error: {
+            code: 'invalid_approval_request_timestamp',
+            message: 'Approval request timestamp must be a valid ISO-8601 string',
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('accepts an approval request timestamp with microsecond precision', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-29T12:00:00.123Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-microseconds',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-07-29T12:00:00.123456Z',
+          }),
+        });
+
+        expect(res.status).toBe(201);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('rejects an approval request older than the configured timeout window', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-29T12:00:00.000Z'));
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-stale',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: '2026-07-29T11:54:59.999Z',
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        await expect(res.json()).resolves.toEqual({
+          error: {
+            code: 'approval_request_expired',
+            message: 'Approval request timestamp is outside the allowed window',
+          },
+        });
+        const healthBody = await (await app.request('/health')).json();
+        expect(healthBody.pendingApprovals).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('creates approval request', async () => {
       const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
       const res = await app.request('/v1/approval/request', {
@@ -36,6 +165,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-1',
           taskId: 'task-1',
           summary: 'Deploy to production',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -44,12 +174,36 @@ describe('Governor Hono Server', () => {
       expect(body.status).toBe('pending');
     });
 
+    it('uses the wall clock for request freshness in deterministic mode', async () => {
+      const previousSeed = process.env.FRANKENBEAST_SEED;
+      process.env.FRANKENBEAST_SEED = 'approval-freshness-test';
+      try {
+        const app = createGovernorApp({ allowUnsignedApprovalsForTests: true });
+        const res = await app.request('/v1/approval/request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestId: 'req-deterministic-mode',
+            taskId: 'task-1',
+            summary: 'Deploy to production',
+            timestamp: new Date().toISOString(),
+          }),
+        });
+
+        expect(res.status).toBe(201);
+      } finally {
+        if (previousSeed === undefined) delete process.env.FRANKENBEAST_SEED;
+        else process.env.FRANKENBEAST_SEED = previousSeed;
+      }
+    });
+
     it('creates a signed approval request when a signing secret is configured', async () => {
       const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
       const payload = JSON.stringify({
         requestId: 'req-signed',
         taskId: 'task-1',
         summary: 'Deploy to production',
+        timestamp: new Date().toISOString(),
       });
 
       const res = await app.request('/v1/approval/request', {
@@ -75,6 +229,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-unsigned',
           taskId: 'task-1',
           summary: 'Deploy to production',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -123,7 +278,12 @@ describe('Governor Hono Server', () => {
         const accepted = await app.request('/v1/approval/request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requestId, taskId: 'task-1', summary: 'Deploy' }),
+          body: JSON.stringify({
+            requestId,
+            taskId: 'task-1',
+            summary: 'Deploy',
+            timestamp: new Date().toISOString(),
+          }),
         });
         expect(accepted.status).toBe(201);
       }
@@ -131,7 +291,12 @@ describe('Governor Hono Server', () => {
       const rejected = await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'req-3', taskId: 'task-1', summary: 'Deploy' }),
+        body: JSON.stringify({
+          requestId: 'req-3',
+          taskId: 'task-1',
+          summary: 'Deploy',
+          timestamp: new Date().toISOString(),
+        }),
       });
 
       expect(rejected.status).toBe(429);
@@ -161,14 +326,24 @@ describe('Governor Hono Server', () => {
       const created = await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'req-1', taskId: 'task-1', summary: 'Deploy' }),
+        body: JSON.stringify({
+          requestId: 'req-1',
+          taskId: 'task-1',
+          summary: 'Deploy',
+          timestamp: new Date().toISOString(),
+        }),
       });
       expect(created.status).toBe(201);
 
       const refreshed = await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: 'req-1', taskId: 'task-1', summary: 'Updated summary' }),
+        body: JSON.stringify({
+          requestId: 'req-1',
+          taskId: 'task-1',
+          summary: 'Updated summary',
+          timestamp: new Date().toISOString(),
+        }),
       });
 
       expect(refreshed.status).toBe(201);
@@ -187,6 +362,7 @@ describe('Governor Hono Server', () => {
         requestId,
         taskId: 'task-1',
         summary: 'Deploy',
+        timestamp: new Date().toISOString(),
       });
       await app.request('/v1/approval/request', {
         method: 'POST',
@@ -209,6 +385,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-1',
           taskId: 'task-1',
           summary: 'Deploy',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -236,6 +413,7 @@ describe('Governor Hono Server', () => {
           requestId: 'req-invalid',
           taskId: 'task-1',
           summary: 'Deploy',
+          timestamp: new Date().toISOString(),
         }),
       });
 
@@ -413,6 +591,91 @@ describe('Governor Hono Server', () => {
       expect(res.status).toBe(401);
       const body = await res.json();
       expect(body.error.message).toBe('Missing signature');
+    });
+
+    // Regression coverage for issue #3722: the raw request bytes must be
+    // authenticated with the governor signing secret BEFORE JSON.parse ever
+    // runs, so an unauthenticated caller cannot force parsing of arbitrary
+    // bytes. Each case below sends a body that is not valid JSON; if
+    // authentication happened first (as it must), the handler never reaches
+    // JSON.parse and returns the auth-specific 401 below instead of the
+    // generic "Malformed JSON body" 400 that parsing failure would produce.
+    describe('authenticates before JSON parsing', () => {
+      const MALFORMED_JSON = '{not valid json';
+
+      it('rejects an unsigned malformed-JSON body before parsing when no signing secret is configured', async () => {
+        const app = createGovernorApp();
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Signing secret required for approval responses');
+      });
+
+      it('rejects a malformed-JSON body with a missing signature before parsing', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Missing signature');
+      });
+
+      it('rejects a malformed-JSON body with a malformed signature header before parsing', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-governor-signature': 'sha256=not-hex',
+          },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Malformed signature');
+      });
+
+      it('rejects a malformed-JSON body with an invalid signature before parsing', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-governor-signature': `sha256=${'0'.repeat(64)}`,
+          },
+          body: MALFORMED_JSON,
+        });
+
+        expect(res.status).toBe(401);
+        const body = await res.json();
+        expect(body.error.message).toBe('Invalid signature');
+      });
+
+      it('never dispatches to the registry when authentication fails, even with well-formed JSON', async () => {
+        const app = createGovernorApp({ signingSecret: SIGNING_FIXTURE });
+        await seedResponseApproval(app, 'req-auth-order', SIGNING_FIXTURE);
+
+        const res = await app.request('/v1/approval/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requestId: 'req-auth-order', decision: 'APPROVE' }),
+        });
+
+        expect(res.status).toBe(401);
+        const health = await app.request('/health');
+        const healthBody = await health.json();
+        expect(healthBody.pendingApprovals).toBe(1);
+      });
     });
   });
 
@@ -644,7 +907,12 @@ describe('Governor Hono Server', () => {
       await app.request('/v1/approval/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId, taskId: 'task-1', summary: 'Deploy' }),
+        body: JSON.stringify({
+          requestId,
+          taskId: 'task-1',
+          summary: 'Deploy',
+          timestamp: new Date().toISOString(),
+        }),
       });
     }
 

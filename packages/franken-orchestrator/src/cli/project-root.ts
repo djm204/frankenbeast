@@ -134,6 +134,7 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
   const plansDir = planName ? resolve(plansBaseDir, planName) : plansBaseDir;
   const buildDir = resolve(frankenbeastDir, '.build');
   const beastsDir = resolve(buildDir, 'beasts');
+  const tracesDbOverride = process.env.FRANKENBEAST_TRACES_DB?.trim();
   return {
     root,
     frankenbeastDir,
@@ -146,7 +147,9 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
     chunkSessionsDir: resolve(buildDir, 'chunk-sessions'),
     chunkSessionSnapshotsDir: resolve(buildDir, 'chunk-session-snapshots'),
     checkpointFile: resolve(buildDir, '.checkpoint'),
-    tracesDb: resolve(buildDir, 'build-traces.db'),
+    tracesDb: tracesDbOverride
+      ? (isAbsolute(tracesDbOverride) ? tracesDbOverride : resolve(root, tracesDbOverride))
+      : resolve(buildDir, 'build-traces.db'),
     logFile: resolve(buildDir, 'build.log'),
     designDocFile: resolve(plansDir, 'design.md'),
     configFile: resolve(frankenbeastDir, 'config.json'),

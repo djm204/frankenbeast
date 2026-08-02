@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.9.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.9.2...franken-governor-v0.9.3) (2026-07-31)
+
+
+### Bug Fixes
+
+* **governor:** authenticate approval responses before JSON parsing ([#3911](https://github.com/djm204/frankenbeast/issues/3911)) ([dbd4f11](https://github.com/djm204/frankenbeast/commit/dbd4f1136f160e5de09da0f897949773e7e18081)), closes [#3722](https://github.com/djm204/frankenbeast/issues/3722)
+* **governor:** enforce TTL and purge expired approvals in registry ([#3924](https://github.com/djm204/frankenbeast/issues/3924)) ([91b18b2](https://github.com/djm204/frankenbeast/commit/91b18b271d8bf82bc1e791220cf27b952f53b024))
+* **governor:** expire stale approval requests ([#3895](https://github.com/djm204/frankenbeast/issues/3895)) ([3da0db8](https://github.com/djm204/frankenbeast/commit/3da0db87b10b8013dc5e059fc61a5753eb65f721))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.19.0 to 0.19.1
+
+## [0.9.2](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.9.1...franken-governor-v0.9.2) (2026-07-26)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.18.0 to 0.19.0
+
 ## [0.9.1](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.9.0...franken-governor-v0.9.1) (2026-07-25)
 
 

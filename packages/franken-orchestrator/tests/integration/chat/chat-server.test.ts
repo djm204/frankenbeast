@@ -70,6 +70,40 @@ describe('chat server bootstrap', () => {
     rmSync(TMP, { recursive: true, force: true });
   });
 
+  it('stops admitting HTTP requests before awaiting completion monitor shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    let releaseMonitor!: () => void;
+    let markStopping!: () => void;
+    const monitorStopping = new Promise<void>((resolve) => { markStopping = resolve; });
+    const monitorStopped = new Promise<void>((resolve) => { releaseMonitor = resolve; });
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('unused') },
+      projectName: 'test-project',
+      missionCompletion: {
+        getInput: vi.fn() as never,
+        stopJobs: vi.fn(),
+        getStatus: vi.fn() as never,
+        startMonitoring: vi.fn(),
+        stopMonitoring: async () => {
+          markStopping();
+          await monitorStopped;
+        },
+      },
+    });
+
+    const closing = server.close();
+    await monitorStopping;
+    try {
+      await expect(fetch(`${server.url}/health`)).rejects.toThrow();
+    } finally {
+      releaseMonitor();
+      await closing;
+    }
+  });
+
   it('serves HTTP sessions and websocket upgrades from the same live server', async () => {
     mkdirSync(TMP, { recursive: true });
     const llm = { complete: vi.fn().mockResolvedValue('Server reply') };
@@ -123,6 +157,74 @@ describe('chat server bootstrap', () => {
     }
   });
 
+  it('includes persisted transcript context in the second default HTTP turn', async () => {
+    mkdirSync(TMP, { recursive: true });
+    const llm = {
+      complete: vi.fn(async (prompt: string) => {
+        if (!prompt.includes('What code word did I give you?')) {
+          return 'I stored the code word raven.';
+        }
+        return prompt.includes('assistant: I stored the code word raven.')
+          ? 'The code word is raven.'
+          : 'I cannot recall the code word.';
+      }),
+    };
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm,
+      projectName: 'test-project',
+    });
+
+    try {
+      const createRes = await fetch(`${server.url}/v1/chat/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: 'proj' }),
+      });
+      expect(createRes.status).toBe(201);
+      const { data: session } = await createRes.json() as { data: { id: string } };
+
+      const firstRes = await fetch(`${server.url}/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Remember the code word raven.' }),
+      });
+      expect(firstRes.status).toBe(200);
+
+      const secondRes = await fetch(`${server.url}/v1/chat/sessions/${session.id}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'What code word did I give you?' }),
+      });
+      expect(secondRes.status).toBe(200);
+
+      expect(llm.complete).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('user: Remember the code word raven.'),
+        { sessionContinue: false },
+      );
+      expect(llm.complete).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('assistant: I stored the code word raven.'),
+        { sessionContinue: false },
+      );
+
+      const sessionRes = await fetch(`${server.url}/v1/chat/sessions/${session.id}`);
+      expect(sessionRes.status).toBe(200);
+      const sessionBody = await sessionRes.json() as {
+        data: { transcript: Array<{ role: string; content: string }> };
+      };
+      expect(sessionBody.data.transcript.at(-1)).toMatchObject({
+        role: 'assistant',
+        content: 'The code word is raven.',
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
   it('removes websocket upgrade listeners and closes active sockets on shutdown', async () => {
     mkdirSync(TMP, { recursive: true });
     const server = await startChatServer({
@@ -160,6 +262,35 @@ describe('chat server bootstrap', () => {
     await waitForSocketClose(socket);
 
     expect(server.server.listenerCount('upgrade')).toBe(0);
+  });
+
+  it('awaits asynchronous Beast-service disposal during shutdown', async () => {
+    mkdirSync(TMP, { recursive: true });
+    let releaseDispose: (() => void) | undefined;
+    let notifyDisposeStarted: (() => void) | undefined;
+    const disposeStarted = new Promise<void>((resolve) => { notifyDisposeStarted = resolve; });
+    const disposeBeastControl = vi.fn(() => new Promise<void>((resolve) => {
+      releaseDispose = resolve;
+      notifyDisposeStarted?.();
+    }));
+    const server = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: TMP,
+      llm: { complete: vi.fn().mockResolvedValue('') },
+      projectName: 'test-project',
+      disposeBeastControl,
+    });
+
+    let closed = false;
+    const closePromise = server.close().then(() => { closed = true; });
+    await disposeStarted;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(closed).toBe(false);
+    releaseDispose?.();
+    await closePromise;
+    expect(disposeBeastControl).toHaveBeenCalledOnce();
   });
 
   it('mounts beast routes on the live server when beast control is configured', async () => {

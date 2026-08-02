@@ -1,5 +1,12 @@
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runHook, type HookDeps } from './hook.js';
+import {
+  defaultHookDeps,
+  runHook,
+  TOOL_CONTEXT_FILE_ENV,
+  type HookDeps,
+} from './hook.js';
 
 function hookDeps() {
   const log = vi.fn().mockResolvedValue(undefined);
@@ -24,7 +31,41 @@ function hookDeps() {
 describe('runHook', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     process.exitCode = undefined;
+  });
+
+  it('fails closed when the configured context file cannot be read', async () => {
+    const missingContextFile = join(tmpdir(), `fbeast-missing-context-${process.pid}`);
+    vi.stubEnv(TOOL_CONTEXT_FILE_ENV, missingContextFile);
+    const deps = defaultHookDeps();
+    const governorCheck = vi.fn().mockResolvedValue({ decision: 'approved', reason: 'ok' });
+    deps.governor.check = governorCheck;
+
+    await expect(runHook([
+      'pre-tool',
+      'benign-tool',
+      'legacy-positional-context',
+    ], deps)).rejects.toThrow('Unable to read fbeast tool context file');
+    expect(governorCheck).not.toHaveBeenCalled();
+  });
+
+  it('continues post-tool auditing when the context file cannot be read', async () => {
+    const missingContextFile = join(tmpdir(), `fbeast-missing-post-context-${process.pid}`);
+    vi.stubEnv(TOOL_CONTEXT_FILE_ENV, missingContextFile);
+    const deps = defaultHookDeps();
+    const observerLog = vi.fn().mockResolvedValue(undefined);
+    deps.observer.log = observerLog;
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await expect(runHook([
+      'post-tool',
+      'benign-tool',
+      '{"ok":true}',
+    ], deps)).resolves.toBeUndefined();
+    expect(observerLog).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'tool_call',
+    }));
   });
 
   it('redacts retention-report post-tool payloads before observer logging', async () => {
@@ -122,6 +163,46 @@ describe('runHook', () => {
     });
     expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('«redacted:ghp_…»');
     expect(log.mock.calls.map((call) => JSON.stringify(call)).join('\n')).not.toContain('private memory payload');
+  });
+
+  it('preserves a legitimate agentId that happens to look like a short secret-shaped value', async () => {
+    const { deps, log } = hookDeps();
+    deps.readContext = () => JSON.stringify({
+      args: {
+        agentId: 'sk-platform',
+        profile: 'default',
+        repo: 'djm204/frankenbeast',
+        type: 'working',
+      },
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'fbeast_memory_query',
+      '{"ok":true,"content":[{"type":"text","text":"safe"}]}',
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    // "sk-platform" is a plausible real agentId, not a secret; audit tooling
+    // elsewhere (brain-adapter.ts) filters access reports by its *exact*
+    // value, so over-redacting it would silently break attribution.
+    expect(metadata.args.agentId).toBe('sk-platform');
+  });
+
+  it('still redacts a genuine long sk-prefixed secret in a post-tool payload (regression guard for the agentId fix)', async () => {
+    const { deps, log } = hookDeps();
+    const secret = `sk-${'a'.repeat(40)}`;
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ result: secret }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain(secret);
   });
 
   it('uses the hook tool name to redact direct memory args without type hints', async () => {
@@ -239,5 +320,50 @@ describe('runHook', () => {
     const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
     expect(metadata.decision).toBe('unknown');
     expect(JSON.stringify(metadata)).not.toContain('token=secret-value');
+  });
+
+  it('redacts bare credential-shaped values from post-tool payloads with no secret-labeled key', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    // "result" is not a recognized credential label, so this only gets caught by
+    // value-shape (not key-label) detection. Regression test for #3838.
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ result: 'ghp_1234567890abcdefghijklmnopqrstuvwxyz' }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain('ghp_1234567890abcdefghijklmnopqrstuvwxyz');
+    expect(metadata.payload).toContain('[REDACTED]');
+  });
+
+  it('redacts credential-shaped values embedded in free-form post-tool text', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ message: 'here is AKIAIOSFODNN7EXAMPLE for aws access' }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain('AKIAIOSFODNN7EXAMPLE');
+  });
+
+  it('redacts sk-prefixed API keys nested under an unlabeled field', async () => {
+    const { deps, log } = hookDeps();
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    await runHook([
+      'post-tool',
+      'some_tool',
+      JSON.stringify({ output: 'sk-abcdefghijklmnopqrstuvwxyz1234567890ABCDEF' }),
+    ], deps);
+
+    const metadata = JSON.parse(log.mock.calls[0]![0].metadata);
+    expect(JSON.stringify(metadata)).not.toContain('sk-abcdefghijklmnopqrstuvwxyz1234567890ABCDEF');
   });
 });

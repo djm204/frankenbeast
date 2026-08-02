@@ -1,5 +1,84 @@
 # Changelog
 
+## [0.61.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.61.0...@franken/orchestrator-v0.61.1) (2026-07-31)
+
+
+### Bug Fixes
+
+* **critique:** reject non-finite token budgets ([#3896](https://github.com/djm204/frankenbeast/issues/3896)) ([82465a9](https://github.com/djm204/frankenbeast/commit/82465a92858fed8633bf3fe1900f083e0370ff1f))
+* **orchestrator:** bound adapter LLM requests ([#3931](https://github.com/djm204/frankenbeast/issues/3931)) ([d0fda93](https://github.com/djm204/frankenbeast/commit/d0fda93ebfa407a5a1e373a9621448cd33dfcbce))
+* **orchestrator:** filter secret-shaped env vars before spawning LLM CLIs ([#3925](https://github.com/djm204/frankenbeast/issues/3925)) ([0907db8](https://github.com/djm204/frankenbeast/commit/0907db8fc322d211c5b453f16d243df4c058020a))
+* **orchestrator:** inject planning faculty clock ([#3933](https://github.com/djm204/frankenbeast/issues/3933)) ([8392035](https://github.com/djm204/frankenbeast/commit/8392035e29b00e43eac1491e0b866d9a60750cd1))
+* **orchestrator:** isolate planning telemetry failures ([#3937](https://github.com/djm204/frankenbeast/issues/3937)) ([3c7ba01](https://github.com/djm204/frankenbeast/commit/3c7ba011d2d1f2a66aa83ae87bb47afe2ce0db36))
+* **orchestrator:** preserve launch diagnostics and run design interviews unattended ([#3884](https://github.com/djm204/frankenbeast/issues/3884)) ([d7486e4](https://github.com/djm204/frankenbeast/commit/d7486e498f803dc10ce300a34d5dabe6a081feac))
+* **orchestrator:** sanitize adapter error messages ([#3927](https://github.com/djm204/frankenbeast/issues/3927)) ([21df895](https://github.com/djm204/frankenbeast/commit/21df895f257413f0013f30d7b54289eeca3065f9))
+* **orchestrator:** secure adapter request IDs ([#3894](https://github.com/djm204/frankenbeast/issues/3894)) ([78eecdb](https://github.com/djm204/frankenbeast/commit/78eecdbdc7e68305da5d0d6e3a5d780104adfe82))
+* **orchestrator:** validate completion token limits ([#3936](https://github.com/djm204/frankenbeast/issues/3936)) ([6dc4b50](https://github.com/djm204/frankenbeast/commit/6dc4b503ec5093d55590396ef72aaf685118a76f))
+* **web:** populate LLM Targets model list for providers without a pinned model ([#3888](https://github.com/djm204/frankenbeast/issues/3888)) ([65007bf](https://github.com/djm204/frankenbeast/commit/65007bf758e53bc4c3647134e84411ceaaa4a1d8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.11.2 to 0.11.3
+    * @franken/governor bumped from 0.9.2 to 0.9.3
+    * @franken/types bumped from 0.19.0 to 0.19.1
+    * @franken/observer bumped from 0.13.0 to 0.13.1
+    * @franken/planner bumped from 0.4.28 to 0.4.29
+    * @franken/brain bumped from 0.18.1 to 0.18.2
+
+## [0.61.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.60.0...@franken/orchestrator-v0.61.0) (2026-07-28)
+
+
+### Features
+
+* **orchestrator:** add Codex runtime adapter ([#3861](https://github.com/djm204/frankenbeast/issues/3861)) ([b7dedb7](https://github.com/djm204/frankenbeast/commit/b7dedb7b53f76d7e0b8e28e090b711c7d7a992c9))
+* **orchestrator:** add governed smart-swarm actions ([#3862](https://github.com/djm204/frankenbeast/issues/3862)) ([a9ecf29](https://github.com/djm204/frankenbeast/commit/a9ecf2983a4f910dc7de0ff43ea057956d5b140d))
+* **orchestrator:** add Hermes runtime adapter boundary ([#3821](https://github.com/djm204/frankenbeast/issues/3821)) ([715da9d](https://github.com/djm204/frankenbeast/commit/715da9d456d9a883aa96d85f53cbefca832da1c1))
+* **orchestrator:** add mission completion gates ([#3871](https://github.com/djm204/frankenbeast/issues/3871)) ([1d339b4](https://github.com/djm204/frankenbeast/commit/1d339b445fe8e285d9a139ddc67032f51c42d01f))
+* **orchestrator:** add Ollama runtime adapter ([#3834](https://github.com/djm204/frankenbeast/issues/3834)) ([6734ad4](https://github.com/djm204/frankenbeast/commit/6734ad47f7746edf4c23679fceba17d0a6a45332))
+* **web:** drive brain pulse from runtime events ([#3872](https://github.com/djm204/frankenbeast/issues/3872)) ([4fbb635](https://github.com/djm204/frankenbeast/commit/4fbb6355fa4cfa8abaf51c677ab84b148d8f8578))
+* **web:** make Smart Swarm canonical operations surface ([#3870](https://github.com/djm204/frankenbeast/issues/3870)) ([42642f3](https://github.com/djm204/frankenbeast/commit/42642f3d50d11dcbdd5eaa12cb44100518b6fd0b))
+
+
+### Bug Fixes
+
+* **chat:** preserve HTTP conversation context ([#3866](https://github.com/djm204/frankenbeast/issues/3866)) ([a372df3](https://github.com/djm204/frankenbeast/commit/a372df380d529a66d1ca4a2d8abd2e7d0ef3be36))
+* **orchestrator:** expose trusted CLI paths to managed services ([#3868](https://github.com/djm204/frankenbeast/issues/3868)) ([522eb2d](https://github.com/djm204/frankenbeast/commit/522eb2d01448516619200d0011753512e83b486f))
+* **test:** stabilize public live acceptance ([#3875](https://github.com/djm204/frankenbeast/issues/3875)) ([3cb7e04](https://github.com/djm204/frankenbeast/commit/3cb7e045ee2cd0f185d7a7beb3df7e3c25b149b0))
+* **web:** authenticate forwarded dashboard origins ([#3873](https://github.com/djm204/frankenbeast/issues/3873)) ([595c9ae](https://github.com/djm204/frankenbeast/commit/595c9ae2fc64451eda244bbad41048ddc297a482))
+* **web:** remove Brain Vitals faculty placeholders ([#3810](https://github.com/djm204/frankenbeast/issues/3810)) ([cb2e7c3](https://github.com/djm204/frankenbeast/commit/cb2e7c39199a007c4a4c244c16aa383fb0f633d0))
+
+
+### Tests
+
+* **web:** add live Hermes smart-swarm E2E ([#3869](https://github.com/djm204/frankenbeast/issues/3869)) ([41ffed4](https://github.com/djm204/frankenbeast/commit/41ffed4e55e69d15cca24fceba05ae849667c426))
+* **web:** add public live dashboard acceptance ([#3874](https://github.com/djm204/frankenbeast/issues/3874)) ([f9cc11b](https://github.com/djm204/frankenbeast/commit/f9cc11b88bf55916c85efdf29719376e0e83c754))
+
+## [0.60.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.59.0...@franken/orchestrator-v0.60.0) (2026-07-26)
+
+
+### Features
+
+* **beasts:** expose lifecycle churn metrics ([#3794](https://github.com/djm204/frankenbeast/issues/3794)) ([15d2e52](https://github.com/djm204/frankenbeast/commit/15d2e52b48d345c928c03014ce39c302d9d24fd2))
+* **brain:** add hive-aware status queries ([#3778](https://github.com/djm204/frankenbeast/issues/3778)) ([dff353f](https://github.com/djm204/frankenbeast/commit/dff353f96168374efd439c9abf486b360f4a327e))
+* **observer:** add cache-aware token accounting ([#3781](https://github.com/djm204/frankenbeast/issues/3781)) ([3d526f5](https://github.com/djm204/frankenbeast/commit/3d526f5573293f52e604c496dbffcefcc45fab28))
+* **observer:** export session compaction metrics ([#3780](https://github.com/djm204/frankenbeast/issues/3780)) ([96b032e](https://github.com/djm204/frankenbeast/commit/96b032ea310a31ea51de20e9df2ad6db148c5a47))
+* **orchestrator:** expose brain vitals telemetry APIs ([#3798](https://github.com/djm204/frankenbeast/issues/3798)) ([a26a390](https://github.com/djm204/frankenbeast/commit/a26a390a58f7f678dc1ad937ef55bd1015d56daf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.11.1 to 0.11.2
+    * @franken/governor bumped from 0.9.1 to 0.9.2
+    * @franken/types bumped from 0.18.0 to 0.19.0
+    * @franken/observer bumped from 0.12.1 to 0.13.0
+    * @franken/planner bumped from 0.4.27 to 0.4.28
+    * @franken/brain bumped from 0.18.0 to 0.18.1
+
 ## [0.59.0](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.58.0...@franken/orchestrator-v0.59.0) (2026-07-25)
 
 

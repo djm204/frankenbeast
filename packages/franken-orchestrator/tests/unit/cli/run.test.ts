@@ -272,7 +272,7 @@ vi.mock('node:readline', () => ({
 
 // ── Import run.ts exports (main() is guarded, call explicitly in tests) ──
 
-import { resolvePhases, createStdinIO, createChatSurfaceDeps, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown } from '../../../src/cli/run.js';
+import { resolvePhases, createStdinIO, createChatSurfaceDeps, main, resolveDashboardAllowedOrigins, runDirectCli, shouldForceDirectCliExit, discoverResumeTarget, inferResumeBaseBranch, checkProviderCliAvailability, assertAnyProviderCliAvailable, resolveEffectivePreflightProvider, resolveEffectivePreflightProviders, buildDashboardProviderSnapshot, formatMissingRunPlanGuidance, shouldShowMissingRunPlanGuidance, defaultRunPlanNeedsGuidance, validateStateDirBeforeScaffold, resolveScaffoldStateDir, runNetworkCommand, handleBeastDaemonShutdown, installChatServerTerminationHandlers } from '../../../src/cli/run.js';
 import { loadConfig } from '../../../src/cli/config-loader.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths, readActivePlanName, writeActivePlanName } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
@@ -587,8 +587,8 @@ describe('dashboard provider snapshots', () => {
     } as any);
 
     expect(providers).toEqual([
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'claude-sonnet-4' },
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, model: 'claude-sonnet-4', executionProvider: 'claude' },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5', executionProvider: 'codex' },
     ]);
   });
 
@@ -606,9 +606,9 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any, ['codex', 'claude']);
 
     expect(providers).toEqual([
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex' },
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 1 },
-      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2 },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 0, model: 'gpt-5-codex', executionProvider: 'codex' },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 1, executionProvider: 'claude' },
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 2, executionProvider: 'gemini' },
     ]);
   });
 
@@ -626,7 +626,7 @@ describe('dashboard provider snapshots', () => {
     } as any);
 
     expect(providers).toEqual([
-      { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0 },
+      { name: 'aider', type: 'claude-cli', available: true, failoverOrder: 0, executionProvider: 'aider' },
     ]);
   });
 
@@ -643,8 +643,8 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0 },
-      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1 },
+      { name: 'claude', type: 'claude-cli', available: true, failoverOrder: 0, executionProvider: 'claude' },
+      { name: 'codex', type: 'codex-cli', available: false, failoverOrder: 1, executionProvider: 'codex' },
     ]);
   });
 
@@ -662,8 +662,8 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
-      { name: 'backup-codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark' },
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
+      { name: 'backup-codex', type: 'codex-cli', available: true, failoverOrder: 1, model: 'gpt-5.3-codex-spark', executionProvider: 'codex' },
     ]);
   });
 
@@ -677,8 +677,8 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
-      { name: 'backup-claude', type: 'claude-cli', available: true, failoverOrder: 1 },
+      { name: 'primary-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
+      { name: 'backup-claude', type: 'claude-cli', available: true, failoverOrder: 1, executionProvider: 'claude' },
     ]);
   });
 
@@ -695,7 +695,7 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'prod-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'prod-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
     ]);
   });
 
@@ -712,7 +712,7 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'prod-claude-default', type: 'claude-cli', available: commandHealthyForTest('claude'), failoverOrder: 0 },
+      { name: 'prod-claude-default', type: 'claude-cli', available: commandHealthyForTest('claude'), failoverOrder: 0, executionProvider: 'claude' },
     ]);
   });
 
@@ -733,7 +733,7 @@ describe('dashboard provider snapshots', () => {
     const providers = buildDashboardProviderSnapshot(config, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'broken-claude', type: 'claude-cli', available: false, failoverOrder: 0 },
+      { name: 'broken-claude', type: 'claude-cli', available: false, failoverOrder: 0, executionProvider: 'claude' },
     ]);
   });
 
@@ -747,7 +747,7 @@ describe('dashboard provider snapshots', () => {
     } as any, { getProviders: () => [] } as any);
 
     expect(providers).toEqual([
-      { name: 'aider', type: 'claude-cli', available: commandHealthyForTest('aider'), failoverOrder: 0 },
+      { name: 'aider', type: 'claude-cli', available: commandHealthyForTest('aider'), failoverOrder: 0, executionProvider: 'aider' },
     ]);
   });
 
@@ -786,7 +786,7 @@ describe('dashboard provider snapshots', () => {
       } as any, { getProviders: () => [] } as any);
 
       expect(providers).toEqual([
-        { name: 'gemini-api', type: 'gemini-api', available: true, failoverOrder: 0 },
+        { name: 'gemini-api', type: 'gemini-api', available: true, failoverOrder: 0, executionProvider: 'gemini' },
       ]);
     } finally {
       if (geminiApiKey === undefined) delete process.env.GEMINI_API_KEY;
@@ -1131,6 +1131,33 @@ describe('createStdinIO', () => {
   });
 });
 
+describe('chat-server termination', () => {
+  it('awaits the server close fence before finalizing CLI dependencies on SIGTERM', async () => {
+    const listeners = new Map<NodeJS.Signals, () => Promise<void>>();
+    const target = {
+      exitCode: undefined as number | undefined,
+      once: vi.fn((signal: NodeJS.Signals, listener: () => Promise<void>) => {
+        listeners.set(signal, listener);
+        return target;
+      }),
+      off: vi.fn((signal: NodeJS.Signals) => {
+        listeners.delete(signal);
+        return target;
+      }),
+    };
+    const order: string[] = [];
+    const close = vi.fn(async () => { order.push('close'); });
+    const finalize = vi.fn(async () => { order.push('finalize'); });
+
+    installChatServerTerminationHandlers({ close }, finalize, target);
+    await listeners.get('SIGTERM')?.();
+
+    expect(order).toEqual(['close', 'finalize']);
+    expect(target.exitCode).toBe(143);
+    expect(target.off).toHaveBeenCalledWith('SIGINT', expect.any(Function));
+  });
+});
+
 describe('runDirectCli', () => {
   it('does not force process.exit after successful long-running chat-server startup', async () => {
     const entrypoint = vi.fn(async () => undefined);
@@ -1368,6 +1395,22 @@ describe('main() execution', () => {
     await main();
     expect(MockSession).toHaveBeenCalled();
     expect(mockSessionStart).toHaveBeenCalled();
+  });
+
+  it('passes interview goal and output arguments into the Session config', async () => {
+    mockParseArgs.mockReturnValue({
+      ...(mockParseArgs() as Record<string, unknown>),
+      subcommand: 'interview',
+      interviewGoal: 'Create a todo list',
+      interviewOutput: '/mock/project/.fbeast/design-docs/run.md',
+    } as unknown as ReturnType<typeof mockParseArgs>);
+
+    await main();
+
+    expect(MockSession).toHaveBeenCalledWith(expect.objectContaining({
+      interviewGoal: 'Create a todo list',
+      interviewOutput: '/mock/project/.fbeast/design-docs/run.md',
+    }));
   });
 
   it('closes the session readline interface after successful execution', async () => {
@@ -2093,6 +2136,7 @@ describe('main() execution', () => {
   });
 
   it('does not open the lazy chat terminal owner when dependency creation fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('chat server unavailable'); }));
     mockParseArgs.mockReturnValue({
       ...(mockParseArgs() as Record<string, unknown>),
       subcommand: 'chat',
@@ -2106,6 +2150,7 @@ describe('main() execution', () => {
 
   it('dispatches chat-server without creating a Session or REPL', async () => {
     const logSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const runtimeGovernor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
     vi.mocked(loadConfig).mockResolvedValueOnce({
       maxCritiqueIterations: 3,
       maxDurationMs: 600_000,
@@ -2142,7 +2187,8 @@ describe('main() execution', () => {
       },
     } as any);
     mockCreateCliDeps.mockResolvedValueOnce({
-      deps: {},
+      deps: { governor: runtimeGovernor },
+      governorActionEnabled: false,
       cliLlmAdapter: { name: 'chat-adapter' },
       observerBridge: {},
       logger: {},
@@ -2201,14 +2247,19 @@ describe('main() execution', () => {
       }),
     }));
     const startOptions = (mockStartChatServer.mock.calls as any[])[0][0];
+    expect(startOptions.missionCompletion).toEqual(expect.objectContaining({
+      getInput: expect.any(Function),
+      stopJobs: expect.any(Function),
+    }));
+    expect(startOptions).not.toHaveProperty('runtimeActionGovernor');
     expect(startOptions.dashboardDeps?.getSecurityConfig()).toEqual(expect.objectContaining({
       profile: 'permissive',
       webhookSignaturePolicy: 'local-dev-unsigned',
       customRules: [{ name: 'no-credentials', pattern: 'credential', action: 'block', target: 'request' }],
     }));
     expect(startOptions.dashboardDeps?.getProviders()).toEqual([
-      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0, model: 'gemini-2.5-pro' },
-      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1 },
+      { name: 'gemini', type: 'gemini-cli', available: true, failoverOrder: 0, model: 'gemini-2.5-pro', executionProvider: 'gemini' },
+      { name: 'codex', type: 'codex-cli', available: true, failoverOrder: 1, executionProvider: 'codex' },
     ]);
     expect(MockSession).not.toHaveBeenCalled();
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('http://127.0.0.1:3737'));
@@ -2345,7 +2396,10 @@ describe('main() execution', () => {
 
     await main();
 
-    expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({ skillsDir }));
+    expect(mockCreateBeastServices).toHaveBeenCalledWith(expect.objectContaining({
+      skillsDir,
+      tracesDb: join(root, '.fbeast', '.build', 'build-traces.db'),
+    }));
     expect(mockStartChatServer).toHaveBeenCalledWith(expect.objectContaining({
       operatorToken: TEST_ROOT_ENV_TOKEN,
       beastControl: expect.objectContaining({
@@ -2842,6 +2896,7 @@ describe('main() execution', () => {
       root: '/mock/project',
       beastsDb: '/mock/project/.fbeast/beast.db',
       beastLogsDir: '/mock/project/.fbeast/.build/beasts/logs',
+      tracesDb: '/mock/project/.fbeast/.build/build-traces.db',
       host: '127.0.0.1',
       port: 4050,
       operatorToken: TEST_DASHBOARD_OPERATOR_TOKEN,

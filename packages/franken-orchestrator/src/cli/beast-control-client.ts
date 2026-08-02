@@ -37,9 +37,9 @@ export function createBeastControlClient(paths: ProjectPaths, serviceBundle?: Be
     },
     createRun: (input: Parameters<typeof services.dispatch.createRun>[0]) =>
       services.dispatch.createRun(input),
-    dispose: () => {
+    dispose: async () => {
       if (ownsServices) {
-        services.dispose();
+        await services.dispose();
       }
     },
   };

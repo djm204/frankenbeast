@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TokenBudgetBreaker } from '../../../src/breakers/token-budget.js';
+import { ConfigurationError } from '../../../src/errors/index.js';
 import type { ObservabilityPort } from '../../../src/types/contracts.js';
 import type { LoopState, LoopConfig } from '../../../src/types/loop.js';
 
@@ -82,12 +83,49 @@ describe('TokenBudgetBreaker', () => {
     expect(breaker.phase).toBe('both');
   });
 
+  describe('non-finite tokenBudget (regression for #3800)', () => {
+    it('rejects +Infinity with ConfigurationError before calling getTokenSpend', async () => {
+      const port = createMockObservabilityPort(0);
+      const breaker = new TokenBudgetBreaker(port);
+      await expect(
+        breaker.check(createState(0), createConfig(Number.POSITIVE_INFINITY)),
+      ).rejects.toThrow(ConfigurationError);
+      expect(port.getTokenSpend).not.toHaveBeenCalled();
+    });
+
+    it('rejects -Infinity with ConfigurationError before calling getTokenSpend', async () => {
+      const port = createMockObservabilityPort(0);
+      const breaker = new TokenBudgetBreaker(port);
+      await expect(
+        breaker.check(createState(0), createConfig(Number.NEGATIVE_INFINITY)),
+      ).rejects.toThrow(ConfigurationError);
+      expect(port.getTokenSpend).not.toHaveBeenCalled();
+    });
+
+    it('rejects +Infinity with ConfigurationError even when costBudgetUsd is a valid finite value', async () => {
+      const port = createMockObservabilityPort(0);
+      const breaker = new TokenBudgetBreaker(port);
+      await expect(
+        breaker.check(createState(0), {
+          ...createConfig(Number.POSITIVE_INFINITY),
+          costBudgetUsd: 10,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+      expect(port.getTokenSpend).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cost budget (USD)', () => {
+    // tokenBudget must be finite (see the regression block above), so a
+    // cost-only budget is expressed with a finite, effectively-unbounded
+    // sentinel instead of Infinity — matching dep-factory.ts's CLI wiring.
+    const EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET = Number.MAX_SAFE_INTEGER;
+
     it('trips on estimatedCostUsd, not token count, when costBudgetUsd is set', async () => {
       // 1,500,000 tokens at $0.00001/token = $15.00 estimated cost, over the $10 budget.
       const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_500_000));
       const result = await breaker.check(createState(1), {
-        ...createConfig(Number.POSITIVE_INFINITY),
+        ...createConfig(EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET),
         costBudgetUsd: 10,
       });
       expect(result.tripped).toBe(true);
@@ -102,7 +140,7 @@ describe('TokenBudgetBreaker', () => {
       // breaker treats equality as within budget; the critique breaker must too.
       const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_000_000));
       const result = await breaker.check(createState(1), {
-        ...createConfig(Number.POSITIVE_INFINITY),
+        ...createConfig(EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET),
         costBudgetUsd: 10,
       });
       expect(result.tripped).toBe(false);
@@ -113,7 +151,7 @@ describe('TokenBudgetBreaker', () => {
       // any critique work could run.
       const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
       const result = await breaker.check(createState(1), {
-        ...createConfig(Number.POSITIVE_INFINITY),
+        ...createConfig(EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET),
         costBudgetUsd: 0,
       });
       expect(result.tripped).toBe(false);
@@ -125,8 +163,60 @@ describe('TokenBudgetBreaker', () => {
       // (~$0.0005) is far under $10 and must not trip.
       const breaker = new TokenBudgetBreaker(createMockObservabilityPort(50));
       const result = await breaker.check(createState(1), {
-        ...createConfig(Number.POSITIVE_INFINITY),
+        ...createConfig(EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET),
         costBudgetUsd: 10,
+      });
+      expect(result.tripped).toBe(false);
+    });
+
+    // Regression for #3843: a non-finite costBudgetUsd (e.g. Infinity) silently
+    // disabled cost-budget enforcement, since `spend.estimatedCostUsd > Infinity`
+    // never trips. Reject non-finite / negative values up front instead.
+    it('rejects with ConfigurationError when costBudgetUsd is Infinity', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(1_000_000_000));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(Number.POSITIVE_INFINITY),
+          costBudgetUsd: Number.POSITIVE_INFINITY,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('rejects with ConfigurationError when costBudgetUsd is -Infinity', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: Number.NEGATIVE_INFINITY,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('rejects with ConfigurationError when costBudgetUsd is NaN', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: Number.NaN,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('rejects with ConfigurationError when costBudgetUsd is negative', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      await expect(
+        breaker.check(createState(1), {
+          ...createConfig(10000),
+          costBudgetUsd: -1,
+        }),
+      ).rejects.toThrow(ConfigurationError);
+    });
+
+    it('does not reject a valid finite non-negative costBudgetUsd', async () => {
+      const breaker = new TokenBudgetBreaker(createMockObservabilityPort(0));
+      const result = await breaker.check(createState(1), {
+        ...createConfig(10000),
+        costBudgetUsd: 5,
       });
       expect(result.tripped).toBe(false);
     });

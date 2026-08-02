@@ -1,6 +1,6 @@
 {
   "name": "frankenbeast",
-  "version": "0.65.0",
+  "version": "0.67.1",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -42,6 +42,8 @@
     "test:eval": "turbo run test:eval --filter=@franken/observer",
     "test:ci": "npm run build --workspace @franken/types && npm run ci:test:root && npm run ci:test:packages && npm run ci:test:mcp-suite-integration && npm run ci:test:planner-integration && npm run ci:test:observer-eval",
     "test:e2e": "npm run test:e2e --workspace @franken/orchestrator --",
+    "test:e2e:smart-swarm:hermes": "playwright install chromium && npm run build && LIVE_SMART_SWARM_E2E=1 vitest run packages/franken-orchestrator/tests/e2e/smart-swarm-hermes-live.test.ts --config packages/franken-orchestrator/vitest.config.ts",
+    "test:e2e:smart-swarm:public": "playwright install chromium && LIVE_PUBLIC_SMART_SWARM_E2E=1 vitest run packages/franken-orchestrator/tests/e2e/smart-swarm-public-live.test.ts --config packages/franken-orchestrator/vitest.config.ts",
     "test:live:bench": "turbo run test:live --filter=@franken/live-bench",
     "ci:test:root": "node scripts/retry-ci-command.mjs -- npm run test:root",
     "ci:test:packages": "node scripts/retry-ci-command.mjs -- npx turbo run test",
@@ -61,6 +63,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@playwright/test": "^1.62.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.10",
@@ -68,6 +71,7 @@
     "better-sqlite3": "^12.11.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
+    "ipaddr.js": "2.4.0",
     "js-yaml": "^5.2.2",
     "jsdom": "^29.1.1",
     "tsx": "^4.23.1",

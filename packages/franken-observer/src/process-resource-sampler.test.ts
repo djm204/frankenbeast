@@ -236,6 +236,22 @@ describe('ProcessResourceSampler', () => {
     await expect(adapter.queryResourceSamples({ runId: 'run-persisted' })).resolves.toEqual([sample]);
     await adapter.close();
   });
+
+  it('prunes expired samples on the write path', async () => {
+    const deleteResourceSamplesBefore = vi.fn(async () => 1);
+    const recordResourceSample = vi.fn(async () => undefined);
+    const sampler = new ProcessResourceSampler({
+      pid: process.pid,
+      agentId: 'agent-retention',
+      runId: 'run-retention',
+      adapter: { deleteResourceSamplesBefore, recordResourceSample },
+    });
+
+    const sample = await sampler.sample();
+
+    expect(deleteResourceSamplesBefore).toHaveBeenCalledWith(sample.timestamp - (24 * 60 * 60 * 1_000));
+    expect(recordResourceSample).toHaveBeenCalledAfter(deleteResourceSamplesBefore);
+  });
 });
 
 describe('estimateProcessPower', () => {

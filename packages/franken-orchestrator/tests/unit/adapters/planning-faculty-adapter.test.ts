@@ -150,6 +150,10 @@ describe('PlanningFacultyAdapter', () => {
       },
     });
 
+    // Synthetic PEM fixture: repeated 'A' filler, not real key material. Verifies
+    // the redaction utility strips PEM-looking blocks before they reach a lesson
+    // query. Allowlisted for gitleaks in .gitleaks.toml (rule: private-key) — see
+    // that file for the scoped false-positive triage (issue #3779).
     await faculty.createPlan({
       goal: `-----BEGIN PRIVATE KEY-----\n${'A'.repeat(3_000)}\n-----END PRIVATE KEY-----`,
     });

@@ -113,6 +113,7 @@ export interface IssueCliDeps {
 
 export interface CliDeps {
   deps: BeastLoopDeps;
+  governorActionEnabled: boolean;
   cliLlmAdapter: CliLlmAdapter;
   observerBridge: CliObserverBridge;
   logger: BeastLogger;
@@ -543,14 +544,19 @@ async function createObserverDeps(
   });
   const replayAuditRoot = resolve(options.paths.root, '.fbeast', 'audit');
   const replayStore = new ReplayContentStore(replayAuditRoot);
-  const runSessionId = options.runSessionId ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
+  const processRunSessionId = process.env.FRANKENBEAST_BEAST_RUN_ID?.trim() || undefined;
+  const runSessionId = options.runSessionId
+    ?? processRunSessionId
+    ?? `cli-session-${process.pid}-${deterministicUuid('packages/franken-orchestrator/src/cli/dep-factory.ts')}`;
+  const telemetryAdapter = createBestEffortCompactionAdapter(options.paths.tracesDb, logger);
   const observerBridge = new CliObserverBridge({
     budgetLimitUsd: config.budget,
     sessionId: runSessionId,
     replayStore,
-    compactionAdapter: createBestEffortCompactionAdapter(options.paths.tracesDb, logger),
+    compactionAdapter: telemetryAdapter,
+    traceAdapter: telemetryAdapter,
   });
-  if (config.enableTracing) {
+  if (config.enableTracing || processRunSessionId !== undefined) {
     observerBridge.startTrace(runSessionId);
   }
   const traceViewerHandle = options.verbose
@@ -788,6 +794,11 @@ function resolveMissingSafetyModule<T>(moduleName: string, stub: T, logger: Beas
   );
 }
 
+// TokenBudgetBreaker requires a finite, positive tokenBudget (Infinity is
+// rejected as a fail-open bypass), so a cost-only budget needs a finite
+// sentinel that no real token count will reach.
+const EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET = Number.MAX_SAFE_INTEGER;
+
 async function createCritiqueDeps(
   options: CliDepOptions,
   config: EffectiveCliConfig,
@@ -826,9 +837,9 @@ async function createCritiqueDeps(
     config: {
       maxIterations: options.critiqueMaxIterations ?? 3,
       // `config.budget` is the CLI `--budget <usd>` dollar limit, so enforce it
-      // as a cost budget. The token budget is left unbounded; the dollar budget
-      // is the single budget the CLI exposes.
-      tokenBudget: Number.POSITIVE_INFINITY,
+      // as a cost budget. The token budget is left effectively unbounded; the
+      // dollar budget is the single budget the CLI exposes.
+      tokenBudget: EFFECTIVELY_UNBOUNDED_TOKEN_BUDGET,
       costBudgetUsd: config.budget,
       consensusThreshold: options.critiqueConsensusThreshold ?? 0.7,
       sessionId: `cli-critique-${deterministicNow()}`,
@@ -1249,6 +1260,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
     return {
       deps,
+      governorActionEnabled: governance.actionEnabled,
       cliLlmAdapter: llm.cliLlmAdapter,
       observerBridge: observer.observerBridge,
       logger: observer.logger,

@@ -71,10 +71,12 @@ export class GeminiApiAdapter implements ILlmProvider {
     const model = this.options.model ?? 'gemini-2.5-flash';
 
     try {
+      request.signal?.throwIfAborted();
       const config: Record<string, unknown> = {
         systemInstruction: request.systemPrompt,
         maxOutputTokens:
           request.maxTokens ?? this.options.maxTokens ?? 4096,
+        ...(request.signal ? { abortSignal: request.signal } : {}),
       };
       if (request.tools) {
         config['tools'] = [
@@ -94,6 +96,7 @@ export class GeminiApiAdapter implements ILlmProvider {
       let totalOutputTokens = 0;
 
       for await (const chunk of response) {
+        request.signal?.throwIfAborted();
         if (chunk.text) {
           yield { type: 'text', content: chunk.text };
         }

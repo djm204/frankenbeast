@@ -120,7 +120,12 @@ export class CliChannel implements ApprovalChannel {
   private formatPrompt(request: ApprovalRequest): string {
     const lines = [
       '',
-      formatApprovalPromptWithBoundaries(request, { includePlanDiff: true }),
+      formatApprovalPromptWithBoundaries(request, {
+        includePlanDiff: true,
+        redactSecrets: true,
+        maxSummaryLength: 1000,
+        maxPlanDiffLength: 2000,
+      }),
       `[a]pprove  [r]egenerate  a[x]bort  [d]ebug`,
       'Append an acknowledgement token after the decision when a SECURITY NOTICE requires one.',
     ].filter(Boolean);

@@ -6,10 +6,43 @@ import {
   formatApprovalResponseSignaturePayload,
   SignatureVerifier,
 } from '../security/signature-verifier.js';
-import { now as deterministicNow } from '@franken/types';
+import { now as deterministicNow, wallClockNow } from '@franken/types';
 import { SessionTokenStore } from '../security/session-token-store.js';
+import { normalizeGovernorConfig } from '../core/config.js';
 
 const VALID_DECISIONS = new Set<string>(RESPONSE_CODES);
+const ISO_8601_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function parseIso8601Timestamp(value: unknown): number {
+  if (typeof value !== 'string') return Number.NaN;
+  const match = ISO_8601_TIMESTAMP.exec(value);
+  if (!match) return Number.NaN;
+
+  const [
+    , year, month, day, hour, minute, second, fraction = '', zone,
+    offsetSign = '+', offsetHour = '0', offsetMinute = '0',
+  ] = match;
+  const timestampMs = Date.parse(value);
+  if (!Number.isFinite(timestampMs)) return Number.NaN;
+
+  const offsetHours = Number(offsetHour);
+  const offsetMinutes = Number(offsetMinute);
+  if (offsetHours > 23 || offsetMinutes > 59) return Number.NaN;
+  const signedOffsetMinutes = zone === 'Z'
+    ? 0
+    : (offsetSign === '-' ? -1 : 1) * (offsetHours * 60 + offsetMinutes);
+  const local = new Date(timestampMs + signedOffsetMinutes * 60_000);
+
+  return local.getUTCFullYear() === Number(year)
+    && local.getUTCMonth() + 1 === Number(month)
+    && local.getUTCDate() === Number(day)
+    && local.getUTCHours() === Number(hour)
+    && local.getUTCMinutes() === Number(minute)
+    && local.getUTCSeconds() === Number(second)
+    && local.getUTCMilliseconds() === Number(fraction.slice(0, 3).padEnd(3, '0'))
+    ? timestampMs
+    : Number.NaN;
+}
 
 export interface SlackEphemeralResponse {
   readonly response_type: 'ephemeral';
@@ -31,6 +64,8 @@ export interface GovernorAppOptions {
   slackResponsePoster?: SlackResponsePoster;
   slackWebhookUrl?: string;
   allowUnsignedApprovalsForTests?: boolean;
+  /** Maximum accepted age/skew for inbound approval-request timestamps. */
+  timeoutMs?: number;
   /**
    * Shared registry of pending approval waiters. Pass the same instance to
    * an `HttpApprovalChannel` (used by `ApprovalGateway`) so that a caller
@@ -255,10 +290,17 @@ function extractSlackActionFeedback(actionId: unknown): string | undefined {
 
 export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   const app = new Hono();
-  const registry = options.registry ?? new ApprovalWaiterRegistry();
   const slackApproverUserIds = new Set(options.slackApproverUserIds ?? []);
   const slackResponsePoster = options.slackResponsePoster ?? DEFAULT_SLACK_RESPONSE_POSTER;
   const approvalQueueBackpressure = normalizeApprovalQueueBackpressure(options.approvalQueueBackpressure);
+  const approvalRequestTimeoutMs = normalizeGovernorConfig(
+    options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+  ).timeoutMs;
+  // Reuse the same timeoutMs for the registry's pending-approval TTL so
+  // "how stale may an inbound request be" and "how long may an approval sit
+  // unresolved before it expires and is purged" stay a single knob (#3736,
+  // #3751). An externally supplied registry manages its own timeoutMs.
+  const registry = options.registry ?? new ApprovalWaiterRegistry({ timeoutMs: approvalRequestTimeoutMs });
   let sessionTokenStore: SessionTokenStore | undefined = options.sessionTokenStore;
   if (!sessionTokenStore && options.sessionTokenStorePath) {
     try {
@@ -344,6 +386,24 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       );
     }
 
+    const timestampMs = parseIso8601Timestamp(body.timestamp);
+    if (!Number.isFinite(timestampMs)) {
+      return c.json({
+        error: {
+          code: 'invalid_approval_request_timestamp',
+          message: 'Approval request timestamp must be a valid ISO-8601 string',
+        },
+      }, 400);
+    }
+    if (Math.abs(wallClockNow() - timestampMs) > approvalRequestTimeoutMs) {
+      return c.json({
+        error: {
+          code: 'approval_request_expired',
+          message: 'Approval request timestamp is outside the allowed window',
+        },
+      }, 400);
+    }
+
     if (
       approvalQueueBackpressure
       && !registry.hasKnownRequest(body.requestId)
@@ -374,13 +434,13 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
   // POST /v1/approval/respond — respond to an approval request
   app.post('/v1/approval/respond', async (c) => {
     const rawBody = Buffer.from(await c.req.arrayBuffer());
-    const body = parseJsonBody(rawBody);
-    if (!body) {
-      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
-    }
 
-    // Fail closed: unsigned approval responses are rejected unless a signing
-    // secret is configured (then verified) or an explicit test flag is set.
+    // Fail closed: authenticate the raw bytes with the governor signature
+    // BEFORE parsing JSON, so untrusted/unauthenticated input never reaches
+    // JSON.parse or registry dispatch. Unsigned approval responses are
+    // rejected unless a signing secret is configured (then verified) or an
+    // explicit test flag is set; the test-only unsigned path is still
+    // gated here, ahead of parsing.
     if (!options.signingSecret) {
       if (!options.allowUnsignedApprovalsForTests) {
         return c.json({ error: { message: 'Signing secret required for approval responses' } }, 401);
@@ -402,6 +462,11 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       }
     }
 
+    const body = parseJsonBody(rawBody);
+    if (!body) {
+      return c.json({ error: { message: 'Malformed JSON body' } }, 400);
+    }
+
     if (typeof body.requestId !== 'string' || typeof body.decision !== 'string') {
       return c.json(
         { error: { message: 'Missing required fields: requestId, decision' } },
@@ -418,6 +483,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
         },
         400,
       );
+    }
+
+    // Reject a decision for an approval past its TTL with a distinct error
+    // code before the generic `has()` lazy-eviction check below (which would
+    // otherwise report it identically to a requestId that never existed) —
+    // see #3736. Peeking via `isExpired` (non-mutating) rather than relying
+    // solely on `has`/`resolve` also lets the purge that follows be explicit.
+    if (registry.isExpired(body.requestId)) {
+      registry.delete(body.requestId);
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
     }
 
     if (!registry.has(body.requestId)) {
@@ -438,7 +518,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
     // a caller blocked on `ApprovalGateway.requestApproval()` actually
     // unblocks with this decision instead of the request silently resolving
     // only from the HTTP caller's point of view.
-    registry.resolve(body.requestId, {
+    const resolved = registry.resolve(body.requestId, {
       requestId: body.requestId,
       decision,
       respondedBy,
@@ -446,6 +526,21 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ...(feedback !== undefined ? { feedback } : {}),
       ...(signature !== undefined ? { signature } : {}),
     });
+
+    // The TTL can be crossed between the preflight checks above and this
+    // call (e.g. a decision arriving in the request's final milliseconds).
+    // `resolve()` is the actual source of truth for whether the decision
+    // was honored: trust its return value rather than the earlier `has()`
+    // check, so an operator is never told "resolved" for a decision that
+    // silently failed to wake anything.
+    if (!resolved) {
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
 
     return c.json({
       requestId: body.requestId,
@@ -621,6 +716,18 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       });
     }
 
+    // Reject a Slack decision for an approval past its TTL with a distinct
+    // error code, same as the HTTP respond endpoint above (#3736).
+    if (registry.isExpired(requestId)) {
+      registry.delete(requestId);
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
+
     // Look up the pending approval; unknown requests are rejected.
     if (!registry.has(requestId)) {
       return c.json({ error: { message: 'Approval request not found' } }, 404);
@@ -642,7 +749,7 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       )
       : undefined;
 
-    registry.resolve(requestId, {
+    const resolved = registry.resolve(requestId, {
       requestId,
       decision,
       respondedBy: slackUserId,
@@ -650,6 +757,19 @@ export function createGovernorApp(options: GovernorAppOptions = {}): Hono {
       ...(feedback !== undefined ? { feedback } : {}),
       ...(slackSignature !== undefined ? { signature: slackSignature } : {}),
     });
+
+    // Same rationale as the HTTP respond endpoint above: the TTL can be
+    // crossed between the preflight checks and this call, so `resolve()`'s
+    // actual return value -- not the earlier `has()` check -- decides
+    // whether this is reported as resolved.
+    if (!resolved) {
+      return c.json({
+        error: {
+          code: 'approval_expired',
+          message: 'Approval request has expired and can no longer be resolved',
+        },
+      }, 410);
+    }
 
     return c.json({
       requestId,

@@ -207,6 +207,21 @@ describe('CodexCliAdapter', () => {
     });
   });
 
+  describe('sanitizedEnv()', () => {
+    it('strips unrelated secret-shaped env vars but preserves OPENAI_API_KEY', () => {
+      process.env['SOME_UNRELATED_API_KEY'] = 'unrelated-secret';
+      process.env['OPENAI_API_KEY'] = 'openai-secret';
+      try {
+        const env = adapter.sanitizedEnv();
+        expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+        expect(env['OPENAI_API_KEY']).toBe('openai-secret');
+      } finally {
+        delete process.env['SOME_UNRELATED_API_KEY'];
+        delete process.env['OPENAI_API_KEY'];
+      }
+    });
+  });
+
   describe('isAvailable()', () => {
     it('does not expose runtime config integrity state to the Codex availability probe', async () => {
       const originalManifest = process.env[RUN_CONFIG_INTEGRITY_ENV];

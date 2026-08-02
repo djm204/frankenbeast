@@ -87,6 +87,11 @@ function mockClient(overrides: Partial<DashboardApiClient> = {}): DashboardApiCl
     fetchSnapshot: vi.fn().mockResolvedValue(snapshot),
     fetchBrainState: vi.fn(),
     fetchBrainLessons: vi.fn(),
+    listBrainVitalsRuns: vi.fn().mockResolvedValue({ runs: [] }),
+    fetchBrainVitalsSnapshot: vi.fn(),
+    fetchBrainVitalsHistory: vi.fn(),
+    fetchBrainVitalsRun: vi.fn(),
+    subscribeToBrainVitals: vi.fn().mockResolvedValue(() => undefined),
     toggleSkill: vi.fn().mockResolvedValue(undefined),
     updateSecurityProfile: vi.fn().mockResolvedValue(undefined),
     subscribeToDashboard: vi.fn().mockResolvedValue(() => undefined),
@@ -119,6 +124,19 @@ describe('DashboardPage', () => {
     expect(await screen.findByRole('region', { name: 'Brain faculties' })).toBeTruthy();
     expect(screen.getByText('Enter an agent type to inspect its persisted Brain state.')).toBeTruthy();
     expect(client.fetchBrainState).not.toHaveBeenCalled();
+  });
+
+  it('does not mount the retired acceptance-only Brain Vitals data path', async () => {
+    const listBrainVitalsRuns = vi.fn().mockRejectedValue(
+      new Error('The stale design-interview acceptance store must not be queried.'),
+    );
+    const client = mockClient({ listBrainVitalsRuns });
+
+    render(<DashboardPage client={client} />);
+
+    await screen.findByRole('region', { name: 'Brain faculties' });
+    expect(listBrainVitalsRuns).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Brain Vitals/i)).toBeNull();
   });
 
   it('renders partial dependency outages with remediation and safe work guidance', async () => {

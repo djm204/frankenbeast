@@ -1,0 +1,38 @@
+# Issue #3816 Codex runtime adapter progress
+
+- [x] Verify authorized workspace, dedicated branch, clean status, Git identity, and exact #3812 stacked base.
+- [x] Read issue #3816 and inspect the provider-neutral runtime contract, Hermes adapter, registry, HTTP wiring, and conformance tests.
+- [x] Inspect the installed Codex CLI/app-server surface and local state shapes without reading credentials or transcript content.
+- [x] Add a failing Codex adapter test for honest capability and unavailable-health reporting.
+- [x] Implement the minimal documented app-server client and default registry wiring for provider discovery.
+- [x] Add a failing Codex snapshot test for bounded observable sessions/workspaces, redaction, and no fabricated tasks/topology/blockers/approvals.
+- [x] Implement normalized Codex snapshot mapping with bounded, cancellable reads and degraded/unavailable states.
+- [x] Add a failing Codex event/cursor test for stable polling semantics and malformed cursor rejection.
+- [x] Implement bounded normalized events from observable Codex thread metadata without raw transcripts.
+- [x] Add shared adapter conformance coverage for Hermes and Codex.
+- [x] Run focused tests, package tests, root lint, typecheck, build, and relevant full tests.
+- [x] Self-review the complete diff and verify no Hive Brain files or fixture/demo/synthetic production data were introduced.
+- [x] Re-check #3812 exact head; rebase only if it changed.
+- [x] Commit as David Mendez <me@davidmendez.dev>, push, and open one PR with `Closes #3816`.
+- [x] Trigger real GitHub `@codex review` and remediate current-head findings 3653371402, 3653371403, 3653371405, and 3653371408 test-first.
+- [x] Run focused runtime verification (27/27), root lint/typecheck/build, and full tests (full suite reached 4,637/4,640 orchestrator tests; three unrelated environment/order-sensitive CLI tests remain red).
+- [x] Publish the rebased remediation commits and reply to/resolve all four Codex threads.
+- [x] Rebase onto #3821's final exact clean head `9d7393fa76f2c00ddbbc2ceb9010d287550eac4e`.
+- [x] Remediate fifth-round Codex findings 3653658278, 3653658281, 3653658283, and 3653658284 under RED→GREEN; focused verification passes 52/52.
+- [x] Obtain explicit tier escalation approval and trigger the sixth `@codex review` within the approved tier-12 cap.
+- [x] Remediate sixth-round Codex findings 3653882359, 3653882360, 3653882361, and 3653882368 under RED→GREEN; Codex adapter 30/30 and shared conformance 6/6 pass.
+- [x] Remediate seventh-round Codex finding 3653950577 fail-closed under RED→GREEN; Codex adapter 31/31 and shared conformance 6/6 pass.
+- [x] Remediate eighth-round Codex findings 3653993487, 3653993494, 3653993497, and 3653993499 under RED→GREEN; Codex adapter 35/35 and shared conformance 6/6 pass.
+- [x] Rebase the implementation directly onto merged `origin/main` (canonical #3812 merge `715da9d456d9a883aa96d85f53cbefca832da1c1`), preserving only scoped runtime changes.
+- [x] Run focused runtime verification (pre-review 71/71), root lint/typecheck/build, and document unrelated full-orchestrator execution/CLI failures.
+- [x] Publish replacement PR #3861 against `main` after GitHub refused to reopen superseded PR #3826.
+- [x] Remediate replacement-PR findings 3657124167, 3657124173, and 3657124178 under RED→GREEN in `b25b0a7a59e02dfa883c02c88aa76eb82ced7f1e`: exhaustive disappearance confirmation, replay-safe ≤4,096-byte SSE cursors, and complete snapshot continuation baselines.
+- [x] Verify the remediation with 84/84 focused runtime/HTTP tests, package typecheck/build, targeted ESLint, and `git diff --check`; reply to and resolve all three review threads.
+- [x] Remediate follow-up findings 3657285306, 3657285315, and 3657285323 under RED→GREEN: deterministic snapshot tie ordering, bounded 50-record pages with a 64 MiB protocol response ceiling, and safe shared-environment merging. Focused runtime/HTTP verification passes 87/87 with package typecheck/build and targeted ESLint green.
+- [x] Remediate final-tier findings 3657459743, 3657459752, and 3657459765 under RED→GREEN: retained disappearance tombstones/reappearance transitions, one end-to-end app-server request deadline, and early-stop absence confirmation. Focused runtime/HTTP verification passes 91/91 with package typecheck/build and targeted ESLint green.
+- [x] Rebase onto exact-current `origin/main` `522eb2d01448516619200d0011753512e83b486f`, preserving the merged Ollama adapter alongside Hermes and Codex. Post-rebase focused runtime/HTTP verification passes 104/104; root lint, typecheck, build, and diff check pass. Full orchestrator verification is 4,815/4,818 with only the three established unrelated network-health/CLI order-sensitive failures.
+- [x] Remediate exact-head Codex findings 3657845876, 3657845882, and 3657845886 under RED→GREEN: unique disappearance transition IDs, one deadline per paginated metadata scan, and encoded-cursor rejection before decode/decompression. Focused runtime/HTTP verification passes 107/107; root typecheck/build, targeted ESLint, and diff check pass. Full orchestrator verification is 4,818/4,821 with the same three unrelated baseline failures.
+- [x] Remediate exact-head Codex finding 3657981872 under RED→GREEN: concurrent callers now race shared app-server initialization against independent deadlines, and a short caller cannot terminate initialization while a longer-budget caller is still waiting. Focused runtime/HTTP verification passes 108/108; root typecheck/build, targeted ESLint, and diff check pass. Full orchestrator verification is 4,824/4,827 with the same three unrelated network-health/CLI order-sensitive failures.
+- [x] Remediate exact-head Codex findings 3658098974, 3658098981, and 3658098990 under RED→GREEN: request timeouts are isolated to one pending call, compacted cursor saturation survives continuation, and active statuses require `activeFlags`. Rebase onto exact-current `origin/main` `8747367fd4eb099e56b852e4300643e22bbcb925`; focused runtime/HTTP verification passes 104/104; root lint/typecheck/build and diff check pass. Full orchestrator verification remains at the same three unrelated network-health/CLI order-sensitive baseline failures.
+- [x] Verify exact-current-head clean Codex, four green CI checks, CLEAN mergeability, and zero unresolved Codex threads on PR #3861; do not merge.
+- [ ] Post structured handoff to the task, active PM, and root blackboard; block for review.

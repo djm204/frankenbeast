@@ -303,6 +303,74 @@ describe('SQLiteBeastRepository', () => {
     db.close();
   });
 
+  it('lists a bounded indexed window of runs for one definition', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
+    const dbPath = join(workDir, 'beasts.db');
+    const repo = new SQLiteBeastRepository(dbPath);
+    const oldActive = repo.createRun({
+      definitionId: 'reviewer',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-01T00:00:00.000Z',
+    });
+    const recentTerminal = repo.createRun({
+      definitionId: 'reviewer',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    repo.updateRun(recentTerminal.id, {
+      status: 'completed',
+      finishedAt: '2026-03-10T00:10:00.000Z',
+    });
+    repo.createRun({
+      definitionId: 'planner',
+      definitionVersion: 1,
+      executionMode: 'process',
+      configSnapshot: {},
+      dispatchedBy: 'dashboard',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:05:00.000Z',
+    });
+
+    expect(repo.listRunsForDefinitionWindow({
+      definitionId: 'reviewer',
+      since: '2026-03-10T00:00:00.000Z',
+      limit: 1,
+    })).toEqual([repo.getRun(recentTerminal.id)]);
+    expect(repo.listRunsForDefinitionWindow({
+      definitionId: 'reviewer',
+      since: '2026-03-10T00:20:00.000Z',
+      limit: 2,
+    })).toEqual([repo.getRun(oldActive.id)]);
+    expect(() => repo.listRunsForDefinitionWindow({
+      definitionId: 'reviewer', since: 'invalid', limit: 2,
+    })).toThrow(RangeError);
+    expect(() => repo.listRunsForDefinitionWindow({
+      definitionId: 'reviewer', since: '2026-03-10T00:00:00.000Z', limit: 201,
+    })).toThrow(RangeError);
+
+    const db = new Database(dbPath, { readonly: true });
+    const indexes = db.prepare(
+      `SELECT name FROM sqlite_master
+        WHERE type = 'index' AND name IN (
+          'idx_beast_runs_definition_status_created_at_id',
+          'idx_beast_runs_definition_activity_at_id'
+        ) ORDER BY name`,
+    ).all() as Array<{ name: string }>;
+    expect(indexes.map(({ name }) => name)).toEqual([
+      'idx_beast_runs_definition_activity_at_id',
+      'idx_beast_runs_definition_status_created_at_id',
+    ]);
+    db.close();
+  });
+
   it('creates attempts and keeps run state in sync', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-beasts-repo-'));
     const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -28,12 +29,16 @@ vi.mock('../../../src/http/ws-chat-server.js', () => ({
 
 import { startChatServer } from '../../../src/http/chat-server.js';
 import { createChatApp } from '../../../src/http/chat-app.js';
+import { attachChatWebSocketServer } from '../../../src/http/ws-chat-server.js';
 import { hashChatRateLimitPrincipal } from '../../../src/http/chat-rate-limit.js';
+import { RuntimeActionStore } from '../../../src/runtime/runtime-action-store.js';
+import { SseConnectionTicketStore } from '../../../src/beasts/events/sse-connection-ticket.js';
 import type { CommsConfig } from '../../../src/comms/config/comms-config.js';
 import type { CommsRuntimePort } from '../../../src/comms/core/comms-runtime-port.js';
 import type { ChatServerHandle } from '../../../src/http/chat-server.js';
 
 const mockedCreateChatApp = vi.mocked(createChatApp);
+const mockedAttachChatWebSocketServer = vi.mocked(attachChatWebSocketServer);
 
 describe('startChatServer comms pass-through', () => {
   let handle: ChatServerHandle | undefined;
@@ -104,6 +109,202 @@ describe('startChatServer comms pass-through', () => {
     handle = await startChatServer(options);
     const restartedStore = mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore;
     expect(restartedStore!.consume(ticket, TEST_OPERATOR_TOKEN, 'session-1')).toBe('valid');
+  });
+
+  it('provides durable runtime action state and the configured governor to the production app', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-runtime-actions-'));
+    tempDirs.push(projectDir);
+    const governor = { requestApproval: vi.fn(async () => ({ decision: 'approved' as const })) };
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(projectDir, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+      runtimeActionGovernor: governor,
+    });
+
+    const opts = mockedCreateChatApp.mock.calls[0]![0];
+    expect(opts.runtimeActionGovernor).toBe(governor);
+    expect(opts.runtimeActionStore).toBeDefined();
+    expect(opts.runtimeActionStore!.listAuditEvents()).toEqual([]);
+    await expect(stat(join(projectDir, 'chat', 'runtime-actions', 'actions.sqlite'))).resolves.toBeDefined();
+    const beginShutdown = vi.spyOn(opts.runtimeActionStore!, 'beginShutdown');
+    const drain = vi.spyOn(opts.runtimeActionStore!, 'drain');
+    const destroy = vi.spyOn(opts.runtimeActionStore!, 'destroy');
+
+    await handle.close();
+    handle = undefined;
+
+    expect(beginShutdown).toHaveBeenCalledOnce();
+    expect(drain).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(beginShutdown.mock.invocationCallOrder[0]).toBeLessThan(drain.mock.invocationCallOrder[0]!);
+    expect(drain.mock.invocationCallOrder[0]).toBeLessThan(destroy.mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps the owned action store open until actions outlive the bounded shutdown drain', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-runtime-action-drain-'));
+    tempDirs.push(projectDir);
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(projectDir, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    });
+    const actionStore = mockedCreateChatApp.mock.calls[0]![0].runtimeActionStore!;
+    let settleAction!: () => void;
+    const action = new Promise<void>((resolve) => { settleAction = resolve; });
+    void actionStore.track(action);
+    const destroy = vi.spyOn(actionStore, 'destroy');
+
+    vi.useFakeTimers();
+    try {
+      const closing = handle.close();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await closing;
+      handle = undefined;
+
+      expect(destroy).not.toHaveBeenCalled();
+      settleAction();
+      await action;
+      await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continues owned server cleanup when shutdown claim fencing fails', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-runtime-action-fence-failure-'));
+    tempDirs.push(projectDir);
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: join(projectDir, 'chat'),
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      operatorToken: TEST_OPERATOR_TOKEN,
+    });
+    const actionStore = mockedCreateChatApp.mock.calls[0]![0].runtimeActionStore!;
+    const drain = vi.spyOn(actionStore, 'drain');
+    const destroy = vi.spyOn(actionStore, 'destroy');
+    vi.spyOn(actionStore, 'beginShutdown').mockImplementation(() => {
+      throw new Error('SQLITE_BUSY while fencing claims');
+    });
+    const webSocketClose = vi.mocked(mockedAttachChatWebSocketServer.mock.results.at(-1)!.value.close);
+    const ticketDestroy = vi.spyOn(mockedCreateChatApp.mock.calls[0]![0].chatStreamTicketStore!, 'destroy');
+
+    await expect(handle.close()).rejects.toThrow('SQLITE_BUSY while fencing claims');
+    handle = undefined;
+
+    expect(webSocketClose).toHaveBeenCalledOnce();
+    expect(ticketDestroy).toHaveBeenCalledOnce();
+    expect(drain).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it('leaves caller-owned runtime action store lifecycle with the caller', async () => {
+    const runtimeActionStore = new RuntimeActionStore();
+    const beginShutdown = vi.spyOn(runtimeActionStore, 'beginShutdown');
+    const drain = vi.spyOn(runtimeActionStore, 'drain');
+    const destroy = vi.spyOn(runtimeActionStore, 'destroy');
+
+    handle = await startChatServer({
+      host: '127.0.0.1',
+      port: 0,
+      sessionStoreDir: '/tmp/chat-server-external-runtime-action-store',
+      llm: { complete: vi.fn().mockResolvedValue('ok') },
+      projectName: 'test',
+      runtimeActionStore,
+    });
+    await handle.close();
+    handle = undefined;
+
+    expect(beginShutdown).not.toHaveBeenCalled();
+    expect(drain).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
+    expect(runtimeActionStore.reserve('key', 'fingerprint', Date.now() + 1000)).toEqual(expect.objectContaining({
+      status: 'claimed', claimToken: expect.any(String),
+    }));
+    runtimeActionStore.destroy();
+  });
+
+  it('destroys earlier owned stores when runtime action store construction fails', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-action-store-construction-failure-'));
+    tempDirs.push(projectDir);
+    const sessionStoreDir = join(projectDir, 'chat');
+    await mkdir(sessionStoreDir, { recursive: true });
+    await writeFile(join(sessionStoreDir, 'runtime-actions'), 'blocks action-store directory creation');
+    const destroyTickets = vi.spyOn(SseConnectionTicketStore.prototype, 'destroy');
+
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir,
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: TEST_OPERATOR_TOKEN,
+      })).rejects.toThrow();
+
+      expect(destroyTickets).toHaveBeenCalledOnce();
+    } finally {
+      destroyTickets.mockRestore();
+    }
+  });
+
+  it('destroys an owned runtime action store when app creation fails before listen', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-app-failure-'));
+    tempDirs.push(projectDir);
+    const destroy = vi.spyOn(RuntimeActionStore.prototype, 'destroy');
+    mockedCreateChatApp.mockImplementationOnce(() => {
+      throw new Error('invalid app configuration');
+    });
+
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: 0,
+        sessionStoreDir: join(projectDir, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: TEST_OPERATOR_TOKEN,
+      })).rejects.toThrow('invalid app configuration');
+
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      destroy.mockRestore();
+    }
+  });
+
+  it('destroys an owned runtime action store when server startup fails', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'chat-server-startup-failure-'));
+    tempDirs.push(projectDir);
+    const occupied = createServer();
+    await new Promise<void>((resolve) => occupied.listen(0, '127.0.0.1', resolve));
+    const address = occupied.address();
+    if (!address || typeof address === 'string') throw new Error('Expected occupied TCP port');
+    const destroy = vi.spyOn(RuntimeActionStore.prototype, 'destroy');
+
+    try {
+      await expect(startChatServer({
+        host: '127.0.0.1',
+        port: address.port,
+        sessionStoreDir: join(projectDir, 'chat'),
+        llm: { complete: vi.fn().mockResolvedValue('ok') },
+        projectName: 'test',
+        operatorToken: TEST_OPERATOR_TOKEN,
+      })).rejects.toThrow();
+
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      destroy.mockRestore();
+      await new Promise<void>((resolve, reject) => occupied.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it('closes analytics dependencies when the chat server shuts down', async () => {

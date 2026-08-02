@@ -1,5 +1,6 @@
 import type { ILlmClient, LlmCompletionOptions, LlmCompletionResult, ProviderContext, TokenUsage } from '@franken/types';
-import { now as deterministicNow, seededRandom } from '@franken/types';
+import { randomUUID } from 'node:crypto';
+import { redactSensitiveText } from '../logging/redaction.js';
 
 type UnifiedRequest = {
   id: string;
@@ -27,9 +28,81 @@ type UnifiedResponse = {
   providerContext?: ProviderContext;
 };
 
+const MAX_OUTWARD_ERROR_CONTEXT_LENGTH = 1_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_REQUEST_TIMEOUT_MS = 2_147_483_647;
+
+function validateMaxTokens(maxTokens: number | undefined): void {
+  if (maxTokens !== undefined && (!Number.isSafeInteger(maxTokens) || maxTokens <= 0)) {
+    throw new TypeError('LLM request maxTokens must be a positive safe integer');
+  }
+}
+
+function normalizeRequestTimeout(timeoutMs: number | undefined): number {
+  const normalized = timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    throw new Error('LLM request timeoutMs must be a finite positive number');
+  }
+  if (normalized > MAX_REQUEST_TIMEOUT_MS) {
+    throw new Error(`LLM request timeoutMs must be less than or equal to ${MAX_REQUEST_TIMEOUT_MS}`);
+  }
+  return normalized;
+}
+
+function settleOrAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const rejectOnAbort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', rejectOnAbort, { once: true });
+    operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', rejectOnAbort);
+    });
+  });
+}
+
+function safeAdapterErrorContext(error: unknown): string {
+  let errorClass: string = typeof error;
+  let message = 'No diagnostic available';
+  let errorValue: Error | undefined;
+  try {
+    if (error instanceof Error) {
+      errorValue = error;
+    }
+  } catch {
+    // Treat values with hostile prototype traps as opaque thrown values.
+  }
+  if (errorValue) {
+    try {
+      errorClass = String(errorValue.name);
+    } catch {
+      errorClass = 'Error';
+    }
+    try {
+      message = String(errorValue.message);
+    } catch {
+      // Keep the fixed safe fallback when an untrusted error getter throws.
+    }
+  } else {
+    try {
+      message = String(error);
+    } catch {
+      // Keep the fixed safe fallback when an untrusted conversion throws.
+    }
+  }
+  const safeClass = redactSensitiveText(errorClass.replace(/\s+/gu, ' ')).trim().slice(0, 100);
+  const safeMessage = redactSensitiveText(message.replace(/\s+/gu, ' '))
+    .trim()
+    .slice(0, MAX_OUTWARD_ERROR_CONTEXT_LENGTH);
+  return redactSensitiveText(
+    `${safeClass || 'Error'}: ${safeMessage || 'No diagnostic available'}`,
+  );
+}
+
 export interface IAdapter {
+  /** Set only when execute() enforces request.timeoutMs and cancels its underlying work. */
+  readonly managesRequestTimeout?: boolean;
   transformRequest(request: UnifiedRequest): unknown;
-  execute(providerRequest: unknown): Promise<unknown>;
+  execute(providerRequest: unknown, signal?: AbortSignal): Promise<unknown>;
   transformResponse(providerResponse: unknown, requestId: string): UnifiedResponse;
   validateCapabilities(feature: string): boolean;
 }
@@ -100,41 +173,66 @@ export class AdapterLlmClient implements ILlmClient {
     prompt: string,
     options?: LlmCompletionOptions & { sessionContinue?: boolean; sessionId?: string },
   ): Promise<{ content: string; usage?: TokenUsage; providerContext?: ProviderContext }> {
-    const requestId = `llm-${deterministicNow()}-${seededRandom.random().toString(16).slice(2)}`;
+    const requestId = `llm-${randomUUID()}`;
     const model = this.defaultModel;
+    validateMaxTokens(options?.maxTokens);
+    const timeoutMs = normalizeRequestTimeout(options?.timeoutMs);
+    const controller = new AbortController();
+    const abortFromCaller = (): void => {
+      controller.abort(
+        options?.signal?.reason instanceof Error
+          ? options.signal.reason
+          : new Error('LLM request cancelled'),
+      );
+    };
+    if (options?.signal?.aborted) {
+      abortFromCaller();
+    } else {
+      options?.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    }
+    const timeout = this.adapter.managesRequestTimeout || controller.signal.aborted
+      ? undefined
+      : setTimeout(() => {
+          controller.abort(
+            Object.assign(new Error(`LLM request timeout after ${timeoutMs}ms`), { code: 'ETIMEDOUT' }),
+          );
+        }, timeoutMs);
 
     const request: UnifiedRequest = {
       id: requestId,
       provider: 'adapter',
       model,
       messages: [{ role: 'user', content: prompt }],
+      ...(options?.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       ...(options?.sessionId ? { session_id: options.sessionId } : {}),
       ...(options?.sessionContinue !== undefined ? { sessionContinue: options.sessionContinue } : {}),
-      ...(options?.signal ? { signal: options.signal } : {}),
-      ...(options?.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      signal: controller.signal,
+      ...(!this.adapter.managesRequestTimeout || options?.timeoutMs !== undefined ? { timeoutMs } : {}),
     };
 
     let span: any;
-    if (this.observer) {
-      span = this.observer.startSpan(this.observer.trace, { name: `llm-complete:${requestId}` });
-    }
-
     let failed = false;
     try {
+      if (this.observer) {
+        span = this.observer.startSpan(this.observer.trace, { name: `llm-complete:${requestId}` });
+      }
       let content: string | null;
       let usage: TokenUsage | undefined;
       let providerContext: ProviderContext | undefined;
       try {
+        if (controller.signal.aborted) throw controller.signal.reason;
         const providerRequest = this.adapter.transformRequest(request);
-        const providerResponse = await this.adapter.execute(providerRequest);
+        const providerResponse = await settleOrAbort(
+          this.adapter.execute(providerRequest, controller.signal),
+          controller.signal,
+        );
         const response = this.adapter.transformResponse(providerResponse, requestId);
         content = response.content;
         usage = response.usage;
         providerContext = response.providerContext;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
         throw new AdapterLlmError(
-          `LLM adapter call failed for request ${requestId}: ${message}`,
+          `LLM adapter call failed for request ${requestId}: ${safeAdapterErrorContext(error)}`,
           requestId,
           { cause: error },
         );
@@ -178,6 +276,8 @@ export class AdapterLlmClient implements ILlmClient {
       failed = true;
       throw error;
     } finally {
+      if (timeout) clearTimeout(timeout);
+      options?.signal?.removeEventListener('abort', abortFromCaller);
       if (this.observer && span) {
         this.observer.endSpan(span, { status: failed ? 'error' : 'completed' });
       }

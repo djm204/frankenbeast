@@ -98,6 +98,10 @@ export class CodexProvider implements ICliProvider {
     };
   }
 
+  requiredAuthEnvVars(): readonly string[] {
+    return ['OPENAI_API_KEY'];
+  }
+
   supportsStreamJson(): boolean {
     return false;
   }

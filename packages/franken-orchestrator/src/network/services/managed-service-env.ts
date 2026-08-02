@@ -22,7 +22,21 @@ const PROVIDER_ENV_KEYS = [
   'GEMINI_CLI_TRUST_WORKSPACE',
 ] as const;
 
+function ollamaEnvKeys(): string[] {
+  const credentialRef = process.env['OLLAMA_API_KEY_REF']?.trim();
+  return [
+    'OLLAMA_HOST',
+    'OLLAMA_API_KEY_REF',
+    ...(credentialRef && /^[A-Za-z_][A-Za-z0-9_]*$/.test(credentialRef) ? [credentialRef] : []),
+  ];
+}
+
 const DASHBOARD_BUILD_ENV_KEYS = ['VITE_PROJECT_ID'] as const;
+
+const DASHBOARD_RUNTIME_ENV_KEYS = [
+  'FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_ORIGIN',
+  'FRANKENBEAST_DASHBOARD_TRUSTED_PROXY_TOKEN',
+] as const;
 
 const GITHUB_ENV_KEYS = [
   'GH_TOKEN',
@@ -164,10 +178,10 @@ export function inheritedNetworkServiceEnvKeys(
     keys.push(...CAPACITY_ENV_KEYS);
   }
   if (serviceId === 'chat-server') {
-    keys.push(...configuredCommsEnvRefs(config));
+    keys.push(...ollamaEnvKeys(), ...configuredCommsEnvRefs(config));
   }
   if (serviceId === 'dashboard-web') {
-    keys.push(...DASHBOARD_BUILD_ENV_KEYS);
+    keys.push(...DASHBOARD_BUILD_ENV_KEYS, ...DASHBOARD_RUNTIME_ENV_KEYS);
   }
 
   return [...new Set(keys)];

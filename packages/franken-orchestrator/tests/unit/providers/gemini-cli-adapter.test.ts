@@ -297,6 +297,18 @@ describe('GeminiCliAdapter', () => {
     });
   });
 
+  describe('sanitizedEnv()', () => {
+    it('strips unrelated secret-shaped env vars', () => {
+      process.env['SOME_UNRELATED_API_KEY'] = 'unrelated-secret';
+      try {
+        const env = adapter.sanitizedEnv();
+        expect(env['SOME_UNRELATED_API_KEY']).toBeUndefined();
+      } finally {
+        delete process.env['SOME_UNRELATED_API_KEY'];
+      }
+    });
+  });
+
   describe('isAvailable()', () => {
     it('does not expose runtime config integrity state to the Gemini availability probe', async () => {
       const originalManifest = process.env[RUN_CONFIG_INTEGRITY_ENV];

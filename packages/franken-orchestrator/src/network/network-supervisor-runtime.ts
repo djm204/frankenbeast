@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { Socket } from 'node:net';
-import { dirname, delimiter, join, sep } from 'node:path';
+import { dirname, delimiter, isAbsolute, join, sep } from 'node:path';
 import type { ManagedNetworkServiceState } from './network-state-store.js';
 import type { ResolvedNetworkService } from './network-registry.js';
 import type { PreflightServiceResult, StartServiceOptions } from './network-supervisor.js';
@@ -149,13 +149,13 @@ function validateNetworkServiceEnv(service: ResolvedNetworkService): void {
   }
 }
 
-// Resolve the `npm` binary on PATH to its real target. Distro packages that
+// Resolve the `npm` binary on the trusted managed PATH to its real target. Distro packages that
 // ship npm separately from node (e.g. Debian's /usr/bin/npm) symlink the
 // launcher to the real `npm-cli.js`, so following the link yields a trusted
 // CLI script we can run directly with node — without spawning a shell or an
 // npm shim. Returns null if npm is absent or does not resolve to an npm-cli.js.
 function resolveNpmCliFromPath(): string | null {
-  const pathDirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  const pathDirs = buildNetworkProcessPath().split(delimiter).filter(Boolean);
   for (const dir of pathDirs) {
     const candidate = join(dir, 'npm');
     if (!existsSync(candidate)) continue;
@@ -266,10 +266,20 @@ function allowlistedNetworkProcessEnv(
 }
 
 function buildNetworkProcessPath(): string {
+  const operatorHome = process.env.HOME;
+  const operatorBin = operatorHome && isAbsolute(operatorHome) && !operatorHome.includes(delimiter)
+    ? join(operatorHome, '.local', 'bin')
+    : undefined;
   const pathEntries = process.platform === 'win32'
     ? [dirname(process.execPath)]
-    : [dirname(process.execPath), '/usr/bin', '/bin'];
-  return pathEntries.join(delimiter);
+    : [
+        dirname(process.execPath),
+        ...(operatorBin ? [operatorBin] : []),
+        '/usr/local/bin',
+        '/usr/bin',
+        '/bin',
+      ];
+  return [...new Set(pathEntries)].join(delimiter);
 }
 
 function buildNetworkProcessEnv(
@@ -300,9 +310,19 @@ function buildValidatedProcessSpec(service: ResolvedNetworkService): ValidatedPr
     };
   }
   if (processSpec.command === 'node' || processSpec.command === 'node.exe') {
+    const args = [...processSpec.args];
+    if (service.id === 'dashboard-web') {
+      const buildCommandIndex = args.indexOf('--build-command');
+      const buildArgsIndex = args.indexOf('--build-args');
+      if (buildCommandIndex < 0 || buildArgsIndex < 0) {
+        throw new Error(`Unsafe network service arguments for ${service.id}`);
+      }
+      args[buildCommandIndex + 1] = process.execPath;
+      args.splice(buildArgsIndex + 1, 0, resolveNpmCliPath());
+    }
     return {
       command: process.execPath,
-      args: processSpec.args,
+      args,
       cwd: processSpec.cwd,
       env,
     };

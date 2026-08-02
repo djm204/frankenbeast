@@ -12,8 +12,10 @@ export interface CompactionEvent {
   readonly timestamp: number
 }
 
-export interface CompactionEventQuery {
-  readonly sessionId: string
+export type CompactionEventQuery = (
+  | { readonly sessionId: string; readonly runId?: never }
+  | { readonly runId: string; readonly sessionId?: never }
+) & {
   readonly since?: number
   readonly limit: number
 }

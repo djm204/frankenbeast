@@ -632,6 +632,23 @@ describe('MartinLoop', () => {
     delete process.env['CLAUDECODE'];
   });
 
+  it('strips secret-shaped ambient env vars while preserving the provider auth var (spawnIteration path)', async () => {
+    process.env['SOME_UNRELATED_API_KEY'] = 'unrelated-secret';
+    process.env['ANTHROPIC_API_KEY'] = 'anthropic-secret';
+
+    queueMock({ stdout: 'ok\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    await loop.run(baseConfig({ provider: 'claude' }));
+
+    const spawnEnv = (mockSpawn.mock.calls[0] as unknown[])[2] as { env: Record<string, string> };
+    expect(spawnEnv.env).not.toHaveProperty('SOME_UNRELATED_API_KEY');
+    expect(spawnEnv.env).toHaveProperty('ANTHROPIC_API_KEY', 'anthropic-secret');
+
+    delete process.env['SOME_UNRELATED_API_KEY'];
+    delete process.env['ANTHROPIC_API_KEY'];
+  });
+
   // ── 11. Token estimation via provider ──
 
   it('estimates tokens via provider: /4 for claude, /16 for codex', async () => {
@@ -874,7 +891,6 @@ describe('MartinLoop', () => {
     const metrics = new CompactionMetrics(adapter);
     const bridge = new CliObserverBridge({ budgetLimitUsd: 1, compactionAdapter: adapter });
     bridge.startTrace('run-threshold');
-    const traceId = bridge.observerDeps.trace.id;
 
     queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
 
@@ -906,7 +922,7 @@ describe('MartinLoop', () => {
     await expect(metrics.query(stored!.sessionId)).resolves.toEqual([
       expect.objectContaining({
         sessionId: stored!.sessionId,
-        runId: traceId,
+        runId: 'run-threshold',
         generation: 1,
         triggerReason: 'threshold',
         tokensBefore: 900,

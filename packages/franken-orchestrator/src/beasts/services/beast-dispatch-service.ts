@@ -49,6 +49,7 @@ const SHARED_RUNTIME_CONFIG_KEYS = [
   'categories',
   'issue',
   'brain',
+  'budget',
 ] as const;
 
 const TOOL_POLICY_CONFIG_KEYS = [
@@ -125,6 +126,8 @@ function normalizeSharedRuntimeConfigValue(key: string, value: unknown): unknown
     case 'maxDurationMs':
     case 'maxTotalTokens':
       return typeof value === 'number' ? value : undefined;
+    case 'budget':
+      return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
     case 'reflection':
       return typeof value === 'boolean' ? value : undefined;
     case 'label':

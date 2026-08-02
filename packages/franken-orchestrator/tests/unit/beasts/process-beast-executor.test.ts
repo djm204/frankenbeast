@@ -17,8 +17,16 @@ import {
 import type { BeastDefinition } from '../../../src/beasts/types.js';
 import { SAFE_DISPATCH_FAILURE_MESSAGE } from '../../../src/beasts/services/dispatch-failure-message.js';
 
-function createTestRun(repo: SQLiteBeastRepository) {
+function createTestRun(repo: SQLiteBeastRepository, tracked = false) {
+  const trackedAgentId = tracked
+    ? repo.createTrackedAgent({
+      definitionId: 'martin-loop', source: 'cli', status: 'dispatching', createdByUser: 'pfk',
+      initAction: { kind: 'martin-loop', command: 'test', config: {} }, initConfig: {},
+      createdAt: '2026-03-10T00:00:00.000Z', updatedAt: '2026-03-10T00:00:00.000Z',
+    }).id
+    : undefined;
   return repo.createRun({
+    ...(trackedAgentId ? { trackedAgentId } : {}),
     definitionId: 'martin-loop',
     definitionVersion: 1,
     executionMode: 'process',
@@ -148,6 +156,45 @@ describe('ProcessBeastExecutor', () => {
         type: 'attempt.started',
       }),
     ]);
+  });
+
+  it('propagates the stable Beast run ID and samples resources for the process lifetime', async () => {
+    workDir = await createTempWorkDir();
+    const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logs = new BeastLogStore(join(workDir, 'logs'));
+    let callbacks: ProcessCallbacks | undefined;
+    let spawnedEnv: Record<string, string> | undefined;
+    const supervisor = {
+      spawn: vi.fn(async (spec: { env?: Record<string, string> }, handlers: ProcessCallbacks) => {
+        spawnedEnv = spec.env;
+        callbacks = handlers;
+        return { pid: 4242 };
+      }),
+      stop: vi.fn(async () => {}),
+      kill: vi.fn(async () => {}),
+    };
+    const sampler = { start: vi.fn(), stop: vi.fn(async () => {}) };
+    const resourceSamplerFactory = vi.fn(() => sampler);
+    const telemetryDatabasePath = join(workDir, 'shared-traces.db');
+    const executor = new ProcessBeastExecutor(repo, logs, supervisor, {
+      resourceSamplerFactory,
+      telemetryDatabasePath,
+    });
+    const run = createTestRun(repo, true);
+
+    const attempt = await executor.start(run, martinLoopDefinition);
+    expect(spawnedEnv?.FRANKENBEAST_BEAST_RUN_ID).toBe(run.id);
+    expect(spawnedEnv?.FRANKENBEAST_TRACES_DB).toBe(telemetryDatabasePath);
+    expect(resourceSamplerFactory).toHaveBeenCalledWith(expect.objectContaining({
+      pid: 4242,
+      agentId: run.trackedAgentId,
+      runId: run.id,
+    }));
+    expect(sampler.start).toHaveBeenCalledOnce();
+
+    callbacks?.onExit(0, null);
+    await vi.waitFor(() => expect(sampler.stop).toHaveBeenCalledOnce());
+    expect(repo.getAttempt(attempt.id)?.status).toBe('completed');
   });
 
   it('merges process-group ownership metadata into custom attempt metadata', async () => {
@@ -1959,6 +2006,55 @@ describe('ProcessBeastExecutor', () => {
   });
 
   describe('spawn failure handling', () => {
+    it('persists launch preparation failures to the system log', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = createSupervisorMock();
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+      const invalidDefinition = {
+        ...martinLoopDefinition,
+        buildProcessSpec: () => {
+          throw new Error('invalid launch config');
+        },
+      } satisfies BeastDefinition;
+
+      await expect(executor.start(run, invalidDefinition)).rejects.toThrow('invalid launch config');
+
+      const systemLogs = await logs.read(run.id, 'system');
+      expect(systemLogs).toContainEqual(
+        expect.stringContaining('process launch preparation failed: invalid launch config'),
+      );
+      expect(supervisor.spawn).not.toHaveBeenCalled();
+    });
+
+    it('persists output emitted before a spawn failure to the system log', async () => {
+      workDir = await createTempWorkDir();
+      const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+      const logs = new BeastLogStore(join(workDir, 'logs'));
+      const supervisor = {
+        spawn: vi.fn(async (_spec: unknown, callbacks: unknown) => {
+          const cb = callbacks as ProcessCallbacks;
+          cb.onStdout('pre-spawn stdout');
+          cb.onStderr('pre-spawn stderr');
+          throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
+        }),
+        stop: vi.fn(async () => {}),
+        kill: vi.fn(async () => {}),
+      };
+      const executor = new ProcessBeastExecutor(repo, logs, supervisor);
+      const run = createTestRun(repo);
+
+      await expect(executor.start(run, martinLoopDefinition)).rejects.toThrow(SAFE_DISPATCH_FAILURE_MESSAGE);
+
+      const systemLogs = await logs.read(run.id, 'system');
+      expect(systemLogs).toEqual(expect.arrayContaining([
+        expect.stringContaining('pre-spawn stdout'),
+        expect.stringContaining('pre-spawn stderr'),
+      ]));
+    });
+
     it('sets run to failed with spawn_failed stop reason', async () => {
       workDir = await createTempWorkDir();
       const repo = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

@@ -1,5 +1,31 @@
 # Resolve Issues Shared Lessons
 
+## 2026-07-30 — Maintained-docs conflict-marker integrity
+- A docs integrity regression should combine a real repository scan with isolated fixtures so the suite proves both the current tree and the guard's red-capable behavior. Restrict traversal to maintained Markdown roots and skip generated/vendor directories. Reject standard-width opening/closing remnants independently, but require a coherent same-width block for shorter configurable markers so custom Git conflicts are caught without misclassifying standalone Setext headings or Markdown blockquotes. Preserve an active short block after its separator, normalize BOM and CR-only inputs, and test those parser boundaries directly.
+
+## 2026-07-30 — Completion token limits must cross every adapter boundary
+- Put provider-agnostic completion limits on the shared `LlmCompletionOptions` contract, reject non-positive or unsafe integers before adapter work starts, and explicitly map the unified request's `max_tokens` field into provider-facing `LlmRequest.maxTokens`; declaring a field on an intermediate request type alone neither validates nor forwards it.
+
+## 2026-07-30 — Bound automatic scans without breaking unlimited retrieval
+- When an API uses negative limits to mean “all,” do not reuse that result limit directly as a finite raw-row budget: bound non-negative automatic lookbacks by rows examined, but preserve the explicit negative-limit convention (and label it `unbounded` in audit metadata). Add separate regressions for bounded filtered/encrypted scans and negative-limit ordering.
+
+## 2026-07-30 — Faculty clocks must be wired before adapter construction
+- Resolve the shared Beast clock before constructing any faculty adapter, then use that same source for lesson-consultation and every lifecycle timestamp. A frozen-clock dependency-factory regression should exercise planning, completion, and failure paths together so one remaining wall-clock call cannot hide behind otherwise deterministic reasoning/action behavior.
+
+## 2026-07-30 — Evaluator severity must agree with blocking verdicts
+- A deterministic style threshold is not flaky merely because code edits cross it. Re-run identical boundary inputs and trace the result through aggregate consumers before changing the threshold.
+- Informational evaluator findings must not return a blocking `fail` verdict when the pipeline contract treats `pass` plus `info` as non-blocking. Preserve the finding and score signal, and fix the verdict/severity drift instead of adding environment configuration to pure evaluator logic.
+
+## 2026-07-30 — Adapter-level deadlines need one owner and one cancellation signal
+- A client wrapper that only forwards `timeoutMs` remains unbounded for generic adapters. Enforce a default/request deadline at the wrapper, pass the same abort signal through both request transformation and `execute()`, and race completion against that signal so the caller returns even when adapter work stalls.
+- Let adapters that already enforce and clean up their own deadline explicitly advertise that capability; the wrapper should forward the normalized timeout but skip its extra timer. Timeout-aware process adapters must abort their child process, while generic adapters receive the wrapper signal for cooperative cleanup.
+- Propagate cancellation through provider registries into SDK request options and child-process spawn signals. Caller cancellation must release half-open circuit-breaker reservations without recording provider failures, and timer inputs must be capped at Node's signed 32-bit delay limit.
+
+## 2026-07-27 — Managed-service CLI visibility must use explicit operator paths
+- A managed service that rebuilds `PATH` should add only explicit conventional operator locations (for example `$HOME/.local/bin` and `/usr/local/bin`) beside the runtime/system directories; never copy the parent shell's `PATH`, because arbitrary inherited entries would undo process isolation. Validate home-derived entries as absolute and delimiter-free before adding them.
+- Audit nested child launchers after widening a managed PATH. Bare commands that were safe only under the old restricted PATH (such as a dashboard process spawning `npm`) must be replaced with already-resolved trusted executable/CLI paths, and fallback resolution must search the sanitized managed PATH rather than the parent process PATH.
+- Verify this boundary from the real detached child rather than only the launching shell: inspect only the child `PATH` from `/proc/<pid>/environ`, resolve required CLI names against that exact value, and query the authenticated managed dashboard health snapshot while keeping all credential values out of output.
+
 ## 2026-07-25 — Cross-agent hive activity needs explicit attribution truth
 - A workspace-wide status query may use agent-type hive activity for a subject only when the bounded tracked-agent scan proves that type belongs to one subject, or when the publisher id matches that subject's tracked agent/run directly. If the scan is incomplete or the type is shared, omit generic activity and expose a stable partial/error marker instead of guessing ownership.
 - Count soft-deleted agents when proving agent-type ownership; persisted hive episodes can outlive the tracked-agent row's active lifecycle.
@@ -564,3 +590,12 @@
 
 ## 2026-07-25 — Shared memory inherits local safety semantics
 - A cross-agent SQLite memory substrate needs more than namespace isolation: retain bounded rows, filter entry kinds before read limits, keep database metadata authoritative over payload fields, revoke rejected/never-store candidates, propagate right-to-forget for owned entries, avoid plaintext publication from encrypted brains, and include hive state in encrypted DR backups.
+
+## 2026-07-30 — Best-effort persistence diagnostics
+- Emit persistence-failure diagnostics only around the failing adapter call, keep diagnostic sinks best-effort, log bounded hashes instead of raw payloads/errors, and restore console spies so rejection tests remain isolated and warning-free.
+
+## 2026-07-30 — Caller-side boundaries for optional faculty hooks
+- An adapter-owned faculty may already contain persistence failures, but custom faculties attached through the public brain boundary can still throw. Keep a caller-side best-effort boundary around optional lifecycle hooks and leave the established generic recovery write outside it; regress both success and failure hooks with a custom throwing faculty.
+
+## 2026-08-02 — CLI provider stdin error ownership
+- Child-process adapters that write prompts to `stdin` must own stream `error` events as part of normal process lifecycle, not rely on process-level `error`/`close` handling alone. Guard writes after an early exit, defer benign `EPIPE`/closed-stdin races into the existing child result path, and add provider-specific regressions that simulate early-exiting CLIs so one adapter cannot crash the whole orchestrator.

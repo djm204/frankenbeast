@@ -228,6 +228,50 @@ describe('ContainerBeastExecutor', () => {
     expect(fakeSupervisor.spawn).not.toHaveBeenCalled();
   });
 
+  it('rejects telemetry database paths outside the mounted workspace', async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'franken-container-executor-'));
+    const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));
+    const logStore = new BeastLogStore(join(workDir, 'logs'));
+    const fakeSupervisor: ProcessSupervisorLike = {
+      spawn: vi.fn(async () => ({ pid: 4242 })),
+      stop: vi.fn(async () => undefined),
+      kill: vi.fn(async () => undefined),
+    };
+    const telemetryDatabasePath = join(tmpdir(), 'external-frankenbeast-traces.db');
+    const executor = new ContainerBeastExecutor({
+      repository,
+      logStore,
+      supervisorFactory: () => fakeSupervisor,
+      policy: { ...DEFAULT_SANDBOX_POLICY, workspaceHostPath: workDir },
+      telemetryDatabasePath,
+    });
+    const run = repository.createRun({
+      definitionId: 'test-beast',
+      definitionVersion: 1,
+      executionMode: 'container',
+      configSnapshot: {},
+      dispatchedBy: 'api',
+      dispatchedByUser: 'pfk',
+      createdAt: '2026-03-10T00:00:00.000Z',
+    });
+    const definition = {
+      id: 'test-beast',
+      version: 1,
+      label: 'Test Beast',
+      description: 'Test beast',
+      executionModeDefault: 'container' as const,
+      configSchema: { parse: (value: unknown) => value as Readonly<Record<string, unknown>> },
+      interviewPrompts: [],
+      telemetryLabels: {},
+      buildProcessSpec: () => ({ command: 'node', args: ['agent.js'], cwd: workDir, env: {} }),
+    };
+
+    await expect(executor.start(run, definition)).rejects.toThrow(
+      `Container telemetryDatabasePath must be inside the mounted workspace: ${telemetryDatabasePath}`,
+    );
+    expect(fakeSupervisor.spawn).not.toHaveBeenCalled();
+  });
+
   it('uses a distinct Docker container name for each retry attempt', async () => {
     workDir = await mkdtemp(join(tmpdir(), 'franken-container-executor-'));
     const repository = new SQLiteBeastRepository(join(workDir, 'beasts.db'));

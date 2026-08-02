@@ -365,6 +365,12 @@ export interface ProcessBeastExecutorOptions {
   worktreeIsolation?: GitWorktreeIsolationConfig | undefined;
   /** Optional protected debug sink. Values are scrubbed before this callback is invoked. */
   onSpawnFailureDebug?: (details: SpawnFailureDebugDetails) => void;
+  resourceSamplerFactory?: (options: {
+    pid: number;
+    agentId: string;
+    runId: string;
+  }) => { start(): void; stop(): Promise<void> };
+  telemetryDatabasePath?: string | undefined;
 }
 
 function applyRunConfigOwnership(path: string, owner: RunConfigSnapshotOwner | undefined): void {
@@ -490,6 +496,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
   private readonly attemptConfigFilePaths = new Map<string, string>();
   private readonly attemptConfigManifestPaths = new Map<string, string>();
   private readonly worktreeAllocations = new Map<string, BeastWorktreeAllocation>();
+  private readonly resourceSamplers = new Map<string, { stop(): Promise<void> }>();
 
   constructor(
     private readonly repository: SQLiteBeastRepository,
@@ -499,6 +506,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
   ) {}
 
   async start(run: BeastRun, definition: BeastDefinition): Promise<BeastRunAttempt> {
+    let prepared: PreparedBeastStartResources;
+    try {
+      prepared = this.prepareStartResources(run, definition);
+    } catch (error) {
+      const configuredSecrets = collectConfiguredSecretValues(run.configSnapshot);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.appendSystemLogSafely(
+        run.id,
+        'stderr',
+        `process launch preparation failed: ${redactSpawnErrorMessage(errorMessage, configuredSecrets)}`,
+      );
+      throw error;
+    }
     const {
       processSpec,
       worktree,
@@ -506,7 +526,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
       configManifestPath,
       spawnedSpec,
       configuredSecrets,
-    } = this.prepareStartResources(run, definition);
+    } = prepared;
 
     // eslint-disable-next-line prefer-const -- reassigned after attempt creation (line 162)
     let attemptId: string | undefined;
@@ -558,6 +578,19 @@ export class ProcessBeastExecutor implements BeastExecutor {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCode = normalizeSpawnErrorCode(error);
       const failedAt = new Date(wallClockNow()).toISOString();
+
+      for (const line of earlyOutputLines(earlyStdout)) {
+        await this.appendSystemLogSafely(run.id, 'stdout', line, failedAt);
+      }
+      for (const line of earlyOutputLines(earlyStderr)) {
+        await this.appendSystemLogSafely(run.id, 'stderr', line, failedAt);
+      }
+      await this.appendSystemLogSafely(
+        run.id,
+        'stderr',
+        `process spawn failed before attempt creation (code=${errorCode})`,
+        failedAt,
+      );
 
       try {
         this.options.onSpawnFailureDebug?.({
@@ -758,6 +791,15 @@ export class ProcessBeastExecutor implements BeastExecutor {
     if (flushedEarlyExit) {
       return this.repository.getAttempt(attempt.id) ?? attempt;
     }
+    const resourceSampler = this.options.resourceSamplerFactory?.({
+      pid: handle.pid,
+      agentId: run.trackedAgentId ?? run.definitionId,
+      runId: run.id,
+    });
+    if (resourceSampler) {
+      resourceSampler.start();
+      this.resourceSamplers.set(attempt.id, resourceSampler);
+    }
     this.options.eventBus?.publish({
       type: 'run.status',
       data: { runId: run.id, status: 'running' as const, updatedAt: startedAt },
@@ -769,6 +811,23 @@ export class ProcessBeastExecutor implements BeastExecutor {
       data: { runId: run.id, attemptId: attempt.id, stream: 'stdout', line: startLogLine, createdAt: startedAt },
     });
     return attempt;
+  }
+
+  private async appendSystemLogSafely(
+    runId: string,
+    stream: 'stdout' | 'stderr',
+    line: string,
+    createdAt = new Date(wallClockNow()).toISOString(),
+  ): Promise<void> {
+    try {
+      await this.logs.append(runId, 'system', stream, line, createdAt);
+      this.options.eventBus?.publish({
+        type: 'run.log',
+        data: { runId, attemptId: 'system', stream, line, createdAt },
+      });
+    } catch {
+      // Startup logging is best-effort and must never prevent process launch.
+    }
   }
 
   async cleanupPendingRun(runId: string): Promise<boolean> {
@@ -812,6 +871,10 @@ export class ProcessBeastExecutor implements BeastExecutor {
         ...isolatedSpec.env,
         ...moduleEnv,
         FRANKENBEAST_RUN_CONFIG: configFilePath,
+        FRANKENBEAST_BEAST_RUN_ID: run.id,
+        ...(this.options.telemetryDatabasePath
+          ? { FRANKENBEAST_TRACES_DB: this.options.telemetryDatabasePath }
+          : {}),
         [RUN_CONFIG_INTEGRITY_ENV]: configManifestPath,
         [RUN_CONFIG_INTEGRITY_SECRET_ENV]: runConfigIntegritySecret,
       },
@@ -977,6 +1040,7 @@ export class ProcessBeastExecutor implements BeastExecutor {
     stderrTail: string[],
     configuredSecrets: readonly string[],
   ): void {
+    void this.stopResourceSampler(attemptId);
     // Skip if attempt is already in a terminal state (e.g., finishAttempt already ran from stop/kill)
     const currentAttempt = this.repository.getAttempt(attemptId);
     if (currentAttempt && (currentAttempt.status === 'stopped' || currentAttempt.status === 'completed' || currentAttempt.status === 'failed')) {
@@ -1113,12 +1177,24 @@ export class ProcessBeastExecutor implements BeastExecutor {
     }
   }
 
+  private async stopResourceSampler(attemptId: string): Promise<void> {
+    const sampler = this.resourceSamplers.get(attemptId);
+    if (!sampler) return;
+    this.resourceSamplers.delete(attemptId);
+    try {
+      await sampler.stop();
+    } catch {
+      // Resource telemetry is best effort and must not hide process completion.
+    }
+  }
+
   private finishAttempt(
     runId: string,
     attempt: BeastRunAttempt,
     status: BeastRunAttempt['status'],
     stopReason: string,
   ): BeastRunAttempt {
+    void this.stopResourceSampler(attempt.id);
     const finishedAt = new Date(wallClockNow()).toISOString();
     const updatedAttempt = this.repository.updateAttempt(attempt.id, {
       status,

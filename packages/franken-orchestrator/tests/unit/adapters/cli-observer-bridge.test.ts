@@ -6,6 +6,7 @@ import {
   CircuitBreaker,
   LoopDetector,
   type CompactionEventAdapter,
+  type Trace,
 } from '@franken/observer';
 import { CliObserverBridge } from '../../../src/adapters/cli-observer-bridge.js';
 import type { IObserverModule } from '../../../src/deps.js';
@@ -301,6 +302,42 @@ describe('CliObserverBridge', () => {
   });
 
   describe('close()', () => {
+    it('closes leaked spans and still flushes the production trace', async () => {
+      const flush = vi.fn(async (_trace: Trace) => undefined);
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        traceAdapter: { flush },
+      });
+      bridge.startTrace('run-with-leaked-span');
+      bridge.startSpan('leaked-span');
+
+      await bridge.close();
+
+      expect(flush).toHaveBeenCalledOnce();
+      expect(flush.mock.calls[0]?.[0].status).toBe('completed');
+      expect(flush.mock.calls[0]?.[0].spans[0]?.status).toBe('error');
+    });
+
+    it('closes the telemetry adapter when final trace flushing fails', async () => {
+      const close = vi.fn(async () => undefined);
+      const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {
+        recordCompaction: vi.fn(async () => undefined),
+        queryCompactions: vi.fn(async () => []),
+        aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
+        close,
+      };
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        compactionAdapter,
+        traceAdapter: { flush: vi.fn(async () => { throw new Error('SQLite database is locked'); }) },
+      });
+      bridge.startTrace('run-with-locked-trace-db');
+
+      await expect(bridge.close()).resolves.toBeUndefined();
+
+      expect(close).toHaveBeenCalledOnce();
+    });
+
     it('keeps observer adapter shutdown failures best-effort', async () => {
       const close = vi.fn(async () => { throw new Error('SQLite worker close timed out'); });
       const compactionAdapter: CompactionEventAdapter & { close(): Promise<void> } = {
@@ -320,16 +357,19 @@ describe('CliObserverBridge', () => {
   });
 
   describe('recordCompaction()', () => {
-    it('correlates compaction telemetry with the persisted trace id', async () => {
+    it('correlates compaction telemetry with the stable Beast run id', async () => {
       const recordCompaction = vi.fn(async () => undefined);
       const compactionAdapter: CompactionEventAdapter = {
         recordCompaction,
         queryCompactions: vi.fn(async () => []),
         aggregateCompactions: vi.fn(async () => ({ count: 0, latestAt: null })),
       };
-      const bridge = new CliObserverBridge({ ...defaultConfig, compactionAdapter });
-      bridge.startTrace('chunk-session-1');
-      const traceId = bridge.observerDeps.trace.id;
+      const bridge = new CliObserverBridge({
+        ...defaultConfig,
+        sessionId: 'run_123',
+        compactionAdapter,
+      });
+      bridge.startTrace('run_123');
 
       await bridge.recordCompaction({
         sessionId: 'chunk-session-1',
@@ -342,7 +382,7 @@ describe('CliObserverBridge', () => {
 
       expect(recordCompaction).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: 'chunk-session-1',
-        runId: traceId,
+        runId: 'run_123',
       }));
     });
   });

@@ -1,5 +1,5 @@
-export type RouteId = 'dashboard' | 'chat' | 'beasts' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
-export type PlaceholderRouteId = Exclude<RouteId, 'dashboard' | 'chat' | 'beasts' | 'network' | 'analytics'>;
+export type RouteId = 'dashboard' | 'chat' | 'beasts' | 'smart-swarm' | 'network' | 'sessions' | 'analytics' | 'costs' | 'safety' | 'settings';
+export type PlaceholderRouteId = Exclude<RouteId, 'dashboard' | 'chat' | 'beasts' | 'smart-swarm' | 'network' | 'analytics'>;
 
 export interface DashboardRoute {
   id: RouteId;
@@ -12,6 +12,7 @@ export const ROUTES: DashboardRoute[] = [
   { id: 'dashboard', label: 'Overview', summary: 'Snapshot controls for skills, security, and providers', live: true },
   { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console', live: true },
   { id: 'beasts', label: 'Beasts', summary: 'Dispatch, inspect, and control tracked beast runs', live: true },
+  { id: 'smart-swarm', label: 'Smart Swarm', summary: 'Canonical live provider-neutral operations and runtime evidence', live: true },
   { id: 'network', label: 'Network', summary: 'Service controls and operator config', live: true },
   { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands', live: false },
   { id: 'analytics', label: 'Analytics', summary: 'Observer, governor, security, and cost telemetry', live: true },
@@ -23,6 +24,7 @@ export const ROUTES: DashboardRoute[] = [
 export const PRIMARY_NAV_ROUTES = ROUTES.filter((route) => route.live);
 
 export function routeFromHash(hash: string): RouteId {
-  const candidate = hash.replace(/^#\/?/, '') as RouteId;
-  return PRIMARY_NAV_ROUTES.some((route) => route.id === candidate) ? candidate : 'chat';
+  const candidate = hash.replace(/^#\/?/, '');
+  if (candidate === 'brain-vitals') return 'smart-swarm';
+  return PRIMARY_NAV_ROUTES.find((route) => route.id === candidate)?.id ?? 'chat';
 }

@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { accessSync, constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
+import { filterSecretEnvVars } from '../security/env-filter.js';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
@@ -39,6 +40,7 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { basename, delimiter, dirname, join, resolve as resolvePath } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
+import { createProductionMissionCompletionDeps } from '../runtime/mission-completion-runtime.js';
 import { createSqliteAnalyticsService } from '../analytics/sqlite-analytics-service.js';
 import { buildSloDashboardFromKanban, createSqliteSloDashboardSource } from '../availability/slo-dashboard.js';
 import { parse as parseDotenv } from 'dotenv';
@@ -71,7 +73,7 @@ import { TransportSecurityService } from '../http/security/transport-security.js
 import { CommsConfigSchema, type CommsConfig } from '../comms/config/comms-config.js';
 import { assertLocalPlaintextOrSecureHttpUrl, localPlaintextOrSecureEndpoint } from '../network/network-url.js';
 import { loadRunConfigFromEnv, type RunConfig } from './run-config-loader.js';
-import { resolveProviderCatalogEntry, resolveProviderType, type ProviderConfig } from '../providers/provider-config.js';
+import { resolveProviderCatalogEntry, resolveProviderType, resolveWizardExecutionProvider, type ProviderConfig } from '../providers/provider-config.js';
 import type { ProviderRegistry as LlmProviderRegistry } from '../providers/provider-registry.js';
 import { redactLogData } from '../logging/redaction.js';
 import type { NetworkServiceHealthStatus } from '../network/network-health.js';
@@ -461,6 +463,7 @@ interface ChatSurfaceDeps {
   sessionStoreDir: string;
   skillManager?: import('../skills/skill-manager.js').SkillManager | undefined;
   providerRegistry?: import('../providers/provider-registry.js').ProviderRegistry | undefined;
+  runtimeActionGovernor?: import('../deps.js').IGovernorModule | undefined;
   /** Resolved provider's declared context window, for the status line's usage bar. */
   contextMaxTokens: number;
   /** Resolve a fallback provider's declared context window. */
@@ -668,13 +671,17 @@ export function buildDashboardProviderSnapshot(
   extraProviderNames: readonly string[] = [],
 ): DashboardProviderSnapshot[] {
   if (config.consolidatedProviders?.length) {
-    return config.consolidatedProviders.map((provider, index) => ({
-      name: provider.name,
-      type: provider.type,
-      available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
-      failoverOrder: index,
-      ...(provider.model ? { model: provider.model } : {}),
-    }));
+    return config.consolidatedProviders.map((provider, index) => {
+      const executionProvider = resolveWizardExecutionProvider(provider.name, config.consolidatedProviders);
+      return {
+        name: provider.name,
+        type: provider.type,
+        available: resolveDashboardProviderAvailability(provider.name, provider.type, config),
+        failoverOrder: index,
+        ...(provider.model ? { model: provider.model } : {}),
+        ...(executionProvider ? { executionProvider } : {}),
+      };
+    });
   }
 
   const registryProviders = providerRegistry?.getProviders() ?? [];
@@ -712,12 +719,14 @@ export function buildDashboardProviderSnapshot(
     const registryProvider = registryByName.get(name);
     const type: string = registryProvider?.type ?? resolveDashboardProviderType(name, registryProviders[index]?.type);
     const model = config.providers.overrides?.[name]?.model;
+    const executionProvider = resolveWizardExecutionProvider(name, config.consolidatedProviders);
     return {
       name,
       type,
       available: resolveDashboardProviderAvailability(name, type, config),
       failoverOrder: index,
       ...(model ? { model } : {}),
+      ...(executionProvider ? { executionProvider } : {}),
     };
   });
 }
@@ -751,7 +760,13 @@ function scheduleDashboardCommandHealthProbe(command: string): void {
     checking: true,
   });
   try {
-    const proc = spawn(command, ['--version'], { stdio: 'ignore', timeout: 5_000 });
+    const proc = spawn(command, ['--version'], {
+      stdio: 'ignore',
+      timeout: 5_000,
+      // A --version probe never needs to authenticate, so no provider auth
+      // exemption — just strip anything secret-shaped from the ambient env.
+      env: filterSecretEnvVars(process.env as Record<string, string>),
+    });
     const finish = (available: boolean) => {
       dashboardCommandHealthCache.set(command, { available, checkedAt: Date.now(), checking: false });
     };
@@ -1190,7 +1205,14 @@ export async function createChatSurfaceDeps(
     governorCancel,
     orchestratorConfig: config,
   };
-  const { cliLlmAdapter, finalize, skillManager, providerRegistry } = await createCliDeps(chatDepOpts);
+  const {
+    deps,
+    governorActionEnabled,
+    cliLlmAdapter,
+    finalize,
+    skillManager,
+    providerRegistry,
+  } = await createCliDeps(chatDepOpts);
   const chatLlm = new AdapterLlmClient(cliLlmAdapter);
 
   const override = config.providers.overrides?.[provider];
@@ -1208,6 +1230,7 @@ export async function createChatSurfaceDeps(
     sessionStoreDir,
     ...(skillManager ? { skillManager } : {}),
     ...(providerRegistry ? { providerRegistry } : {}),
+    ...(governorActionEnabled ? { runtimeActionGovernor: deps.governor } : {}),
     contextMaxTokens: resolvedProvider.defaultContextWindowTokens(),
     contextMaxTokensForProvider: (providerName) => registry.has(providerName)
       ? registry.get(providerName).defaultContextWindowTokens()
@@ -1308,6 +1331,54 @@ async function runNonSessionCommandIfRequested(options: {
   return false;
 }
 
+type ChatServerTerminationSignal = 'SIGINT' | 'SIGTERM';
+type ChatServerTerminationHandler = () => Promise<void>;
+interface ChatServerTerminationTarget {
+  exitCode?: string | number | null | undefined;
+  once(signal: ChatServerTerminationSignal, handler: ChatServerTerminationHandler): unknown;
+  off(signal: ChatServerTerminationSignal, handler: ChatServerTerminationHandler): unknown;
+}
+
+let removeActiveChatServerTerminationHandlers = (): void => {};
+
+export function installChatServerTerminationHandlers(
+  server: { close(): Promise<void> },
+  finalize: () => Promise<void>,
+  target: ChatServerTerminationTarget = process,
+): () => void {
+  removeActiveChatServerTerminationHandlers();
+  let closing: Promise<void> | undefined;
+  const handlers = {} as Record<ChatServerTerminationSignal, ChatServerTerminationHandler>;
+  const remove = (): void => {
+    target.off('SIGINT', handlers.SIGINT);
+    target.off('SIGTERM', handlers.SIGTERM);
+    if (removeActiveChatServerTerminationHandlers === remove) {
+      removeActiveChatServerTerminationHandlers = (): void => {};
+    }
+  };
+  const closeForSignal = (signal: ChatServerTerminationSignal): Promise<void> => {
+    target.exitCode = signal === 'SIGINT' ? 130 : 143;
+    remove();
+    closing ??= (async () => {
+      try {
+        await server.close();
+      } finally {
+        await finalize();
+      }
+    })().catch((error: unknown) => {
+      target.exitCode = 1;
+      console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+    });
+    return closing;
+  };
+  handlers.SIGINT = () => closeForSignal('SIGINT');
+  handlers.SIGTERM = () => closeForSignal('SIGTERM');
+  target.once('SIGINT', handlers.SIGINT);
+  target.once('SIGTERM', handlers.SIGTERM);
+  removeActiveChatServerTerminationHandlers = remove;
+  return remove;
+}
+
 async function runChatCommandIfRequested(
   args: CliArgs,
   config: OrchestratorConfig,
@@ -1379,6 +1450,7 @@ async function runChatCommandIfRequested(
     sessionStoreDir,
     skillManager,
     providerRegistry,
+    runtimeActionGovernor,
     contextMaxTokens,
     contextMaxTokensForProvider,
     modelLabel,
@@ -1421,6 +1493,7 @@ async function runChatCommandIfRequested(
       ? createBeastServices({
         beastsDb: join(paths.frankenbeastDir, 'beast.db'),
         beastLogsDir: paths.beastLogsDir,
+        tracesDb: paths.tracesDb,
         root,
         brainDbPath: config.brain?.dbPath,
         skillsDir: typeof skillManager?.getSkillsDir === 'function'
@@ -1437,6 +1510,7 @@ async function runChatCommandIfRequested(
       llm: chatLlm,
       executionLlm: execLlm,
       projectName: projectId,
+      missionCompletion: createProductionMissionCompletionDeps({ root }),
       ...(beastOperatorToken ? { operatorToken: beastOperatorToken } : {}),
       ...(localBeastServices && beastOperatorToken
         ? {
@@ -1474,6 +1548,7 @@ async function runChatCommandIfRequested(
       // Consolidated deps — skill/dashboard routes activate when providers are configured
       ...(skillManager ? { skillManager } : {}),
       ...(providerRegistry ? { providerRegistry } : {}),
+      ...(runtimeActionGovernor ? { runtimeActionGovernor } : {}),
       ...(skillManager && providerRegistry
         ? {
             dashboardDeps: {
@@ -1498,6 +1573,7 @@ async function runChatCommandIfRequested(
         : {}),
       analyticsDeps: { analytics },
     });
+    installChatServerTerminationHandlers(server, finalize);
     printLine(`Chat server listening on ${server.url}`);
     return true;
   }
@@ -1726,7 +1802,7 @@ export async function main(): Promise<void> {
   const session = new Session({
     paths,
     baseBranch,
-    budget: args.budget,
+    budget: runConfig?.budget ?? args.budget,
     provider,
     providers: args.providers ?? config.providers.fallbackChain,
     providersConfig: config.providers.overrides,
@@ -1740,6 +1816,8 @@ export async function main(): Promise<void> {
     entryPhase,
     ...(exitAfter !== undefined ? { exitAfter } : {}),
     ...(args.designDoc !== undefined ? { designDocPath: args.designDoc } : {}),
+    ...(args.interviewGoal !== undefined ? { interviewGoal: args.interviewGoal } : {}),
+    ...(args.interviewOutput !== undefined ? { interviewOutput: args.interviewOutput } : {}),
     ...(planDirOverride !== undefined
       ? { planDirOverride }
       : {}),
@@ -1844,6 +1922,7 @@ async function runBeastDaemonCommand(
     root,
     beastsDb: paths.beastsDb,
     beastLogsDir: paths.beastLogsDir,
+    tracesDb: paths.tracesDb,
     operatorToken,
     ...(args.host ? { host: args.host } : {}),
     ...(args.port !== undefined ? { port: args.port } : {}),

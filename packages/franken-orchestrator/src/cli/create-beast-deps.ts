@@ -186,15 +186,16 @@ export function createBeastDeps(
 
   // 6. Adapters
   const firewall = new MiddlewareChainFirewallAdapter(middlewareChain);
+  const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
   const planning = new PlanningFacultyAdapter(existingDeps.planner, brain.episodic, {
     learning: brain.learning,
+    clock,
     ...(config.planning?.recordEpisodes !== undefined
       ? { recordEpisodes: config.planning.recordEpisodes }
       : {}),
   });
   brain.attachPlanningFaculty(planning);
   const memory = new SqliteBrainMemoryAdapter(brain);
-  const clock = existingDeps.clock ?? (() => new Date(deterministicNow()));
   const reasoningEnabled = config.reasoning?.enabled !== false
     && existingDeps.critique.configured !== false;
   const reasoning = reasoningEnabled

@@ -581,38 +581,43 @@ describe('runNetworkCommand', () => {
 
   it('health includes configured services missing from partial persisted state', async () => {
     const print = vi.fn();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('service unavailable'));
 
-    await runNetworkCommand(
-      makeArgs({ networkAction: 'health', json: true }),
-      defaultConfig(),
-      '/repo/frankenbeast',
-      makePaths(),
-      {
-        resolveServices: vi.fn(() => []),
-        createSupervisor: vi.fn(() => ({
-          up: vi.fn(),
-          stopAll: vi.fn(),
-          down: vi.fn(),
-          status: vi.fn(async () => ({
-            services: [{
-              id: 'chat-server',
-              displayName: 'chat-server',
-              pid: 101,
-              detached: true,
-              dependsOn: [],
-              startedAt: '2026-07-17T00:00:00.000Z',
-              status: 'running',
-            }],
+    try {
+      await runNetworkCommand(
+        makeArgs({ networkAction: 'health', json: true }),
+        defaultConfig(),
+        '/repo/frankenbeast',
+        makePaths(),
+        {
+          resolveServices: vi.fn(() => []),
+          createSupervisor: vi.fn(() => ({
+            up: vi.fn(),
+            stopAll: vi.fn(),
+            down: vi.fn(),
+            status: vi.fn(async () => ({
+              services: [{
+                id: 'chat-server',
+                displayName: 'chat-server',
+                pid: 101,
+                detached: true,
+                dependsOn: [],
+                startedAt: '2026-07-17T00:00:00.000Z',
+                status: 'running' as const,
+              }],
+            })),
+            stop: vi.fn(),
+            logs: vi.fn(),
           })),
-          stop: vi.fn(),
-          logs: vi.fn(),
-        })),
-        print,
-        printError: vi.fn(),
-        renderHelp: () => 'network help',
-        waitForShutdown: vi.fn(async () => undefined),
-      },
-    );
+          print,
+          printError: vi.fn(),
+          renderHelp: () => 'network help',
+          waitForShutdown: vi.fn(async () => undefined),
+        },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
 
     const report = JSON.parse(print.mock.calls.at(-1)?.[0] as string) as {
       status: string;

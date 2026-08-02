@@ -181,6 +181,25 @@ describe('GeminiApiAdapter', () => {
       expect(events[2]).toEqual({ type: 'done', usage: { inputTokens: 40, outputTokens: 20, totalTokens: 60 } });
     });
 
+    it('passes cancellation through the request-scoped Gemini config', async () => {
+      const adapter = new GeminiApiAdapter({ apiKey: 'test-key' });
+      const generateContentStream = vi.fn().mockResolvedValue((async function* () {
+        yield { text: 'done', functionCalls: null, usageMetadata: null };
+      })());
+      (adapter as any).client = { models: { generateContentStream } };
+      const signal = new AbortController().signal;
+
+      await collectEvents(adapter.execute({
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+        signal,
+      }));
+
+      expect(generateContentStream).toHaveBeenCalledWith(expect.objectContaining({
+        config: expect.objectContaining({ abortSignal: signal }),
+      }));
+    });
+
     it('translates function call chunks', async () => {
       const adapter = new GeminiApiAdapter({ apiKey: 'test-key' });
       (adapter as any).client = {

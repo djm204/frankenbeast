@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.13.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.13.0...franken-observer-v0.13.1) (2026-07-31)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.19.0 to 0.19.1
+
+## [0.13.0](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.12.1...franken-observer-v0.13.0) (2026-07-26)
+
+
+### Features
+
+* **observer:** add brain health scoring ([#3797](https://github.com/djm204/frankenbeast/issues/3797)) ([b320d89](https://github.com/djm204/frankenbeast/commit/b320d892c479c8dff98c40e01fcab9eb50615e69))
+* **observer:** add cache-aware token accounting ([#3781](https://github.com/djm204/frankenbeast/issues/3781)) ([3d526f5](https://github.com/djm204/frankenbeast/commit/3d526f5573293f52e604c496dbffcefcc45fab28))
+* **observer:** export session compaction metrics ([#3780](https://github.com/djm204/frankenbeast/issues/3780)) ([96b032e](https://github.com/djm204/frankenbeast/commit/96b032ea310a31ea51de20e9df2ad6db148c5a47))
+* **observer:** sample process resource usage ([#3795](https://github.com/djm204/frankenbeast/issues/3795)) ([f39e2ad](https://github.com/djm204/frankenbeast/commit/f39e2ad6673d4eade82ffb4b0ae6ba7897173110))
+* **orchestrator:** expose brain vitals telemetry APIs ([#3798](https://github.com/djm204/frankenbeast/issues/3798)) ([a26a390](https://github.com/djm204/frankenbeast/commit/a26a390a58f7f678dc1ad937ef55bd1015d56daf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/types bumped from 0.18.0 to 0.19.0
+
 ## [0.12.1](https://github.com/djm204/frankenbeast/compare/franken-observer-v0.12.0...franken-observer-v0.12.1) (2026-07-25)
 
 

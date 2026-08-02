@@ -74,6 +74,41 @@ describe('AiderProvider', () => {
     expect(filtered).not.toBe(env);
   });
 
+  // -- requiredAuthEnvVars --------------------------------------------------
+
+  it('requiredAuthEnvVars resolves to just ANTHROPIC_API_KEY by default (default chatModel is Sonnet)', () => {
+    expect(provider.requiredAuthEnvVars?.()).toEqual(['ANTHROPIC_API_KEY']);
+    expect(provider.requiredAuthEnvVars?.('sonnet')).toEqual(['ANTHROPIC_API_KEY']);
+  });
+
+  it('requiredAuthEnvVars resolves to just the active backend key for a recognized LiteLLM prefix', () => {
+    expect(provider.requiredAuthEnvVars?.('groq/llama-3.1-70b-versatile')).toEqual(['GROQ_API_KEY']);
+    expect(provider.requiredAuthEnvVars?.('openrouter/anthropic/claude-3.5-sonnet')).toEqual(['OPENROUTER_API_KEY']);
+    expect(provider.requiredAuthEnvVars?.('gpt-4o')).toEqual(['OPENAI_API_KEY']);
+  });
+
+  it('requiredAuthEnvVars falls back to the full known-vendor list for an unrecognized model string', () => {
+    const vars = provider.requiredAuthEnvVars?.('some-unrecognized-custom-model') ?? [];
+    expect(vars).toContain('ANTHROPIC_API_KEY');
+    expect(vars).toContain('OPENAI_API_KEY');
+    expect(vars).toContain('OPENROUTER_API_KEY');
+    expect(vars).toContain('GROQ_API_KEY');
+    expect(vars).toContain('MISTRAL_API_KEY');
+  });
+
+  it('requiredAuthEnvVars resolves to the AWS credential trio for Bedrock/SageMaker backends', () => {
+    expect(provider.requiredAuthEnvVars?.('bedrock/anthropic.claude-3-sonnet')).toEqual([
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_SESSION_TOKEN',
+    ]);
+    expect(provider.requiredAuthEnvVars?.('sagemaker/my-endpoint')).toEqual([
+      'AWS_ACCESS_KEY_ID',
+      'AWS_SECRET_ACCESS_KEY',
+      'AWS_SESSION_TOKEN',
+    ]);
+  });
+
   // -- isRateLimited -------------------------------------------------------
 
   it('isRateLimited always returns false (LiteLLM handles retries)', () => {

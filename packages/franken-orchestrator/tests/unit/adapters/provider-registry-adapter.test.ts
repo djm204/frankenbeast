@@ -43,6 +43,21 @@ describe('ProviderRegistryIAdapter', () => {
       });
     });
 
+    it('preserves the request cancellation signal through middleware mapping', () => {
+      const signal = new AbortController().signal;
+      const adapter = new ProviderRegistryIAdapter(makeRegistry(() => textEvents('hi')));
+
+      expect(adapter.transformRequest({ ...makeRequest(), signal })).toEqual(expect.objectContaining({ signal }));
+    });
+
+    it('maps the unified max_tokens limit to the provider maxTokens field', () => {
+      const adapter = new ProviderRegistryIAdapter(makeRegistry(() => textEvents('hi')));
+
+      expect(adapter.transformRequest({ ...makeRequest(), max_tokens: 8_192 })).toEqual(
+        expect.objectContaining({ maxTokens: 8_192 }),
+      );
+    });
+
     it('applies middleware processRequest when provided', () => {
       const processRequest = vi.fn((req: any) => ({ ...req, systemPrompt: 'SANITIZED' }));
       const middleware = { processRequest, processResponse: vi.fn((r: any) => r) };
@@ -91,6 +106,33 @@ describe('ProviderRegistryIAdapter', () => {
         messages: [{ role: 'user', content: 'Hello' }],
         tools: [],
       })).rejects.toThrow('Rate limited');
+    });
+
+    it('propagates the execution signal to provider work for cooperative cancellation', async () => {
+      let cancelled = false;
+      const registry = {
+        execute: vi.fn((request: { signal?: AbortSignal }) => (async function* () {
+          await new Promise<void>((_resolve, reject) => {
+            request.signal?.addEventListener('abort', () => {
+              cancelled = true;
+              reject(request.signal?.reason);
+            }, { once: true });
+          });
+          yield { type: 'text' as const, content: 'unreachable' };
+        })()),
+      } as unknown as ProviderRegistry;
+      const adapter = new ProviderRegistryIAdapter(registry);
+      const controller = new AbortController();
+      const completion = adapter.execute({
+        systemPrompt: '',
+        messages: [{ role: 'user', content: 'Hello' }],
+        tools: [],
+      }, controller.signal);
+
+      controller.abort(new Error('deadline reached'));
+
+      await expect(completion).rejects.toThrow('deadline reached');
+      expect(cancelled).toBe(true);
     });
   });
 
