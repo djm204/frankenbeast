@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.61.2](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.61.1...@franken/orchestrator-v0.61.2) (2026-08-02)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @franken/critique bumped from 0.11.3 to 0.11.4
+    * @franken/governor bumped from 0.9.3 to 0.9.4
+
 ## [0.61.1](https://github.com/djm204/frankenbeast/compare/@franken/orchestrator-v0.61.0...@franken/orchestrator-v0.61.1) (2026-07-31)
 
 

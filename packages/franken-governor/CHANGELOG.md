@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.9.3...franken-governor-v0.9.4) (2026-08-02)
+
+
+### Bug Fixes
+
+* **governor:** redact CLI approval prompt secrets ([#3897](https://github.com/djm204/frankenbeast/issues/3897)) ([5604f36](https://github.com/djm204/frankenbeast/commit/5604f36a99ea9f7e91b891e3772a26c5f6fdd0d1))
+
 ## [0.9.3](https://github.com/djm204/frankenbeast/compare/franken-governor-v0.9.2...franken-governor-v0.9.3) (2026-07-31)
 
 
