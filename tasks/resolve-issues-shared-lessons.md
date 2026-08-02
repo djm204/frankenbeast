@@ -596,3 +596,6 @@
 
 ## 2026-07-30 — Caller-side boundaries for optional faculty hooks
 - An adapter-owned faculty may already contain persistence failures, but custom faculties attached through the public brain boundary can still throw. Keep a caller-side best-effort boundary around optional lifecycle hooks and leave the established generic recovery write outside it; regress both success and failure hooks with a custom throwing faculty.
+
+## 2026-08-02 — CLI provider stdin error ownership
+- Child-process adapters that write prompts to `stdin` must own stream `error` events as part of normal process lifecycle, not rely on process-level `error`/`close` handling alone. Guard writes after an early exit, defer benign `EPIPE`/closed-stdin races into the existing child result path, and add provider-specific regressions that simulate early-exiting CLIs so one adapter cannot crash the whole orchestrator.
