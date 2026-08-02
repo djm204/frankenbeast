@@ -1,6 +1,6 @@
 {
   "name": "@franken/mcp-suite",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "MCP server suite exposing frankenbeast capabilities as Claude Code tools",
   "type": "module",
   "main": "dist/index.js",
@@ -46,10 +46,10 @@
   "dependencies": {
     "@franken/types": "0.19.1",
     "@franken/brain": "0.18.2",
-    "@franken/critique": "0.11.3",
-    "@franken/governor": "0.9.3",
+    "@franken/critique": "0.11.4",
+    "@franken/governor": "0.9.4",
     "@franken/observer": "0.13.1",
-    "@franken/orchestrator": "0.61.1",
+    "@franken/orchestrator": "0.61.2",
     "@franken/planner": "0.4.29",
     "@hono/node-server": "^2.0.11",
     "@modelcontextprotocol/server": "2.0.0-beta.5",

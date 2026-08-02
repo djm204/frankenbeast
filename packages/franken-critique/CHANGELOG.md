@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.3...franken-critique-v0.11.4) (2026-08-02)
+
+
+### Performance
+
+* **critique:** bound ConcisenessEvaluator input memory and processing ([#3657](https://github.com/djm204/frankenbeast/issues/3657)) ([#3684](https://github.com/djm204/frankenbeast/issues/3684)) ([b50d3bb](https://github.com/djm204/frankenbeast/commit/b50d3bb377f4878411a4364aac1274d2d7ea200d))
+
 ## [0.11.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.2...franken-critique-v0.11.3) (2026-07-31)
 
 
