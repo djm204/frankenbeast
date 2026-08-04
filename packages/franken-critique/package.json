@@ -56,7 +56,7 @@
     "@franken/types": "0.19.1",
     "acorn": "^8.17.0",
     "acorn-typescript": "^1.4.13",
-    "hono": "^4.12.31",
+    "hono": "^4.13.0",
     "zod": "^4.4.3"
   }
 }
