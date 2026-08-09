@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.3...franken-critique-v0.12.0) (2026-08-09)
+
+
+### Features
+
+* **learning:** add lesson effectiveness telemetry ([#3803](https://github.com/djm204/frankenbeast/issues/3803)) ([33ab5c1](https://github.com/djm204/frankenbeast/commit/33ab5c1aa86c5f155ebf7246582d6e920c62d4e2))
+
+
+### Performance
+
+* **critique:** bound ConcisenessEvaluator input memory and processing ([#3657](https://github.com/djm204/frankenbeast/issues/3657)) ([#3684](https://github.com/djm204/frankenbeast/issues/3684)) ([b50d3bb](https://github.com/djm204/frankenbeast/commit/b50d3bb377f4878411a4364aac1274d2d7ea200d))
+
 ## [0.11.3](https://github.com/djm204/frankenbeast/compare/franken-critique-v0.11.2...franken-critique-v0.11.3) (2026-07-31)
 
 

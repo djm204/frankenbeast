@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.68.0](https://github.com/djm204/frankenbeast/compare/v0.67.1...v0.68.0) (2026-08-09)
+
+
+### Features
+
+* **learning:** add lesson effectiveness telemetry ([#3803](https://github.com/djm204/frankenbeast/issues/3803)) ([33ab5c1](https://github.com/djm204/frankenbeast/commit/33ab5c1aa86c5f155ebf7246582d6e920c62d4e2))
+
+
+### Bug Fixes
+
+* **governor:** redact CLI approval prompt secrets ([#3897](https://github.com/djm204/frankenbeast/issues/3897)) ([5604f36](https://github.com/djm204/frankenbeast/commit/5604f36a99ea9f7e91b891e3772a26c5f6fdd0d1))
+
+
+### Performance
+
+* **critique:** bound ConcisenessEvaluator input memory and processing ([#3657](https://github.com/djm204/frankenbeast/issues/3657)) ([#3684](https://github.com/djm204/frankenbeast/issues/3684)) ([b50d3bb](https://github.com/djm204/frankenbeast/commit/b50d3bb377f4878411a4364aac1274d2d7ea200d))
+
+
+### Documentation
+
+* **tasks:** record CLI stdin error lesson ([81696aa](https://github.com/djm204/frankenbeast/commit/81696aa1dc1ee560c70b806fd0bcca3aabd12949))
+
+
+### CI/CD
+
+* **deps:** baseline better-sqlite3 type major gap ([7907b5b](https://github.com/djm204/frankenbeast/commit/7907b5bff3b1e528a23263766ec62916d21eefc9))
+
 ## [0.67.1](https://github.com/djm204/frankenbeast/compare/v0.67.0...v0.67.1) (2026-07-31)
 
 
