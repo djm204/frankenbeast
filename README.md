@@ -11,6 +11,9 @@
 
 **Deterministic guardrails for AI agents.**
 
+> [!IMPORTANT]
+> Frankenbeast's operational swarm topology, runtime Brain Pulse, and approval dashboard surfaces have moved to [Smart Swarm](https://github.com/djm204/smart-swarm). Frankenbeast remains active for its deterministic guardrails, Beast runtime, and supporting libraries; the shared monorepo is not archived. The retirement boundary is recorded in [ADR-042](docs/adr/042-retire-legacy-operational-dashboard.md).
+
 Frankenbeast is a safety framework that enforces guardrails *outside* the LLM's context window. Every check that can be deterministic is deterministic — regex-based injection scanning, schema validation, dependency whitelisting, DAG cycle detection, HMAC signature verification. These do not hallucinate.
 
 ## 🚀 One-click onboarding

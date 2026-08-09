@@ -12,7 +12,7 @@ export const ROUTES: DashboardRoute[] = [
   { id: 'dashboard', label: 'Overview', summary: 'Snapshot controls for skills, security, and providers', live: true },
   { id: 'chat', label: 'Chat', summary: 'Live CLI-parity operator console', live: true },
   { id: 'beasts', label: 'Beasts', summary: 'Dispatch, inspect, and control tracked beast runs', live: true },
-  { id: 'smart-swarm', label: 'Smart Swarm', summary: 'Canonical live provider-neutral operations and runtime evidence', live: true },
+  { id: 'smart-swarm', label: 'Smart Swarm', summary: 'Operational dashboard moved to the Smart Swarm successor', live: true },
   { id: 'network', label: 'Network', summary: 'Service controls and operator config', live: true },
   { id: 'sessions', label: 'Sessions', summary: 'Coming online once session explorer lands', live: false },
   { id: 'analytics', label: 'Analytics', summary: 'Observer, governor, security, and cost telemetry', live: true },
