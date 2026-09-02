@@ -35,11 +35,11 @@
     "prepublishOnly": "npm --prefix ../.. run build"
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
-    "typescript": "~6.0.3",
+    "@types/node": "^26.4.0",
+    "typescript": "~7.0.2",
     "vitest": "^4.1.9"
   },
   "engines": {
