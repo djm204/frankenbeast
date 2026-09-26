@@ -186,6 +186,8 @@ function extractSubcommand(argv: string[]): { subcommand: Subcommand; flagArgs: 
       if (BOOLEAN_SHORT_OPTIONS.has(shortName)) {
         continue;
       }
+      // Skip unknown short options instead of breaking the argv scan
+      continue;
     }
 
     if (VALID_SUBCOMMANDS.has(arg)) {
