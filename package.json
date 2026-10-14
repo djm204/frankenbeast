@@ -62,7 +62,7 @@
     "ci:dr:restore-rehearsal": "npm run dr:restore-rehearsal"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@playwright/test": "^1.62.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^26.1.1",
